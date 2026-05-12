@@ -1,0 +1,29 @@
+{
+  "name": "@psycheros/daemon",
+  "version": "0.1.0",
+  "exports": "./src/main.ts",
+  "imports": {
+    "marked": "npm:marked@^15",
+    "dompurify": "npm:dompurify@^3",
+    "jsdom": "npm:jsdom@^26",
+    "pdf-parse": "npm:pdf-parse@^1.1.1",
+    "mammoth": "npm:mammoth@^1.8.0",
+    "xlsx": "npm:xlsx@^0.18.5",
+    "web-push": "npm:web-push@^3.6",
+    "@zendrex/buttplug.js": "npm:@zendrex/buttplug.js@^0.3"
+  },
+  "tasks": {
+    "dev": "deno run --watch -A --unstable-cron src/main.ts",
+    "start": "deno run -A --unstable-cron src/main.ts",
+    "stop": "pkill -INT -f 'deno.*main.ts' || true"
+  },
+  "lint": {
+    "exclude": ["web/lib/", "web/js/"],
+    "rules": {
+      "exclude": ["require-await"]
+    }
+  },
+  "fmt": {
+    "exclude": ["web/lib/", "web/js/"]
+  }
+}

@@ -1,0 +1,112 @@
+/**
+ * Design Tokens
+ * OLED-friendly dark terminal aesthetic with accent color theming.
+ */
+
+:root {
+  /* Backgrounds - true black for OLED */
+  --c-bg: #000000;
+  --c-bg-raised: #0a0a0a;
+  --c-bg-sunken: #050505;
+  --c-bg-hover: #111111;
+
+  /* Foregrounds - high contrast */
+  --c-fg: #e8e8e8;
+  --c-fg-muted: #888888;
+  --c-fg-strong: #ffffff;
+  --c-fg-subtle: #555555;
+  --c-fg-label: #888888;
+
+  /* Primary accent - violet dream (default preset, overridden by theme.js at runtime)
+     To change accent color, update these 5 values together:
+     - --c-accent: main color (hex)
+     - --c-accent-hover: lighter variant (hex)
+     - --c-accent-muted: darker variant (hex)
+     - --c-accent-subtle: 8% opacity (rgba)
+     - --c-accent-glow: 25% opacity (rgba) */
+  --c-accent: #a855f7;
+  --c-accent-hover: #c084fc;
+  --c-accent-muted: #7e22ce;
+  --c-accent-subtle: rgba(168, 85, 247, 0.08);
+  --c-accent-glow: rgba(168, 85, 247, 0.25);
+
+  /* Secondary - muted for thinking/secondary elements */
+  --c-muted: #666666;
+  --c-muted-subtle: rgba(102, 102, 102, 0.1);
+
+  /* Semantic colors */
+  --c-error: #ff4444;
+  --c-warning: #ffaa00;
+  --c-success: var(--c-accent);
+
+  /* Borders */
+  --c-border: #1a1a1a;
+  --c-border-strong: #2a2a2a;
+
+  /* Spacing (4px base scale) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* Typography */
+  --font-sans:
+    "IBM Plex Sans",
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  --font-mono:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    "SF Mono",
+    "Fira Code",
+    "Consolas",
+    monospace;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 13px;
+  --font-size-base: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 20px;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  --line-height: 1.7;
+  --line-height-tight: 1.4;
+
+  /* Effects */
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+  --glow-accent: 0 0 12px var(--c-accent-glow);
+  --transition: 150ms ease;
+
+  /* Layout */
+  --sidebar-width: 260px;
+  --header-height: 52px;
+  --input-height: 48px;
+  --content-max-width: 720px;
+
+  /* Theme system */
+  --theme-mode: dark;
+
+  /* Background image */
+  --bg-image: none;
+  --bg-image-url: "";
+  --bg-blur: 0px;
+  --bg-overlay-opacity: 0;
+
+  /* Glassmorphism */
+  --glass-bg: rgba(10, 10, 10, 0.85);
+  --glass-blur: 12px;
+  --glass-border: rgba(255, 255, 255, 0.08);
+
+  /* Border radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+}

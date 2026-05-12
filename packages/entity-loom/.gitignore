@@ -1,0 +1,6 @@
+.env
+.entity-loom/
+.loom-exports/
+*.lock
+.DS_Store
+logs/

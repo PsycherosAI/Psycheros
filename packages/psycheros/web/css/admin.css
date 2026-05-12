@@ -1,0 +1,816 @@
+/**
+ * Admin Panel Styles
+ *
+ * Styles for the system admin/debug panel.
+ * Uses design tokens from tokens.css.
+ * Follows the Phosphor Terminal aesthetic: accent-color aware,
+ * glow effects, mono typography for data.
+ */
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+
+@keyframes adminFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes adminStatusPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* ==========================================================================
+   Navigation Tabs
+   ========================================================================== */
+
+.admin-nav {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--c-border);
+  padding-bottom: var(--sp-2);
+}
+
+.admin-nav-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--c-fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition:
+    color var(--transition),
+    background var(--transition),
+    border-color var(--transition),
+    box-shadow var(--transition);
+}
+
+.admin-nav-tab:hover {
+  color: var(--c-fg);
+  background: var(--c-bg-hover);
+}
+
+.admin-nav-tab:active {
+  transform: scale(0.98);
+}
+
+.admin-nav-tab.active {
+  color: var(--c-accent);
+  background: var(--c-accent-subtle);
+  border-color: var(--c-accent);
+}
+
+/* ==========================================================================
+   Panel Entrance
+   ========================================================================== */
+
+/* Fade-in on panel-level containers only (not on #admin-content itself,
+   which would re-animate on every cell update or HTMX swap) */
+.admin-diagnostics,
+.admin-logs,
+.admin-jobs {
+  animation: adminFadeIn 0.15s ease both;
+}
+
+/* ==========================================================================
+   Sections
+   ========================================================================== */
+
+.admin-section {
+  margin-bottom: var(--sp-6);
+  background: var(--c-bg);
+  padding: var(--sp-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--c-border);
+}
+
+.admin-section-title {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--c-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: var(--sp-3);
+}
+
+/* ==========================================================================
+   Stats Grid
+   ========================================================================== */
+
+.admin-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.admin-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-3);
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  transition:
+    border-color var(--transition),
+    background var(--transition),
+    box-shadow var(--transition);
+}
+
+.admin-stat:hover {
+  border-color: var(--c-accent);
+  background: var(--c-bg-hover);
+  box-shadow: var(--glow-accent);
+}
+
+.admin-stat-label {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-subtle);
+  letter-spacing: 0.02em;
+}
+
+.admin-stat-value {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--c-fg);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  transition: color var(--transition);
+}
+
+.admin-stat:hover .admin-stat-value {
+  color: var(--c-accent);
+}
+
+/* ==========================================================================
+   Status Dots
+   ========================================================================== */
+
+.admin-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.admin-status-ok {
+  background: var(--c-accent);
+  box-shadow: 0 0 6px var(--c-accent-glow);
+  animation: adminStatusPulse 2s ease-in-out infinite;
+}
+
+.admin-status-error {
+  background: var(--c-error);
+  box-shadow: 0 0 6px rgba(255, 68, 68, 0.3);
+}
+
+/* ==========================================================================
+   Tables
+   ========================================================================== */
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.admin-table th {
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--c-border);
+  color: var(--c-fg-subtle);
+  font-weight: 500;
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.admin-table td {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--c-border);
+  color: var(--c-fg);
+}
+
+.admin-table tbody tr {
+  transition: background var(--transition);
+}
+
+.admin-table tbody tr:hover {
+  background: var(--c-bg-hover);
+}
+
+/* ==========================================================================
+   Footer
+   ========================================================================== */
+
+.admin-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--c-border);
+}
+
+.admin-footer-ts {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-subtle);
+}
+
+/* ==========================================================================
+   Refresh Button
+   ========================================================================== */
+
+.admin-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  color: var(--c-fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition:
+    color var(--transition),
+    border-color var(--transition),
+    background var(--transition),
+    box-shadow var(--transition);
+}
+
+.admin-refresh-btn:hover {
+  color: var(--c-accent);
+  border-color: var(--c-accent-muted);
+  background: var(--c-bg-hover);
+  box-shadow: var(--glow-accent);
+}
+
+.admin-refresh-btn:active {
+  transform: scale(0.98);
+}
+
+/* ==========================================================================
+   Log Viewer — Controls
+   ========================================================================== */
+
+.admin-log-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  align-items: center;
+}
+
+.admin-select {
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--c-bg-sunken);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  color: var(--c-fg);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.admin-select:focus {
+  outline: none;
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 2px var(--c-accent-subtle), var(--glow-accent);
+}
+
+/* ==========================================================================
+   Log Viewer — Entries
+   ========================================================================== */
+
+.admin-log-list {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  max-height: 500px;
+  overflow-y: auto;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+
+  /* Dark scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-border-strong) transparent;
+}
+
+.admin-log-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.admin-log-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.admin-log-list::-webkit-scrollbar-thumb {
+  background: var(--c-border-strong);
+  border-radius: 3px;
+}
+
+.admin-log-list::-webkit-scrollbar-thumb:hover {
+  background: var(--c-fg-subtle);
+}
+
+.admin-log-row {
+  display: flex;
+  gap: var(--sp-3);
+  padding: 3px var(--sp-3);
+  border-bottom: 1px solid var(--c-border);
+  border-left: 2px solid transparent;
+  align-items: baseline;
+  transition: background var(--transition);
+}
+
+.admin-log-row:hover {
+  background: var(--c-bg-hover);
+}
+
+.admin-log-row:last-child {
+  border-bottom: none;
+}
+
+.admin-log-time {
+  color: var(--c-fg-subtle);
+  white-space: nowrap;
+  min-width: 70px;
+}
+
+.admin-log-level-badge {
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 44px;
+  text-align: center;
+}
+
+.admin-log-component {
+  color: var(--c-accent);
+  white-space: nowrap;
+  min-width: 60px;
+}
+
+.admin-log-message {
+  color: var(--c-fg);
+  word-break: break-word;
+  flex: 1;
+}
+
+/* Level-specific colors */
+.admin-log-error .admin-log-level-badge {
+  color: var(--c-error);
+}
+.admin-log-warn .admin-log-level-badge {
+  color: #f59e0b;
+}
+.admin-log-info .admin-log-level-badge {
+  color: #3b82f6;
+}
+
+.admin-log-error {
+  background: rgba(255, 68, 68, 0.05);
+  border-left-color: var(--c-error);
+}
+
+.admin-log-warn {
+  background: rgba(245, 158, 11, 0.05);
+  border-left-color: #f59e0b;
+}
+
+/* ==========================================================================
+   Empty State
+   ========================================================================== */
+
+.admin-empty {
+  padding: var(--sp-6);
+  text-align: center;
+  color: var(--c-fg-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+/* ==========================================================================
+   Mobile Responsive
+   ========================================================================== */
+
+@media (max-width: 600px) {
+  /* Kill inner scroll — let settings-content handle all scrolling */
+  .admin-log-list {
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  /* Log rows: stack vertically instead of horizontal flex */
+  .admin-log-row {
+    flex-wrap: wrap;
+    gap: var(--sp-1);
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .admin-log-time {
+    min-width: auto;
+  }
+
+  .admin-log-message {
+    flex-basis: 100%;
+    padding-left: 0;
+  }
+
+  /* Stats grid: 2 columns on narrow screens */
+  .admin-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Tables: horizontal scroll wrapper */
+  .admin-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Footer: wrap buttons below timestamp */
+  .admin-footer {
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+
+  /* Controls: full-width selects */
+  .admin-log-controls {
+    gap: var(--sp-2);
+  }
+
+  .admin-select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .admin-jobs-table {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
+/* ── Scheduled Jobs ────────────────────────────────────────── */
+
+.admin-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-jobs-table td,
+.admin-jobs-table th {
+  white-space: nowrap;
+}
+
+.admin-jobs-table td:first-child {
+  white-space: normal;
+  min-width: 180px;
+}
+
+.admin-jobs-table td:nth-child(7) {
+  white-space: normal;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-job-name {
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.admin-job-desc {
+  font-size: 0.8em;
+  color: var(--c-text-muted);
+  margin-top: 2px;
+}
+
+.admin-job-error {
+  color: var(--c-error);
+  font-size: 0.85em;
+}
+
+.admin-job-count-ok {
+  color: var(--c-accent);
+}
+
+.admin-job-count-err {
+  color: var(--c-error);
+}
+
+.admin-status-running {
+  background: #f59e0b;
+  animation: adminStatusPulse 1s ease-in-out infinite;
+}
+
+.admin-status-idle {
+  background: var(--c-text-muted);
+  opacity: 0.4;
+}
+
+.admin-job-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  color: var(--c-text);
+  font-size: 0.8em;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.admin-job-trigger-btn:hover:not(:disabled) {
+  background: var(--c-accent-subtle);
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+.admin-job-trigger-btn:disabled,
+.admin-job-trigger-btn.htmx-request {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ── Actions Panel ────────────────────────────────────────── */
+
+.admin-actions {
+  animation: adminFadeIn 0.15s ease both;
+}
+
+.admin-action-desc {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-subtle);
+  margin-bottom: var(--sp-4);
+  line-height: 1.5;
+}
+
+.admin-action-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: flex-end;
+}
+
+.admin-action-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.admin-action-label {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+
+.admin-input {
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--c-bg-sunken);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  color: var(--c-fg);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  width: 80px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.admin-input:focus {
+  outline: none;
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 2px var(--c-accent-subtle), var(--glow-accent);
+}
+
+.admin-checkbox {
+  accent-color: var(--c-accent);
+  width: 14px;
+  height: 14px;
+}
+
+.admin-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--c-accent-subtle);
+  border: 1px solid var(--c-accent);
+  border-radius: var(--radius-sm);
+  color: var(--c-accent);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), box-shadow var(--transition);
+}
+
+.admin-action-btn:hover:not(:disabled) {
+  background: var(--c-accent);
+  color: var(--c-bg);
+  box-shadow: var(--glow-accent);
+}
+
+.admin-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-action-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--c-accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: adminSpinner 0.6s linear infinite;
+}
+
+@keyframes adminSpinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.admin-action-output {
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-bg-sunken);
+  overflow: hidden;
+}
+
+.admin-action-output-header {
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--c-accent);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.admin-action-output-header.admin-action-error {
+  color: var(--c-error);
+}
+
+.admin-action-output-pre {
+  padding: var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--c-fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 500px;
+  overflow-y: auto;
+  margin: 0;
+  line-height: 1.5;
+
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-border-strong) transparent;
+}
+
+.admin-action-output-pre::-webkit-scrollbar {
+  width: 6px;
+}
+
+.admin-action-output-pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.admin-action-output-pre::-webkit-scrollbar-thumb {
+  background: var(--c-border-strong);
+  border-radius: 3px;
+}
+
+/* ── Data Migration — Placeholder / Disabled State ───────── */
+
+/* Style the native file input button to match the admin theme */
+.admin-input[type="file"] {
+  width: auto;
+  padding: var(--sp-1) var(--sp-2);
+  color-scheme: dark;
+}
+
+.admin-input[type="file"]::file-selector-button {
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--c-bg-sunken);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  color: var(--c-accent);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+  margin-right: var(--sp-3);
+  transition: background var(--transition), box-shadow var(--transition);
+}
+
+.admin-input[type="file"]::file-selector-button:hover {
+  background: var(--c-accent-subtle);
+  box-shadow: var(--glow-accent);
+}
+
+.admin-input[type="file"]::file-selector-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-migration-placeholder {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.admin-migration-placeholder .admin-section-title {
+  color: var(--c-fg-subtle);
+}
+
+.admin-migration-disabled-btn {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.admin-migration-output {
+  margin-top: var(--sp-3);
+}
+
+/* ── Import Progress Bar ───────────────────────────────── */
+
+.import-progress {
+  margin-top: var(--sp-3);
+}
+
+.import-progress-bar {
+  height: 6px;
+  background: var(--c-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.import-progress-fill {
+  height: 100%;
+  background: var(--c-accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+
+.import-progress-text {
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  color: var(--c-fg-muted);
+  margin-top: var(--sp-1);
+}
+
+/* ── Import Blocking Overlay ─────────────────────────── */
+
+.import-blocking-overlay {
+  margin-top: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.import-blocking-text {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--c-fg);
+}
+
+.import-blocking-subtext {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  margin-top: var(--sp-1);
+}

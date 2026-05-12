@@ -1,0 +1,166 @@
+/*
+ * Psycheros brand theme for Starlight.
+ * Mirrors the Psycheros UI tokens (packages/psycheros/web/css/tokens.css):
+ *   - True-black OLED background, high-contrast foreground
+ *   - Violet "violet dream" accent (#a855f7) — UI surfaces stay solid violet;
+ *     the brand gradient is reserved for the logo + select hero touches
+ *   - IBM Plex Sans / Mono typography, 1.7 line-height
+ *   - Dark-only (matches the Psycheros app); see ThemeProvider.astro override
+ */
+
+/* IBM Plex via Fontsource — self-hosted, no third-party fetch. */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
+/* ------------------------------------------------------------------------- */
+/* Brand tokens — re-exported here so we can reference them anywhere         */
+/* ------------------------------------------------------------------------- */
+
+:root {
+  --psy-bg: #000000;
+  --psy-bg-raised: #0a0a0a;
+  --psy-bg-sunken: #050505;
+  --psy-fg: #e8e8e8;
+  --psy-fg-strong: #ffffff;
+  --psy-fg-muted: #888888;
+  --psy-fg-subtle: #555555;
+
+  --psy-accent: #a855f7;
+  --psy-accent-hover: #c084fc;
+  --psy-accent-muted: #7e22ce;
+  --psy-accent-glow: rgba(168, 85, 247, 0.25);
+
+  --psy-border: #1a1a1a;
+  --psy-border-strong: #2a2a2a;
+
+  --psy-gradient: linear-gradient(
+    90deg,
+    #00d2ff 0%,
+    #00d2ff 7%,
+    #66befe 25%,
+    #a989fd 50%,
+    #c54efe 75%,
+    #d200ff 93%,
+    #d200ff 100%
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Starlight token overrides — Psycheros dark surface                        */
+/* ------------------------------------------------------------------------- */
+
+:root {
+  /* Accent ramp — violet dream */
+  --sl-color-accent-low: #2a1640;
+  --sl-color-accent: var(--psy-accent);
+  --sl-color-accent-high: var(--psy-accent-hover);
+
+  /* Neutrals — Starlight's gray scale shifted toward true-black */
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #e8e8e8;
+  --sl-color-gray-2: #b0b0b0;
+  --sl-color-gray-3: #888888;
+  --sl-color-gray-4: #555555;
+  --sl-color-gray-5: #2a2a2a;
+  --sl-color-gray-6: #1a1a1a;
+  --sl-color-black: #000000;
+
+  /* Surfaces */
+  --sl-color-bg: var(--psy-bg);
+  --sl-color-bg-nav: var(--psy-bg-raised);
+  --sl-color-bg-sidebar: var(--psy-bg-raised);
+  --sl-color-bg-inline-code: var(--psy-bg-raised);
+  --sl-color-bg-accent: var(--psy-accent);
+
+  /* Text */
+  --sl-color-text: var(--psy-fg);
+  --sl-color-text-accent: var(--psy-accent-hover);
+  --sl-color-text-invert: var(--psy-bg);
+  --sl-color-white-fg: var(--psy-bg);
+
+  /* Hairlines */
+  --sl-color-hairline: var(--psy-border);
+  --sl-color-hairline-shade: var(--psy-border);
+  --sl-color-hairline-light: var(--psy-border-strong);
+
+  /* Typography */
+  --sl-font:
+    "IBM Plex Sans",
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  --sl-font-mono:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    "SF Mono",
+    "Fira Code",
+    Consolas,
+    monospace;
+  --sl-line-height: 1.7;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Focus ring — phosphor glow                                                */
+/* ------------------------------------------------------------------------- */
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--psy-accent), 0 0 12px var(--psy-accent-glow);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Selection                                                                  */
+/* ------------------------------------------------------------------------- */
+
+::selection {
+  background-color: var(--psy-accent);
+  color: var(--psy-bg);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Logo in nav                                                                */
+/* ------------------------------------------------------------------------- */
+
+.site-title img {
+  height: 1.75rem;
+  width: auto;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Splash hero — constrain the logo and apply the brand gradient to the H1   */
+/* ------------------------------------------------------------------------- */
+
+.hero img {
+  max-width: 240px;
+  height: auto;
+}
+
+.hero h1 {
+  background: var(--psy-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Top-nav gradient hairline — subtle brand cue                              */
+/* Scoped to `.page > header` so the search-dialog's internal header (also   */
+/* classed `header`) doesn't get the same treatment.                         */
+/* ------------------------------------------------------------------------- */
+
+.page > header.header {
+  border-bottom: 1px solid transparent;
+  background-image:
+    linear-gradient(var(--sl-color-bg-nav), var(--sl-color-bg-nav)),
+    var(--psy-gradient);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+}

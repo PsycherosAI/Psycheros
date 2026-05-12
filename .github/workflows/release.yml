@@ -1,0 +1,110 @@
+name: release
+
+on:
+  # Manual-only by design. Dispatch against a tag ref — `github.ref_name`
+  # resolves to the chosen tag, which the per-package jobs below gate on.
+  #
+  # Supported tag prefixes (independent version lineages):
+  #   launcher-vX.Y.Z      → launcher bundle (zip + tarball + raw files)
+  #   entity-core-vX.Y.Z   → source tarball of packages/entity-core/
+  #   entity-loom-vX.Y.Z   → source tarball of packages/entity-loom/
+  #   psycheros-vX.Y.Z     → notes-only (container built by docker.yml)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  launcher:
+    if: startsWith(github.ref_name, 'launcher-v')
+    name: launcher
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage launcher bundle
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          mkdir -p "bundle/${REF}"
+          cp packages/launcher/dashboard.ts "bundle/${REF}/"
+          cp packages/launcher/run.sh      "bundle/${REF}/"
+          cp packages/launcher/run.ps1     "bundle/${REF}/"
+          cp packages/launcher/README.md   "bundle/${REF}/"
+          ( cd bundle && zip -r "${REF}.zip"    "${REF}" )
+          ( cd bundle && tar -czf "${REF}.tar.gz" "${REF}" )
+
+      - name: Upload launcher assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF: ${{ github.ref_name }}
+        run: |
+          gh release upload "$REF" \
+            "bundle/${REF}.zip" \
+            "bundle/${REF}.tar.gz" \
+            packages/launcher/dashboard.ts \
+            packages/launcher/run.sh \
+            packages/launcher/run.ps1
+
+  entity-core:
+    if: startsWith(github.ref_name, 'entity-core-v')
+    name: entity-core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage source tarball
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          mkdir -p bundle
+          cp -a packages/entity-core "bundle/${REF}"
+          ( cd bundle && tar -czf "${REF}.tar.gz" "${REF}" )
+          ( cd bundle && zip -r   "${REF}.zip"    "${REF}" )
+
+      - name: Upload source asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF: ${{ github.ref_name }}
+        run: |
+          gh release upload "$REF" \
+            "bundle/${REF}.tar.gz" \
+            "bundle/${REF}.zip"
+
+  entity-loom:
+    if: startsWith(github.ref_name, 'entity-loom-v')
+    name: entity-loom
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage source tarball
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          mkdir -p bundle
+          cp -a packages/entity-loom "bundle/${REF}"
+          ( cd bundle && tar -czf "${REF}.tar.gz" "${REF}" )
+          ( cd bundle && zip -r   "${REF}.zip"    "${REF}" )
+
+      - name: Upload source asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF: ${{ github.ref_name }}
+        run: |
+          gh release upload "$REF" \
+            "bundle/${REF}.tar.gz" \
+            "bundle/${REF}.zip"
+
+  psycheros-notes:
+    if: startsWith(github.ref_name, 'psycheros-v')
+    name: psycheros-notes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Emit notes-only notice
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          echo "::notice::Tag '$REF' is the Psycheros harness lineage."
+          echo "::notice::No release artifacts to attach — the container image is built + pushed by the docker workflow."
+          echo "::notice::Dispatch .github/workflows/docker.yml against the same tag to publish ghcr.io/${{ github.repository_owner }}/psycheros."

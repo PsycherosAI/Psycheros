@@ -1,0 +1,739 @@
+/**
+ * Knowledge Graph View Styles
+ *
+ * Namespaced with .gv- to avoid conflicts with app-wide styles.
+ * Uses design tokens from tokens.css.
+ */
+
+/* ─── Graph View ─────────────────────────────────────────────────────────── */
+
+.gv {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* Cancel parent .settings-content padding so we fill the full area */
+  margin: calc(-1 * var(--sp-4));
+  background: var(--c-bg);
+  color: var(--c-fg);
+  font-family: var(--font-sans);
+}
+
+/* Header */
+.gv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-bg-raised);
+  gap: var(--sp-3);
+  flex-shrink: 0;
+}
+.gv-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.gv-title-block {
+  min-width: 0;
+}
+.gv-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--c-accent);
+  letter-spacing: 0.02em;
+}
+.gv-stats {
+  display: flex;
+  gap: var(--sp-2);
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+.gv-stats strong {
+  color: var(--c-fg);
+  font-weight: var(--font-weight-medium);
+}
+.gv-stats-sep {
+  opacity: 0.3;
+}
+.gv-header-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* View Toggle */
+.gv-view-toggle {
+  display: flex;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.gv-view-toggle-btn {
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  background: transparent;
+  color: var(--c-fg-muted);
+  border: none;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.gv-view-toggle-btn:hover {
+  color: var(--c-fg);
+}
+.gv-view-toggle-btn.active {
+  background: var(--c-accent);
+  color: var(--c-bg);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* Toolbar */
+.gv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-bg-raised);
+  flex-shrink: 0;
+}
+.gv-search {
+  flex: 1;
+  min-width: 0;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-bg-sunken);
+  color: var(--c-fg);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color var(--transition);
+}
+.gv-search:focus {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 2px var(--c-accent-subtle);
+}
+.gv-search::placeholder {
+  color: var(--c-fg-subtle);
+}
+.gv-filter {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-bg-sunken);
+  color: var(--c-fg);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  outline: none;
+  max-width: 120px;
+}
+.gv-filter:focus {
+  border-color: var(--c-accent);
+}
+#gv-add-node {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* Hidden */
+.gv-hidden {
+  display: none !important;
+}
+
+/* ─── List View ──────────────────────────────────────────────────────────── */
+
+.gv-list-view {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  position: relative;
+  min-height: 0;
+}
+.gv-list-spacer {
+  pointer-events: none;
+}
+
+/* Cards */
+.gv-card {
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--c-border);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.gv-card:hover {
+  background: var(--c-bg-raised);
+}
+.gv-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.gv-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.gv-card-label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--c-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gv-card-conns {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Expanded card */
+.gv-card--expanded {
+  background: var(--c-bg-raised);
+  border-bottom: 1px solid var(--c-border);
+  cursor: default;
+}
+.gv-card-detail {
+  padding-top: var(--sp-3);
+}
+.gv-card-desc {
+  font-size: var(--font-size-sm);
+  color: var(--c-fg-muted);
+  line-height: var(--line-height);
+  margin-bottom: var(--sp-3);
+}
+.gv-card-section {
+  margin-bottom: var(--sp-3);
+}
+.gv-card-actions {
+  display: flex;
+  gap: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--c-border);
+}
+
+/* ─── Graph View (vis-network) ──────────────────────────────────────────── */
+
+.gv-canvas {
+  flex: 1;
+  position: relative;
+  background: var(--c-bg);
+  overflow: hidden;
+  min-height: 0;
+}
+#gv-graph-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  min-height: 0;
+}
+.vis-network {
+  outline: none !important;
+}
+
+/* Loading */
+.gv-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.gv-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--c-border-strong);
+  border-top-color: var(--c-accent);
+  border-radius: 50%;
+  animation: gv-spin 0.8s linear infinite;
+}
+@keyframes gv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Empty state */
+.gv-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: var(--c-fg-muted);
+  font-size: var(--font-size-sm);
+}
+.gv-empty svg {
+  margin-bottom: var(--sp-3);
+}
+.gv-empty p {
+  margin: var(--sp-1) 0;
+}
+.gv-empty-hint {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-subtle);
+}
+
+/* ─── Node Detail Panel ──────────────────────────────────────────────────── */
+.gv-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 280px;
+  max-width: 85vw;
+  height: 100%;
+  background: var(--c-bg-raised);
+  border-left: 1px solid var(--c-border);
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.2s ease;
+}
+.gv-panel.gv-panel-open {
+  transform: translateX(0);
+}
+.gv-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--c-border);
+  flex-shrink: 0;
+}
+.gv-panel-header h3 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--c-fg-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gv-panel-body {
+  padding: var(--sp-3) var(--sp-4);
+  overflow-y: auto;
+  flex: 1;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Detail rows inside panel */
+.gv-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--c-border);
+  font-size: var(--font-size-sm);
+}
+.gv-detail-label {
+  color: var(--c-fg-muted);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: var(--font-mono);
+}
+.gv-detail-value {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--c-fg);
+}
+.gv-detail-section {
+  margin-top: var(--sp-4);
+}
+.gv-detail-desc {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--c-fg);
+  line-height: var(--line-height);
+}
+.gv-conn-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--sp-2) 0 0;
+}
+.gv-conn-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+  font-size: var(--font-size-sm);
+  border-bottom: 1px solid var(--c-border);
+}
+.gv-conn-list li:last-child {
+  border-bottom: none;
+}
+.gv-conn-dir {
+  color: var(--c-accent);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+.gv-conn-type {
+  color: var(--c-fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+.gv-conn-label {
+  color: var(--c-fg);
+}
+.gv-node-id {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-subtle);
+  font-family: var(--font-mono);
+  word-break: break-all;
+  margin-top: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--c-bg-sunken);
+  border-radius: var(--radius-sm);
+}
+.gv-panel-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+.gv-edit-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* ─── Modal ──────────────────────────────────────────────────────────────── */
+.gv-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  padding: var(--sp-4);
+}
+.gv-modal.gv-modal-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.gv-modal-box {
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--sp-6);
+  width: 100%;
+  max-width: 380px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  transform: scale(0.95);
+  transition: transform 0.15s ease;
+}
+.gv-modal.gv-modal-open .gv-modal-box {
+  transform: scale(1);
+}
+.gv-modal-box h3 {
+  margin: 0 0 var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--c-fg-strong);
+}
+
+/* Form fields */
+.gv-field {
+  margin-bottom: var(--sp-4);
+}
+.gv-field label {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--sp-1);
+}
+.gv-field input[type="text"],
+.gv-field textarea,
+.gv-field select {
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-bg-sunken);
+  color: var(--c-fg);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color var(--transition);
+  box-sizing: border-box;
+}
+.gv-field input:focus,
+.gv-field textarea:focus,
+.gv-field select:focus {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 2px var(--c-accent-subtle);
+}
+.gv-field textarea {
+  resize: vertical;
+  min-height: 48px;
+}
+.gv-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+
+/* ─── Action button styles ──────────────────────────────────────────────── */
+.gv-action-danger:not(:disabled):hover {
+  color: var(--c-error);
+  border-color: var(--c-error);
+}
+
+/* ─── Delete Confirm Modal ──────────────────────────────────────────────── */
+.gv-delete-confirm .gv-delete-msg {
+  font-size: var(--font-size-sm);
+  color: var(--c-fg-muted);
+  margin: 0 0 var(--sp-4);
+  line-height: var(--line-height);
+}
+.gv-delete-btn-confirm {
+  background: var(--c-error) !important;
+  border-color: var(--c-error) !important;
+  color: #fff !important;
+}
+.gv-delete-btn-confirm:hover {
+  opacity: 0.9;
+}
+
+/* ─── Searchable Node Picker ─────────────────────────────────────────────── */
+.gv-node-picker {
+  position: relative;
+}
+.gv-node-search-input {
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-bg-sunken);
+  color: var(--c-fg);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color var(--transition);
+  box-sizing: border-box;
+}
+.gv-node-search-input:focus {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 2px var(--c-accent-subtle);
+}
+.gv-node-search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-sm);
+  margin-top: 2px;
+  display: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.gv-node-search-results--open {
+  display: block;
+}
+.gv-node-search-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  transition: background var(--transition);
+}
+.gv-node-search-item:hover {
+  background: var(--c-accent-subtle);
+}
+.gv-node-search-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--c-fg);
+}
+.gv-node-search-empty {
+  padding: var(--sp-3);
+  text-align: center;
+  color: var(--c-fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+/* ─── Edit Connections List ──────────────────────────────────────────────── */
+.gv-modal-box--wide {
+  max-width: 460px;
+}
+.gv-edit-conns {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--sp-2);
+}
+.gv-edit-conn-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--c-border);
+  font-size: var(--font-size-sm);
+}
+.gv-edit-conn-row:last-child {
+  border-bottom: none;
+}
+.gv-edit-conn-info {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex: 1;
+}
+.gv-edit-conn-del {
+  flex-shrink: 0;
+  padding: 0 var(--sp-2);
+  color: var(--c-fg-muted);
+  font-size: var(--font-size-base);
+  line-height: 1;
+}
+.gv-edit-conn-del:hover {
+  color: var(--c-error);
+}
+
+/* ─── Back button override ───────────────────────────────────────────────── */
+.gv-header .settings-back-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  color: var(--c-fg-muted);
+  font-size: var(--font-size-sm);
+  text-decoration: none;
+  transition: color var(--transition), background var(--transition);
+  flex-shrink: 0;
+}
+.gv-header .settings-back-btn:hover {
+  color: var(--c-accent);
+  background: var(--c-accent-subtle);
+}
+
+/* ─── Toast ──────────────────────────────────────────────────────────────── */
+#gv-toast-container {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  pointer-events: none;
+}
+.gv-toast {
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border-strong);
+  color: var(--c-fg);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-sans);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: auto;
+  max-width: 340px;
+  text-align: center;
+}
+.gv-toast.gv-toast-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ─── Mobile ─────────────────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .gv-header {
+    padding: var(--sp-2) var(--sp-3);
+  }
+  .gv-toolbar {
+    flex-wrap: wrap;
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-2);
+  }
+  .gv-search {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .gv-filter {
+    order: 2;
+    flex: 1;
+    max-width: none;
+  }
+  #gv-add-node {
+    order: 1;
+  }
+  #gv-add-node span {
+    display: none;
+  }
+  .gv-card {
+    padding: var(--sp-3);
+  }
+  .gv-card-actions {
+    flex-wrap: wrap;
+  }
+  .gv-panel {
+    width: 100%;
+    max-width: 100vw;
+    border-left: none;
+    border-top: 1px solid var(--c-border);
+    top: auto;
+    bottom: 0;
+    height: 55vh;
+    transform: translateY(100%);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+  }
+  .gv-panel.gv-panel-open {
+    transform: translateY(0);
+  }
+  .gv-stats {
+    display: none;
+  }
+  .gv-view-toggle-btn {
+    padding: var(--sp-1) var(--sp-2);
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "@psycheros/launcher",
+  "version": "0.1.0",
+  "exports": "./dashboard.ts",
+  "tasks": {
+    "start": "deno run --allow-net --allow-read --allow-write --allow-run --allow-env dashboard.ts"
+  }
+}

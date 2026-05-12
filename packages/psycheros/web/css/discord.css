@@ -1,0 +1,730 @@
+/**
+ * Discord Integration Styles
+ *
+ * Styles for Discord Gateway UI: sidebar nav, hub view,
+ * channel chat, DM queue, and gateway settings.
+ */
+
+/* ==========================================================================
+   Sidebar Discord Navigation
+   ========================================================================== */
+
+.discord-nav-link {
+  position: relative;
+}
+
+.discord-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--c-fg-muted);
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: background-color var(--transition), box-shadow var(--transition);
+}
+
+.discord-dot-connected {
+  background-color: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+}
+
+.discord-dot-disconnected {
+  background-color: #ef4444;
+  box-shadow: 0 0 4px rgba(239, 68, 68, 0.3);
+}
+
+/* ==========================================================================
+   Connection Status
+   ========================================================================== */
+
+.discord-connection-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--radius-sm);
+}
+
+.status-connected {
+  color: #22c55e;
+  background-color: rgba(34, 197, 94, 0.1);
+}
+
+.status-disconnected {
+  color: #ef4444;
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.discord-status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-connected .discord-status-indicator {
+  background-color: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+}
+
+.status-disconnected .discord-status-indicator {
+  background-color: #ef4444;
+  box-shadow: 0 0 4px rgba(239, 68, 68, 0.3);
+}
+
+/* ==========================================================================
+   Hub View
+   ========================================================================== */
+
+.discord-hub-content {
+  padding: var(--sp-4);
+  overflow-y: auto;
+  flex: 1;
+}
+
+.discord-info-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background-color: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--c-fg-muted);
+  flex-wrap: wrap;
+}
+
+.discord-info-bar strong {
+  color: var(--c-fg);
+}
+
+.discord-section {
+  margin-top: var(--sp-6);
+}
+
+.discord-section-title {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--c-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--sp-3);
+}
+
+.discord-server-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.discord-server-card {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-3) var(--sp-4);
+  background-color: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  transition:
+    border-color var(--transition),
+    background-color var(--transition);
+  cursor: pointer;
+}
+
+.discord-server-card:hover {
+  border-color: var(--c-accent);
+  background-color: var(--c-bg-hover);
+}
+
+.discord-server-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.discord-server-card-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.discord-server-name {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--c-fg);
+}
+
+.discord-server-members {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+}
+
+.discord-conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.discord-conversation-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  color: var(--c-fg);
+  text-decoration: none;
+  transition: background-color var(--transition);
+}
+
+.discord-conversation-item:hover {
+  background-color: var(--c-bg-hover);
+}
+
+.discord-conv-title {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  color: var(--c-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.discord-conv-time {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  flex-shrink: 0;
+  margin-left: var(--sp-3);
+}
+
+.discord-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-border);
+}
+
+/* ==========================================================================
+   Channel Chat View
+   ========================================================================== */
+
+.discord-channel-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-4);
+}
+
+.discord-message {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.discord-msg-role {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.discord-msg-user .discord-msg-role {
+  color: #5865f2;
+}
+
+.discord-msg-entity .discord-msg-role {
+  color: var(--c-accent);
+}
+
+.discord-msg-system .discord-msg-role {
+  color: var(--c-fg-muted);
+}
+
+.discord-msg-time {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-subtle);
+}
+
+.discord-msg-content {
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height);
+  color: var(--c-fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ==========================================================================
+   DM Whitelist
+   ========================================================================== */
+
+.dm-whitelist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.dm-whitelist-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-2) var(--sp-3);
+  background-color: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+}
+
+.dm-whitelist-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.dm-whitelist-meta {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-subtle);
+}
+
+.dm-whitelist-notes {
+  font-size: var(--font-size-sm);
+  color: var(--c-fg-muted);
+  font-style: italic;
+}
+
+.dm-whitelist-actions {
+  display: flex;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+
+.dm-whitelist-edit,
+.dm-whitelist-save,
+.dm-whitelist-remove {
+  flex-shrink: 0;
+}
+
+.dm-wl-edit-username {
+  width: 120px;
+}
+
+/* ==========================================================================
+   Gateway Settings
+   ========================================================================== */
+
+.discord-settings-form {
+  padding: var(--sp-4);
+  overflow-y: auto;
+  flex: 1;
+  max-width: 720px;
+}
+
+.discord-settings-form .settings-field {
+  margin-bottom: var(--sp-4);
+}
+
+.discord-settings-form .settings-label {
+  display: block;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--c-fg);
+  margin-bottom: var(--sp-1);
+}
+
+.discord-settings-form .settings-hint {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-subtle);
+  margin-top: var(--sp-1);
+}
+
+/* Field hints (explanatory text under inputs) — small & muted */
+.field-hint {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  margin-top: var(--sp-1);
+}
+
+/* Discord settings page: input labels more prominent, hints stay small & muted */
+.discord-settings-page .llm-field label {
+  font-size: var(--font-size-sm);
+  color: var(--c-fg);
+  font-weight: var(--font-weight-medium);
+}
+
+.discord-settings-form .settings-hint code {
+  background-color: var(--c-bg);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+}
+
+.discord-settings-form .settings-row {
+  display: flex;
+  gap: var(--sp-4);
+}
+
+.discord-settings-form .settings-row .settings-field {
+  flex: 1;
+}
+
+.discord-settings-form .settings-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-border);
+}
+
+/* ==========================================================================
+   Channel Mode Badges
+   ========================================================================== */
+
+.discord-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.discord-mode-badge--active {
+  background-color: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+}
+
+.discord-mode-badge--lurk {
+  background-color: rgba(234, 179, 8, 0.12);
+  color: #eab308;
+}
+
+.discord-mode-badge--strict {
+  background-color: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+/* ==========================================================================
+   Mobile Responsive
+   ========================================================================== */
+
+@media (max-width: 600px) {
+  .discord-hub-content {
+    padding: var(--sp-3);
+  }
+
+  .discord-info-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .discord-actions {
+    flex-direction: column;
+  }
+
+  .discord-actions .btn {
+    width: 100%;
+    text-align: center;
+  }
+
+  .discord-settings-form .settings-row {
+    flex-direction: column;
+    gap: var(--sp-3);
+  }
+
+  .discord-server-card {
+    gap: var(--sp-1);
+  }
+}
+
+/* ==========================================================================
+   Channel Picker (Settings page)
+   ========================================================================== */
+
+.discord-picker-guild {
+  padding: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  background-color: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+}
+
+.discord-picker-guild-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.discord-picker-guild-name {
+  font-weight: 600;
+}
+
+.discord-picker-guild-meta {
+  color: var(--c-muted);
+  font-size: 0.85rem;
+}
+
+.discord-picker-select-all {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--c-muted);
+  text-decoration: none;
+}
+
+.discord-picker-select-all:hover {
+  color: var(--c-accent);
+}
+
+.discord-picker-channels {
+  margin-top: var(--sp-2);
+  padding-left: var(--sp-5);
+}
+
+.discord-picker-channel {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+}
+
+.discord-picker-channel + .discord-picker-channel {
+  border-top: 1px solid var(--c-border);
+}
+
+.discord-picker-channel-name {
+  flex: 0 0 auto;
+  min-width: 100px;
+  color: var(--c-muted);
+  font-size: 0.9rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.discord-picker-channel-name:hover {
+  color: var(--c-fg);
+}
+
+/* ==========================================================================
+   Hub Server Card Expansion
+   ========================================================================== */
+
+.discord-server-card .discord-server-channels {
+  display: none;
+  padding: var(--sp-2) 0 0 var(--sp-2);
+  border-top: 1px solid var(--c-border);
+  margin-top: var(--sp-2);
+}
+
+.discord-server-card.expanded .discord-server-channels {
+  display: block;
+}
+
+.discord-server-chevron {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--c-muted);
+  transition: transform 0.15s;
+}
+
+.discord-server-card.expanded .discord-server-chevron {
+  transform: rotate(90deg);
+}
+
+.discord-channel-link {
+  display: block;
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--c-muted);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+}
+
+.discord-channel-link:hover {
+  color: var(--c-fg);
+  background-color: var(--c-bg-hover);
+}
+
+/* ==========================================================================
+   Channel View Header
+   ========================================================================== */
+
+.discord-channel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--c-border);
+  background-color: var(--c-bg-raised);
+  flex-shrink: 0;
+}
+
+.discord-channel-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.discord-channel-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.discord-channel-header-info .settings-title {
+  margin: 0;
+  font-size: var(--font-size-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.discord-channel-header-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.discord-channel-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--c-fg-muted);
+  font-weight: var(--font-weight-medium);
+}
+
+.discord-channel-id {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-subtle);
+  opacity: 0.7;
+}
+
+.discord-channel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.discord-header-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--c-bg);
+  color: var(--c-fg-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.discord-header-btn:hover {
+  color: var(--c-fg);
+  border-color: var(--c-accent);
+  background-color: var(--c-bg-hover);
+}
+
+.discord-header-btn-danger:hover {
+  color: #ef4444;
+  border-color: #ef4444;
+  background-color: rgba(239, 68, 68, 0.08);
+}
+
+/* ==========================================================================
+   Message Edit Button (Discord Channel View)
+   ========================================================================== */
+
+.discord-msg-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.discord-msg-edit-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--c-fg-muted);
+  cursor: pointer;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--transition), color var(--transition);
+}
+
+.discord-message:hover .discord-msg-edit-btn {
+  display: flex;
+  opacity: 1;
+}
+
+.discord-msg-edit-btn:hover {
+  color: var(--c-accent);
+}
+
+/* ==========================================================================
+   Context Divider
+   ========================================================================== */
+
+.discord-context-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-5) 0;
+  margin: var(--sp-3) 0;
+}
+
+.discord-context-divider-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--c-border),
+    transparent
+  );
+}
+
+.discord-context-divider-text {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--c-accent);
+  white-space: nowrap;
+  padding: 4px var(--sp-3);
+  background-color: color-mix(in srgb, var(--c-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-accent) 20%, transparent);
+  border-radius: var(--radius-md);
+}
+
+/* ==========================================================================
+   Discord Mentions
+   ========================================================================== */
+
+.discord-mention {
+  background-color: rgba(88, 101, 242, 0.25);
+  color: #c9cdfb;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}

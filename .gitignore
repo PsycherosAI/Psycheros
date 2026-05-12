@@ -1,0 +1,79 @@
+# ============================================
+# Runtime data — never commit user/entity data
+# ============================================
+
+# entity-core runtime
+data/
+
+# Psycheros runtime
+.psycheros/
+/packages/psycheros/identity/
+/packages/psycheros/memories/
+/packages/psycheros/backgrounds/
+/packages/psycheros/custom-tools/
+/packages/psycheros/.snapshots/
+
+# entity-loom runtime
+.entity-loom/
+.loom-exports/
+
+# SQLite databases (runtime)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+logs/
+
+# ============================================
+# Environment files — secrets
+# ============================================
+.env
+.env.local
+.env.*.local
+
+# ============================================
+# Deno
+# ============================================
+.deno/
+*_cache_v2/
+
+# Note: deno.lock IS committed for reproducibility — do not ignore.
+
+# ============================================
+# Native extensions — downloaded at runtime
+# ============================================
+# sqlite-vec extension is fetched from upstream GitHub releases on first
+# run (see packages/entity-core/src/vec-extension.ts). Never commit.
+packages/*/lib/vec0.so
+packages/*/lib/vec0.dylib
+packages/*/lib/vec0.dll
+
+# ============================================
+# Node (in case tooling generates one)
+# ============================================
+node_modules/
+
+# ============================================
+# Editors / IDEs
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ============================================
+# OS
+# ============================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================
+# Claude Code / agent tooling — never commit
+# ============================================
+.claude/
+.playwright-mcp/

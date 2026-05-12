@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 836 836">
+  <defs>
+    <linearGradient
+      id="grad"
+      x1="0"
+      y1="0"
+      x2="836"
+      y2="0"
+      gradientUnits="userSpaceOnUse"
+    >
+      <stop offset="0%" stop-color="#00D2FF" />
+      <stop offset="7%" stop-color="#00D2FF" />
+      <stop offset="25%" stop-color="#66BEFE" />
+      <stop offset="50%" stop-color="#A989FD" />
+      <stop offset="75%" stop-color="#C54EFE" />
+      <stop offset="93%" stop-color="#D200FF" />
+      <stop offset="100%" stop-color="#D200FF" />
+    </linearGradient>
+  </defs>
+
+  <g
+    fill="none"
+    stroke="url(#grad)"
+    stroke-width="28"
+    stroke-linejoin="round"
+    stroke-linecap="round"
+    stroke-miterlimit="1"
+  >
+    <!-- Heart: path starts at left lobe peak (smooth tangent there) so the V apex becomes a clean interior corner with proper linejoin -->
+    <path
+      stroke-linejoin="miter"
+      stroke-miterlimit="20"
+      d="M 232,76
+             C 116,76 19,178 19,300
+             C 3,460 200,560 418,810
+             C 636,560 833,460 817,300
+             C 817,178 720,76 604,76
+             C 528,76 452,130 418,179
+             C 384,130 308,76 232,76 Z"
+    />
+
+    <!-- Chip outer body -->
+    <rect x="282" y="280" width="270" height="268" rx="22" ry="22" />
+
+    <!-- Chip inner square -->
+    <rect x="338" y="337" width="160" height="158" rx="6" ry="6" />
+
+    <!-- Top pins -->
+    <line x1="330" y1="234" x2="330" y2="280" />
+    <line x1="389" y1="234" x2="389" y2="280" />
+    <line x1="447" y1="234" x2="447" y2="280" />
+    <line x1="505" y1="234" x2="505" y2="280" />
+
+    <!-- Bottom pins -->
+    <line x1="330" y1="548" x2="330" y2="594" />
+    <line x1="389" y1="548" x2="389" y2="594" />
+    <line x1="447" y1="548" x2="447" y2="594" />
+    <line x1="505" y1="548" x2="505" y2="594" />
+
+    <!-- Left pins -->
+    <line x1="234" y1="330" x2="282" y2="330" />
+    <line x1="234" y1="387" x2="282" y2="387" />
+    <line x1="234" y1="443" x2="282" y2="443" />
+    <line x1="234" y1="500" x2="282" y2="500" />
+
+    <!-- Right pins -->
+    <line x1="552" y1="330" x2="600" y2="330" />
+    <line x1="552" y1="387" x2="600" y2="387" />
+    <line x1="552" y1="443" x2="600" y2="443" />
+    <line x1="552" y1="500" x2="600" y2="500" />
+  </g>
+</svg>

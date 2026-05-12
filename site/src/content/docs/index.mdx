@@ -1,0 +1,29 @@
+---
+title: Psycheros
+description: An embodiment for an AI entity. Documentation for Psycheros and its supporting packages.
+template: splash
+hero:
+  image:
+    file: ../../assets/psycheros-logo.svg
+  tagline: An embodiment for an AI entity — not a tool, not an assistant framework.
+---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+<CardGrid>
+	<LinkCard
+		title="Psycheros"
+		href="/psycheros/api-reference/"
+		description="The embodiment interface — UI, tools, identity system, memory + RAG."
+	/>
+	<LinkCard
+		title="entity-core"
+		href="/entity-core/entity-philosophy/"
+		description="The memory and identity substrate — knowledge graph, snapshots, sync protocol, MCP tools."
+	/>
+	<LinkCard
+		title="entity-loom"
+		href="/entity-loom/user-guide/"
+		description="Import old AI companion chat histories into the entity's memory."
+	/>
+</CardGrid>

@@ -1,0 +1,21 @@
+# Personal data - identity and memory files
+data/
+
+# Deno
+.deno/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

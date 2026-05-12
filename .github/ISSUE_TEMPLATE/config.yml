@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/PsycherosAI/Psycheros/security/advisories/new
+    about: Report security issues privately via GitHub's vulnerability reporting (not as a public issue).
+  - name: Documentation
+    url: https://github.com/PsycherosAI/Psycheros#documentation
+    about: Looking for setup help, usage docs, or per-package references? Start here.

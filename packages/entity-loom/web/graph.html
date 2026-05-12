@@ -1,0 +1,2314 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entity Loom — Graph Preview</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --bg-raised: #161b22;
+        --bg-sunken: #0d1117;
+        --fg: #e6edf3;
+        --fg-muted: #8b949e;
+        --fg-subtle: #484f58;
+        --fg-strong: #f0f6fc;
+        --border: #30363d;
+        --border-strong: #484f58;
+        --accent: #58a6ff;
+        --accent-subtle: rgba(56, 139, 253, 0.15);
+        --error: #f85149;
+        --radius-sm: 6px;
+        --radius-md: 8px;
+        --sp-1: 4px;
+        --sp-2: 8px;
+        --sp-3: 12px;
+        --sp-4: 16px;
+        --sp-6: 24px;
+        --font-sans:
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Helvetica,
+          Arial,
+          sans-serif;
+        --font-mono:
+          "SF Mono",
+          "Cascadia Code",
+          "Fira Code",
+          Consolas,
+          monospace;
+        --font-size-xs: 11px;
+        --font-size-sm: 13px;
+        --font-size-base: 14px;
+        --font-weight-medium: 500;
+        --font-weight-semibold: 600;
+        --line-height: 1.5;
+        --transition: 0.15s ease;
+      }
+
+      *, *::before, *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        font-size: var(--font-size-base);
+        background: var(--bg);
+        color: var(--fg);
+        line-height: var(--line-height);
+        overflow: hidden;
+        height: 100vh;
+      }
+
+      /* ─── Layout ─────────────────────────────────────────────────────── */
+
+      .gv {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      .gv-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--sp-3) var(--sp-4);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-raised);
+        gap: var(--sp-3);
+        flex-shrink: 0;
+      }
+      .gv-header-left {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        min-width: 0;
+      }
+      .gv-title-block {
+        min-width: 0;
+      }
+      .gv-title {
+        font-family: var(--font-mono);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        color: var(--accent);
+        letter-spacing: 0.02em;
+      }
+      .gv-stats {
+        display: flex;
+        gap: var(--sp-2);
+        font-size: var(--font-size-xs);
+        color: var(--fg-muted);
+        font-family: var(--font-mono);
+        margin-top: 2px;
+      }
+      .gv-stats strong {
+        color: var(--fg);
+        font-weight: var(--font-weight-medium);
+      }
+      .gv-stats-sep {
+        opacity: 0.3;
+      }
+
+      /* View Toggle */
+      .gv-view-toggle {
+        display: flex;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+      }
+      .gv-view-toggle-btn {
+        padding: var(--sp-1) var(--sp-3);
+        font-size: var(--font-size-xs);
+        font-family: var(--font-mono);
+        background: transparent;
+        color: var(--fg-muted);
+        border: none;
+        cursor: pointer;
+        transition: background var(--transition), color var(--transition);
+      }
+      .gv-view-toggle-btn:hover {
+        color: var(--fg);
+      }
+      .gv-view-toggle-btn.active {
+        background: var(--accent);
+        color: var(--bg);
+        font-weight: var(--font-weight-semibold);
+      }
+
+      /* Toolbar */
+      .gv-toolbar {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: var(--sp-2) var(--sp-4);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-raised);
+        flex-shrink: 0;
+      }
+      .gv-search {
+        flex: 1;
+        min-width: 0;
+        padding: var(--sp-1) var(--sp-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-sunken);
+        color: var(--fg);
+        font-size: var(--font-size-sm);
+        font-family: var(--font-sans);
+        outline: none;
+        transition: border-color var(--transition);
+      }
+      .gv-search:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-subtle);
+      }
+      .gv-search::placeholder {
+        color: var(--fg-subtle);
+      }
+      .gv-filter {
+        padding: var(--sp-1) var(--sp-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-sunken);
+        color: var(--fg);
+        font-size: var(--font-size-sm);
+        font-family: var(--font-sans);
+        cursor: pointer;
+        outline: none;
+        max-width: 120px;
+      }
+      .gv-filter:focus {
+        border-color: var(--accent);
+      }
+
+      .gv-hidden {
+        display: none !important;
+      }
+
+      /* ─── Buttons ────────────────────────────────────────────────────── */
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--sp-1);
+        padding: var(--sp-1) var(--sp-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--fg);
+        font-size: var(--font-size-sm);
+        font-family: var(--font-sans);
+        cursor: pointer;
+        transition:
+          background var(--transition),
+          color var(--transition),
+          border-color var(--transition);
+        white-space: nowrap;
+      }
+      .btn:hover {
+        background: var(--bg-raised);
+      }
+      .btn--ghost {
+        border-color: var(--border);
+        background: transparent;
+      }
+      .btn--ghost:hover {
+        background: var(--accent-subtle);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .btn--sm {
+        padding: 2px var(--sp-2);
+        font-size: var(--font-size-xs);
+      }
+      .btn--primary {
+        background: var(--accent);
+        color: var(--bg);
+        border-color: var(--accent);
+        font-weight: var(--font-weight-medium);
+      }
+      .btn--primary:hover {
+        opacity: 0.9;
+      }
+      .gv-action-danger:not(:disabled):hover {
+        color: var(--error);
+        border-color: var(--error);
+      }
+
+      /* ─── List View ──────────────────────────────────────────────────── */
+
+      .gv-list-view {
+        flex: 1;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        position: relative;
+        min-height: 0;
+      }
+      .gv-list-spacer {
+        pointer-events: none;
+      }
+
+      .gv-card {
+        padding: var(--sp-3) var(--sp-4);
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        transition: background var(--transition);
+      }
+      .gv-card:hover {
+        background: var(--bg-raised);
+      }
+      .gv-card-header {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        min-width: 0;
+      }
+      .gv-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 1px var(--sp-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-xs);
+        font-family: var(--font-mono);
+        font-weight: var(--font-weight-medium);
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .gv-card-label {
+        flex: 1;
+        min-width: 0;
+        font-size: var(--font-size-sm);
+        color: var(--fg);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .gv-card-conns {
+        font-size: var(--font-size-xs);
+        color: var(--fg-muted);
+        font-family: var(--font-mono);
+        flex-shrink: 0;
+        white-space: nowrap;
+      }
+
+      .gv-card--expanded {
+        background: var(--bg-raised);
+        cursor: default;
+      }
+      .gv-card-detail {
+        padding-top: var(--sp-3);
+      }
+      .gv-card-desc {
+        font-size: var(--font-size-sm);
+        color: var(--fg-muted);
+        line-height: var(--line-height);
+        margin-bottom: var(--sp-3);
+      }
+      .gv-card-section {
+        margin-bottom: var(--sp-3);
+      }
+      .gv-card-actions {
+        display: flex;
+        gap: var(--sp-2);
+        padding-top: var(--sp-2);
+        border-top: 1px solid var(--border);
+      }
+
+      /* ─── Graph View ─────────────────────────────────────────────────── */
+
+      #gv-graph-view {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        min-height: 0;
+      }
+      .gv-canvas {
+        flex: 1;
+        position: relative;
+        background: var(--bg);
+        overflow: hidden;
+        min-height: 0;
+      }
+      #graph-container {
+        width: 100%;
+        height: 100%;
+      }
+      .vis-network {
+        outline: none !important;
+      }
+
+      /* Loading */
+      .gv-loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+      }
+      .gv-spinner {
+        width: 28px;
+        height: 28px;
+        border: 2px solid var(--border-strong);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: gv-spin 0.8s linear infinite;
+      }
+      @keyframes gv-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Empty state */
+      .gv-empty {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        color: var(--fg-muted);
+        font-size: var(--font-size-sm);
+      }
+      .gv-empty svg {
+        margin-bottom: var(--sp-3);
+      }
+      .gv-empty p {
+        margin: var(--sp-1) 0;
+      }
+      .gv-empty-hint {
+        font-size: var(--font-size-xs);
+        color: var(--fg-subtle);
+      }
+
+      /* ─── Node Detail Panel ──────────────────────────────────────────── */
+
+      .gv-panel {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 280px;
+        max-width: 85vw;
+        height: 100%;
+        background: var(--bg-raised);
+        border-left: 1px solid var(--border);
+        box-shadow: -4px 0 16px rgba(0, 0, 0, 0.4);
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+        transform: translateX(100%);
+        transition: transform 0.2s ease;
+      }
+      .gv-panel.gv-panel-open {
+        transform: translateX(0);
+      }
+      .gv-panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: var(--sp-3) var(--sp-4);
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .gv-panel-header h3 {
+        font-family: var(--font-mono);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        color: var(--fg-strong);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .gv-panel-body {
+        padding: var(--sp-3) var(--sp-4);
+        overflow-y: auto;
+        flex: 1;
+      }
+
+      .gv-detail-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: var(--sp-2) 0;
+        border-bottom: 1px solid var(--border);
+        font-size: var(--font-size-sm);
+      }
+      .gv-detail-label {
+        color: var(--fg-muted);
+        font-size: var(--font-size-xs);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-family: var(--font-mono);
+      }
+      .gv-detail-value {
+        font-family: var(--font-mono);
+        font-size: var(--font-size-sm);
+        color: var(--fg);
+      }
+      .gv-detail-section {
+        margin-top: var(--sp-4);
+      }
+      .gv-detail-desc {
+        margin: var(--sp-1) 0 0;
+        font-size: var(--font-size-sm);
+        color: var(--fg);
+        line-height: var(--line-height);
+      }
+      .gv-conn-list {
+        list-style: none;
+        padding: 0;
+        margin: var(--sp-2) 0 0;
+      }
+      .gv-conn-list li {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: var(--sp-1) 0;
+        font-size: var(--font-size-sm);
+        border-bottom: 1px solid var(--border);
+      }
+      .gv-conn-list li:last-child {
+        border-bottom: none;
+      }
+      .gv-conn-dir {
+        color: var(--accent);
+        font-family: var(--font-mono);
+        font-size: var(--font-size-xs);
+      }
+      .gv-conn-type {
+        color: var(--fg-muted);
+        font-family: var(--font-mono);
+        font-size: var(--font-size-xs);
+      }
+      .gv-conn-label {
+        color: var(--fg);
+      }
+      .gv-node-id {
+        display: block;
+        font-size: var(--font-size-xs);
+        color: var(--fg-subtle);
+        font-family: var(--font-mono);
+        word-break: break-all;
+        margin-top: var(--sp-1);
+        padding: var(--sp-1) var(--sp-2);
+        background: var(--bg-sunken);
+        border-radius: var(--radius-sm);
+      }
+      .gv-panel-actions {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-2);
+        margin-top: var(--sp-4);
+      }
+      .gv-edit-btn {
+        width: 100%;
+        justify-content: center;
+      }
+
+      /* ─── Modal ──────────────────────────────────────────────────────── */
+
+      .gv-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 200;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+        padding: var(--sp-4);
+      }
+      .gv-modal.gv-modal-open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .gv-modal-box {
+        background: var(--bg-raised);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-md);
+        padding: var(--sp-6);
+        width: 100%;
+        max-width: 380px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+        transform: scale(0.95);
+        transition: transform 0.15s ease;
+      }
+      .gv-modal.gv-modal-open .gv-modal-box {
+        transform: scale(1);
+      }
+      .gv-modal-box h3 {
+        margin: 0 0 var(--sp-4);
+        font-family: var(--font-mono);
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-semibold);
+        color: var(--fg-strong);
+      }
+      .gv-modal-box--wide {
+        max-width: 460px;
+      }
+
+      .gv-field {
+        margin-bottom: var(--sp-4);
+      }
+      .gv-field label {
+        display: block;
+        font-size: var(--font-size-xs);
+        color: var(--fg-muted);
+        font-family: var(--font-mono);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: var(--sp-1);
+      }
+      .gv-field input[type="text"],
+      .gv-field textarea,
+      .gv-field select {
+        width: 100%;
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-sunken);
+        color: var(--fg);
+        font-size: var(--font-size-sm);
+        font-family: var(--font-sans);
+        outline: none;
+        transition: border-color var(--transition);
+        box-sizing: border-box;
+      }
+      .gv-field input:focus,
+      .gv-field textarea:focus,
+      .gv-field select:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-subtle);
+      }
+      .gv-field textarea {
+        resize: vertical;
+        min-height: 48px;
+      }
+      .gv-modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--sp-2);
+        margin-top: var(--sp-4);
+      }
+
+      /* Delete confirm */
+      .gv-delete-confirm .gv-delete-msg {
+        font-size: var(--font-size-sm);
+        color: var(--fg-muted);
+        margin: 0 0 var(--sp-4);
+        line-height: var(--line-height);
+      }
+      .gv-delete-btn-confirm {
+        background: var(--error) !important;
+        border-color: var(--error) !important;
+        color: #fff !important;
+      }
+      .gv-delete-btn-confirm:hover {
+        opacity: 0.9;
+      }
+
+      /* Node picker */
+      .gv-node-picker {
+        position: relative;
+      }
+      .gv-node-search-input {
+        width: 100%;
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-sunken);
+        color: var(--fg);
+        font-size: var(--font-size-sm);
+        font-family: var(--font-sans);
+        outline: none;
+        transition: border-color var(--transition);
+        box-sizing: border-box;
+      }
+      .gv-node-search-input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-subtle);
+      }
+      .gv-node-search-results {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: 10;
+        max-height: 200px;
+        overflow-y: auto;
+        background: var(--bg-raised);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-sm);
+        margin-top: 2px;
+        display: none;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      }
+      .gv-node-search-results--open {
+        display: block;
+      }
+      .gv-node-search-item {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: var(--sp-2) var(--sp-3);
+        cursor: pointer;
+        font-size: var(--font-size-sm);
+        transition: background var(--transition);
+      }
+      .gv-node-search-item:hover {
+        background: var(--accent-subtle);
+      }
+      .gv-node-search-label {
+        flex: 1;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--fg);
+      }
+      .gv-node-search-empty {
+        padding: var(--sp-3);
+        text-align: center;
+        color: var(--fg-muted);
+        font-size: var(--font-size-xs);
+      }
+
+      /* Edit connections */
+      .gv-edit-conns {
+        max-height: 180px;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        margin-bottom: var(--sp-2);
+      }
+      .gv-edit-conn-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--sp-2);
+        padding: var(--sp-2) var(--sp-3);
+        border-bottom: 1px solid var(--border);
+        font-size: var(--font-size-sm);
+      }
+      .gv-edit-conn-row:last-child {
+        border-bottom: none;
+      }
+      .gv-edit-conn-info {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        min-width: 0;
+        flex: 1;
+      }
+      .gv-edit-conn-del {
+        flex-shrink: 0;
+        padding: 0 var(--sp-2);
+        color: var(--fg-muted);
+        font-size: var(--font-size-base);
+        line-height: 1;
+        background: none;
+        border: none;
+        cursor: pointer;
+      }
+      .gv-edit-conn-del:hover {
+        color: var(--error);
+      }
+
+      /* Toast */
+      #gv-toast-container {
+        position: fixed;
+        bottom: 32px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-2);
+        pointer-events: none;
+      }
+      .gv-toast {
+        background: var(--bg-raised);
+        border: 1px solid var(--border-strong);
+        color: var(--fg);
+        font-size: var(--font-size-sm);
+        font-family: var(--font-sans);
+        padding: var(--sp-3) var(--sp-4);
+        border-radius: var(--radius-md);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+        opacity: 0;
+        transform: translateY(8px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: auto;
+        max-width: 340px;
+        text-align: center;
+      }
+      .gv-toast.gv-toast-visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      /* Mobile */
+      @media (max-width: 600px) {
+        .gv-header {
+          padding: var(--sp-2) var(--sp-3);
+        }
+        .gv-toolbar {
+          flex-wrap: wrap;
+          padding: var(--sp-2) var(--sp-3);
+        }
+        .gv-search {
+          order: 3;
+          flex-basis: 100%;
+        }
+        .gv-filter {
+          order: 2;
+          flex: 1;
+          max-width: none;
+        }
+        #gv-add-node {
+          order: 1;
+        }
+        #gv-add-node span {
+          display: none;
+        }
+        .gv-card {
+          padding: var(--sp-3);
+        }
+        .gv-card-actions {
+          flex-wrap: wrap;
+        }
+        .gv-panel {
+          width: 100%;
+          max-width: 100vw;
+          border-left: none;
+          border-top: 1px solid var(--border);
+          top: auto;
+          bottom: 0;
+          height: 55vh;
+          transform: translateY(100%);
+          border-radius: var(--radius-md) var(--radius-md) 0 0;
+        }
+        .gv-panel.gv-panel-open {
+          transform: translateY(0);
+        }
+        .gv-stats {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="gv">
+      <!-- Header -->
+      <div class="gv-header">
+        <div class="gv-header-left">
+          <a
+            href="/"
+            class="btn btn--ghost btn--sm"
+            style="margin-right: var(--sp-3); text-decoration: none; font-size: var(--font-size-sm); gap: 4px; display: flex; align-items: center"
+          >&#x2190; Back</a>
+          <div class="gv-title-block">
+            <h1 class="gv-title">entity-loom graph preview</h1>
+            <div class="gv-stats" id="gv-stats"></div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: var(--sp-2)">
+          <button
+            class="btn btn--ghost btn--sm"
+            id="graph-refresh"
+            title="Refresh"
+          >
+            &#x21bb;
+          </button>
+          <div class="gv-view-toggle" id="gv-view-toggle">
+            <button class="gv-view-toggle-btn active" data-view="list">
+              List
+            </button>
+            <button class="gv-view-toggle-btn" data-view="graph">
+              Network
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="gv-toolbar">
+        <input
+          type="text"
+          class="gv-search"
+          id="graph-search"
+          placeholder="Search nodes..."
+        >
+        <select class="gv-filter" id="graph-filter-type">
+          <option value="">All types</option>
+        </select>
+        <button class="btn btn--ghost btn--sm" id="gv-add-node">
+          + <span>Add Node</span>
+        </button>
+      </div>
+
+      <!-- List View -->
+      <div class="gv-list-view" id="gv-list-view"></div>
+
+      <!-- Graph View -->
+      <div id="gv-graph-view" class="gv-hidden">
+        <div class="gv-canvas">
+          <div id="graph-container"></div>
+        </div>
+        <div class="gv-panel" id="graph-node-panel">
+          <div class="gv-panel-header">
+            <h3 id="panel-node-label"></h3>
+            <button class="btn btn--ghost btn--sm" id="panel-close">
+              &times;
+            </button>
+          </div>
+          <div class="gv-panel-body" id="panel-content"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create Node Modal -->
+    <div class="gv-modal" id="graph-create-modal">
+      <div class="gv-modal-box">
+        <h3>Add Node</h3>
+        <form id="create-node-form">
+          <div class="gv-field">
+            <label>Type</label>
+            <select name="type" required>
+              <option value="self">Self</option>
+              <option value="person">Person</option>
+              <option value="topic">Topic</option>
+              <option value="preference">Preference</option>
+              <option value="place">Place</option>
+              <option value="goal">Goal</option>
+              <option value="health">Health</option>
+              <option value="boundary">Boundary</option>
+              <option value="tradition">Tradition</option>
+              <option value="insight">Insight</option>
+            </select>
+          </div>
+          <div class="gv-field">
+            <label>Label</label>
+            <input type="text" name="label" required placeholder="Entity name">
+          </div>
+          <div class="gv-field">
+            <label>Description</label>
+            <textarea
+              name="description"
+              placeholder="Brief description (optional)"
+            ></textarea>
+          </div>
+          <div class="gv-modal-actions">
+            <button type="button" class="btn btn--ghost" id="cancel-create">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn--primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Edit Node Modal -->
+    <div class="gv-modal" id="graph-edit-modal">
+      <div class="gv-modal-box gv-modal-box--wide">
+        <h3>Edit Node</h3>
+        <form id="edit-node-form">
+          <input type="hidden" id="edit-node-id">
+          <div class="gv-field">
+            <label>Type</label>
+            <select id="edit-node-type" required>
+              <option value="self">Self</option>
+              <option value="person">Person</option>
+              <option value="topic">Topic</option>
+              <option value="preference">Preference</option>
+              <option value="place">Place</option>
+              <option value="goal">Goal</option>
+              <option value="health">Health</option>
+              <option value="boundary">Boundary</option>
+              <option value="tradition">Tradition</option>
+              <option value="insight">Insight</option>
+            </select>
+          </div>
+          <div class="gv-field">
+            <label>Label</label>
+            <input type="text" id="edit-node-label" required>
+          </div>
+          <div class="gv-field">
+            <label>Description</label>
+            <textarea id="edit-node-description"></textarea>
+          </div>
+          <div class="gv-field" id="edit-connections-field">
+            <label>Connections</label>
+            <div class="gv-edit-conns" id="edit-connections-list"></div>
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm"
+              id="edit-add-conn"
+            >
+              + Connection
+            </button>
+          </div>
+          <div class="gv-modal-actions">
+            <button type="button" class="btn btn--ghost" id="cancel-edit">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn--primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Edge Modal -->
+    <div class="gv-modal" id="graph-edge-modal">
+      <div class="gv-modal-box">
+        <h3>Connect Nodes</h3>
+        <form id="edge-create-form">
+          <div class="gv-field">
+            <label>From</label>
+            <div class="gv-node-picker" id="edge-from-picker">
+              <input
+                type="text"
+                class="gv-node-search-input"
+                placeholder="Search node..."
+              >
+              <div class="gv-node-search-results"></div>
+            </div>
+            <input type="hidden" id="edge-from">
+          </div>
+          <div class="gv-field">
+            <label>To</label>
+            <div class="gv-node-picker" id="edge-to-picker">
+              <input
+                type="text"
+                class="gv-node-search-input"
+                placeholder="Search node..."
+              >
+              <div class="gv-node-search-results"></div>
+            </div>
+            <input type="hidden" id="edge-to">
+          </div>
+          <div class="gv-field">
+            <label>Relationship</label>
+            <input
+              type="text"
+              id="edge-type"
+              required
+              placeholder="e.g. loves, works_with, close_to"
+            >
+          </div>
+          <div class="gv-field">
+            <label>Evidence (optional)</label>
+            <input type="text" id="edge-evidence" placeholder="Brief evidence">
+          </div>
+          <div class="gv-modal-actions">
+            <button type="button" class="btn btn--ghost" id="cancel-edge">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn--primary">Connect</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Delete Confirm Modal -->
+    <div class="gv-modal gv-delete-confirm" id="graph-delete-modal">
+      <div class="gv-modal-box">
+        <h3>Delete Node</h3>
+        <p class="gv-delete-msg" id="delete-confirm-msg"></p>
+        <div class="gv-modal-actions">
+          <button type="button" class="btn btn--ghost" id="cancel-delete">
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="btn gv-delete-btn-confirm"
+            id="confirm-delete"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ─── Color Utilities ──────────────────────────────────────────────────────
+
+      function getNodeTypeConfig() {
+        return {
+          self: { hue: 160, label: "Self" },
+          person: { hue: 200, label: "Person" },
+          emotion: { hue: 340, label: "Emotion" },
+          event: { hue: 220, label: "Event" },
+          memory_ref: { hue: 280, label: "Memory" },
+          topic: { hue: 35, label: "Topic" },
+          preference: { hue: 180, label: "Preference" },
+          place: { hue: 25, label: "Place" },
+          goal: { hue: 55, label: "Goal" },
+          health: { hue: 0, label: "Health" },
+          boundary: { hue: 210, label: "Boundary" },
+          tradition: { hue: 90, label: "Tradition" },
+          insight: { hue: 45, label: "Insight" },
+          default: { hue: 0, label: "Other" },
+        };
+      }
+
+      function hslColor(hue, s, l, a) {
+        if (a !== undefined) return `hsla(${hue}, ${s}%, ${l}%, ${a})`;
+        return `hsl(${hue}, ${s}%, ${l}%)`;
+      }
+
+      function getNodeColor(type) {
+        const config = getNodeTypeConfig();
+        const info = config[type] || config.default;
+        return {
+          background: hslColor(info.hue, 55, 35),
+          border: hslColor(info.hue, 55, 50),
+          highlight: {
+            background: hslColor(info.hue, 60, 45),
+            border: hslColor(info.hue, 70, 60),
+          },
+          hover: {
+            background: hslColor(info.hue, 55, 40),
+            border: hslColor(info.hue, 60, 55),
+          },
+        };
+      }
+
+      function getEdgeColor(type) {
+        const map = {
+          loves: { h: 340, s: 50 },
+          dislikes: { h: 25, s: 40 },
+          respects: { h: 200, s: 40 },
+          proud_of: { h: 45, s: 50 },
+          worried_about: { h: 0, s: 50 },
+          nostalgic_for: { h: 30, s: 40 },
+          intrigued_by: { h: 270, s: 40 },
+          frustrated_with: { h: 15, s: 50 },
+          family_of: { h: 30, s: 40 },
+          friend_of: { h: 200, s: 40 },
+          works_with: { h: 210, s: 35 },
+          close_to: { h: 210, s: 40 },
+          estranged_from: { h: 0, s: 40 },
+          works_at: { h: 210, s: 30 },
+          lives_in: { h: 140, s: 35 },
+          studies: { h: 270, s: 30 },
+          values: { h: 45, s: 45 },
+          believes_in: { h: 200, s: 45 },
+          skilled_at: { h: 270, s: 40 },
+          interested_in: { h: 55, s: 40 },
+          caused: { h: 0, s: 35 },
+          led_to: { h: 25, s: 30 },
+          part_of: { h: 200, s: 30 },
+          reminds_of: { h: 270, s: 30 },
+          associated_with: { h: 0, s: 0 },
+          similar_to: { h: 210, s: 25 },
+          mentions: { h: 270, s: 30 },
+          mentioned_in: { h: 270, s: 25 },
+        };
+        const info = map[type] || { h: 0, s: 0 };
+        const color = hslColor(info.h, info.s, 45, 0.7);
+        return {
+          color,
+          highlight: hslColor(info.h, info.s + 10, 55),
+          hover: color,
+        };
+      }
+
+      // ─── State ────────────────────────────────────────────────────────────────
+
+      let network = null;
+      let graphData = { nodes: [], edges: [] };
+      let currentView = "list";
+      let expandedNodeId = null;
+      let filteredNodes = [];
+      let connectionCounts = new Map();
+      let initialized = false;
+      let deleteTargetNodeId = null;
+      let eventListenersAbort = null;
+
+      const CARD_HEIGHT_EST = 56;
+      const VISIBLE_BUFFER = 10;
+
+      // ─── Initialization ──────────────────────────────────────────────────────
+
+      async function initGraph() {
+        if (initialized) {
+          if (network) {
+            network.destroy();
+            network = null;
+          }
+          expandedNodeId = null;
+        }
+        initialized = true;
+        currentView = "list";
+        await loadGraphData();
+        setupEventListeners();
+      }
+
+      // ─── Data Loading ─────────────────────────────────────────────────────────
+
+      async function loadGraphData() {
+        const listView = document.getElementById("gv-list-view");
+        const graphView = document.getElementById("gv-graph-view");
+
+        try {
+          const response = await fetch("/api/graph");
+          if (!response.ok) {
+            throw new Error("Failed to load graph data");
+          }
+          graphData = await response.json();
+
+          buildConnectionCounts();
+          populateTypeFilter();
+          populateStats();
+          getFilteredNodes();
+
+          if (!graphData.nodes || graphData.nodes.length === 0) {
+            const emptyHtml = `
+            <div class="gv-empty">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
+                <circle cx="12" cy="12" r="3"/>
+                <circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/>
+                <circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/>
+                <line x1="7" y1="7" x2="10" y2="10"/><line x1="17" y1="7" x2="14" y2="10"/>
+                <line x1="7" y1="17" x2="10" y2="14"/><line x1="17" y1="17" x2="14" y2="14"/>
+              </svg>
+              <p>Knowledge graph is empty</p>
+              <p class="gv-empty-hint">Run entity-loom import first, or create nodes manually</p>
+            </div>`;
+            if (listView) listView.innerHTML = emptyHtml;
+            return;
+          }
+
+          renderListView();
+          if (currentView === "graph" && graphView) renderGraph();
+        } catch (error) {
+          const errorHtml = `
+          <div class="gv-empty">
+            <p>Failed to load graph data</p>
+            <p class="gv-empty-hint">${escapeHtml(error.message)}</p>
+            <button onclick="initGraph()" class="btn btn--ghost" style="margin-top: var(--sp-3)">Retry</button>
+          </div>`;
+          if (listView) listView.innerHTML = errorHtml;
+        }
+      }
+
+      // ─── Stats ────────────────────────────────────────────────────────────────
+
+      function populateStats() {
+        const el = document.getElementById("gv-stats");
+        if (!el) return;
+        const nc = graphData.nodes.length;
+        const ec = graphData.edges.length;
+        el.innerHTML = `<strong>${nc}</strong> node${
+          nc !== 1 ? "s" : ""
+        }<span class="gv-stats-sep">/</span><strong>${ec}</strong> edge${
+          ec !== 1 ? "s" : ""
+        }`;
+      }
+
+      // ─── Connection Counts ────────────────────────────────────────────────────
+
+      function buildConnectionCounts() {
+        connectionCounts = new Map();
+        for (const node of graphData.nodes) {
+          connectionCounts.set(node.id, 0);
+        }
+        for (const edge of graphData.edges) {
+          connectionCounts.set(
+            edge.fromId,
+            (connectionCounts.get(edge.fromId) || 0) + 1,
+          );
+          connectionCounts.set(
+            edge.toId,
+            (connectionCounts.get(edge.toId) || 0) + 1,
+          );
+        }
+      }
+
+      // ─── Filtering ────────────────────────────────────────────────────────────
+
+      function getFilteredNodes() {
+        const searchEl = document.getElementById("graph-search");
+        const filterEl = document.getElementById("graph-filter-type");
+        const query = searchEl ? searchEl.value.toLowerCase().trim() : "";
+        const typeFilter = filterEl ? filterEl.value : "";
+        filteredNodes = graphData.nodes.filter((n) => {
+          if (typeFilter && n.type !== typeFilter) return false;
+          if (
+            query && !n.label.toLowerCase().includes(query) &&
+            !(n.description &&
+              n.description.toLowerCase().includes(query))
+          ) return false;
+          return true;
+        });
+        filteredNodes.sort((a, b) => a.label.localeCompare(b.label));
+        return filteredNodes;
+      }
+
+      // ─── List View ────────────────────────────────────────────────────────────
+
+      let scrollListenerAttached = false;
+
+      function renderListView() {
+        const container = document.getElementById("gv-list-view");
+        if (!container) return;
+        if (filteredNodes.length === 0) {
+          container.innerHTML = `
+          <div class="gv-empty">
+            <p>No matching nodes</p>
+            <p class="gv-empty-hint">Try adjusting your search or filter</p>
+          </div>`;
+          return;
+        }
+        renderVisibleCards(container);
+        if (!scrollListenerAttached) {
+          container.addEventListener(
+            "scroll",
+            () => renderVisibleCards(container),
+          );
+          scrollListenerAttached = true;
+        }
+      }
+
+      function renderVisibleCards(container) {
+        const scrollTop = container.scrollTop;
+        const viewHeight = container.clientHeight;
+
+        let startIdx = 0;
+        let y = 0;
+        for (let i = 0; i < filteredNodes.length; i++) {
+          const isExpanded = filteredNodes[i].id === expandedNodeId;
+          const h = isExpanded
+            ? estimateExpandedHeight(filteredNodes[i])
+            : CARD_HEIGHT_EST;
+          if (y + h > scrollTop - CARD_HEIGHT_EST * VISIBLE_BUFFER) {
+            startIdx = i;
+            break;
+          }
+          y += h;
+        }
+
+        const visibleCards = [];
+        let curY = y;
+        for (
+          let i = startIdx;
+          i < filteredNodes.length &&
+          curY <
+            scrollTop + viewHeight + CARD_HEIGHT_EST * VISIBLE_BUFFER;
+          i++
+        ) {
+          const node = filteredNodes[i];
+          const isExpanded = node.id === expandedNodeId;
+          const h = isExpanded ? estimateExpandedHeight(node) : CARD_HEIGHT_EST;
+          visibleCards.push({ node, y: curY, height: h, isExpanded });
+          curY += h;
+        }
+
+        let totalHeight = 0;
+        for (const node of filteredNodes) {
+          totalHeight += node.id === expandedNodeId
+            ? estimateExpandedHeight(node)
+            : CARD_HEIGHT_EST;
+        }
+
+        const topPad = visibleCards.length > 0 ? visibleCards[0].y : 0;
+        const bottomPad = totalHeight -
+          (visibleCards.length > 0
+            ? visibleCards[visibleCards.length - 1].y +
+              visibleCards[visibleCards.length - 1].height
+            : 0);
+
+        let html =
+          `<div class="gv-list-spacer" style="height:${topPad}px"></div>`;
+        for (const { node, isExpanded } of visibleCards) {
+          html += isExpanded ? renderNodeDetail(node) : renderNodeCard(node);
+        }
+        html += `<div class="gv-list-spacer" style="height:${
+          Math.max(0, bottomPad)
+        }px"></div>`;
+        html += `<div class="gv-list-spacer" style="height:${
+          viewHeight + 200
+        }px"></div>`;
+
+        container.innerHTML = html;
+      }
+
+      function estimateExpandedHeight(node) {
+        const edges = graphData.edges.filter((e) =>
+          e.fromId === node.id || e.toId === node.id
+        );
+        return 130 + edges.length * 28;
+      }
+
+      // ─── Card Rendering ───────────────────────────────────────────────────────
+
+      function renderNodeCard(node) {
+        const config = getNodeTypeConfig();
+        const typeInfo = config[node.type] || config.default;
+        const conns = connectionCounts.get(node.id) || 0;
+        return `<div class="gv-card" data-node-id="${
+          escapeHtml(node.id)
+        }" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
+        <div class="gv-card-header">
+          <span class="gv-badge" style="background:${
+          hslColor(typeInfo.hue, 55, 35)
+        };color:${hslColor(typeInfo.hue, 55, 70)}">${
+          escapeHtml(typeInfo.label)
+        }</span>
+          <span class="gv-card-label">${escapeHtml(node.label)}</span>
+          <span class="gv-card-conns">${
+          conns > 0 ? conns + " conn" + (conns > 1 ? "s" : "") : ""
+        }</span>
+        </div>
+      </div>`;
+      }
+
+      function renderNodeDetail(node) {
+        const config = getNodeTypeConfig();
+        const typeInfo = config[node.type] || config.default;
+        const conns = connectionCounts.get(node.id) || 0;
+        const edges = graphData.edges.filter((e) =>
+          e.fromId === node.id || e.toId === node.id
+        );
+        const connHtml = edges.map((edge) => {
+          const isFrom = edge.fromId === node.id;
+          const otherId = isFrom ? edge.toId : edge.fromId;
+          const otherNode = graphData.nodes.find((n) => n.id === otherId);
+          const dir = isFrom ? "&rarr;" : "&larr;";
+          return `<li><span class="gv-conn-dir">${dir}</span> <span class="gv-conn-type">${
+            escapeHtml(edge.type)
+          }</span> <span class="gv-conn-label">${
+            escapeHtml(otherNode?.label || "?")
+          }</span></li>`;
+        }).join("");
+
+        return `<div class="gv-card gv-card--expanded" data-node-id="${
+          escapeHtml(node.id)
+        }">
+        <div class="gv-card-header" onclick="toggleNodeCard('${
+          escapeHtml(node.id)
+        }')">
+          <span class="gv-badge" style="background:${
+          hslColor(typeInfo.hue, 55, 35)
+        };color:${hslColor(typeInfo.hue, 55, 70)}">${
+          escapeHtml(typeInfo.label)
+        }</span>
+          <span class="gv-card-label">${escapeHtml(node.label)}</span>
+          <span class="gv-card-conns">${conns} conn${
+          conns !== 1 ? "s" : ""
+        }</span>
+        </div>
+        <div class="gv-card-detail">
+          ${
+          node.description
+            ? `<div class="gv-card-desc">${escapeHtml(node.description)}</div>`
+            : ""
+        }
+          ${
+          connHtml
+            ? `
+            <div class="gv-card-section">
+              <div class="gv-detail-label">Connections (${edges.length})</div>
+              <ul class="gv-conn-list">${connHtml}</ul>
+            </div>`
+            : ""
+        }
+          <div class="gv-card-actions">
+            <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation(); openEdgeModalFromNode('${
+          escapeHtml(node.id)
+        }')">Connect</button>
+            <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation(); openEditModal('${
+          escapeHtml(node.id)
+        }')">Edit</button>
+            <button class="btn btn--ghost btn--sm gv-action-danger" onclick="event.stopPropagation(); renderDeleteConfirmModal('${
+          escapeHtml(node.id)
+        }')">Delete</button>
+          </div>
+        </div>
+      </div>`;
+      }
+
+      function toggleNodeCard(nodeId) {
+        expandedNodeId = expandedNodeId === nodeId ? null : nodeId;
+        renderListView();
+      }
+
+      // ─── View Toggle ──────────────────────────────────────────────────────────
+
+      async function toggleView(view) {
+        if (view === currentView) return;
+        currentView = view;
+
+        const listView = document.getElementById("gv-list-view");
+        const graphView = document.getElementById("gv-graph-view");
+        const toggle = document.getElementById("gv-view-toggle");
+
+        if (toggle) {
+          toggle.querySelectorAll(".gv-view-toggle-btn").forEach(
+            (btn) => {
+              btn.classList.toggle("active", btn.dataset.view === view);
+            },
+          );
+        }
+
+        if (view === "list") {
+          if (graphView) graphView.classList.add("gv-hidden");
+          if (listView) listView.classList.remove("gv-hidden");
+          renderListView();
+        } else {
+          if (listView) listView.classList.add("gv-hidden");
+          if (graphView) graphView.classList.remove("gv-hidden");
+
+          if (!network && typeof vis === "undefined") {
+            const container = document.getElementById(
+              "graph-container",
+            );
+            if (container) {
+              container.innerHTML =
+                '<div class="gv-loading"><div class="gv-spinner"></div></div>';
+            }
+            await new Promise((resolve, reject) => {
+              const script = document.createElement("script");
+              script.src =
+                "https://unpkg.com/vis-network/standalone/umd/vis-network.min.js";
+              script.onload = resolve;
+              script.onerror = reject;
+              document.head.appendChild(script);
+            });
+          }
+          renderGraph();
+        }
+      }
+
+      // ─── Graph Rendering ──────────────────────────────────────────────────────
+
+      function renderGraph() {
+        if (typeof vis === "undefined") return;
+        const container = document.getElementById("graph-container");
+        if (!container) return;
+        container.innerHTML = "";
+
+        const nodes = new vis.DataSet(
+          graphData.nodes.map((node) => {
+            const colors = getNodeColor(node.type);
+            return {
+              id: node.id,
+              label: node.label.length > 20
+                ? node.label.substring(0, 17) + "..."
+                : node.label,
+              title: `${node.type}: ${node.label}\n${node.description || ""}`,
+              color: colors,
+              borderWidth: 2,
+              borderWidthSelected: 3,
+              font: {
+                color: "#e6edf3",
+                size: 13,
+                face: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+              },
+              shadow: {
+                enabled: true,
+                color: "rgba(0,0,0,0.5)",
+                size: 8,
+                x: 0,
+                y: 2,
+              },
+              data: node,
+            };
+          }),
+        );
+
+        const edges = new vis.DataSet(
+          graphData.edges.map((edge) => {
+            const colors = getEdgeColor(edge.type);
+            return {
+              id: edge.id,
+              from: edge.fromId,
+              to: edge.toId,
+              label: edge.type,
+              title: edge.type,
+              color: colors,
+              width: 1 + (edge.weight || 0.5) * 1.5,
+              font: {
+                size: 9,
+                color: "rgba(232,232,232,0.5)",
+                strokeWidth: 0,
+                face: "SF Mono, Consolas, monospace",
+              },
+              smooth: { type: "curvedCW", roundness: 0.15 },
+              data: edge,
+            };
+          }),
+        );
+
+        const options = {
+          physics: {
+            enabled: true,
+            barnesHut: {
+              gravitationalConstant: -2500,
+              centralGravity: 0.25,
+              springLength: 160,
+              springConstant: 0.04,
+              damping: 0.12,
+            },
+            stabilization: { iterations: 150, fit: true },
+          },
+          interaction: {
+            hover: true,
+            tooltipDelay: 300,
+            zoomView: true,
+            dragView: true,
+            multiselect: true,
+            navigationButtons: false,
+            keyboard: false,
+          },
+          nodes: {
+            shape: "dot",
+            size: 18,
+            scaling: { min: 12, max: 28 },
+          },
+          edges: {
+            arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+            smooth: { enabled: true, type: "continuous" },
+          },
+        };
+
+        network = new vis.Network(container, { nodes, edges }, options);
+        network.on("click", handleNetworkClick);
+        network.on("doubleClick", handleNetworkDoubleClick);
+        network.on("stabilizationIterationsDone", () => {
+          network.setOptions({ physics: { enabled: false } });
+          network.fit({
+            animation: {
+              duration: 400,
+              easingFunction: "easeInOutQuad",
+            },
+          });
+        });
+      }
+
+      function handleNetworkClick(params) {
+        if (params.nodes && params.nodes.length === 1) {
+          showNodePanel(params.nodes[0]);
+        } else hideNodePanel();
+      }
+
+      function handleNetworkDoubleClick(params) {
+        if (params.nodes && params.nodes.length === 1) {
+          network.focus(params.nodes[0], {
+            animation: true,
+            scale: 1.5,
+          });
+        }
+      }
+
+      // ─── Node Panel ───────────────────────────────────────────────────────────
+
+      function showNodePanel(nodeId) {
+        const node = graphData.nodes.find((n) => n.id === nodeId);
+        if (!node) return;
+
+        const panel = document.getElementById("graph-node-panel");
+        const label = document.getElementById("panel-node-label");
+        const content = document.getElementById("panel-content");
+        if (!panel || !label || !content) return;
+
+        const connectedEdges = graphData.edges.filter((e) =>
+          e.fromId === nodeId || e.toId === nodeId
+        );
+        const typeConfig = getNodeTypeConfig();
+        const typeInfo = typeConfig[node.type] || typeConfig.default;
+        const typeColor = hslColor(typeInfo.hue, 55, 50);
+
+        const connections = connectedEdges.map((edge) => {
+          const isFrom = edge.fromId === nodeId;
+          const otherNodeId = isFrom ? edge.toId : edge.fromId;
+          const otherNode = graphData.nodes.find((n) => n.id === otherNodeId);
+          const dir = isFrom ? "&rarr;" : "&larr;";
+          return `<li><span class="gv-conn-dir">${dir}</span> <span class="gv-conn-type">${
+            escapeHtml(edge.type)
+          }</span> <span class="gv-conn-label">${
+            escapeHtml(otherNode?.label || "?")
+          }</span></li>`;
+        }).join("");
+
+        label.textContent = node.label;
+        content.innerHTML = `
+        <div class="gv-detail-row">
+          <span class="gv-detail-label">Type</span>
+          <span class="gv-detail-value" style="color: ${typeColor}">${
+          escapeHtml(node.type)
+        }</span>
+        </div>
+        ${
+          node.description
+            ? `
+          <div class="gv-detail-section">
+            <div class="gv-detail-label">Description</div>
+            <p class="gv-detail-desc">${escapeHtml(node.description)}</p>
+          </div>`
+            : ""
+        }
+        ${
+          connections
+            ? `
+          <div class="gv-detail-section">
+            <div class="gv-detail-label">Connections (${connectedEdges.length})</div>
+            <ul class="gv-conn-list">${connections}</ul>
+          </div>`
+            : ""
+        }
+        <div class="gv-detail-section">
+          <div class="gv-detail-label">ID</div>
+          <code class="gv-node-id">${escapeHtml(node.id)}</code>
+        </div>
+        <div class="gv-panel-actions">
+          <button class="btn btn--ghost gv-edit-btn" onclick="openEdgeModalFromNode('${
+          escapeHtml(node.id)
+        }')">Connect</button>
+          <button class="btn btn--ghost gv-edit-btn" onclick="openEditModal('${
+          escapeHtml(node.id)
+        }')">Edit</button>
+          <button class="btn btn--ghost gv-edit-btn gv-action-danger" onclick="renderDeleteConfirmModal('${
+          escapeHtml(node.id)
+        }')">Delete</button>
+        </div>`;
+
+        panel.classList.add("gv-panel-open");
+      }
+
+      function hideNodePanel() {
+        document.getElementById("graph-node-panel")?.classList.remove(
+          "gv-panel-open",
+        );
+      }
+
+      // ─── Type Filter ──────────────────────────────────────────────────────────
+
+      function populateTypeFilter() {
+        const select = document.getElementById("graph-filter-type");
+        if (!select) return;
+        while (select.options.length > 1) select.remove(1);
+        const types = [...new Set(graphData.nodes.map((n) => n.type))]
+          .sort();
+        const config = getNodeTypeConfig();
+        types.forEach((type) => {
+          const option = document.createElement("option");
+          option.value = type;
+          option.textContent = config[type]?.label || type;
+          select.appendChild(option);
+        });
+      }
+
+      // ─── Edge Modal ──────────────────────────────────────────────────────────
+
+      function openEdgeModal(fromId) {
+        const modal = document.getElementById("graph-edge-modal");
+        if (!modal) return;
+
+        const fromPicker = document.getElementById("edge-from-picker");
+        const toPicker = document.getElementById("edge-to-picker");
+        const fromHidden = document.getElementById("edge-from");
+        const toHidden = document.getElementById("edge-to");
+        const fromInput = fromPicker?.querySelector(
+          ".gv-node-search-input",
+        );
+        const toInput = toPicker?.querySelector(
+          ".gv-node-search-input",
+        );
+
+        fromHidden.value = "";
+        toHidden.value = "";
+        if (fromInput) {
+          fromInput.value = "";
+          fromInput.dataset.nodeId = "";
+        }
+        if (toInput) {
+          toInput.value = "";
+          toInput.dataset.nodeId = "";
+        }
+        if (fromPicker) {
+          fromPicker.querySelector(".gv-node-search-results")
+            .innerHTML = "";
+        }
+        if (toPicker) {
+          toPicker.querySelector(".gv-node-search-results").innerHTML = "";
+        }
+
+        if (fromId) {
+          const fromNode = graphData.nodes.find((n) => n.id === fromId);
+          if (fromNode && fromInput) {
+            fromInput.value = fromNode.label;
+            fromInput.dataset.nodeId = fromNode.id;
+            fromHidden.value = fromNode.id;
+          }
+        }
+
+        modal.classList.add("gv-modal-open");
+      }
+
+      function openEdgeModalFromNode(nodeId) {
+        openEdgeModal(nodeId);
+      }
+
+      function setupEdgeModalListeners(opts) {
+        const modal = document.getElementById("graph-edge-modal");
+        const form = document.getElementById("edge-create-form");
+        const cancelBtn = document.getElementById("cancel-edge");
+
+        cancelBtn?.addEventListener(
+          "click",
+          () => modal?.classList.remove("gv-modal-open"),
+          opts,
+        );
+        modal?.addEventListener("click", (e) => {
+          if (e.target.id === "graph-edge-modal") {
+            modal.classList.remove("gv-modal-open");
+          }
+        }, opts);
+
+        form?.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const fromId = document.getElementById("edge-from").value;
+          const toId = document.getElementById("edge-to").value;
+          const type = document.getElementById("edge-type").value;
+          const evidence = document.getElementById("edge-evidence").value;
+
+          if (!fromId || !toId || !type) return;
+          if (fromId === toId) {
+            showToast("Cannot connect a node to itself");
+            return;
+          }
+
+          try {
+            const body = { fromId, toId, type };
+            if (evidence) body.evidence = evidence;
+            const response = await fetch("/api/graph/edges", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            const result = await response.json();
+            if (result.success) {
+              modal.classList.remove("gv-modal-open");
+              form.reset();
+              showToast("Connection created");
+              await loadGraphData();
+            } else {
+              showToast("Failed: " + (result.error || "unknown error"));
+            }
+          } catch (error) {
+            showToast("Error: " + error.message);
+          }
+        }, opts);
+      }
+
+      // ─── Searchable Node Picker ──────────────────────────────────────────────
+
+      function setupNodePickers(opts) {
+        document.querySelectorAll(".gv-node-picker").forEach(
+          (picker) => {
+            const input = picker.querySelector(".gv-node-search-input");
+            const results = picker.querySelector(
+              ".gv-node-search-results",
+            );
+            const hidden = picker.querySelector('input[type="hidden"]');
+            if (!input || !results || !hidden) return;
+
+            input.addEventListener("input", () => {
+              const query = input.value.toLowerCase().trim();
+              if (query.length === 0) {
+                results.innerHTML = "";
+                results.classList.remove(
+                  "gv-node-search-results--open",
+                );
+                return;
+              }
+              const matches = graphData.nodes.filter((n) =>
+                n.label.toLowerCase().includes(query) ||
+                n.type.toLowerCase().includes(query)
+              ).slice(0, 20);
+
+              if (matches.length === 0) {
+                results.innerHTML =
+                  '<div class="gv-node-search-empty">No matches</div>';
+                results.classList.add("gv-node-search-results--open");
+                return;
+              }
+
+              results.innerHTML = matches.map((n) => {
+                const config = getNodeTypeConfig();
+                const info = config[n.type] || config.default;
+                return `<div class="gv-node-search-item" data-node-id="${
+                  escapeHtml(n.id)
+                }">
+              <span class="gv-badge" style="background:${
+                  hslColor(info.hue, 55, 35)
+                };color:${hslColor(info.hue, 55, 70)}">${
+                  escapeHtml(info.label)
+                }</span>
+              <span class="gv-node-search-label">${escapeHtml(n.label)}</span>
+            </div>`;
+              }).join("");
+              results.classList.add("gv-node-search-results--open");
+            }, opts);
+
+            input.addEventListener("focus", () => {
+              if (input.value.length > 0) {
+                input.dispatchEvent(new Event("input"));
+              }
+            }, opts);
+
+            results.addEventListener("click", (e) => {
+              const item = e.target.closest(".gv-node-search-item");
+              if (!item) return;
+              const nodeId = item.dataset.nodeId;
+              const node = graphData.nodes.find((n) => n.id === nodeId);
+              if (!node) return;
+              input.value = node.label;
+              input.dataset.nodeId = node.id;
+              hidden.value = node.id;
+              results.innerHTML = "";
+              results.classList.remove("gv-node-search-results--open");
+            }, opts);
+
+            input.addEventListener("input", () => {
+              if (
+                input.dataset.nodeId &&
+                input.value !==
+                  graphData.nodes.find((n) => n.id === input.dataset.nodeId)
+                    ?.label
+              ) {
+                input.dataset.nodeId = "";
+                hidden.value = "";
+              }
+            }, opts);
+          },
+        );
+
+        document.addEventListener("click", (e) => {
+          if (!e.target.closest(".gv-node-picker")) {
+            document.querySelectorAll(".gv-node-search-results--open")
+              .forEach((r) => {
+                r.classList.remove("gv-node-search-results--open");
+              });
+          }
+        }, opts);
+      }
+
+      // ─── Edit Connections ─────────────────────────────────────────────────────
+
+      function renderEditConnections(nodeId) {
+        const field = document.getElementById("edit-connections-field");
+        const list = document.getElementById("edit-connections-list");
+        if (!field || !list) return;
+
+        const edges = graphData.edges.filter((e) =>
+          e.fromId === nodeId || e.toId === nodeId
+        );
+        if (edges.length === 0) {
+          field.style.display = "none";
+          return;
+        }
+
+        field.style.display = "";
+        list.innerHTML = edges.map((edge) => {
+          const isFrom = edge.fromId === nodeId;
+          const otherId = isFrom ? edge.toId : edge.fromId;
+          const otherNode = graphData.nodes.find((n) => n.id === otherId);
+          const dir = isFrom ? "&rarr;" : "&larr;";
+          return `<div class="gv-edit-conn-row" data-edge-id="${
+            escapeHtml(edge.id)
+          }">
+          <span class="gv-edit-conn-info">
+            <span class="gv-conn-dir">${dir}</span>
+            <span class="gv-conn-type">${escapeHtml(edge.type)}</span>
+            <span class="gv-conn-label">${
+            escapeHtml(otherNode?.label || "?")
+          }</span>
+          </span>
+          <button class="gv-edit-conn-del" data-edge-id="${
+            escapeHtml(edge.id)
+          }" title="Remove">&times;</button>
+        </div>`;
+        }).join("");
+
+        list.querySelectorAll(".gv-edit-conn-del").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const edgeId = btn.dataset.edgeId;
+            btn.disabled = true;
+            try {
+              const response = await fetch(
+                `/api/graph/edges/${encodeURIComponent(edgeId)}`,
+                { method: "DELETE" },
+              );
+              const result = await response.json();
+              if (result.success) {
+                btn.closest(".gv-edit-conn-row").remove();
+                const remaining = list.querySelectorAll(
+                  ".gv-edit-conn-row",
+                );
+                if (remaining.length === 0) {
+                  field.style.display = "none";
+                }
+                showToast("Connection removed");
+                buildConnectionCounts();
+              } else {
+                showToast(
+                  "Failed: " + (result.error || "unknown error"),
+                );
+                btn.disabled = false;
+              }
+            } catch (err) {
+              showToast("Error: " + err.message);
+              btn.disabled = false;
+            }
+          });
+        });
+      }
+
+      // ─── Delete Confirmation Modal ────────────────────────────────────────────
+
+      function renderDeleteConfirmModal(nodeId) {
+        const node = graphData.nodes.find((n) => n.id === nodeId);
+        if (!node) return;
+        deleteTargetNodeId = nodeId;
+
+        const msg = document.getElementById("delete-confirm-msg");
+        const modal = document.getElementById("graph-delete-modal");
+        if (msg) {
+          msg.textContent =
+            `Delete "${node.label}"? This will also remove all its connections.`;
+        }
+        if (modal) modal.classList.add("gv-modal-open");
+      }
+
+      function setupDeleteModalListeners(opts) {
+        const modal = document.getElementById("graph-delete-modal");
+        const cancelBtn = document.getElementById("cancel-delete");
+        const confirmBtn = document.getElementById("confirm-delete");
+
+        cancelBtn?.addEventListener("click", () => {
+          modal?.classList.remove("gv-modal-open");
+          deleteTargetNodeId = null;
+        }, opts);
+        modal?.addEventListener("click", (e) => {
+          if (e.target.id === "graph-delete-modal") {
+            modal.classList.remove("gv-modal-open");
+            deleteTargetNodeId = null;
+          }
+        }, opts);
+        confirmBtn?.addEventListener("click", async () => {
+          if (!deleteTargetNodeId) return;
+          const nodeId = deleteTargetNodeId;
+          modal?.classList.remove("gv-modal-open");
+          deleteTargetNodeId = null;
+
+          try {
+            const response = await fetch(
+              `/api/graph/nodes/${encodeURIComponent(nodeId)}`,
+              { method: "DELETE" },
+            );
+            const result = await response.json();
+            if (result.success) {
+              hideNodePanel();
+              expandedNodeId = null;
+              showToast("Node deleted");
+              await loadGraphData();
+            } else {
+              showToast("Failed: " + (result.error || "unknown error"));
+            }
+          } catch (err) {
+            showToast("Delete failed: " + err.message);
+          }
+        }, opts);
+      }
+
+      // ─── Edit Modal ──────────────────────────────────────────────────────────
+
+      function openEditModal(nodeId) {
+        const node = graphData.nodes.find((n) => n.id === nodeId);
+        if (!node) return;
+        const modal = document.getElementById("graph-edit-modal");
+        if (!modal) return;
+        document.getElementById("edit-node-id").value = node.id;
+        document.getElementById("edit-node-type").value = node.type;
+        document.getElementById("edit-node-label").value = node.label;
+        document.getElementById("edit-node-description").value =
+          node.description || "";
+        renderEditConnections(node.id);
+        modal.classList.add("gv-modal-open");
+      }
+
+      // ─── Event Listeners ──────────────────────────────────────────────────────
+
+      let searchDebounce = null;
+
+      function setupEventListeners() {
+        if (eventListenersAbort) eventListenersAbort.abort();
+        eventListenersAbort = new AbortController();
+        const opts = { signal: eventListenersAbort.signal };
+
+        // View toggle
+        document.getElementById("gv-view-toggle")?.addEventListener(
+          "click",
+          (e) => {
+            const btn = e.target.closest(".gv-view-toggle-btn");
+            if (btn) toggleView(btn.dataset.view);
+          },
+          opts,
+        );
+
+        // Search
+        document.getElementById("graph-search")?.addEventListener(
+          "input",
+          () => {
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(() => {
+              getFilteredNodes();
+              if (currentView === "list") renderListView();
+              else if (network) {
+                const query = document.getElementById("graph-search")
+                  .value.toLowerCase().trim();
+                if (!query) {
+                  network.selectNodes([]);
+                  return;
+                }
+                const matches = filteredNodes.map((n) => n.id);
+                if (matches.length > 0) {
+                  network.selectNodes(matches);
+                  network.focus(matches[0], {
+                    animation: true,
+                    scale: 1.2,
+                  });
+                }
+              }
+            }, 200);
+          },
+          opts,
+        );
+
+        // Type filter
+        document.getElementById("graph-filter-type")?.addEventListener(
+          "change",
+          () => {
+            getFilteredNodes();
+            if (currentView === "list") renderListView();
+            else if (network) {
+              const type = document.getElementById("graph-filter-type").value;
+              if (!type) {
+                network.selectNodes([]);
+                return;
+              }
+              const ids = graphData.nodes.filter((n) => n.type === type)
+                .map((n) => n.id);
+              network.selectNodes(ids);
+              if (ids.length > 0) {
+                network.focus(ids[0], {
+                  animation: true,
+                });
+              }
+            }
+          },
+          opts,
+        );
+
+        // Refresh
+        document.getElementById("graph-refresh")?.addEventListener(
+          "click",
+          () => loadGraphData(),
+          opts,
+        );
+
+        // Add node
+        document.getElementById("gv-add-node")?.addEventListener(
+          "click",
+          () => {
+            document.getElementById("graph-create-modal")?.classList
+              .add("gv-modal-open");
+          },
+          opts,
+        );
+
+        // Close panel
+        document.getElementById("panel-close")?.addEventListener(
+          "click",
+          hideNodePanel,
+          opts,
+        );
+
+        // ─── Create Modal ────────────────────────────────────────────────
+        document.getElementById("cancel-create")?.addEventListener(
+          "click",
+          () => {
+            document.getElementById("graph-create-modal")?.classList
+              .remove("gv-modal-open");
+          },
+          opts,
+        );
+        document.getElementById("graph-create-modal")?.addEventListener(
+          "click",
+          (e) => {
+            if (e.target.id === "graph-create-modal") {
+              e.target
+                .classList.remove("gv-modal-open");
+            }
+          },
+          opts,
+        );
+
+        document.getElementById("create-node-form")?.addEventListener(
+          "submit",
+          async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const data = {
+              type: form.type.value,
+              label: form.label.value,
+              description: form.description.value,
+            };
+            try {
+              const response = await fetch("/api/graph/nodes", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data),
+              });
+              const result = await response.json();
+              if (result.success) {
+                document.getElementById("graph-create-modal").classList
+                  .remove("gv-modal-open");
+                form.reset();
+                showToast("Node created");
+                await loadGraphData();
+              } else {
+                showToast("Failed to create node: " + result.error);
+              }
+            } catch (error) {
+              showToast("Error: " + error.message);
+            }
+          },
+          opts,
+        );
+
+        // ─── Edit Modal ──────────────────────────────────────────────────
+        document.getElementById("cancel-edit")?.addEventListener(
+          "click",
+          () => {
+            document.getElementById("graph-edit-modal")?.classList
+              .remove("gv-modal-open");
+          },
+          opts,
+        );
+        document.getElementById("graph-edit-modal")?.addEventListener(
+          "click",
+          (e) => {
+            if (e.target.id === "graph-edit-modal") {
+              e.target.classList
+                .remove("gv-modal-open");
+            }
+          },
+          opts,
+        );
+        document.getElementById("edit-add-conn")?.addEventListener(
+          "click",
+          () => {
+            const nodeId = document.getElementById("edit-node-id").value;
+            if (nodeId) openEdgeModal(nodeId);
+          },
+          opts,
+        );
+
+        document.getElementById("edit-node-form")?.addEventListener(
+          "submit",
+          async (e) => {
+            e.preventDefault();
+            const nodeId = document.getElementById("edit-node-id").value;
+            const data = {
+              type: document.getElementById("edit-node-type").value,
+              label: document.getElementById("edit-node-label").value,
+              description:
+                document.getElementById("edit-node-description").value,
+            };
+            try {
+              const response = await fetch(
+                `/api/graph/nodes/${encodeURIComponent(nodeId)}`,
+                {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(data),
+                },
+              );
+              const result = await response.json();
+              if (result.success) {
+                document.getElementById("graph-edit-modal").classList
+                  .remove("gv-modal-open");
+                showToast("Node updated");
+                await loadGraphData();
+              } else {
+                showToast("Failed to update node: " + result.error);
+              }
+            } catch (error) {
+              showToast("Error: " + error.message);
+            }
+          },
+          opts,
+        );
+
+        // ─── Edge Modal ──────────────────────────────────────────────────
+        setupEdgeModalListeners(opts);
+        setupNodePickers(opts);
+
+        // ─── Delete Modal ────────────────────────────────────────────────
+        setupDeleteModalListeners(opts);
+      }
+
+      // ─── Toast ────────────────────────────────────────────────────────────────
+
+      function showToast(msg) {
+        let container = document.getElementById("gv-toast-container");
+        if (!container) {
+          container = document.createElement("div");
+          container.id = "gv-toast-container";
+          document.body.appendChild(container);
+        }
+        const toast = document.createElement("div");
+        toast.className = "gv-toast";
+        toast.textContent = msg;
+        container.appendChild(toast);
+        requestAnimationFrame(() => toast.classList.add("gv-toast-visible"));
+        setTimeout(() => {
+          toast.classList.remove("gv-toast-visible");
+          setTimeout(() => toast.remove(), 200);
+        }, 4000);
+      }
+
+      // ─── HTML Escaping ────────────────────────────────────────────────────────
+
+      function escapeHtml(str) {
+        if (typeof str !== "string") str = String(str);
+        const div = document.createElement("div");
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+      }
+
+      // ─── Global Exports ───────────────────────────────────────────────────────
+
+      globalThis.initGraph = initGraph;
+      globalThis.openEditModal = openEditModal;
+      globalThis.toggleNodeCard = toggleNodeCard;
+      globalThis.openEdgeModal = openEdgeModal;
+      globalThis.openEdgeModalFromNode = openEdgeModalFromNode;
+      globalThis.renderDeleteConfirmModal = renderDeleteConfirmModal;
+      globalThis.showToast = showToast;
+
+      // ─── Boot ─────────────────────────────────────────────────────────────────
+
+      initGraph();
+    </script>
+  </body>
+</html>

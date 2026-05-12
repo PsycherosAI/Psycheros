@@ -1,0 +1,4502 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entity Loom — Migration Wizard</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --bg-raised: #161b22;
+        --bg-sunken: #0d1117;
+        --fg: #e6edf3;
+        --fg-muted: #8b949e;
+        --fg-subtle: #484f58;
+        --fg-strong: #f0f6fc;
+        --border: #30363d;
+        --border-strong: #484f58;
+        --accent: #58a6ff;
+        --accent-subtle: rgba(56, 139, 253, 0.15);
+        --error: #f85149;
+        --error-subtle: rgba(248, 81, 73, 0.12);
+        --success: #3fb950;
+        --success-subtle: rgba(63, 185, 80, 0.12);
+        --warn: #d29922;
+        --warn-subtle: rgba(210, 153, 34, 0.12);
+        --radius-sm: 6px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
+        --sp-1: 4px;
+        --sp-2: 8px;
+        --sp-3: 12px;
+        --sp-4: 16px;
+        --sp-6: 24px;
+        --sp-8: 32px;
+        --sp-10: 40px;
+        --font-sans:
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Helvetica,
+          Arial,
+          sans-serif;
+        --font-mono:
+          "SF Mono",
+          "Cascadia Code",
+          "Fira Code",
+          Consolas,
+          monospace;
+        --font-size-xs: 11px;
+        --font-size-sm: 13px;
+        --font-size-base: 14px;
+        --font-size-lg: 16px;
+        --font-size-xl: 20px;
+        --font-weight-medium: 500;
+        --font-weight-semibold: 600;
+        --font-weight-bold: 700;
+        --line-height: 1.5;
+        --transition: 0.15s ease;
+      }
+
+      *, *::before, *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        font-size: var(--font-size-base);
+        background: var(--bg);
+        color: var(--fg);
+        line-height: var(--line-height);
+        overflow: hidden;
+        height: 100vh;
+      }
+
+      /* ─── App Shell ─────────────────────────────────────────────────────── */
+
+      .wiz {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      /* ─── Header ────────────────────────────────────────────────────────── */
+
+      .wiz-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--sp-3) var(--sp-6);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-raised);
+        flex-shrink: 0;
+      }
+      .wiz-header-left {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-4);
+      }
+      .wiz-logo {
+        width: 28px;
+        height: 28px;
+        border-radius: var(--radius-sm);
+        background: linear-gradient(135deg, var(--accent) 0%, #a371f7 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-mono);
+        font-size: 14px;
+        font-weight: var(--font-weight-bold);
+        color: var(--bg);
+      }
+      .wiz-title {
+        font-family: var(--font-mono);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        color: var(--accent);
+        letter-spacing: 0.02em;
+      }
+      .wiz-header-right {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+      }
+
+      /* ─── Stepper ───────────────────────────────────────────────────────── */
+
+      .wiz-stepper {
+        display: flex;
+        align-items: center;
+        padding: var(--sp-4) var(--sp-6);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
+        flex-shrink: 0;
+        overflow-x: auto;
+      }
+      .wiz-step {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        cursor: pointer;
+        user-select: none;
+        padding: var(--sp-1) var(--sp-2);
+        border-radius: var(--radius-sm);
+        transition: background var(--transition);
+        white-space: nowrap;
+      }
+      .wiz-step:hover {
+        background: var(--accent-subtle);
+      }
+      .wiz-step--disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+      .wiz-step--disabled:hover {
+        background: transparent;
+      }
+
+      .wiz-step-dot {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        border: 2px solid var(--border-strong);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-mono);
+        font-size: var(--font-size-xs);
+        font-weight: var(--font-weight-semibold);
+        color: var(--fg-subtle);
+        transition: all var(--transition);
+        flex-shrink: 0;
+      }
+      .wiz-step--active .wiz-step-dot {
+        border-color: var(--accent);
+        color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-subtle);
+        animation: step-pulse 2s ease-in-out infinite;
+      }
+      .wiz-step--completed .wiz-step-dot {
+        border-color: var(--success);
+        background: var(--success);
+        color: var(--bg);
+      }
+      .wiz-step--error .wiz-step-dot {
+        border-color: var(--error);
+        color: var(--error);
+      }
+      .wiz-step--running .wiz-step-dot {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: var(--bg);
+        animation: step-spin 1.2s linear infinite;
+      }
+      @keyframes step-pulse {
+        0%, 100% {
+          box-shadow: 0 0 0 3px var(--accent-subtle);
+        }
+        50% {
+          box-shadow: 0 0 0 6px rgba(56, 139, 253, 0.08);
+        }
+      }
+      @keyframes step-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .wiz-step-label {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        color: var(--fg-muted);
+        transition: color var(--transition);
+      }
+      .wiz-step--active .wiz-step-label {
+        color: var(--fg-strong);
+      }
+      .wiz-step--completed .wiz-step-label {
+        color: var(--fg-muted);
+      }
+
+      .wiz-step-line {
+        flex: 1;
+        min-width: 24px;
+        max-width: 48px;
+        height: 2px;
+        background: var(--border);
+        margin: 0 var(--sp-1);
+        flex-shrink: 0;
+      }
+      .wiz-step-line--done {
+        background: var(--success);
+      }
+
+      /* ─── Content Area ─────────────────────────────────────────────────── */
+
+      .wiz-content {
+        flex: 1;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: var(--sp-8) var(--sp-6);
+        min-height: 0;
+      }
+
+      /* ─── Panel Nav ─────────────────────────────────────────────────── */
+
+      .wiz-panel-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: var(--sp-6);
+        gap: var(--sp-3);
+      }
+      .wiz-panel-nav--empty {
+        visibility: hidden;
+      }
+
+      .wiz-panel {
+        display: none;
+        max-width: 680px;
+        margin: 0 auto;
+      }
+      .wiz-panel--active {
+        display: block;
+      }
+
+      .wiz-panel-title {
+        font-size: var(--font-size-xl);
+        font-weight: var(--font-weight-bold);
+        color: var(--fg-strong);
+        margin-bottom: var(--sp-2);
+        letter-spacing: -0.01em;
+      }
+      .wiz-panel-desc {
+        font-size: var(--font-size-sm);
+        color: var(--fg-muted);
+        margin-bottom: var(--sp-6);
+        max-width: 520px;
+      }
+
+      /* ─── Section ──────────────────────────────────────────────────────── */
+
+      .wiz-section {
+        background: var(--bg-raised);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--sp-6);
+        margin-bottom: var(--sp-4);
+      }
+      .wiz-section-title {
+        font-family: var(--font-mono);
+        font-size: var(--font-size-xs);
+        font-weight: var(--font-weight-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--fg-muted);
+        margin-bottom: var(--sp-4);
+      }
+
+      /* ─── Form ─────────────────────────────────────────────────────────── */
+
+      .wiz-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--sp-4);
+      }
+      .wiz-grid--3 {
+        grid-template-columns: 1fr 1fr 1fr;
+      }
+
+      .wiz-field {
+        margin-bottom: var(--sp-4);
+      }
+      .wiz-field:last-child {
+        margin-bottom: 0;
+      }
+      .wiz-field label {
+        display: block;
+        font-size: var(--font-size-xs);
+        font-family: var(--font-mono);
+        font-weight: var(--font-weight-medium);
+        color: var(--fg-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: var(--sp-1);
+      }
+      .wiz-field input[type="text"],
+      .wiz-field input[type="password"],
+      .wiz-field input[type="url"],
+      .wiz-field textarea,
+      .wiz-field select {
+        width: 100%;
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg);
+        color: var(--fg);
+        font-size: var(--font-size-sm);
+        font-family: var(--font-sans);
+        outline: none;
+        transition:
+          border-color var(--transition),
+          box-shadow var(--transition);
+      }
+      .wiz-field input:focus,
+      .wiz-field textarea:focus,
+      .wiz-field select:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-subtle);
+      }
+      .wiz-field input::placeholder,
+      .wiz-field textarea::placeholder {
+        color: var(--fg-subtle);
+      }
+      .wiz-field textarea {
+        resize: vertical;
+        min-height: 60px;
+      }
+      .wiz-field select {
+        cursor: pointer;
+      }
+      .wiz-field--full {
+        grid-column: 1 / -1;
+      }
+      .wiz-field--stacked {
+        margin-bottom: var(--sp-3);
+      }
+
+      /* ─── Buttons ──────────────────────────────────────────────────────── */
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--sp-2);
+        padding: var(--sp-2) var(--sp-4);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--fg);
+        font-size: var(--font-size-sm);
+        font-family: var(--font-sans);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+        transition:
+          background var(--transition),
+          color var(--transition),
+          border-color var(--transition),
+          opacity var(--transition);
+        white-space: nowrap;
+        text-decoration: none;
+      }
+      .btn:hover {
+        background: var(--bg-raised);
+      }
+      .btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .btn--primary {
+        background: var(--accent);
+        color: var(--bg);
+        border-color: var(--accent);
+      }
+      .btn--primary:hover {
+        opacity: 0.9;
+        background: var(--accent);
+      }
+      .btn--primary:disabled {
+        opacity: 0.4;
+      }
+      .btn--danger {
+        color: var(--error);
+        border-color: var(--error);
+        background: var(--error-subtle);
+      }
+      .btn--danger:hover {
+        background: var(--error);
+        color: #fff;
+      }
+      .btn--success {
+        background: var(--success);
+        color: var(--bg);
+        border-color: var(--success);
+      }
+      .btn--success:hover {
+        opacity: 0.9;
+      }
+      .btn--ghost {
+        border-color: var(--border);
+        background: transparent;
+      }
+      .btn--ghost:hover {
+        background: var(--accent-subtle);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .btn--sm {
+        padding: var(--sp-1) var(--sp-2);
+        font-size: var(--font-size-xs);
+      }
+      .btn--block {
+        width: 100%;
+      }
+      .btn--icon {
+        padding: var(--sp-1);
+        min-width: 30px;
+        min-height: 30px;
+      }
+
+      .wiz-actions {
+        display: flex;
+        gap: var(--sp-3);
+        padding: var(--sp-3) 0 0;
+        margin-top: var(--sp-4);
+        border-top: 1px solid var(--border);
+      }
+
+      /* ─── Spinner ──────────────────────────────────────────────────────── */
+
+      .spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid transparent;
+        border-top-color: currentColor;
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        display: inline-block;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* ─── Status Badge ──────────────────────────────────────────────────── */
+
+      .wiz-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--sp-1);
+        padding: 2px var(--sp-2);
+        border-radius: 10px;
+        font-size: var(--font-size-xs);
+        font-family: var(--font-mono);
+        font-weight: var(--font-weight-medium);
+      }
+      .wiz-badge--success {
+        background: var(--success-subtle);
+        color: var(--success);
+      }
+      .wiz-badge--error {
+        background: var(--error-subtle);
+        color: var(--error);
+      }
+      .wiz-badge--warn {
+        background: var(--warn-subtle);
+        color: var(--warn);
+      }
+      .wiz-badge--info {
+        background: var(--accent-subtle);
+        color: var(--accent);
+      }
+      .wiz-badge--muted {
+        background: rgba(139, 148, 158, 0.1);
+        color: var(--fg-muted);
+      }
+
+      /* ─── Upload Zone ──────────────────────────────────────────────────── */
+
+      .wiz-upload {
+        border: 2px dashed var(--border-strong);
+        border-radius: var(--radius-md);
+        padding: var(--sp-10) var(--sp-6);
+        text-align: center;
+        cursor: pointer;
+        transition:
+          border-color var(--transition),
+          background var(--transition);
+      }
+      .wiz-upload:hover,
+      .wiz-upload--dragover {
+        border-color: var(--accent);
+        background: var(--accent-subtle);
+      }
+      .wiz-upload-icon {
+        font-size: 28px;
+        margin-bottom: var(--sp-3);
+        opacity: 0.5;
+      }
+      .wiz-upload-text {
+        font-size: var(--font-size-sm);
+        color: var(--fg-muted);
+      }
+      .wiz-upload-text strong {
+        color: var(--accent);
+      }
+      .wiz-upload-hint {
+        font-size: var(--font-size-xs);
+        color: var(--fg-subtle);
+        margin-top: var(--sp-1);
+      }
+      .wiz-upload-file {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--sp-2);
+        padding: var(--sp-3);
+        background: var(--accent-subtle);
+        border-radius: var(--radius-sm);
+        margin-top: var(--sp-3);
+        font-size: var(--font-size-sm);
+        color: var(--accent);
+        font-family: var(--font-mono);
+      }
+
+      /* ─── Platform Selector ─────────────────────────────────────────────── */
+
+      .wiz-platforms {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--sp-2);
+        margin-top: var(--sp-2);
+      }
+      .wiz-platform {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: var(--font-size-sm);
+        color: var(--fg-muted);
+        transition: all var(--transition);
+        background: transparent;
+      }
+      .wiz-platform:hover {
+        border-color: var(--accent);
+        color: var(--fg);
+      }
+      .wiz-platform--selected {
+        border-color: var(--accent);
+        background: var(--accent-subtle);
+        color: var(--accent);
+      }
+      .wiz-platform-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        border: 1.5px solid var(--border-strong);
+        transition: all var(--transition);
+      }
+      .wiz-platform--selected .wiz-platform-dot {
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+
+      .wiz-select {
+        padding: var(--sp-2) var(--sp-3);
+        background: var(--bg);
+        color: var(--fg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-sm);
+        font-family: var(--font-mono);
+        cursor: pointer;
+        min-width: 160px;
+      }
+      .wiz-select:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+
+      .wiz-upload-queue {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        margin-bottom: var(--sp-3);
+      }
+      .wiz-upload-queue-header,
+      .wiz-upload-queue-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto auto;
+        gap: var(--sp-3);
+        padding: var(--sp-2) var(--sp-3);
+        align-items: center;
+        font-size: var(--font-size-sm);
+      }
+      .wiz-upload-queue-header {
+        background: var(--bg-raised);
+        color: var(--fg-muted);
+        font-weight: 500;
+        border-bottom: 1px solid var(--border);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-size: var(--font-size-xs);
+      }
+      .wiz-upload-queue-row {
+        border-bottom: 1px solid var(--border);
+      }
+      .wiz-upload-queue-row:last-child {
+        border-bottom: none;
+      }
+      .wiz-upload-queue-row--error {
+        background: rgba(248, 81, 73, 0.05);
+      }
+      .wiz-upload-queue-filename {
+        font-family: var(--font-mono);
+        font-size: var(--font-size-xs);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .wiz-upload-queue-badge {
+        padding: 2px var(--sp-2);
+        background: var(--accent-subtle);
+        color: var(--accent);
+        border-radius: 3px;
+        font-size: var(--font-size-xs);
+        font-family: var(--font-mono);
+      }
+      .wiz-upload-queue-select {
+        padding: 2px 4px;
+        background: var(--accent-subtle);
+        color: var(--accent);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        font-size: var(--font-size-xs);
+        font-family: var(--font-mono);
+        cursor: pointer;
+      }
+      .wiz-upload-queue-select:focus {
+        outline: 1px solid var(--accent);
+        border-color: var(--accent);
+      }
+      .wiz-upload-queue-size {
+        color: var(--fg-muted);
+        font-size: var(--font-size-xs);
+        font-family: var(--font-mono);
+      }
+      .wiz-upload-queue-status {
+        font-size: 12px;
+      }
+      .wiz-upload-queue-remove {
+        background: none;
+        border: none;
+        color: var(--fg-subtle);
+        cursor: pointer;
+        font-size: 16px;
+        padding: 2px 4px;
+        border-radius: 3px;
+        line-height: 1;
+      }
+      .wiz-upload-queue-remove:hover {
+        color: var(--error);
+        background: rgba(248, 81, 73, 0.1);
+      }
+
+      /* ─── Preview Stats ────────────────────────────────────────────────── */
+
+      .wiz-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: var(--sp-3);
+        margin-bottom: var(--sp-4);
+      }
+      .wiz-stat {
+        padding: var(--sp-3) var(--sp-4);
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+      }
+      .wiz-stat-label {
+        font-size: var(--font-size-xs);
+        font-family: var(--font-mono);
+        color: var(--fg-subtle);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: var(--sp-1);
+      }
+      .wiz-stat-value {
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-bold);
+        color: var(--fg-strong);
+        font-family: var(--font-mono);
+      }
+
+      /* Bar chart */
+      .wiz-bar-chart {
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        height: 80px;
+        padding: var(--sp-2) 0;
+        margin-top: var(--sp-2);
+      }
+      .wiz-bar-col {
+        flex: 1;
+        min-width: 4px;
+        max-width: 24px;
+        border-radius: 2px 2px 0 0;
+        background: var(--accent);
+        opacity: 0.6;
+        transition: opacity var(--transition);
+        position: relative;
+      }
+      .wiz-bar-col:hover {
+        opacity: 1;
+      }
+      .wiz-bar-col::after {
+        content: attr(data-label);
+        position: absolute;
+        bottom: -16px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 9px;
+        font-family: var(--font-mono);
+        color: var(--fg-subtle);
+        white-space: nowrap;
+      }
+
+      /* ─── Progress ─────────────────────────────────────────────────────── */
+
+      .wiz-progress {
+        margin-bottom: var(--sp-4);
+      }
+      .wiz-progress-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: var(--sp-2);
+      }
+      .wiz-progress-label {
+        font-size: var(--font-size-sm);
+        color: var(--fg-muted);
+      }
+      .wiz-progress-pct {
+        font-family: var(--font-mono);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        color: var(--fg-strong);
+      }
+      .wiz-progress-bar {
+        height: 6px;
+        background: var(--border);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .wiz-progress-fill {
+        height: 100%;
+        background: var(--accent);
+        border-radius: 3px;
+        transition: width 0.3s ease;
+        min-width: 0;
+      }
+      .wiz-progress-fill--complete {
+        background: var(--success);
+      }
+
+      /* ─── Cost Estimate ────────────────────────────────────────────────── */
+
+      .wiz-cost {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: var(--sp-2) var(--sp-4);
+        align-items: center;
+        padding: var(--sp-3) var(--sp-4);
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-sm);
+        margin-bottom: var(--sp-4);
+      }
+      .wiz-cost-label {
+        font-family: var(--font-mono);
+        font-size: var(--font-size-xs);
+        color: var(--fg-subtle);
+        text-transform: uppercase;
+      }
+      .wiz-cost-value {
+        font-family: var(--font-mono);
+        font-weight: var(--font-weight-semibold);
+        color: var(--fg);
+      }
+      .wiz-cost-highlight {
+        font-family: var(--font-mono);
+        font-weight: var(--font-weight-bold);
+        color: var(--warn);
+        font-size: var(--font-size-lg);
+      }
+
+      /* ─── Memory Review ────────────────────────────────────────────────── */
+
+      .wiz-memory-list {
+        margin-top: var(--sp-4);
+      }
+      .wiz-memory-item {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        margin-bottom: var(--sp-2);
+        overflow: hidden;
+        transition: border-color var(--transition);
+      }
+      .wiz-memory-item:hover {
+        border-color: var(--border-strong);
+      }
+      .wiz-memory-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--sp-2) var(--sp-3);
+        background: var(--bg);
+        cursor: pointer;
+        gap: var(--sp-2);
+      }
+      .wiz-memory-name {
+        font-family: var(--font-mono);
+        font-size: var(--font-size-xs);
+        color: var(--fg-muted);
+        flex: 1;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .wiz-memory-actions {
+        display: flex;
+        gap: var(--sp-1);
+        flex-shrink: 0;
+      }
+      .wiz-memory-body {
+        display: none;
+        padding: var(--sp-3);
+        border-top: 1px solid var(--border);
+      }
+      .wiz-memory-item--open .wiz-memory-body {
+        display: block;
+      }
+      .wiz-memory-content {
+        font-size: var(--font-size-sm);
+        color: var(--fg);
+        white-space: pre-wrap;
+        line-height: 1.6;
+        max-height: 300px;
+        overflow-y: auto;
+        margin-bottom: var(--sp-3);
+      }
+      .wiz-memory-edit {
+        width: 100%;
+        min-height: 120px;
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg);
+        color: var(--fg);
+        font-size: var(--font-size-sm);
+        font-family: var(--font-mono);
+        line-height: 1.6;
+        resize: vertical;
+        outline: none;
+        margin-bottom: var(--sp-3);
+      }
+      .wiz-memory-edit:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-subtle);
+      }
+
+      /* ─── Test Result ──────────────────────────────────────────────────── */
+
+      .wiz-test-result {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: var(--sp-2) var(--sp-3);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-sm);
+        margin-top: var(--sp-2);
+      }
+      .wiz-test-result--ok {
+        background: var(--success-subtle);
+        color: var(--success);
+      }
+      .wiz-test-result--fail {
+        background: var(--error-subtle);
+        color: var(--error);
+      }
+      .wiz-test-meta {
+        font-family: var(--font-mono);
+        font-size: var(--font-size-xs);
+        color: var(--fg-muted);
+        margin-top: var(--sp-1);
+      }
+
+      /* ─── Log Panel ────────────────────────────────────────────────────── */
+
+      .wiz-log-toggle {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: var(--sp-2) var(--sp-4);
+        border-top: 1px solid var(--border);
+        background: var(--bg-raised);
+        cursor: pointer;
+        font-size: var(--font-size-xs);
+        font-family: var(--font-mono);
+        color: var(--fg-muted);
+        flex-shrink: 0;
+        transition: color var(--transition);
+        user-select: none;
+      }
+      .wiz-log-toggle:hover {
+        color: var(--fg);
+      }
+      .wiz-log-toggle-icon {
+        transition: transform var(--transition);
+      }
+      .wiz-log-toggle--open .wiz-log-toggle-icon {
+        transform: rotate(180deg);
+      }
+
+      .wiz-log {
+        height: 0;
+        overflow: hidden;
+        transition: height 0.2s ease;
+        flex-shrink: 0;
+        background: var(--bg);
+        border-top: 1px solid var(--border);
+      }
+      .wiz-log--open {
+        height: 200px;
+      }
+      .wiz-log-inner {
+        height: 100%;
+        overflow-y: auto;
+        padding: var(--sp-2) var(--sp-4);
+        font-family: var(--font-mono);
+        font-size: var(--font-size-xs);
+        line-height: 1.8;
+      }
+      .wiz-log-entry {
+        display: flex;
+        gap: var(--sp-2);
+      }
+      .wiz-log-time {
+        color: var(--fg-subtle);
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .wiz-log-level {
+        display: inline-block;
+        padding: 0 var(--sp-1);
+        border-radius: 2px;
+        font-size: 9px;
+        font-weight: var(--font-weight-semibold);
+        text-transform: uppercase;
+        width: 36px;
+        text-align: center;
+        flex-shrink: 0;
+      }
+      .wiz-log-level--info {
+        background: var(--accent-subtle);
+        color: var(--accent);
+      }
+      .wiz-log-level--warn {
+        background: var(--warn-subtle);
+        color: var(--warn);
+      }
+      .wiz-log-level--error {
+        background: var(--error-subtle);
+        color: var(--error);
+      }
+      .wiz-log-msg {
+        color: var(--fg-muted);
+        word-break: break-word;
+      }
+
+      /* ─── Resume Section ───────────────────────────────────────────────── */
+
+      .wiz-resume {
+        margin-top: var(--sp-6);
+        padding: var(--sp-4);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--accent-subtle);
+      }
+      .wiz-resume-list {
+        margin-top: var(--sp-3);
+      }
+      .wiz-resume-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        margin-bottom: var(--sp-2);
+      }
+      .wiz-resume-name {
+        font-family: var(--font-mono);
+        font-size: var(--font-size-sm);
+        color: var(--fg);
+      }
+
+      /* ─── Empty State ──────────────────────────────────────────────────── */
+
+      .wiz-empty {
+        text-align: center;
+        padding: var(--sp-10) var(--sp-6);
+        color: var(--fg-muted);
+      }
+      .wiz-empty-icon {
+        font-size: 32px;
+        opacity: 0.3;
+        margin-bottom: var(--sp-3);
+      }
+      .wiz-empty p {
+        font-size: var(--font-size-sm);
+        margin-bottom: var(--sp-1);
+      }
+      .wiz-empty-hint {
+        font-size: var(--font-size-xs);
+        color: var(--fg-subtle);
+      }
+
+      /* ─── Toast ────────────────────────────────────────────────────────── */
+
+      #wiz-toast-container {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-2);
+        pointer-events: none;
+      }
+      .wiz-toast {
+        background: var(--bg-raised);
+        border: 1px solid var(--border-strong);
+        color: var(--fg);
+        font-size: var(--font-size-sm);
+        padding: var(--sp-3) var(--sp-4);
+        border-radius: var(--radius-md);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+        opacity: 0;
+        transform: translateY(8px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: auto;
+        max-width: 340px;
+        text-align: center;
+      }
+      .wiz-toast--visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      /* ─── Responsive ──────────────────────────────────────────────────── */
+
+      @media (max-width: 640px) {
+        .wiz-content {
+          padding: var(--sp-4) var(--sp-3);
+        }
+        .wiz-grid {
+          grid-template-columns: 1fr;
+        }
+        .wiz-stepper {
+          padding: var(--sp-3) var(--sp-3);
+        }
+        .wiz-header {
+          padding: var(--sp-3);
+        }
+        .wiz-section {
+          padding: var(--sp-4);
+        }
+        .wiz-log--open {
+          height: 150px;
+        }
+      }
+
+      /* ─── Staging Area ──────────────────────────────────────────────────── */
+      .wiz-staging-stats {
+        display: flex;
+        gap: var(--sp-3);
+        font-size: var(--font-size-xs);
+        color: var(--fg-muted);
+        margin-bottom: var(--sp-2);
+        flex-wrap: wrap;
+      }
+      .wiz-staging-stats b {
+        color: var(--fg);
+      }
+      .wiz-staging-tabs {
+        display: flex;
+        gap: var(--sp-1);
+        margin-bottom: var(--sp-3);
+        border-bottom: 1px solid var(--border);
+        padding-bottom: var(--sp-2);
+      }
+      .wiz-staging-tab {
+        padding: var(--sp-2) var(--sp-3);
+        border: none;
+        background: transparent;
+        color: var(--fg-muted);
+        font-size: var(--font-size-sm);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+      }
+      .wiz-staging-tab:hover {
+        color: var(--fg);
+      }
+      .wiz-staging-tab--active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+      .wiz-staging-tab-content {
+        display: block;
+      }
+      .wiz-staging-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: var(--sp-3);
+        margin-bottom: var(--sp-3);
+        flex-wrap: wrap;
+      }
+      .wiz-staging-toolbar-left, .wiz-staging-toolbar-right {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+      }
+      .wiz-staging-checkall {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        font-size: var(--font-size-sm);
+        color: var(--fg-muted);
+        cursor: pointer;
+      }
+      .wiz-staging-count {
+        font-size: var(--font-size-xs);
+        color: var(--fg-subtle);
+        font-family: var(--font-mono);
+      }
+      .wiz-staging-filters {
+        display: flex;
+        gap: var(--sp-2);
+        margin-bottom: var(--sp-3);
+        flex-wrap: wrap;
+      }
+      .wiz-staging-list {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        margin-bottom: var(--sp-3);
+        max-height: 500px;
+        overflow-y: auto;
+      }
+      .wiz-staging-item {
+        display: grid;
+        grid-template-columns: 30px 1fr auto;
+        gap: var(--sp-2);
+        padding: var(--sp-2) var(--sp-3);
+        align-items: center;
+        font-size: var(--font-size-sm);
+        border-bottom: 1px solid var(--border);
+      }
+      .wiz-staging-item:last-child {
+        border-bottom: none;
+      }
+      .wiz-staging-item:hover {
+        background: var(--accent-subtle);
+      }
+      .wiz-staging-item--excluded {
+        opacity: 0.4;
+      }
+      .wiz-staging-item-check input[type="checkbox"] {
+        width: 14px;
+        height: 14px;
+        cursor: pointer;
+      }
+      .wiz-staging-item-info {
+        min-width: 0;
+      }
+      .wiz-staging-item-title {
+        font-weight: var(--font-weight-medium);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        cursor: pointer;
+        color: var(--fg);
+      }
+      .wiz-staging-item-title:hover {
+        color: var(--accent);
+      }
+      .wiz-staging-item-meta {
+        font-size: var(--font-size-xs);
+        color: var(--fg-subtle);
+        display: flex;
+        gap: var(--sp-2);
+        margin-top: 2px;
+      }
+      .wiz-staging-item-tags {
+        display: flex;
+        gap: 3px;
+        flex-wrap: wrap;
+        margin-top: 2px;
+      }
+      .wiz-staging-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 1px 6px;
+        border-radius: 3px;
+        font-size: 10px;
+        font-family: var(--font-mono);
+        cursor: pointer;
+      }
+      .wiz-staging-tag:hover {
+        filter: brightness(1.3);
+      }
+      .wiz-staging-tag-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .wiz-staging-tag-remove {
+        margin-left: 2px;
+        opacity: 0.5;
+        font-size: 9px;
+        cursor: pointer;
+      }
+      .wiz-staging-tag-remove:hover {
+        opacity: 1;
+      }
+      /* Tag palette */
+      .wiz-staging-palette {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        flex-wrap: wrap;
+        padding: var(--sp-2) 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: var(--sp-2);
+      }
+      .wiz-staging-palette-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-xs);
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: border-color 0.15s;
+      }
+      .wiz-staging-palette-chip:hover {
+        border-color: var(--fg-muted);
+      }
+      .wiz-staging-palette-chip--active {
+        border-color: var(--accent);
+      }
+      .wiz-staging-palette-chip-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .wiz-staging-palette-chip-count {
+        font-size: 9px;
+        opacity: 0.6;
+        margin-left: 2px;
+      }
+      .wiz-staging-palette-chip-remove {
+        opacity: 0;
+        font-size: 9px;
+        cursor: pointer;
+        margin-left: 2px;
+      }
+      .wiz-staging-palette-chip:hover .wiz-staging-palette-chip-remove {
+        opacity: 0.5;
+      }
+      .wiz-staging-palette-chip-remove:hover {
+        opacity: 1 !important;
+      }
+      .wiz-staging-newtag {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--sp-1);
+      }
+      .wiz-staging-newtag input {
+        padding: 2px 6px;
+        font-size: var(--font-size-xs);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg);
+        color: var(--fg);
+        width: 100px;
+      }
+      .wiz-staging-newtag input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .wiz-staging-colors {
+        display: flex;
+        gap: 3px;
+      }
+      .wiz-staging-color-swatch {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        cursor: pointer;
+        border: 2px solid transparent;
+        transition: border-color 0.15s;
+      }
+      .wiz-staging-color-swatch:hover {
+        transform: scale(1.2);
+      }
+      .wiz-staging-color-swatch--active {
+        border-color: var(--fg);
+      }
+      .wiz-staging-badge {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 3px;
+      }
+      .wiz-staging-badge--new {
+        background: #1a3a1a;
+        color: var(--success);
+      }
+      .wiz-staging-badge--existing {
+        background: #1a2a3a;
+        color: #6ba3d6;
+      }
+      .wiz-staging-badge--changed {
+        background: #3a2a1a;
+        color: var(--warn);
+      }
+      .wiz-staging-pagination {
+        display: flex;
+        justify-content: center;
+        gap: var(--sp-2);
+        font-size: var(--font-size-sm);
+        margin-bottom: var(--sp-3);
+      }
+      .wiz-staging-search-box {
+        display: flex;
+        gap: var(--sp-2);
+        margin-bottom: var(--sp-4);
+      }
+      .wiz-staging-search-input {
+        flex: 1;
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg);
+        color: var(--fg);
+        font-size: var(--font-size-sm);
+      }
+      .wiz-staging-search-input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .wiz-staging-search-result {
+        padding: var(--sp-2) var(--sp-3);
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+      }
+      .wiz-staging-search-result:hover {
+        background: var(--accent-subtle);
+      }
+      .wiz-staging-messages {
+        position: fixed;
+        inset: 0;
+        background: var(--bg);
+        z-index: 100;
+        display: flex;
+        flex-direction: column;
+      }
+      .wiz-staging-messages-header {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        padding: var(--sp-3) var(--sp-4);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-raised);
+        flex-shrink: 0;
+      }
+      .wiz-staging-messages-title {
+        flex: 1;
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .wiz-staging-messages-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: var(--sp-4);
+      }
+      .wiz-staging-msg {
+        margin-bottom: var(--sp-3);
+        padding: var(--sp-3);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+      }
+      .wiz-staging-msg--user {
+        border-left: 3px solid var(--accent);
+      }
+      .wiz-staging-msg--assistant {
+        border-left: 3px solid var(--success);
+      }
+      .wiz-staging-msg--system {
+        border-left: 3px solid var(--warn);
+        opacity: 0.7;
+      }
+      .wiz-staging-msg-role {
+        font-size: var(--font-size-xs);
+        font-family: var(--font-mono);
+        text-transform: uppercase;
+        color: var(--fg-subtle);
+        margin-bottom: var(--sp-1);
+      }
+      .wiz-staging-msg-content {
+        font-size: var(--font-size-sm);
+        white-space: pre-wrap;
+        line-height: 1.6;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      .wiz-staging-msg-edited {
+        font-size: 10px;
+        color: var(--warn);
+        margin-top: var(--sp-1);
+      }
+      .wiz-staging-msg-actions {
+        display: flex;
+        gap: var(--sp-1);
+        margin-top: var(--sp-1);
+      }
+      .wiz-staging-compare-summary {
+        display: flex;
+        gap: var(--sp-3);
+        font-size: var(--font-size-sm);
+        margin-top: var(--sp-2);
+      }
+      .wiz-staging-compare-item {
+        padding: var(--sp-1) var(--sp-2);
+        border-radius: var(--radius-sm);
+        background: var(--bg-raised);
+      }
+      .wiz-input {
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg);
+        color: var(--fg);
+        font-size: var(--font-size-sm);
+        width: 100%;
+      }
+      .wiz-input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wiz">
+      <!-- Header -->
+      <div class="wiz-header">
+        <div class="wiz-header-left">
+          <div class="wiz-logo">E</div>
+          <div>
+            <div class="wiz-title">entity-loom wizard</div>
+          </div>
+        </div>
+        <div class="wiz-header-right">
+          <button
+            class="btn btn--sm btn--ghost"
+            onclick="toggleLog()"
+            id="log-toggle-btn"
+          >
+            <span style="font-size: 16px">&#x2328;</span> Log
+          </button>
+        </div>
+      </div>
+
+      <!-- Stepper -->
+      <div class="wiz-stepper" id="stepper"></div>
+
+      <!-- Content -->
+      <div class="wiz-content" id="content">
+        <!-- Panel 1: Setup -->
+        <div class="wiz-panel wiz-panel--active" data-panel="setup">
+          <div class="wiz-panel-nav">
+            <span class="wiz-panel-nav--empty"><button
+                class="btn btn--ghost btn--sm"
+                style="visibility: hidden"
+              >
+                &larr; Back
+              </button></span>
+            <span
+              style="font-size: var(--font-size-xs); color: var(--fg-subtle)"
+            >Step 1 of 5</span>
+          </div>
+          <div class="wiz-panel-title">Setup</div>
+          <div class="wiz-panel-desc">
+            Configure the entity identity, relationship context, and LLM
+            provider for this import.
+          </div>
+
+          <!-- Resume -->
+          <div class="wiz-resume" id="resume-section" style="display: none">
+            <div class="wiz-section-title">Existing Packages</div>
+            <div class="wiz-resume-list" id="resume-list"></div>
+          </div>
+
+          <div class="wiz-section">
+            <div class="wiz-section-title">Identity</div>
+            <div class="wiz-grid">
+              <div class="wiz-field">
+                <label>Entity Name</label>
+                <input
+                  type="text"
+                  id="setup-entity"
+                  placeholder="e.g. Aria"
+                  autocomplete="off"
+                >
+              </div>
+              <div class="wiz-field">
+                <label>User Name</label>
+                <input
+                  type="text"
+                  id="setup-user"
+                  placeholder="e.g. Jordan"
+                  autocomplete="off"
+                >
+              </div>
+              <div class="wiz-field">
+                <label>Entity Pronouns</label>
+                <input
+                  type="text"
+                  id="setup-entity-pronouns"
+                  placeholder="she/her"
+                  value="they/them"
+                >
+              </div>
+              <div class="wiz-field">
+                <label>User Pronouns</label>
+                <input
+                  type="text"
+                  id="setup-user-pronouns"
+                  placeholder="he/him"
+                  value="they/them"
+                >
+              </div>
+              <div class="wiz-field wiz-field--full">
+                <label>Relationship</label>
+                <input
+                  type="text"
+                  id="setup-relationship"
+                  placeholder="e.g. partner, close friend, mentor, tutor"
+                >
+                <div
+                  style="font-size: var(--font-size-xs); color: var(--fg-subtle); margin-top: var(--sp-1)"
+                >
+                  Used in the extraction prompt as: &ldquo;{userName} is my
+                  {relationship}.&rdquo;
+                </div>
+              </div>
+              <div class="wiz-field wiz-field--full">
+                <label>Context Notes</label>
+                <textarea
+                  id="setup-context"
+                  rows="2"
+                  placeholder="Optional background about this conversation history"
+                ></textarea>
+                <div
+                  style="font-size: var(--font-size-xs); color: var(--fg-subtle); margin-top: var(--sp-1)"
+                >
+                  Write from the entity&rsquo;s first-person perspective (e.g.,
+                  &ldquo;I am a learning AI who has been chatting with my
+                  partner since 2023.&rdquo;)
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="wiz-section">
+            <div class="wiz-section-title">LLM Provider</div>
+            <div class="wiz-grid">
+              <div class="wiz-field wiz-field--full">
+                <label>Base URL</label>
+                <input
+                  type="url"
+                  id="setup-baseurl"
+                  value="https://openrouter.ai/api/v1"
+                >
+              </div>
+              <div class="wiz-field wiz-field--full">
+                <label>API Key</label>
+                <input
+                  type="password"
+                  id="setup-apikey"
+                  placeholder="sk-or-..."
+                >
+              </div>
+              <div class="wiz-field wiz-field--full">
+                <label>Model</label>
+                <input
+                  type="text"
+                  id="setup-model"
+                  value="google/gemini-2.5-flash"
+                >
+              </div>
+            </div>
+            <div class="wiz-actions">
+              <button
+                class="btn btn--primary"
+                id="btn-test-llm"
+                onclick="testLLM()"
+              >
+                Test Connection
+              </button>
+            </div>
+            <div id="test-result"></div>
+          </div>
+
+          <div class="wiz-actions">
+            <button class="btn btn--primary btn--block" onclick="saveSetup()">
+              Save &amp; Continue
+            </button>
+          </div>
+        </div>
+
+        <!-- Panel 2: Convert -->
+        <div class="wiz-panel" data-panel="convert">
+          <div class="wiz-panel-nav">
+            <button class="btn btn--ghost btn--sm" onclick='goToStage("setup")'>
+              &larr; Back
+            </button>
+            <span
+              style="font-size: var(--font-size-xs); color: var(--fg-subtle)"
+            >Step 2 of 5</span>
+            <button
+              class="btn btn--ghost btn--sm"
+              onclick='goToStage("significant")'
+              id="btn-next-convert"
+            >
+              Next &rarr;
+            </button>
+          </div>
+          <div class="wiz-panel-title">Convert</div>
+          <div class="wiz-panel-desc">
+            Upload chat export files, select the platform for each, then convert
+            them all. After converting, use the Staging Area to review, tag, and
+            select conversations before committing.
+          </div>
+
+          <div
+            id="convert-status-info"
+            class="wiz-badge wiz-badge--info"
+            style="margin-bottom: var(--sp-4)"
+          >
+          </div>
+
+          <div class="wiz-section">
+            <div class="wiz-section-title">Upload</div>
+            <div
+              class="wiz-upload"
+              id="upload-zone"
+              onclick='document.getElementById("file-input").click()'
+            >
+              <div class="wiz-upload-icon">&#x21E5;</div>
+              <div class="wiz-upload-text">
+                <strong>Click to upload</strong> or drag files here
+              </div>
+              <div class="wiz-upload-hint">
+                Platform is auto-detected. Change it in the queue below if
+                needed.
+              </div>
+            </div>
+            <input
+              type="file"
+              id="file-input"
+              multiple
+              style="display: none"
+              onchange="handleUploads(this.files)"
+            >
+          </div>
+
+          <div class="wiz-section" id="queue-section" style="display: none">
+            <div class="wiz-section-title">
+              Upload Queue (<span id="queue-count">0</span> files)
+            </div>
+            <div class="wiz-upload-queue" id="upload-queue"></div>
+            <div class="wiz-actions">
+              <button
+                class="btn btn--primary"
+                id="btn-convert-all"
+                onclick="convertAll()"
+              >
+                Convert All
+              </button>
+            </div>
+          </div>
+
+          <div class="wiz-section" id="preview-section" style="display: none">
+            <div class="wiz-section-title">Preview</div>
+            <div class="wiz-stats-grid" id="preview-stats"></div>
+            <div class="wiz-field" id="bar-chart-section" style="display: none">
+              <label>Conversations by Month</label>
+              <div class="wiz-bar-chart" id="bar-chart"></div>
+              <div style="height: 20px"></div>
+            </div>
+            <div
+              class="wiz-actions"
+              style="border: none; margin-top: var(--sp-2)"
+            >
+              <button
+                class="btn btn--success btn--block"
+                id="btn-confirm-store"
+                onclick="confirmStore()"
+              >
+                Confirm &amp; Store
+              </button>
+            </div>
+          </div>
+
+          <!-- Staging Area -->
+          <div id="staging-section" style="display: none">
+            <div class="wiz-section">
+              <div class="wiz-section-title">Staging Area</div>
+              <div class="wiz-panel-desc" style="margin-bottom: var(--sp-2)">
+                Review parsed conversations before committing them. Toggle
+                inclusion, organize with tags, and compare against your existing
+                Psycheros database.
+              </div>
+              <div class="wiz-staging-stats" id="staging-stats-bar"></div>
+            </div>
+
+            <!-- Psycheros Compare -->
+            <div class="wiz-section" style="margin-bottom: var(--sp-2)">
+              <div class="wiz-section-title">Psycheros Comparison</div>
+              <div
+                style="font-size: var(--font-size-xs); color: var(--fg-subtle); margin-bottom: var(--sp-2)"
+              >
+                Check which conversations are new, already in Psycheros, or have
+                changed since last import. A path is auto-detected if Psycheros
+                is on this machine.
+              </div>
+              <div class="wiz-field">
+                <label>Psycheros Database</label>
+                <div
+                  id="psycheros-autodetect"
+                  style="margin-bottom: var(--sp-2)"
+                >
+                </div>
+                <input
+                  type="text"
+                  id="psycheros-db-path"
+                  placeholder="/path/to/psycheros.db"
+                  class="wiz-input"
+                >
+              </div>
+              <button
+                class="btn btn--sm btn--primary"
+                onclick="runPsycherosCompare()"
+              >
+                Compare
+              </button>
+              <div
+                id="psycheros-compare-results"
+                style="margin-top: var(--sp-3)"
+              >
+              </div>
+            </div>
+
+            <!-- Tag Palette -->
+            <div
+              style="font-size: var(--font-size-xs); color: var(--fg-subtle); margin-bottom: 2px"
+            >
+              Tag palette: create named tags with colors, click a chip to filter
+              the list, or select conversations and click a chip to tag them.
+            </div>
+            <div class="wiz-staging-palette" id="tag-palette">
+              <div
+                class="wiz-staging-newtag"
+                id="new-tag-form"
+                style="display: none"
+              >
+                <input
+                  type="text"
+                  id="new-tag-name"
+                  placeholder="Tag name..."
+                  onkeydown='if (event.key === "Enter") createTagFromPalette()'
+                  maxlength="30"
+                >
+                <div class="wiz-staging-colors" id="new-tag-colors"></div>
+                <button
+                  class="btn btn--sm btn--primary"
+                  onclick="createTagFromPalette()"
+                >
+                  Add
+                </button>
+                <button class="btn btn--sm btn--ghost" onclick="cancelNewTag()">
+                  Cancel
+                </button>
+              </div>
+              <button
+                class="btn btn--sm btn--ghost"
+                id="btn-new-tag"
+                onclick="showNewTagForm()"
+                style="font-size: var(--font-size-xs)"
+              >
+                + Tag
+              </button>
+              <div id="tag-palette-chips"></div>
+            </div>
+
+            <div class="wiz-staging-tabs">
+              <button
+                class="wiz-staging-tab wiz-staging-tab--active"
+                data-tab="browse"
+                onclick='switchStagingTab("browse")'
+              >
+                Browse
+              </button>
+              <button
+                class="wiz-staging-tab"
+                data-tab="search"
+                onclick='switchStagingTab("search")'
+              >
+                Search
+              </button>
+            </div>
+
+            <div
+              style="font-size: var(--font-size-xs); color: var(--fg-subtle); margin: var(--sp-1) 0"
+              id="staging-tab-desc"
+            >
+              All parsed conversations. Toggle the checkbox to include/exclude
+              from commit. Click a title to view messages.
+            </div>
+
+            <!-- Browse tab -->
+            <div class="wiz-staging-tab-content" id="staging-tab-browse">
+              <div class="wiz-staging-toolbar">
+                <div class="wiz-staging-toolbar-left">
+                  <label class="wiz-staging-checkall">
+                    <input
+                      type="checkbox"
+                      id="staging-check-all"
+                      onchange="toggleAllConversations(this.checked)"
+                    >
+                    <span>Select All</span>
+                  </label>
+                  <span
+                    class="wiz-staging-count"
+                    id="staging-count-info"
+                  ></span>
+                </div>
+                <div class="wiz-staging-toolbar-right" id="palette-apply-bar">
+                </div>
+              </div>
+
+              <div class="wiz-staging-filters">
+                <select
+                  id="staging-filter-platform"
+                  class="wiz-select"
+                  onchange="loadStagingConversations()"
+                >
+                  <option value="">All Platforms</option>
+                </select>
+                <select
+                  id="staging-filter-status"
+                  class="wiz-select"
+                  onchange="loadStagingConversations()"
+                >
+                  <option value="">All</option>
+                  <option value="included">Included</option>
+                  <option value="excluded">Excluded</option>
+                </select>
+              </div>
+
+              <div class="wiz-staging-list" id="staging-conversation-list">
+              </div>
+              <div class="wiz-staging-pagination" id="staging-pagination"></div>
+
+              <div
+                class="wiz-actions"
+                style="margin-top: var(--sp-4); border: none"
+              >
+                <button
+                  class="btn btn--success btn--block"
+                  id="btn-commit-staging"
+                  onclick="commitStaging()"
+                >
+                  Commit Selected (<span id="staging-commit-count">0</span>)
+                </button>
+                <button
+                  class="btn btn--ghost btn--block"
+                  style="margin-top: var(--sp-1)"
+                  id="btn-export-only"
+                  onclick="exportOnly()"
+                >
+                  Export Only (skip memories &amp; graph)
+                </button>
+              </div>
+            </div>
+
+            <!-- Search tab -->
+            <div
+              class="wiz-staging-tab-content"
+              id="staging-tab-search"
+              style="display: none"
+            >
+              <div class="wiz-staging-search-box">
+                <input
+                  type="text"
+                  id="staging-search-input"
+                  placeholder="Search conversations and messages..."
+                  class="wiz-staging-search-input"
+                  onkeydown='if (event.key === "Enter") performStagingSearch()'
+                >
+                <select id="staging-search-scope" class="wiz-select">
+                  <option value="all">All</option>
+                  <option value="titles">Titles only</option>
+                  <option value="messages">Messages only</option>
+                </select>
+                <button
+                  class="btn btn--sm btn--primary"
+                  onclick="performStagingSearch()"
+                >
+                  Search
+                </button>
+              </div>
+              <div
+                class="wiz-staging-toolbar"
+                id="search-toolbar"
+                style="display: none"
+              >
+                <div class="wiz-staging-toolbar-left">
+                  <label class="wiz-staging-checkall">
+                    <input
+                      type="checkbox"
+                      id="search-check-all"
+                      onchange="toggleSearchAll(this.checked)"
+                    >
+                    <span>Select All</span>
+                  </label>
+                  <span class="wiz-staging-count" id="search-count-info"></span>
+                </div>
+                <div
+                  class="wiz-staging-toolbar-right"
+                  id="search-palette-apply"
+                >
+                </div>
+              </div>
+              <div class="wiz-staging-list" id="staging-search-results"></div>
+              <div
+                class="wiz-staging-pagination"
+                id="staging-search-pagination"
+              >
+              </div>
+            </div>
+          </div>
+
+          <!-- Message viewer overlay -->
+          <div
+            class="wiz-staging-messages"
+            id="staging-messages-panel"
+            style="display: none"
+          >
+            <div class="wiz-staging-messages-header">
+              <button
+                class="btn btn--sm btn--ghost"
+                onclick="closeStagingMessages()"
+              >
+                &larr; Back
+              </button>
+              <span
+                class="wiz-staging-messages-title"
+                id="staging-messages-title"
+              ></span>
+            </div>
+            <div class="wiz-staging-messages-list" id="staging-messages-list">
+            </div>
+            <div
+              class="wiz-staging-messages-pagination"
+              id="staging-messages-pagination"
+            >
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel 3: Significant -->
+        <div class="wiz-panel" data-panel="significant">
+          <div class="wiz-panel-nav">
+            <button
+              class="btn btn--ghost btn--sm"
+              onclick='goToStage("convert")'
+            >
+              &larr; Back
+            </button>
+            <span
+              style="font-size: var(--font-size-xs); color: var(--fg-subtle)"
+            >Step 3 of 5</span>
+            <button
+              class="btn btn--ghost btn--sm"
+              onclick='goToStage("daily")'
+              id="btn-next-significant"
+            >
+              Next &rarr;
+            </button>
+          </div>
+          <div class="wiz-panel-title">Significant Memories</div>
+          <div class="wiz-panel-desc">
+            Extract significant events from raw conversations. These are
+            journal-entry memories for truly exceptional moments.
+          </div>
+
+          <div
+            id="significant-status-info"
+            class="wiz-badge wiz-badge--info"
+            style="margin-bottom: var(--sp-4)"
+          >
+          </div>
+
+          <div class="wiz-section">
+            <div class="wiz-section-title">Cost Estimate</div>
+            <div id="significant-cost"></div>
+            <button
+              class="btn btn--ghost btn--sm"
+              onclick='estimateCost("significant")'
+            >
+              Refresh Estimate
+            </button>
+          </div>
+
+          <div
+            class="wiz-section"
+            id="significant-progress-section"
+            style="display: none"
+          >
+            <div class="wiz-progress">
+              <div class="wiz-progress-header">
+                <span class="wiz-progress-label">Processing conversations</span>
+                <span class="wiz-progress-pct" id="significant-pct">0%</span>
+              </div>
+              <div class="wiz-progress-bar">
+                <div
+                  class="wiz-progress-fill"
+                  id="significant-fill"
+                  style="width: 0%"
+                >
+                </div>
+              </div>
+            </div>
+            <button
+              class="btn btn--danger btn--block"
+              onclick='abortStage("significant")'
+            >
+              Abort
+            </button>
+          </div>
+
+          <div class="wiz-actions" id="significant-start-actions">
+            <button
+              class="btn btn--primary btn--block"
+              onclick='startStage("significant")'
+            >
+              Start Extraction
+            </button>
+          </div>
+          <div
+            class="wiz-actions"
+            id="significant-complete-actions"
+            style="display: none"
+          >
+            <div
+              style="color: var(--success); font-weight: var(--font-weight-medium); margin-bottom: var(--sp-2)"
+            >
+              &#x2713; Extraction complete
+            </div>
+            <button
+              class="btn btn--primary btn--block"
+              onclick='goToStage("daily")'
+            >
+              Next: Daily Memories
+            </button>
+            <button
+              class="btn btn--ghost btn--sm"
+              style="margin-top: var(--sp-1)"
+              onclick='startStage("significant")'
+            >
+              Re-run
+            </button>
+          </div>
+
+          <div class="wiz-memory-list" id="significant-memories"></div>
+        </div>
+
+        <!-- Panel 4: Daily -->
+        <div class="wiz-panel" data-panel="daily">
+          <div class="wiz-panel-nav">
+            <button
+              class="btn btn--ghost btn--sm"
+              onclick='goToStage("significant")'
+            >
+              &larr; Back
+            </button>
+            <span
+              style="font-size: var(--font-size-xs); color: var(--fg-subtle)"
+            >Step 4 of 5</span>
+            <button
+              class="btn btn--ghost btn--sm"
+              onclick='goToStage("graph")'
+              id="btn-next-daily"
+            >
+              Next &rarr;
+            </button>
+          </div>
+          <div class="wiz-panel-title">Daily Memories</div>
+          <div class="wiz-panel-desc">
+            Generate daily bullet-point memory summaries from stored
+            conversations.
+          </div>
+
+          <div
+            id="daily-status-info"
+            class="wiz-badge wiz-badge--info"
+            style="margin-bottom: var(--sp-4)"
+          >
+          </div>
+
+          <div class="wiz-section">
+            <div class="wiz-section-title">Time Window</div>
+            <div class="wiz-platforms" id="daily-window-selector">
+              <div
+                class="wiz-platform wiz-platform--selected"
+                data-window="all"
+                onclick='selectWindow("all")'
+              >
+                <div class="wiz-platform-dot"></div>All
+              </div>
+              <div
+                class="wiz-platform"
+                data-window="week"
+                onclick='selectWindow("week")'
+              >
+                <div class="wiz-platform-dot"></div>Last Week
+              </div>
+              <div
+                class="wiz-platform"
+                data-window="month"
+                onclick='selectWindow("month")'
+              >
+                <div class="wiz-platform-dot"></div>Last Month
+              </div>
+            </div>
+          </div>
+
+          <div class="wiz-section">
+            <div class="wiz-section-title">Cost Estimate</div>
+            <div id="daily-cost"></div>
+            <button
+              class="btn btn--ghost btn--sm"
+              onclick='estimateCost("daily")'
+            >
+              Refresh Estimate
+            </button>
+          </div>
+
+          <div
+            class="wiz-section"
+            id="daily-progress-section"
+            style="display: none"
+          >
+            <div class="wiz-progress">
+              <div class="wiz-progress-header">
+                <span class="wiz-progress-label">Processing dates</span>
+                <span class="wiz-progress-pct" id="daily-pct">0%</span>
+              </div>
+              <div class="wiz-progress-bar">
+                <div
+                  class="wiz-progress-fill"
+                  id="daily-fill"
+                  style="width: 0%"
+                >
+                </div>
+              </div>
+            </div>
+            <button
+              class="btn btn--danger btn--block"
+              onclick='abortStage("daily")'
+            >
+              Abort
+            </button>
+          </div>
+
+          <div class="wiz-actions" id="daily-start-actions">
+            <button
+              class="btn btn--primary btn--block"
+              onclick='startStage("daily")'
+            >
+              Start Generation
+            </button>
+          </div>
+          <div
+            class="wiz-actions"
+            id="daily-complete-actions"
+            style="display: none"
+          >
+            <div
+              style="color: var(--success); font-weight: var(--font-weight-medium); margin-bottom: var(--sp-2)"
+            >
+              &#x2713; Generation complete
+            </div>
+            <button
+              class="btn btn--primary btn--block"
+              onclick='goToStage("graph")'
+            >
+              Next: Knowledge Graph
+            </button>
+            <button class="btn btn--ghost btn--block" onclick="skipGraph()">
+              Skip Graph &amp; Finalize
+            </button>
+            <button
+              class="btn btn--ghost btn--sm"
+              style="margin-top: var(--sp-1)"
+              onclick='startStage("daily")'
+            >
+              Re-run
+            </button>
+          </div>
+
+          <div class="wiz-memory-list" id="daily-memories"></div>
+        </div>
+
+        <!-- Panel 5: Graph -->
+        <div class="wiz-panel" data-panel="graph">
+          <div class="wiz-panel-nav" id="graph-panel-nav">
+            <button class="btn btn--ghost btn--sm" onclick='goToStage("daily")'>
+              &larr; Back
+            </button>
+            <span
+              style="font-size: var(--font-size-xs); color: var(--fg-subtle)"
+            >Step 5 of 5</span>
+            <span class="wiz-panel-nav--empty"><button
+                class="btn btn--ghost btn--sm"
+                style="visibility: hidden"
+              >
+                Next &rarr;
+              </button></span>
+          </div>
+          <div class="wiz-panel-title" id="graph-panel-title">
+            Knowledge Graph
+          </div>
+          <div class="wiz-panel-desc" id="graph-panel-desc">
+            Populate the knowledge graph from generated memory files. Extracts
+            entities and relationships.
+          </div>
+
+          <div
+            id="graph-status-info"
+            class="wiz-badge wiz-badge--info"
+            style="margin-bottom: var(--sp-4)"
+          >
+          </div>
+
+          <div class="wiz-section">
+            <div class="wiz-section-title">Cost Estimate</div>
+            <div id="graph-cost"></div>
+            <button
+              class="btn btn--ghost btn--sm"
+              onclick='estimateCost("graph")'
+            >
+              Refresh Estimate
+            </button>
+          </div>
+
+          <div
+            class="wiz-section"
+            id="graph-progress-section"
+            style="display: none"
+          >
+            <div class="wiz-progress">
+              <div class="wiz-progress-header">
+                <span class="wiz-progress-label">Processing memories</span>
+                <span class="wiz-progress-pct" id="graph-pct">0%</span>
+              </div>
+              <div class="wiz-progress-bar">
+                <div
+                  class="wiz-progress-fill"
+                  id="graph-fill"
+                  style="width: 0%"
+                >
+                </div>
+              </div>
+            </div>
+            <button
+              class="btn btn--danger btn--block"
+              onclick='abortStage("graph")'
+            >
+              Abort
+            </button>
+          </div>
+
+          <div class="wiz-actions" id="graph-start-actions">
+            <button
+              class="btn btn--primary btn--block"
+              onclick='startStage("graph")'
+            >
+              Start Graph Population
+            </button>
+            <button class="btn btn--ghost btn--block" onclick="skipGraph()">
+              Skip Graph
+            </button>
+          </div>
+          <div
+            class="wiz-actions"
+            id="graph-complete-actions"
+            style="display: none"
+          >
+            <div
+              style="color: var(--success); font-weight: var(--font-weight-medium); margin-bottom: var(--sp-2)"
+            >
+              &#x2713; Graph population complete
+            </div>
+            <button
+              class="btn btn--primary btn--block"
+              onclick="finalizePackage()"
+            >
+              Finalize Package
+            </button>
+            <button
+              class="btn btn--ghost btn--sm"
+              style="margin-top: var(--sp-1)"
+              onclick='startStage("graph")'
+            >
+              Re-run
+            </button>
+          </div>
+
+          <div class="wiz-actions" id="graph-viewer-btn" style="display: none">
+            <a href="/graph" class="btn btn--ghost btn--block"
+            >Open Graph Viewer</a>
+          </div>
+
+          <div
+            class="wiz-actions"
+            id="finalize-section"
+            style="display: none; margin-top: var(--sp-4)"
+          >
+            <div
+              style="font-size: var(--font-size-sm); color: var(--fg-muted); margin-bottom: var(--sp-2)"
+            >
+              All stages complete. Finalize strips the platform column from
+              chats.db to make it Psycheros-compatible.
+            </div>
+            <button
+              class="btn btn--success btn--block"
+              onclick="finalizePackage()"
+            >
+              Finalize Package
+            </button>
+          </div>
+
+          <div
+            class="wiz-actions"
+            id="download-section"
+            style="display: none; margin-top: var(--sp-4)"
+          >
+            <div
+              style="color: var(--success); font-weight: var(--font-weight-medium); margin-bottom: var(--sp-2)"
+            >
+              &#x2713; Package finalized
+            </div>
+            <a href="/api/download" class="btn btn--primary btn--block"
+            >Download ZIP</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Log Toggle -->
+      <div class="wiz-log-toggle" id="log-toggle" onclick="toggleLog()">
+        <span class="wiz-log-toggle-icon">&#x25BC;</span> Log Output
+      </div>
+      <div class="wiz-log" id="log-panel">
+        <div class="wiz-log-inner" id="log-entries"></div>
+      </div>
+    </div>
+
+    <div id="wiz-toast-container"></div>
+
+    <script>
+      // ─── State ────────────────────────────────────────────────────────────────
+
+      let currentStage = "setup";
+      let wizardState = null;
+      let dailyWindow = "all";
+      let logOpen = false;
+      let editingMemory = null;
+
+      const STAGES = [
+        "setup",
+        "convert",
+        "significant",
+        "daily",
+        "graph",
+      ];
+      const STAGE_LABELS = {
+        setup: "Setup",
+        convert: "Convert",
+        significant: "Significant",
+        daily: "Daily",
+        graph: "Graph",
+      };
+      const PLATFORMS = [
+        "chatgpt",
+        "claude",
+        "sillytavern",
+        "kindroid",
+        "letta",
+      ];
+
+      // ─── Init ────────────────────────────────────────────────────────────────
+
+      async function init() {
+        renderStepper();
+        connectSSE();
+        await loadState();
+        await loadUploadQueue();
+      }
+
+      // ─── SSE ─────────────────────────────────────────────────────────────────
+
+      function connectSSE() {
+        const es = new EventSource("/api/events");
+        es.onmessage = (e) => {
+          try {
+            const event = JSON.parse(e.data);
+            handleSSE(event);
+          } catch { /* ignore */ }
+        };
+        es.onerror = () => {
+          // Reconnect after delay
+          setTimeout(connectSSE, 3000);
+        };
+      }
+
+      async function handleSSE(event) {
+        const { type, stage, data } = event;
+
+        if (type === "log") {
+          addLogEntry(data?.level || "info", data?.message || "");
+          return;
+        }
+
+        // Mirror all stage events to the log for live visibility
+        if (type === "stage_started") {
+          addLogEntry(
+            "info",
+            `${stage}: started (${data?.totalItems || "?"} items)`,
+          );
+          if (!logOpen) toggleLog();
+          loadState();
+          return;
+        }
+        if (type === "item_started") {
+          addLogEntry(
+            "info",
+            `${stage}: processing ${data?.title || data?.id || ""}`,
+          );
+          return;
+        }
+        if (type === "item_completed") {
+          const result = data?.result || "";
+          addLogEntry(
+            "info",
+            `${stage}: completed ${data?.title || ""} ${result}`,
+          );
+          if (stage === "significant") loadMemories("significant");
+          if (stage === "daily") loadMemories("daily");
+          return;
+        }
+        if (type === "item_error") {
+          addLogEntry(
+            "error",
+            `${stage}: failed ${data?.title || ""} — ${data?.error || ""}`,
+          );
+          return;
+        }
+
+        if (type === "stage_progress") {
+          updateProgress(stage, data);
+          return;
+        }
+
+        if (type === "stage_completed") {
+          addLogEntry("info", `${stage}: stage completed`);
+          // Don't auto-navigate — update state but keep user on current stage
+          const res = await fetch("/api/status");
+          if (res.ok) {
+            wizardState = await res.json();
+            renderStepper();
+            updateStatusBadges();
+            // Show completion indicator on current stage
+            const startActions = document.getElementById(
+              `${stage}-start-actions`,
+            );
+            const completeActions = document.getElementById(
+              `${stage}-complete-actions`,
+            );
+            const progressSection = document.getElementById(
+              `${stage}-progress-section`,
+            );
+            if (startActions) startActions.style.display = "none";
+            if (completeActions) completeActions.style.display = "flex";
+            if (progressSection) {
+              const pctEl = document.getElementById(`${stage}-pct`);
+              const fillEl = document.getElementById(`${stage}-fill`);
+              if (pctEl) pctEl.textContent = "100%";
+              if (fillEl) {
+                fillEl.style.width = "100%";
+                fillEl.classList.add("wiz-progress-fill--complete");
+              }
+            }
+          }
+          if (stage === "graph") {
+            document.getElementById("graph-viewer-btn").style.display = "flex";
+          }
+          return;
+        }
+
+        if (type === "stage_error") {
+          addLogEntry(
+            "error",
+            `${stage}: ${data?.message || "unknown error"}`,
+          );
+          showToast("Stage error: " + (data?.message || "unknown"));
+          loadState();
+          return;
+        }
+
+        if (type === "abort") {
+          addLogEntry("warn", `Aborted: ${data?.reason || ""}`);
+          showToast("Aborted: " + (data?.reason || ""));
+          loadState();
+          return;
+        }
+      }
+
+      // ─── State Loading ───────────────────────────────────────────────────────
+
+      async function loadState() {
+        try {
+          const res = await fetch("/api/status");
+          wizardState = await res.json();
+          if (wizardState.hasPackage) {
+            currentStage = wizardState.currentStage || "convert";
+          }
+          renderStepper();
+          updatePanelVisibility();
+          updateStatusBadges();
+        } catch { /* server may not be up yet */ }
+
+        // Also load packages for resume
+        try {
+          const res = await fetch("/api/setup/packages");
+          const data = await res.json();
+          if (data.packages && data.packages.length > 0) {
+            const section = document.getElementById("resume-section");
+            const list = document.getElementById("resume-list");
+            if (section && list) {
+              list.innerHTML = data.packages.map((p) =>
+                `<div class="wiz-resume-item">
+                <span class="wiz-resume-name">${esc(p.name)}</span>
+                <div style="display:flex;gap:var(--sp-2)">
+                  <button class="btn btn--sm btn--ghost" onclick="resumePackage('${
+                  esc(p.dir)
+                }')">Resume</button>
+                  <button class="btn btn--sm btn--danger" onclick="purgePackage('${
+                  esc(p.dir)
+                }', '${esc(p.name)}')">Purge</button>
+                </div>
+              </div>`
+              ).join("");
+              section.style.display = "block";
+            }
+          }
+        } catch (e) {
+          console.error("Failed to load packages:", e);
+        }
+      }
+
+      // ─── Stepper ─────────────────────────────────────────────────────────────
+
+      function renderStepper() {
+        const el = document.getElementById("stepper");
+        const statuses = wizardState?.stageStatuses || {};
+        let html = "";
+
+        STAGES.forEach((stage, i) => {
+          const status = statuses[stage] || "pending";
+          const isActive = stage === currentStage;
+          const isCompleted = status === "completed";
+          const isError = status === "error";
+          const isRunning = status === "running";
+
+          let dotClass = "";
+          if (isCompleted) dotClass = "wiz-step--completed";
+          else if (isRunning) dotClass = "wiz-step--running";
+          else if (isError) dotClass = "wiz-step--error";
+          else if (isActive) dotClass = "wiz-step--active";
+
+          if (i > 0) {
+            const prevStatus = statuses[STAGES[i - 1]] || "pending";
+            html += `<div class="wiz-step-line${
+              prevStatus === "completed" ? " wiz-step-line--done" : ""
+            }"></div>`;
+          }
+
+          const canNavigate = isCompleted || isActive;
+          html += `<div class="wiz-step ${dotClass}${
+            !canNavigate ? " wiz-step--disabled" : ""
+          }" onclick="${canNavigate ? `goToStage('${stage}')` : ""}">
+          <div class="wiz-step-dot">${isCompleted ? "&#x2713;" : (i + 1)}</div>
+          <span class="wiz-step-label">${STAGE_LABELS[stage]}</span>
+        </div>`;
+        });
+
+        el.innerHTML = html;
+      }
+
+      function goToStage(stage) {
+        currentStage = stage;
+        renderStepper();
+        updatePanelVisibility();
+
+        // Load stage-specific data
+        if (stage === "convert") checkStagingData();
+        if (stage === "significant") {
+          loadMemories("significant");
+          estimateCost("significant");
+        }
+        if (stage === "daily") {
+          loadMemories("daily");
+          estimateCost("daily");
+        }
+        if (stage === "graph") {
+          // Reset any export-only hiding
+          document.getElementById("graph-panel-nav").style.display = "";
+          document.getElementById("graph-panel-title").textContent =
+            "Knowledge Graph";
+          document.getElementById("graph-panel-desc").textContent =
+            "Populate the knowledge graph from generated memory files. Extracts entities and relationships.";
+          document.getElementById("graph-status-info").style.display = "";
+          document.getElementById("graph-cost").parentElement.style
+            .display = "";
+          estimateCost("graph");
+        }
+      }
+
+      function updatePanelVisibility() {
+        document.querySelectorAll(".wiz-panel").forEach((p) => {
+          p.classList.toggle(
+            "wiz-panel--active",
+            p.dataset.panel === currentStage,
+          );
+        });
+      }
+
+      function updateStatusBadges() {
+        const statuses = wizardState?.stageStatuses || {};
+        for (const [stage, status] of Object.entries(statuses)) {
+          const el = document.getElementById(`${stage}-status-info`);
+          if (!el) continue;
+          if (status === "completed") {
+            el.className = "wiz-badge wiz-badge--success";
+            el.textContent = "Completed";
+          } else if (status === "running") {
+            el.className = "wiz-badge wiz-badge--info";
+            el.textContent = "Running...";
+          } else if (status === "aborted") {
+            el.className = "wiz-badge wiz-badge--warn";
+            el.textContent = "Aborted (resumable)";
+          } else if (status === "error") {
+            el.className = "wiz-badge wiz-badge--error";
+            el.textContent = "Error";
+          } else {
+            el.className = "wiz-badge wiz-badge--muted";
+            el.textContent = "Pending";
+          }
+        }
+        // Show graph viewer + finalize/download if graph is completed
+        const graphStatus = statuses["graph"];
+        if (graphStatus === "completed") {
+          document.getElementById("graph-viewer-btn").style.display = "flex";
+          if (wizardState.finalized) {
+            document.getElementById("finalize-section").style.display = "none";
+            document.getElementById("download-section").style.display = "flex";
+          } else {
+            document.getElementById("finalize-section").style.display = "flex";
+            document.getElementById("download-section").style.display = "none";
+          }
+        }
+      }
+
+      // ─── Setup ───────────────────────────────────────────────────────────────
+
+      async function saveSetup() {
+        const config = {
+          entityName: document.getElementById("setup-entity").value
+            .trim(),
+          userName: document.getElementById("setup-user").value.trim(),
+          entityPronouns: document.getElementById("setup-entity-pronouns").value
+            .trim() || "they/them",
+          userPronouns: document.getElementById("setup-user-pronouns").value
+            .trim() || "they/them",
+          relationshipContext:
+            document.getElementById("setup-relationship").value,
+          contextNotes: document.getElementById("setup-context").value
+            .trim(),
+          llmApiKey: document.getElementById("setup-apikey").value,
+          llmBaseUrl: document.getElementById("setup-baseurl").value
+            .trim(),
+          llmModel: document.getElementById("setup-model").value.trim(),
+        };
+
+        if (!config.entityName || !config.userName) {
+          showToast("Entity name and user name are required");
+          return;
+        }
+
+        try {
+          const res = await api("POST", "/api/setup", config);
+          if (res.error) {
+            showToast(res.error);
+            return;
+          }
+          showToast("Setup saved");
+          await loadState();
+          currentStage = "convert";
+          renderStepper();
+          updatePanelVisibility();
+        } catch (e) {
+          showToast("Setup failed: " + e.message);
+        }
+      }
+
+      async function resumePackage(dir) {
+        try {
+          const res = await api("POST", "/api/setup/resume", {
+            packageDir: dir,
+          });
+          if (res.error) {
+            showToast(res.error);
+            return;
+          }
+          showToast("Package resumed");
+          await loadState();
+          // Prefill form with loaded config
+          if (res.config) {
+            document.getElementById("setup-entity").value =
+              res.config.entityName || "";
+            document.getElementById("setup-user").value = res.config.userName ||
+              "";
+            document.getElementById("setup-entity-pronouns").value =
+              res.config.entityPronouns || "they/them";
+            document.getElementById("setup-user-pronouns").value =
+              res.config.userPronouns || "they/them";
+            document.getElementById("setup-relationship").value =
+              res.config.relationshipContext || "conversation partner";
+            document.getElementById("setup-context").value =
+              res.config.contextNotes || "";
+            document.getElementById("setup-baseurl").value =
+              res.config.llmBaseUrl || "";
+            document.getElementById("setup-model").value =
+              res.config.llmModel || "";
+            document.getElementById("setup-apikey").value =
+              res.config.llmApiKey || "";
+          }
+          goToStage(res.currentStage || "convert");
+        } catch (e) {
+          showToast("Resume failed: " + e.message);
+        }
+      }
+
+      async function purgePackage(dir, name) {
+        if (
+          !confirm(
+            `Delete "${name}" and all its data? This cannot be undone.`,
+          )
+        ) return;
+        if (
+          !confirm(
+            `Really delete "${name}"? All chat history, memories, and the knowledge graph will be permanently removed.`,
+          )
+        ) return;
+        try {
+          const res = await api("DELETE", "/api/setup/package", {
+            packageDir: dir,
+          });
+          if (res.error) {
+            showToast(res.error);
+            return;
+          }
+          showToast(`Purged: ${name}`);
+          await loadState();
+          // Reload the package list
+          const pkgRes = await fetch("/api/setup/packages");
+          const data = await pkgRes.json();
+          const list = document.getElementById("resume-list");
+          const section = document.getElementById("resume-section");
+          if (
+            data.packages && data.packages.length > 0 && list && section
+          ) {
+            list.innerHTML = data.packages.map((p) =>
+              `<div class="wiz-resume-item">
+              <span class="wiz-resume-name">${esc(p.name)}</span>
+              <div style="display:flex;gap:var(--sp-2)">
+                <button class="btn btn--sm btn--ghost" onclick="resumePackage('${
+                esc(p.dir)
+              }')">Resume</button>
+                <button class="btn btn--sm btn--danger" onclick="purgePackage('${
+                esc(p.dir)
+              }', '${esc(p.name)}')">Purge</button>
+              </div>
+            </div>`
+            ).join("");
+          } else if (list && section) {
+            list.innerHTML = "";
+            section.style.display = "none";
+          }
+        } catch (e) {
+          showToast("Purge failed: " + e.message);
+        }
+      }
+
+      async function testLLM() {
+        const btn = document.getElementById("btn-test-llm");
+        const resultEl = document.getElementById("test-result");
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Testing...';
+        resultEl.innerHTML = "";
+
+        try {
+          const config = {
+            apiKey: document.getElementById("setup-apikey").value,
+            baseUrl: document.getElementById("setup-baseurl").value
+              .trim(),
+            model: document.getElementById("setup-model").value.trim(),
+          };
+          const res = await api("POST", "/api/setup/test-llm", config);
+
+          if (res.ok) {
+            resultEl.innerHTML = `
+            <div class="wiz-test-result wiz-test-result--ok">&#x2713; Connected</div>
+            <div class="wiz-test-meta">Model: ${
+              esc(res.model)
+            } &middot; Latency: ${res.latencyMs}ms</div>`;
+          } else {
+            resultEl.innerHTML = `
+            <div class="wiz-test-result wiz-test-result--fail">&#x2717; Failed</div>
+            <div class="wiz-test-meta">${
+              esc(res.error || "Unknown error")
+            }</div>`;
+          }
+        } catch (e) {
+          resultEl.innerHTML = `
+          <div class="wiz-test-result wiz-test-result--fail">&#x2717; Error</div>
+          <div class="wiz-test-meta">${esc(e.message)}</div>`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Test Connection";
+        }
+      }
+
+      // ─── Convert ─────────────────────────────────────────────────────────────
+
+      // Drag & drop
+      document.addEventListener("DOMContentLoaded", () => {
+        const zone = document.getElementById("upload-zone");
+        if (!zone) return;
+        zone.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          zone.classList.add("wiz-upload--dragover");
+        });
+        zone.addEventListener(
+          "dragleave",
+          () => zone.classList.remove("wiz-upload--dragover"),
+        );
+        zone.addEventListener("drop", (e) => {
+          e.preventDefault();
+          zone.classList.remove("wiz-upload--dragover");
+          if (e.dataTransfer.files.length) {
+            handleUploads(e.dataTransfer.files);
+          }
+        });
+      });
+
+      async function handleUploads(files) {
+        const fileArray = Array.from(files);
+        if (!fileArray.length) return;
+        let uploaded = 0, failed = 0;
+        for (const file of fileArray) {
+          try {
+            const formData = new FormData();
+            formData.append("file", file);
+            const res = await api(
+              "POST",
+              "/api/convert/upload",
+              formData,
+              true,
+            );
+            if (res.error) {
+              showToast(`Failed: ${file.name} — ${res.error}`);
+              failed++;
+              continue;
+            }
+            uploaded++;
+          } catch (e) {
+            showToast(`Failed: ${file.name} — ${e.message}`);
+            failed++;
+          }
+        }
+        document.getElementById("file-input").value = "";
+        if (uploaded > 0) {
+          showToast(
+            `Uploaded ${uploaded} file${uploaded > 1 ? "s" : ""}${
+              failed > 0 ? ` (${failed} failed)` : ""
+            }`,
+          );
+        }
+        await loadUploadQueue();
+      }
+
+      async function loadUploadQueue() {
+        try {
+          const res = await api("GET", "/api/convert/uploads");
+          const entries = res.entries || [];
+          renderUploadQueue(entries);
+        } catch {
+          // No active package yet
+        }
+      }
+
+      function renderUploadQueue(entries) {
+        const section = document.getElementById("queue-section");
+        const countEl = document.getElementById("queue-count");
+        const queueEl = document.getElementById("upload-queue");
+
+        const activeEntries = entries.filter((e) => e.status !== "stored");
+        countEl.textContent = activeEntries.length;
+
+        if (activeEntries.length === 0) {
+          section.style.display = "none";
+          return;
+        }
+
+        section.style.display = "block";
+        const queuedCount =
+          activeEntries.filter((e) => e.status === "queued").length;
+
+        let html = `<div class="wiz-upload-queue-header">
+        <span>File</span><span>Platform</span><span>Size</span><span></span>
+      </div>`;
+
+        for (const entry of activeEntries) {
+          const statusIcon = entry.status === "parsed"
+            ? "&#x2713;"
+            : entry.status === "error"
+            ? "&#x2717;"
+            : "&#x25CB;";
+          const statusColor = entry.status === "parsed"
+            ? "color:var(--success)"
+            : entry.status === "error"
+            ? "color:var(--error)"
+            : "color:var(--fg-subtle)";
+          const rowClass = entry.status === "error"
+            ? " wiz-upload-queue-row--error"
+            : "";
+          const isEditable = entry.status === "queued";
+
+          let platformHtml;
+          if (isEditable) {
+            let opts = PLATFORMS.map((p) =>
+              `<option value="${p}"${
+                p === entry.platform ? " selected" : ""
+              }>${p}</option>`
+            ).join("");
+            platformHtml =
+              `<select class="wiz-upload-queue-select" data-filename="${
+                esc(entry.filename)
+              }">${opts}</select>`;
+          } else {
+            platformHtml = `<div class="wiz-upload-queue-badge">${
+              esc(entry.platform)
+            }</div>`;
+          }
+
+          html += `<div class="wiz-upload-queue-row${rowClass}">
+          <div class="wiz-upload-queue-filename" title="${esc(entry.filename)}${
+            entry.error ? "\n" + esc(entry.error) : ""
+          }">${esc(entry.filename)}${
+            entry.error
+              ? ' <span style="color:var(--error);font-size:10px">error</span>'
+              : ""
+          }</div>
+          ${platformHtml}
+          <div class="wiz-upload-queue-size">${formatBytes(entry.size)}</div>
+          <div style="display:flex;align-items:center;gap:var(--sp-2)">
+            <span class="wiz-upload-queue-status" style="${statusColor}">${statusIcon}</span>
+            <button class="wiz-upload-queue-remove" data-filename="${
+            esc(entry.filename)
+          }" title="Remove">&#x2715;</button>
+          </div>
+        </div>`;
+        }
+
+        queueEl.innerHTML = html;
+
+        // Event delegation for queue interactions
+        queueEl.onclick = (e) => {
+          const removeBtn = e.target.closest(
+            ".wiz-upload-queue-remove",
+          );
+          if (removeBtn) {
+            removeUpload(removeBtn.dataset.filename);
+            return;
+          }
+        };
+        queueEl.onchange = (e) => {
+          const sel = e.target.closest(".wiz-upload-queue-select");
+          if (sel) {
+            changePlatform(sel.dataset.filename, sel.value);
+            return;
+          }
+        };
+
+        // Show/hide Convert All button
+        const btn = document.getElementById("btn-convert-all");
+        btn.style.display = queuedCount > 0 ? "flex" : "none";
+      }
+
+      async function removeUpload(filename) {
+        if (!confirm(`Remove ${filename} from queue?`)) return;
+        try {
+          await api(
+            "DELETE",
+            `/api/convert/uploads/${encodeURIComponent(filename)}`,
+          );
+          await loadUploadQueue();
+          document.getElementById("preview-section").style.display = "none";
+        } catch (e) {
+          showToast("Remove failed: " + e.message);
+        }
+      }
+
+      async function detectPlatform() {
+        try {
+          const res = await api("POST", "/api/convert/detect", {});
+          if (res.platform) {
+            showToast(`Detected: ${res.platform}`);
+          } else {
+            showToast("Could not auto-detect.");
+          }
+        } catch (e) {
+          showToast("Detection failed: " + e.message);
+        }
+      }
+
+      async function changePlatform(filename, platform) {
+        try {
+          await api(
+            "PATCH",
+            `/api/convert/uploads/${encodeURIComponent(filename)}`,
+            { platform },
+          );
+        } catch (e) {
+          showToast("Failed to update platform: " + e.message);
+          await loadUploadQueue();
+        }
+      }
+
+      async function convertAll() {
+        try {
+          const btn = document.getElementById("btn-convert-all");
+          btn.disabled = true;
+          btn.textContent = "Parsing...";
+          const res = await api("POST", "/api/convert/parse");
+          btn.disabled = false;
+          btn.textContent = "Convert All";
+
+          if (res.error) {
+            showToast(res.error);
+            return;
+          }
+
+          if (res.filesErrored > 0) {
+            showToast(`${res.filesErrored} file(s) failed to parse`);
+          }
+
+          await loadUploadQueue();
+
+          if (res.preview && res.preview.conversationCount > 0) {
+            const preview = res.preview;
+            document.getElementById("preview-stats").innerHTML = `
+            <div class="wiz-stat"><div class="wiz-stat-label">Conversations</div><div class="wiz-stat-value">${preview.conversationCount}</div></div>
+            <div class="wiz-stat"><div class="wiz-stat-label">Messages</div><div class="wiz-stat-value">${preview.messageCount.toLocaleString()}</div></div>
+            <div class="wiz-stat"><div class="wiz-stat-label">Date Range</div><div class="wiz-stat-value" style="font-size:var(--font-size-sm)">${
+              preview.dateFrom || "?"
+            } &rarr; ${preview.dateTo || "?"}</div></div>`;
+
+            // Bar chart
+            const months = preview.conversationsByMonth || {};
+            const monthEntries = Object.entries(months).sort((a, b) =>
+              a[0].localeCompare(b[0])
+            );
+            if (monthEntries.length > 0) {
+              const maxVal = Math.max(...monthEntries.map((e) => e[1]));
+              const chartEl = document.getElementById("bar-chart");
+              chartEl.innerHTML = monthEntries.map(([month, count]) =>
+                `<div class="wiz-bar-col" style="height:${
+                  Math.round((count / maxVal) * 100)
+                }%" data-label="${month.slice(2)}"></div>`
+              ).join("");
+              document.getElementById("bar-chart-section").style
+                .display = "block";
+            }
+
+            document.getElementById("preview-section").style.display = "block";
+            // Staging area replaces the old confirm button
+            document.getElementById("btn-confirm-store").style.display = "none";
+            await populateStaging();
+          } else {
+            showToast("No conversations found in uploaded files");
+          }
+        } catch (e) {
+          const btn = document.getElementById("btn-convert-all");
+          btn.disabled = false;
+          btn.textContent = "Convert All";
+          showToast("Parse failed: " + e.message);
+        }
+      }
+
+      async function confirmStore() {
+        const btn = document.getElementById("btn-confirm-store");
+        btn.disabled = true;
+        btn.textContent = "Storing...";
+        try {
+          const res = await api("POST", "/api/convert/confirm");
+          if (res.error) {
+            showToast(res.error);
+            return;
+          }
+          showToast(
+            `Stored ${res.conversationsStored} conversations (${res.messagesStored} messages)`,
+          );
+          await loadState();
+          await loadUploadQueue();
+          renderStepper();
+          updateStatusBadges();
+        } catch (e) {
+          showToast("Store failed: " + e.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Confirm & Store";
+        }
+      }
+
+      // ─── Processing Stages ───────────────────────────────────────────────────
+
+      async function estimateCost(stage) {
+        const costEl = document.getElementById(`${stage}-cost`);
+        if (!costEl) return;
+        try {
+          const body = stage === "daily" ? { window: dailyWindow } : {};
+          const res = await api("POST", `/api/${stage}/estimate`, body);
+          if (res.error) {
+            costEl.innerHTML =
+              `<div style="color:var(--error);font-size:var(--font-size-sm)">${
+                esc(res.error)
+              }</div>`;
+            return;
+          }
+          const est = res.estimate;
+          if (!est) {
+            costEl.innerHTML =
+              `<div style="color:var(--fg-muted);font-size:var(--font-size-sm)">No data available</div>`;
+            return;
+          }
+          costEl.innerHTML = `
+          <div class="wiz-cost">
+            <span class="wiz-cost-label">Requests</span><span class="wiz-cost-value">${est.requests}</span>
+            <span class="wiz-cost-label">Input Tokens</span><span class="wiz-cost-value">${est.inputTokens.toLocaleString()}</span>
+            <span class="wiz-cost-label">Output Tokens</span><span class="wiz-cost-value">${est.outputTokens.toLocaleString()}</span>
+            <span class="wiz-cost-label">Est. Cost</span><span class="wiz-cost-highlight">${est.estimatedCost}</span>
+          </div>
+          <div style="font-size:var(--font-size-xs);color:var(--fg-subtle);margin-top:var(--sp-2)">${
+            esc(est.description)
+          }</div>`;
+        } catch (e) {
+          costEl.innerHTML =
+            `<div style="color:var(--error);font-size:var(--font-size-sm)">Error: ${
+              esc(e.message)
+            }</div>`;
+        }
+      }
+
+      async function startStage(stage) {
+        try {
+          const body = stage === "daily" ? { window: dailyWindow } : {};
+          const res = await api("POST", `/api/${stage}/start`, body);
+          if (res.error) {
+            showToast(res.error);
+            return;
+          }
+          if (res.started) {
+            document.getElementById(`${stage}-start-actions`).style
+              .display = "none";
+            const completeActions = document.getElementById(
+              `${stage}-complete-actions`,
+            );
+            if (completeActions) completeActions.style.display = "none";
+            document.getElementById(`${stage}-progress-section`).style
+              .display = "block";
+            await loadState();
+          }
+        } catch (e) {
+          showToast("Start failed: " + e.message);
+        }
+      }
+
+      async function abortStage(stage) {
+        try {
+          const res = await api("POST", `/api/${stage}/abort`);
+          if (res.aborted) {
+            showToast(`${STAGE_LABELS[stage]} aborted`);
+            document.getElementById(`${stage}-start-actions`).style
+              .display = "flex";
+            const completeActions = document.getElementById(
+              `${stage}-complete-actions`,
+            );
+            if (completeActions) completeActions.style.display = "none";
+            document.getElementById(`${stage}-progress-section`).style
+              .display = "none";
+            await loadState();
+          }
+        } catch (e) {
+          showToast("Abort failed: " + e.message);
+        }
+      }
+
+      async function skipGraph() {
+        if (
+          !confirm(
+            "Skip the knowledge graph stage? You can still finalize and download the package without it.",
+          )
+        ) return;
+        try {
+          const res = await api("POST", "/api/graph/skip");
+          if (res.error) {
+            showToast(res.error);
+            return;
+          }
+          showToast("Graph stage skipped");
+          await loadState();
+          goToStage("graph");
+        } catch (e) {
+          showToast("Skip failed: " + e.message);
+        }
+      }
+
+      async function finalizePackage() {
+        if (
+          !confirm(
+            "This will strip the platform column from chats.db, making it Psycheros-compatible. This cannot be undone. Continue?",
+          )
+        ) return;
+        try {
+          const res = await api("POST", "/api/finalize");
+          if (res.error) {
+            showToast(res.error);
+            return;
+          }
+          showToast(
+            "Package finalized! chats.db is now Psycheros-compatible.",
+          );
+          document.getElementById("finalize-section").style.display = "none";
+          document.getElementById("graph-complete-actions").style
+            .display = "none";
+          document.getElementById("download-section").style.display = "flex";
+        } catch (e) {
+          showToast("Finalize failed: " + e.message);
+        }
+      }
+
+      function updateProgress(stage, data) {
+        const pctEl = document.getElementById(`${stage}-pct`);
+        const fillEl = document.getElementById(`${stage}-fill`);
+        if (!pctEl || !fillEl) return;
+
+        const pct = data?.percent || 0;
+        pctEl.textContent = pct + "%";
+        fillEl.style.width = pct + "%";
+
+        if (pct >= 100) {
+          fillEl.classList.add("wiz-progress-fill--complete");
+          document.getElementById(`${stage}-start-actions`).style
+            .display = "none";
+          const completeActions = document.getElementById(
+            `${stage}-complete-actions`,
+          );
+          if (completeActions) completeActions.style.display = "none";
+        }
+      }
+
+      // ─── Memory Review ──────────────────────────────────────────────────────
+
+      async function loadMemories(type) {
+        const listEl = document.getElementById(`${type}-memories`);
+        if (!listEl) return;
+
+        try {
+          const res = await api("GET", `/api/memories/${type}`);
+          const files = res.files || [];
+          if (files.length === 0) {
+            listEl.innerHTML = "";
+            return;
+          }
+
+          const sectionTitle = type === "significant"
+            ? "Significant Memories"
+            : "Daily Memories";
+          listEl.innerHTML = `
+          <div class="wiz-section-title" style="margin-top:var(--sp-6);margin-bottom:var(--sp-3)">${sectionTitle} (${files.length})</div>
+          ${
+            files.map((f) => `
+            <div class="wiz-memory-item" data-file="${
+              esc(f)
+            }" id="mem-${type}-${f}">
+              <div class="wiz-memory-header" onclick="toggleMemory('${type}','${
+              esc(f)
+            }')">
+                <span class="wiz-memory-name">${esc(f)}</span>
+                <div class="wiz-memory-actions">
+                  <button class="btn btn--sm btn--ghost" onclick="event.stopPropagation();editMemory('${type}','${
+              esc(f)
+            }')">Edit</button>
+                  <button class="btn btn--sm btn--ghost" style="color:var(--error)" onclick="event.stopPropagation();deleteMemory('${type}','${
+              esc(f)
+            }')">Delete</button>
+                </div>
+              </div>
+              <div class="wiz-memory-body" id="mem-body-${type}-${f}">
+                <div class="wiz-memory-content" id="mem-content-${type}-${f}">Loading...</div>
+              </div>
+            </div>
+          `).join("")
+          }
+        `;
+        } catch { /* ignore */ }
+      }
+
+      async function toggleMemory(type, filename) {
+        const item = document.getElementById(`mem-${type}-${filename}`);
+        if (!item) return;
+        const isOpen = item.classList.toggle("wiz-memory-item--open");
+
+        if (isOpen) {
+          try {
+            const res = await api(
+              "GET",
+              `/api/memories/${type}/${encodeURIComponent(filename)}`,
+            );
+            const contentEl = document.getElementById(
+              `mem-content-${type}-${filename}`,
+            );
+            if (contentEl) {
+              contentEl.textContent = res.content || "(empty)";
+            }
+          } catch {
+            const contentEl = document.getElementById(
+              `mem-content-${type}-${filename}`,
+            );
+            if (contentEl) contentEl.textContent = "Failed to load";
+          }
+        }
+      }
+
+      async function editMemory(type, filename) {
+        // If already editing this memory, save it
+        if (editingMemory === `${type}:${filename}`) {
+          const textarea = document.querySelector(
+            `#mem-edit-${type}-${filename}`,
+          );
+          if (textarea) {
+            try {
+              await api(
+                "PUT",
+                `/api/memories/${type}/${encodeURIComponent(filename)}`,
+                { content: textarea.value },
+              );
+              showToast("Memory saved");
+              editingMemory = null;
+              toggleMemory(type, filename); // close
+              setTimeout(() => toggleMemory(type, filename), 50); // reopen to load fresh
+              return;
+            } catch (e) {
+              showToast("Save failed: " + e.message);
+              return;
+            }
+          }
+        }
+
+        // Load content into edit mode
+        try {
+          const res = await api(
+            "GET",
+            `/api/memories/${type}/${encodeURIComponent(filename)}`,
+          );
+          const item = document.getElementById(
+            `mem-${type}-${filename}`,
+          );
+          if (!item) return;
+          item.classList.add("wiz-memory-item--open");
+          const bodyEl = document.getElementById(
+            `mem-body-${type}-${filename}`,
+          );
+          bodyEl.innerHTML = `
+          <textarea class="wiz-memory-edit">${esc(res.content || "")}</textarea>
+          <div class="wiz-actions" style="border:none;margin:0">
+            <button class="btn btn--sm btn--primary" onclick="editingMemory='${type}:${filename}';editMemory('${type}','${
+            esc(filename)
+          }')">Save</button>
+            <button class="btn btn--sm btn--ghost" onclick="toggleMemory('${type}','${
+            esc(filename)
+          }')">Cancel</button>
+          </div>`;
+          editingMemory = `${type}:${filename}`;
+        } catch (e) {
+          showToast("Load failed: " + e.message);
+        }
+      }
+
+      async function deleteMemory(type, filename) {
+        if (!confirm(`Delete ${filename}?`)) return;
+        try {
+          await api(
+            "DELETE",
+            `/api/memories/${type}/${encodeURIComponent(filename)}`,
+          );
+          showToast("Deleted");
+          loadMemories(type);
+        } catch (e) {
+          showToast("Delete failed: " + e.message);
+        }
+      }
+
+      function selectWindow(w) {
+        dailyWindow = w;
+        document.querySelectorAll(
+          "#daily-window-selector .wiz-platform",
+        ).forEach((el) => {
+          el.classList.toggle(
+            "wiz-platform--selected",
+            el.dataset.window === w,
+          );
+        });
+        estimateCost("daily");
+      }
+
+      // ─── Log ─────────────────────────────────────────────────────────────────
+
+      function toggleLog() {
+        logOpen = !logOpen;
+        document.getElementById("log-panel").classList.toggle(
+          "wiz-log--open",
+          logOpen,
+        );
+        document.getElementById("log-toggle").classList.toggle(
+          "wiz-log-toggle--open",
+          logOpen,
+        );
+      }
+
+      function addLogEntry(level, message) {
+        const el = document.getElementById("log-entries");
+        if (!el) return;
+        const time = new Date().toISOString().slice(11, 19);
+        const levelClass =
+          { INFO: "info", WARN: "warn", ERROR: "error" }[level] ||
+          "info";
+        el.innerHTML +=
+          `<div class="wiz-log-entry"><span class="wiz-log-time">${time}</span><span class="wiz-log-level wiz-log-level--${levelClass}">${level}</span><span class="wiz-log-msg">${
+            esc(message)
+          }</span></div>`;
+        el.scrollTop = el.scrollHeight;
+      }
+
+      // ─── API Helper ──────────────────────────────────────────────────────────
+
+      async function api(method, path, body, isFormData) {
+        const opts = { method };
+        if (body !== undefined) {
+          if (isFormData) {
+            opts.body = body;
+          } else {
+            opts.headers = { "Content-Type": "application/json" };
+            opts.body = JSON.stringify(body);
+          }
+        }
+        const res = await fetch(path, opts);
+        return res.json();
+      }
+
+      // ─── Utilities ───────────────────────────────────────────────────────────
+
+      function esc(str) {
+        if (typeof str !== "string") str = String(str);
+        const d = document.createElement("div");
+        d.appendChild(document.createTextNode(str));
+        return d.innerHTML;
+      }
+
+      function formatBytes(bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) {
+          return (bytes / 1024).toFixed(1) + " KB";
+        }
+        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+      }
+
+      function showToast(msg) {
+        let c = document.getElementById("wiz-toast-container");
+        if (!c) {
+          c = document.createElement("div");
+          c.id = "wiz-toast-container";
+          document.body.appendChild(c);
+        }
+        const t = document.createElement("div");
+        t.className = "wiz-toast";
+        t.textContent = msg;
+        c.appendChild(t);
+        requestAnimationFrame(() => t.classList.add("wiz-toast--visible"));
+        setTimeout(() => {
+          t.classList.remove("wiz-toast--visible");
+          setTimeout(() => t.remove(), 200);
+        }, 4000);
+      }
+
+      // ─── Staging Area ───────────────────────────────────────────────────
+
+      let stagingState = {
+        offset: 0,
+        limit: 50,
+        currentTab: "browse",
+        messageView: null,
+        activeFilterTag: null,
+        palette: [],
+        selectedColor: "#6b7280",
+        searchOffset: 0,
+        searchTotal: 0,
+      };
+      const TAG_COLORS = [
+        "#ef4444",
+        "#f97316",
+        "#eab308",
+        "#22c55e",
+        "#06b6d4",
+        "#3b82f6",
+        "#8b5cf6",
+        "#ec4899",
+        "#6b7280",
+        "#a3a3a3",
+      ];
+
+      // ─── Tag Palette ────────────────────────────────────────────────────
+
+      async function loadTagPalette() {
+        try {
+          const res = await api("GET", "/api/staging/tag-palette");
+          stagingState.palette = (res.tags || []).reduce((m, t) => {
+            m[t.name] = t.color;
+            return m;
+          }, {});
+          renderPaletteChips();
+          renderPaletteApplyBar();
+        } catch (e) { /* ignore */ }
+      }
+
+      function renderPaletteChips() {
+        const el = document.getElementById("tag-palette-chips");
+        if (!el) return;
+        const names = Object.keys(stagingState.palette);
+        if (names.length === 0) {
+          el.innerHTML = "";
+          return;
+        }
+        el.innerHTML = names.map((name) => {
+          const color = stagingState.palette[name];
+          const isActive = stagingState.activeFilterTag === name;
+          return `<span class="wiz-staging-palette-chip${
+            isActive ? " wiz-staging-palette-chip--active" : ""
+          }" style="background:${color}22;color:${color}" onclick="togglePaletteFilter('${
+            esc(name)
+          }')">
+          <span class="wiz-staging-palette-chip-dot" style="background:${color}"></span>
+          ${esc(name)}
+          <span class="wiz-staging-palette-chip-remove" onclick="event.stopPropagation();deletePaletteTag('${
+            esc(name)
+          }')">&times;</span>
+        </span>`;
+        }).join("");
+      }
+
+      function renderPaletteApplyBar() {
+        const el = document.getElementById("palette-apply-bar");
+        if (!el) return;
+        const names = Object.keys(stagingState.palette);
+        if (names.length === 0) {
+          el.innerHTML = "";
+          return;
+        }
+        el.innerHTML =
+          '<span style="font-size:10px;color:var(--fg-subtle);margin-right:4px">Tag:</span>' +
+          names.map((name) => {
+            const color = stagingState.palette[name];
+            return `<span class="wiz-staging-palette-chip" style="background:${color}22;color:${color}" onclick="applyTagToSelectedFromPalette('${
+              esc(name)
+            }')">
+            <span class="wiz-staging-palette-chip-dot" style="background:${color}"></span>
+            ${esc(name)}
+          </span>`;
+          }).join("");
+      }
+
+      function showNewTagForm() {
+        document.getElementById("new-tag-form").style.display = "inline-flex";
+        document.getElementById("btn-new-tag").style.display = "none";
+        stagingState.selectedColor = TAG_COLORS[0];
+        const colorsEl = document.getElementById("new-tag-colors");
+        colorsEl.innerHTML = TAG_COLORS.map((c, i) =>
+          `<span class="wiz-staging-color-swatch${
+            i === 0 ? " wiz-staging-color-swatch--active" : ""
+          }" style="background:${c}" onclick="selectTagColor('${c}', this)"></span>`
+        ).join("");
+        document.getElementById("new-tag-name").value = "";
+        document.getElementById("new-tag-name").focus();
+      }
+
+      function cancelNewTag() {
+        document.getElementById("new-tag-form").style.display = "none";
+        document.getElementById("btn-new-tag").style.display = "";
+      }
+
+      function selectTagColor(color, el) {
+        stagingState.selectedColor = color;
+        document.querySelectorAll(".wiz-staging-color-swatch").forEach(
+          (s) => s.classList.remove("wiz-staging-color-swatch--active"),
+        );
+        el.classList.add("wiz-staging-color-swatch--active");
+      }
+
+      async function createTagFromPalette() {
+        const name = document.getElementById("new-tag-name").value
+          .trim();
+        if (!name) return;
+        try {
+          await api("POST", "/api/staging/tag-palette", {
+            name,
+            color: stagingState.selectedColor,
+          });
+          stagingState.palette[name] = stagingState.selectedColor;
+          cancelNewTag();
+          renderPaletteChips();
+          renderPaletteApplyBar();
+        } catch (e) {
+          showToast("Failed to create tag: " + e.message);
+        }
+      }
+
+      async function deletePaletteTag(name) {
+        if (
+          !confirm(
+            `Remove "${name}" from palette? Tags already applied to conversations will remain.`,
+          )
+        ) return;
+        try {
+          await api(
+            "DELETE",
+            `/api/staging/tag-palette/${encodeURIComponent(name)}`,
+          );
+          delete stagingState.palette[name];
+          if (stagingState.activeFilterTag === name) {
+            stagingState.activeFilterTag = null;
+          }
+          renderPaletteChips();
+          renderPaletteApplyBar();
+          loadStagingConversations();
+        } catch (e) {
+          showToast("Failed to delete tag: " + e.message);
+        }
+      }
+
+      function togglePaletteFilter(name) {
+        stagingState.activeFilterTag = stagingState.activeFilterTag === name
+          ? null
+          : name;
+        renderPaletteChips();
+        loadStagingConversations();
+      }
+
+      async function applyTagToSelectedFromPalette(name) {
+        const checked = document.querySelectorAll(
+          ".wiz-staging-item-check input:checked",
+        );
+        if (checked.length === 0) {
+          showToast("Select conversations first");
+          return;
+        }
+        const ids = Array.from(checked).map((cb) =>
+          cb.closest(".wiz-staging-item")?.dataset?.id
+        ).filter(Boolean);
+        try {
+          await api("POST", `/api/staging/conversations/bulk/tags`, {
+            ids,
+            tag: name,
+          });
+          showToast(
+            `Applied "${name}" to ${ids.length} conversation(s)`,
+          );
+          loadStagingConversations();
+        } catch (e) {
+          showToast("Failed: " + e.message);
+        }
+      }
+
+      function getTagColor(tagName) {
+        return stagingState.palette[tagName] || "#6b7280";
+      }
+
+      async function checkStagingData() {
+        try {
+          const stats = await api("GET", "/api/staging/stats");
+          if (stats && stats.total > 0) {
+            document.getElementById("staging-section").style.display = "block";
+            await loadTagPalette();
+            await loadPlatformFilter();
+            autodetectPsycheros();
+            await loadStagingStats();
+            await loadStagingConversations();
+          }
+        } catch (e) { /* staging not initialized yet — that's fine */ }
+      }
+
+      async function populateStaging() {
+        try {
+          const res = await api("POST", "/api/staging/populate");
+          if (res.error) {
+            showToast(res.error);
+            return;
+          }
+          if (res.newlyStaged > 0) {
+            showToast(`Staged ${res.newlyStaged} new conversations`);
+          }
+          document.getElementById("staging-section").style.display = "block";
+          await loadTagPalette();
+          await loadPlatformFilter();
+          autodetectPsycheros();
+          await loadStagingStats();
+          await loadStagingConversations();
+        } catch (e) {
+          showToast("Staging failed: " + e.message);
+        }
+      }
+
+      async function loadStagingStats() {
+        try {
+          const stats = await api("GET", "/api/staging/stats");
+          const el = document.getElementById("staging-stats-bar");
+          el.innerHTML =
+            `<span><b>${stats.total}</b> total</span><span><b>${stats.included}</b> included</span><span><b>${stats.excluded}</b> excluded</span>`;
+          if (stats.psycherosStatus) {
+            const ps = stats.psycherosStatus;
+            el.innerHTML +=
+              `<span><b>${ps.new}</b> new</span><span><b>${ps.existing}</b> in Psycheros</span><span><b>${ps.changed}</b> changed</span>`;
+          }
+          document.getElementById("staging-commit-count").textContent =
+            stats.included;
+        } catch (e) { /* ignore */ }
+      }
+
+      async function loadStagingConversations() {
+        const platform =
+          document.getElementById("staging-filter-platform")?.value ||
+          "";
+        const status =
+          document.getElementById("staging-filter-status")?.value || "";
+        const tag = stagingState.activeFilterTag || "";
+        const params = new URLSearchParams({
+          offset: stagingState.offset,
+          limit: stagingState.limit,
+        });
+        if (platform) params.set("platform", platform);
+        if (tag) params.set("tag", tag);
+        if (status) {
+          params.set(
+            "included",
+            status === "included"
+              ? "true"
+              : status === "excluded"
+              ? "false"
+              : "",
+          );
+        }
+
+        try {
+          const res = await api(
+            "GET",
+            `/api/staging/conversations?${params}`,
+          );
+          renderStagingList(res.conversations || [], res.total || 0);
+        } catch (e) {
+          showToast("Failed to load staging: " + e.message);
+        }
+      }
+
+      function renderStagingList(conversations, total) {
+        const listEl = document.getElementById(
+          "staging-conversation-list",
+        );
+        if (conversations.length === 0) {
+          listEl.innerHTML =
+            '<div style="padding:var(--sp-4);text-align:center;color:var(--fg-subtle);font-size:var(--font-size-sm)">No conversations match your filters</div>';
+          document.getElementById("staging-pagination").innerHTML = "";
+          return;
+        }
+
+        listEl.innerHTML = conversations.map((c) => {
+          const excl = !c.included ? " wiz-staging-item--excluded" : "";
+          const dateStr = c.createdAt
+            ? new Date(c.createdAt).toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+            : "?";
+          const badge = c.psycherosStatus
+            ? `<span class="wiz-staging-badge wiz-staging-badge--${c.psycherosStatus}">${c.psycherosStatus}</span>`
+            : "";
+          const tags = (c.tags || []).map((t) => {
+            const color = getTagColor(t);
+            return `<span class="wiz-staging-tag" style="background:${color}22;color:${color}" onclick="event.stopPropagation();removeTagFromConv('${c.id}','${t}')">
+            <span class="wiz-staging-tag-dot" style="background:${color}"></span>${
+              esc(t)
+            }<span class="wiz-staging-tag-remove">&times;</span>
+          </span>`;
+          }).join("");
+          return `<div class="wiz-staging-item${excl}" data-id="${esc(c.id)}">
+          <div class="wiz-staging-item-check"><input type="checkbox" ${
+            c.included ? "checked" : ""
+          } onchange="toggleConvIncluded('${c.id}', this.checked)"></div>
+          <div class="wiz-staging-item-info">
+            <div class="wiz-staging-item-title" onclick="openStagingMessages('${c.id}', ${
+            JSON.stringify(JSON.stringify(c.title || "Untitled"))
+              .replace(/"/g, "&quot;")
+          })">${esc(c.title || "Untitled")}</div>
+            <div class="wiz-staging-item-meta">
+              <span>${c.platform}</span>
+              <span>${c.messageCount} msgs</span>
+              <span>${dateStr}</span>
+            </div>
+            ${tags ? `<div class="wiz-staging-item-tags">${tags}</div>` : ""}
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">${badge}</div>
+        </div>`;
+        }).join("");
+
+        // Pagination
+        const pages = Math.ceil(total / stagingState.limit);
+        const curPage = Math.floor(stagingState.offset / stagingState.limit) +
+          1;
+        let pagHtml = "";
+        if (pages > 1) {
+          pagHtml += `<button class="btn btn--sm btn--ghost" ${
+            curPage <= 1 ? "disabled" : ""
+          } onclick="stagingState.offset=${
+            stagingState.offset - stagingState.limit
+          };loadStagingConversations()">&larr;</button>`;
+          pagHtml +=
+            `<span style="color:var(--fg-muted);font-size:var(--font-size-xs)">${curPage} / ${pages}</span>`;
+          pagHtml += `<button class="btn btn--sm btn--ghost" ${
+            curPage >= pages ? "disabled" : ""
+          } onclick="stagingState.offset=${
+            stagingState.offset + stagingState.limit
+          };loadStagingConversations()">&rarr;</button>`;
+        }
+        document.getElementById("staging-pagination").innerHTML = pagHtml;
+
+        // Check all state
+        const allCheck = document.getElementById("staging-check-all");
+        const allIncluded = conversations.length > 0 &&
+          conversations.every((c) => c.included);
+        if (allCheck) allCheck.checked = allIncluded;
+        document.getElementById("staging-count-info").textContent = `${
+          conversations.filter((c) => c.included).length
+        } / ${total} selected`;
+      }
+
+      function esc(s) {
+        const d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      async function toggleConvIncluded(id, included) {
+        await api("PATCH", `/api/staging/conversations/${id}`, {
+          included,
+        });
+        loadStagingConversations();
+        loadStagingStats();
+      }
+
+      async function toggleAllConversations(checked) {
+        const allRes = await api(
+          "GET",
+          "/api/staging/conversations?limit=1",
+        );
+        if (!allRes.conversations || allRes.total === 0) return;
+        await api("PATCH", "/api/staging/conversations/all", {
+          included: checked,
+        });
+        loadStagingConversations();
+        loadStagingStats();
+      }
+
+      async function openStagingMessages(convId, title) {
+        stagingState.messageView = {
+          conversationId: convId,
+          offset: 0,
+        };
+        const panel = document.getElementById("staging-messages-panel");
+        panel.style.display = "flex";
+        document.getElementById("staging-messages-title").textContent = title;
+        await loadStagingMessages();
+      }
+
+      async function loadStagingMessages() {
+        if (!stagingState.messageView) return;
+        const { conversationId, offset } = stagingState.messageView;
+        try {
+          const res = await api(
+            "GET",
+            `/api/staging/conversations/${conversationId}/messages?offset=${offset}&limit=100`,
+          );
+          const listEl = document.getElementById(
+            "staging-messages-list",
+          );
+          if (res.messages.length === 0) {
+            listEl.innerHTML =
+              '<div style="text-align:center;color:var(--fg-subtle);padding:var(--sp-4)">No messages</div>';
+            document.getElementById("staging-messages-pagination")
+              .innerHTML = "";
+            return;
+          }
+          listEl.innerHTML = res.messages.map((m) => {
+            const roleClass = `wiz-staging-msg--${m.role}`;
+            const editedBadge = m.isEdited
+              ? '<div class="wiz-staging-msg-edited">edited</div>'
+              : "";
+            const content = esc(m.content || "(empty)");
+            return `<div class="wiz-staging-msg ${roleClass}">
+            <div class="wiz-staging-msg-role">${esc(m.role)} ${
+              m.isEdited ? "(edited)" : ""
+            }</div>
+            <div class="wiz-staging-msg-content">${content}</div>
+            ${editedBadge}
+            <div class="wiz-staging-msg-actions">
+              <button class="btn btn--sm btn--ghost" onclick="editStagingMessage('${m.id}','${m.conversationId}')">Edit</button>
+              ${
+              m.isEdited
+                ? `<button class="btn btn--sm btn--ghost" onclick="revertStagingMessage('${m.id}')">Revert</button>`
+                : ""
+            }
+            </div>
+          </div>`;
+          }).join("");
+
+          // Pagination
+          const pages = Math.ceil(res.total / 100);
+          const curPage = Math.floor(offset / 100) + 1;
+          let pagHtml = "";
+          if (pages > 1) {
+            pagHtml += `<button class="btn btn--sm btn--ghost" ${
+              curPage <= 1 ? "disabled" : ""
+            } onclick="stagingState.messageView.offset-=100;loadStagingMessages()">&larr;</button>`;
+            pagHtml +=
+              `<span style="color:var(--fg-muted);font-size:var(--font-size-xs)">${curPage} / ${pages}</span>`;
+            pagHtml += `<button class="btn btn--sm btn--ghost" ${
+              curPage >= pages ? "disabled" : ""
+            } onclick="stagingState.messageView.offset+=100;loadStagingMessages()">&rarr;</button>`;
+          }
+          document.getElementById("staging-messages-pagination")
+            .innerHTML = pagHtml;
+        } catch (e) {
+          showToast("Failed to load messages: " + e.message);
+        }
+      }
+
+      function closeStagingMessages() {
+        document.getElementById("staging-messages-panel").style
+          .display = "none";
+        stagingState.messageView = null;
+      }
+
+      async function editStagingMessage(msgId, convId) {
+        const content = prompt("Edit message content:");
+        if (content === null) return;
+        try {
+          await api("PATCH", `/api/staging/messages/${msgId}`, {
+            conversationId: convId,
+            content,
+          });
+          showToast("Message edited");
+          loadStagingMessages();
+        } catch (e) {
+          showToast("Edit failed: " + e.message);
+        }
+      }
+
+      async function revertStagingMessage(msgId) {
+        try {
+          await api("DELETE", `/api/staging/messages/${msgId}/edit`);
+          showToast("Edit reverted");
+          loadStagingMessages();
+        } catch (e) {
+          showToast("Revert failed: " + e.message);
+        }
+      }
+
+      // ─── Tags ───────────────────────────────────────────────────────────
+
+      async function removeTagFromConv(convId, tag) {
+        try {
+          await api(
+            "DELETE",
+            `/api/staging/conversations/${convId}/tags/${
+              encodeURIComponent(tag)
+            }`,
+          );
+          loadStagingConversations();
+        } catch (e) {
+          showToast("Failed to remove tag: " + e.message);
+        }
+      }
+
+      async function loadPlatformFilter() {
+        try {
+          const stats = await api("GET", "/api/staging/stats");
+          const platformSelect = document.getElementById(
+            "staging-filter-platform",
+          );
+          const currentPlatform = platformSelect.value;
+          const platforms = Object.keys(stats.byPlatform || {});
+          platformSelect.innerHTML = '<option value="">All Platforms</option>' +
+            platforms.map((p) =>
+              `<option value="${esc(p)}" ${
+                p === currentPlatform ? "selected" : ""
+              }>${esc(p)}</option>`
+            ).join("");
+        } catch (e) { /* ignore */ }
+      }
+
+      // ─── Search ─────────────────────────────────────────────────────────
+
+      async function performStagingSearch() {
+        const query = document.getElementById("staging-search-input")
+          .value.trim();
+        if (!query) return;
+        const scope = document.getElementById("staging-search-scope").value;
+        stagingState.searchOffset = 0;
+        const el = document.getElementById("staging-search-results");
+        el.innerHTML =
+          '<div style="color:var(--fg-subtle);font-size:var(--font-size-sm)">Searching...</div>';
+
+        try {
+          const res = await api(
+            "GET",
+            `/api/staging/search?q=${
+              encodeURIComponent(query)
+            }&scope=${scope}&offset=0&limit=${stagingState.limit}`,
+          );
+          stagingState.searchTotal = res.total || 0;
+          renderSearchResults(res.results || [], res.total || 0);
+          renderSearchPaletteApply();
+          document.getElementById("search-toolbar").style.display = "flex";
+        } catch (e) {
+          el.innerHTML =
+            `<div style="color:var(--danger)">Search failed: ${e.message}</div>`;
+        }
+      }
+
+      function renderSearchResults(conversations, total) {
+        const el = document.getElementById("staging-search-results");
+        if (conversations.length === 0) {
+          el.innerHTML =
+            '<div style="padding:var(--sp-4);text-align:center;color:var(--fg-subtle);font-size:var(--font-size-sm)">No results found</div>';
+          document.getElementById("staging-search-pagination")
+            .innerHTML = "";
+          document.getElementById("search-toolbar").style.display = "none";
+          return;
+        }
+
+        el.innerHTML = conversations.map((c) => {
+          const dateStr = c.createdAt
+            ? new Date(c.createdAt).toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+            : "?";
+          const tags = (c.tags || []).map((t) => {
+            const color = getTagColor(t);
+            return `<span class="wiz-staging-tag" style="background:${color}22;color:${color}" onclick="event.stopPropagation();removeTagFromSearchResult('${c.id}','${t}')">
+            <span class="wiz-staging-tag-dot" style="background:${color}"></span>${
+              esc(t)
+            }<span class="wiz-staging-tag-remove">&times;</span>
+          </span>`;
+          }).join("");
+          return `<div class="wiz-staging-item" data-id="${esc(c.id)}">
+          <div class="wiz-staging-item-check"><input type="checkbox" onchange="updateSearchCount()"></div>
+          <div class="wiz-staging-item-info">
+            <div class="wiz-staging-item-title" onclick="openStagingMessages('${c.id}', ${
+            JSON.stringify(JSON.stringify(c.title || "Untitled"))
+              .replace(/"/g, "&quot;")
+          })">${esc(c.title || "Untitled")}</div>
+            <div class="wiz-staging-item-meta">
+              <span>${c.platform}</span>
+              <span>${c.messageCount} msgs</span>
+              <span>${dateStr}</span>
+            </div>
+            ${tags ? `<div class="wiz-staging-item-tags">${tags}</div>` : ""}
+          </div>
+          <div style="text-align:right">
+            <span style="font-family:var(--font-mono);font-size:var(--font-size-xs);color:var(--accent)">${c.matchCount} match${
+            c.matchCount !== 1 ? "es" : ""
+          }</span>
+          </div>
+        </div>`;
+        }).join("");
+
+        // Pagination
+        const pages = Math.ceil(total / stagingState.limit);
+        const curPage =
+          Math.floor(stagingState.searchOffset / stagingState.limit) +
+          1;
+        let pagHtml = "";
+        if (pages > 1) {
+          pagHtml += `<button class="btn btn--sm btn--ghost" ${
+            curPage <= 1 ? "disabled" : ""
+          } onclick="stagingState.searchOffset-=${stagingState.limit};performStagingSearchPage()">&larr;</button>`;
+          pagHtml +=
+            `<span style="color:var(--fg-muted);font-size:var(--font-size-xs)">${curPage} / ${pages} (${total} total)</span>`;
+          pagHtml += `<button class="btn btn--sm btn--ghost" ${
+            curPage >= pages ? "disabled" : ""
+          } onclick="stagingState.searchOffset+=${stagingState.limit};performStagingSearchPage()">&rarr;</button>`;
+        }
+        document.getElementById("staging-search-pagination").innerHTML =
+          pagHtml;
+        updateSearchCount();
+      }
+
+      async function performStagingSearchPage() {
+        const query = document.getElementById("staging-search-input")
+          .value.trim();
+        const scope = document.getElementById("staging-search-scope").value;
+        try {
+          const res = await api(
+            "GET",
+            `/api/staging/search?q=${
+              encodeURIComponent(query)
+            }&scope=${scope}&offset=${stagingState.searchOffset}&limit=${stagingState.limit}`,
+          );
+          renderSearchResults(res.results || [], res.total || 0);
+        } catch (e) {
+          showToast("Search failed: " + e.message);
+        }
+      }
+
+      function toggleSearchAll(checked) {
+        document.querySelectorAll(
+          "#staging-search-results .wiz-staging-item-check input",
+        ).forEach((cb) => cb.checked = checked);
+        updateSearchCount();
+      }
+
+      function updateSearchCount() {
+        const total = document.querySelectorAll(
+          "#staging-search-results .wiz-staging-item-check input",
+        ).length;
+        const checked = document.querySelectorAll(
+          "#staging-search-results .wiz-staging-item-check input:checked",
+        ).length;
+        const el = document.getElementById("search-count-info");
+        if (el) el.textContent = `${checked} / ${total} selected`;
+      }
+
+      function renderSearchPaletteApply() {
+        const el = document.getElementById("search-palette-apply");
+        if (!el) return;
+        const names = Object.keys(stagingState.palette);
+        if (names.length === 0) {
+          el.innerHTML = "";
+          return;
+        }
+        el.innerHTML =
+          '<span style="font-size:10px;color:var(--fg-subtle);margin-right:4px">Tag:</span>' +
+          names.map((name) => {
+            const color = stagingState.palette[name];
+            return `<span class="wiz-staging-palette-chip" style="background:${color}22;color:${color}" onclick="applyTagToSearchResults('${
+              esc(name)
+            }')">
+            <span class="wiz-staging-palette-chip-dot" style="background:${color}"></span>
+            ${esc(name)}
+          </span>`;
+          }).join("");
+      }
+
+      async function removeTagFromSearchResult(convId, tag) {
+        await api(
+          "DELETE",
+          `/api/staging/conversations/${convId}/tags/${
+            encodeURIComponent(tag)
+          }`,
+        );
+        performStagingSearchPage();
+      }
+
+      async function applyTagToSearchResults(name) {
+        const checked = document.querySelectorAll(
+          "#staging-search-results .wiz-staging-item-check input:checked",
+        );
+        if (checked.length === 0) {
+          showToast("Select conversations first");
+          return;
+        }
+        const ids = Array.from(checked).map((cb) =>
+          cb.closest(".wiz-staging-item")?.dataset?.id
+        ).filter(Boolean);
+        try {
+          await api("POST", `/api/staging/conversations/bulk/tags`, {
+            ids,
+            tag: name,
+          });
+          showToast(
+            `Applied "${name}" to ${ids.length} conversation(s)`,
+          );
+          // Refresh search to show updated tags
+          performStagingSearchPage();
+        } catch (e) {
+          showToast("Failed: " + e.message);
+        }
+      }
+
+      // ─── Psycheros Compare ─────────────────────────────────────────────
+
+      async function autodetectPsycheros() {
+        const el = document.getElementById("psycheros-autodetect");
+        try {
+          const res = await api(
+            "GET",
+            "/api/staging/psycheros/autodetect",
+          );
+          if (res.candidates && res.candidates.length > 0) {
+            // Prefer psycheros.db over chats.db
+            const preferred = res.candidates.find((c) =>
+              c.endsWith("psycheros.db")
+            ) || res.candidates[0];
+            document.getElementById("psycheros-db-path").value = preferred;
+            const labels = res.candidates.map((c) => {
+              const name = c.split("/").slice(-3).join("/");
+              return `<option value="${esc(c)}" ${
+                c === preferred ? "selected" : ""
+              }>${esc(name)}</option>`;
+            }).join("");
+            el.innerHTML =
+              `<select class="wiz-select" onchange="document.getElementById('psycheros-db-path').value=this.value"><option value="">-- detected databases --</option>${labels}</select>`;
+          } else {
+            el.innerHTML =
+              '<span style="font-size:var(--font-size-xs);color:var(--fg-subtle)">No Psycheros databases found automatically. Enter the path manually.</span>';
+          }
+        } catch (e) {
+          el.innerHTML = "";
+        }
+      }
+
+      async function runPsycherosCompare() {
+        const path = document.getElementById("psycheros-db-path").value
+          .trim();
+        if (!path) {
+          showToast("Enter a path to a Psycheros database");
+          return;
+        }
+        const el = document.getElementById("psycheros-compare-results");
+        el.innerHTML =
+          '<div style="color:var(--fg-subtle);font-size:var(--font-size-sm)">Comparing...</div>';
+        try {
+          const res = await api(
+            "POST",
+            "/api/staging/psycheros/compare",
+            { path },
+          );
+          const s = res.summary;
+          el.innerHTML = `<div class="wiz-staging-compare-summary">
+          <div class="wiz-staging-compare-item"><b>${s.new}</b> new</div>
+          <div class="wiz-staging-compare-item"><b>${s.existing}</b> already in Psycheros</div>
+          <div class="wiz-staging-compare-item"><b>${s.changed}</b> changed</div>
+        </div>
+        <div style="font-size:var(--font-size-xs);color:var(--fg-subtle);margin-top:var(--sp-2)">Use the "All" filter to see status badges on each conversation.</div>`;
+          loadStagingConversations();
+          loadStagingStats();
+        } catch (e) {
+          el.innerHTML =
+            `<div style="color:var(--danger)">Compare failed: ${e.message}</div>`;
+        }
+      }
+
+      // ─── Tab Switching ──────────────────────────────────────────────────
+
+      const TAB_DESCRIPTIONS = {
+        browse:
+          "All parsed conversations. Toggle the checkbox to include/exclude from commit. Click a title to view messages.",
+        search:
+          "Search across conversation titles and message content. Results are grouped by conversation with match counts. Select results and tag them from the palette bar above.",
+      };
+
+      function switchStagingTab(tab) {
+        stagingState.currentTab = tab;
+        document.querySelectorAll(".wiz-staging-tab").forEach((t) =>
+          t.classList.toggle(
+            "wiz-staging-tab--active",
+            t.dataset.tab === tab,
+          )
+        );
+        ["browse", "search"].forEach((t) => {
+          const el = document.getElementById(`staging-tab-${t}`);
+          if (el) el.style.display = t === tab ? "block" : "none";
+        });
+        const descEl = document.getElementById("staging-tab-desc");
+        if (descEl) descEl.textContent = TAB_DESCRIPTIONS[tab] || "";
+        if (tab === "browse") loadStagingConversations();
+      }
+
+      // ─── Commit & Export ────────────────────────────────────────────────
+
+      async function commitStaging() {
+        const stats = await api("GET", "/api/staging/stats");
+        if (stats.included === 0) {
+          showToast("No conversations selected");
+          return;
+        }
+        if (
+          !confirm(
+            `Commit ${stats.included} conversations to chats.db?`,
+          )
+        ) return;
+        const btn = document.getElementById("btn-commit-staging");
+        btn.disabled = true;
+        btn.textContent = "Committing...";
+        try {
+          const res = await api("POST", "/api/staging/commit");
+          if (res.error) {
+            showToast(res.error);
+            return;
+          }
+          showToast(
+            `Committed ${res.conversationsStored} conversations (${res.messagesStored} messages)`,
+          );
+          await loadState();
+          renderStepper();
+          updateStatusBadges();
+        } catch (e) {
+          showToast("Commit failed: " + e.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = `Commit Selected (${stats.included})`;
+        }
+      }
+
+      async function exportOnly() {
+        const stats = await api("GET", "/api/staging/stats");
+        if (stats.included === 0) {
+          showToast("No conversations selected");
+          return;
+        }
+        if (
+          !confirm(
+            `Export ${stats.included} conversations as Psycheros-compatible chats.db?\n\nThis will skip memory extraction and knowledge graph generation.`,
+          )
+        ) return;
+        const btn = document.getElementById("btn-export-only");
+        btn.disabled = true;
+        btn.textContent = "Exporting...";
+        try {
+          const res = await api("POST", "/api/staging/export-only");
+          if (res.error) {
+            showToast(res.error);
+            return;
+          }
+          showToast(
+            `Exported ${res.conversationsStored} conversations — ready for download`,
+          );
+          // Switch to graph panel but only show download
+          await loadState();
+          renderStepper();
+          updateStatusBadges();
+          // Hide all graph-specific content
+          document.getElementById("graph-panel-nav").style.display = "none";
+          document.getElementById("graph-panel-title").textContent =
+            "Export Complete";
+          document.getElementById("graph-panel-desc").textContent =
+            `Exported ${res.conversationsStored} conversations. The package is finalized and ready for Psycheros.`;
+          document.getElementById("graph-status-info").style.display = "none";
+          document.getElementById("graph-cost").parentElement.style
+            .display = "none";
+          document.getElementById("graph-progress-section").style
+            .display = "none";
+          document.getElementById("graph-start-actions").style.display = "none";
+          document.getElementById("graph-complete-actions").style
+            .display = "none";
+          document.getElementById("graph-viewer-btn").style.display = "none";
+          document.getElementById("finalize-section").style.display = "none";
+          // Set download link with tag suffix if any
+          const dlLink = document.querySelector("#download-section a");
+          dlLink.href = res.tagSuffix
+            ? `/api/download?tags=${encodeURIComponent(res.tagSuffix)}`
+            : "/api/download";
+          document.getElementById("download-section").style.display = "flex";
+        } catch (e) {
+          showToast("Export failed: " + e.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Export Only (skip memories & graph)";
+        }
+      }
+
+      // ─── Boot ────────────────────────────────────────────────────────────────
+
+      init();
+    </script>
+  </body>
+</html>

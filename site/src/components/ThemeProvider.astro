@@ -1,0 +1,12 @@
+---
+// Override — force dark mode for all visitors. Psycheros UI is dark-only
+// (true-black OLED) and the docs match. The companion ThemeSelect override
+// removes the toggle so this can't be flipped at runtime.
+//
+// To restore light/dark, delete this file + ThemeSelect.astro and remove
+// the `components` entries from astro.config.mjs.
+---
+
+<script is:inline>
+	document.documentElement.dataset.theme = 'dark';
+</script>

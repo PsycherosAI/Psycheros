@@ -1,0 +1,155 @@
+/**
+ * Layout
+ * App structure with slide-out sidebar overlay.
+ */
+
+/* Background layer - only visible when image is set */
+.bg-layer {
+  position: fixed;
+  inset: 0;
+  background-image: var(--bg-image);
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  filter: blur(var(--bg-blur));
+  z-index: -2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+body.has-bg-image .bg-layer {
+  opacity: 1;
+}
+
+/* Overlay layer for text readability */
+.bg-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, var(--bg-overlay-opacity));
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+body.has-bg-image .bg-overlay {
+  opacity: 1;
+}
+
+/* Hide overlay when glass is enabled - glass panels provide their own readability */
+body.glass-enabled .bg-overlay {
+  opacity: 0;
+}
+
+/* Glass effect base */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-color: var(--glass-border);
+}
+
+body.glass-enabled .sidebar,
+body.glass-enabled .input-area {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+/* Header stays fully opaque even in glass mode */
+body.glass-enabled .header {
+  background-color: var(--c-bg-raised);
+  border-color: var(--glass-border);
+}
+
+body.glass-enabled .sidebar {
+  border-color: var(--glass-border);
+}
+
+body.glass-enabled .input-area {
+  border-color: var(--glass-border);
+}
+
+/* App shell */
+.app {
+  display: grid;
+  grid-template-rows: calc(var(--header-height) + env(safe-area-inset-top)) 1fr;
+  grid-template-columns: 1fr;
+  height: 100dvh;
+  overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Header row spans full width */
+.header {
+  grid-column: 1 / -1;
+}
+
+/* Main content area */
+.main {
+  display: grid;
+  grid-template-columns: 1fr;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Sidebar - always slide-out overlay */
+.sidebar {
+  position: fixed;
+  top: calc(var(--header-height) + env(safe-area-inset-top));
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
+  background-color: var(--c-bg-raised);
+  border-right: 1px solid var(--c-border);
+  transform: translateX(-100%);
+  transition: transform var(--transition);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar.open {
+  transform: translateX(0);
+}
+
+/* Sidebar overlay - darker for true black aesthetic */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  top: calc(var(--header-height) + env(safe-area-inset-top));
+  background-color: rgba(0, 0, 0, 0.85);
+  z-index: 99;
+}
+
+.sidebar-overlay.open {
+  display: block;
+}
+
+/* Chat container */
+.chat {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Messages area */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* Input area fixed at bottom */
+.input-area {
+  flex-shrink: 0;
+  border-top: 1px solid var(--c-border);
+  background-color: var(--c-bg-raised);
+}

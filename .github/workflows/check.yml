@@ -1,0 +1,45 @@
+name: check
+
+on:
+  # Manual-only by design. Re-enable automatic triggers (push/PR) only
+  # after the operator has decided what should auto-run on what surface.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workspace:
+    name: type-check / lint / fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.7.5
+
+      - name: Cache Deno deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/deno
+            ~/.deno
+          key: deno-${{ runner.os }}-${{ hashFiles('deno.lock', 'deno.json', 'packages/*/deno.json') }}
+          restore-keys: |
+            deno-${{ runner.os }}-
+
+      - name: Type-check all packages
+        run: |
+          deno check \
+            packages/entity-core/src/mod.ts \
+            packages/entity-loom/src/main.ts \
+            packages/psycheros/src/main.ts \
+            packages/launcher/dashboard.ts
+
+      - name: Lint all packages
+        run: deno lint
+
+      - name: Format check
+        run: deno fmt --check

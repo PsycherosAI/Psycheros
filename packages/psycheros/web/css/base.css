@@ -1,0 +1,84 @@
+/**
+ * Base Styles
+ * Global styles, scrollbars, focus states, selection - Phosphor Terminal aesthetic.
+ */
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height);
+  color: var(--c-fg);
+  background-color: var(--c-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Focus states - phosphor glow */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--c-accent), var(--glow-accent);
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Selection - phosphor green */
+::selection {
+  background-color: var(--c-accent);
+  color: var(--c-bg);
+}
+
+/* Scrollbars - green phosphor accent */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--c-bg-sunken);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--c-accent-muted);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--c-accent);
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-accent-muted) var(--c-bg-sunken);
+}
+
+/* Links */
+a:hover {
+  color: var(--c-accent);
+}
+
+/* Code - monospace for code elements */
+code,
+pre {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+pre {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* Green caret for inputs */
+input,
+textarea {
+  caret-color: var(--c-accent);
+}

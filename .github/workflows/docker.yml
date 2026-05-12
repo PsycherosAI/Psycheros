@@ -1,0 +1,88 @@
+name: docker
+
+on:
+  # Manual-only by design. Re-enable automatic triggers (push to main,
+  # version tags) only after the operator has decided what should auto-
+  # run on what surface.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Override image tag (default: derived from ref)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: psycheros
+            dockerfile: packages/psycheros/Dockerfile
+            description: Psycheros harness
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          # Image tag derivation:
+          #   <branch-name>       — for branch dispatches
+          #   <semver>            — for psycheros-v<semver> tag dispatches (prefix stripped)
+          #   latest              — auto-applied alongside <semver> via flavor.latest=auto
+          #                         on any semver match. Note: this does NOT semver-compare —
+          #                         dispatching an older tag would move `latest` backward.
+          #                         See RELEASES.md "Pinning in production".
+          #   sha-<short-sha>     — always; archival pin to the exact commit
+          #   <inputs.tag>        — operator override via workflow_dispatch input
+          tags: |
+            type=ref,event=branch
+            type=match,pattern=psycheros-v(.*),group=1
+            type=sha,prefix=sha-,format=short
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
+          labels: |
+            org.opencontainers.image.title=Psycheros
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.licenses=MPL-2.0
+          # Note: org.opencontainers.image.source and .url default to the
+          # *building* repository (set by docker/metadata-action from
+          # github.repository). While canonical builds live in
+          # PsycherosAI/Psycheros-staging (private), users pulling the image
+          # see those labels pointing at a repo they can't access. This
+          # auto-corrects once canonical builds move to PsycherosAI/Psycheros
+          # (public). No override today — pointing at an empty repo is worse
+          # than pointing at the build provenance.
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

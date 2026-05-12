@@ -1,0 +1,13 @@
+{
+  "name": "@entity/core",
+  "version": "0.1.0",
+  "exports": "./src/mod.ts",
+  "imports": {
+    "zod": "npm:zod@^3"
+  },
+  "tasks": {
+    "dev": "deno run --watch -A --unstable-cron src/mod.ts",
+    "start": "deno run -A --unstable-cron src/mod.ts",
+    "stop": "pkill -INT -f 'deno.*entity-core' || true"
+  }
+}

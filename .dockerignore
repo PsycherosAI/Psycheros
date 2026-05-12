@@ -1,0 +1,66 @@
+# =========================================================
+# Docker build context exclusions
+# Keep images slim and avoid leaking dev/runtime data
+# =========================================================
+
+# Git + CI
+.git
+.github
+.gitignore
+.gitattributes
+
+# Agent tooling — never ship in images
+.claude
+.playwright-mcp
+
+# Editors / IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Deno cache
+.deno
+**/.deno
+*_cache_v2/
+
+# Per-package runtime data (must never leak into images)
+**/data
+**/.psycheros
+**/.entity-loom
+**/.loom-exports
+**/.snapshots
+**/identity
+**/memories
+**/custom-tools
+**/backgrounds
+
+# SQLite runtime files
+**/*.db
+**/*.db-journal
+**/*.db-wal
+**/*.db-shm
+
+# Logs and env
+**/*.log
+**/logs
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Node (if any tooling generates one)
+node_modules
+**/node_modules
+
+# Top-level README/CLAUDE — runtime images don't need workspace-level docs
+# (per-package READMEs ARE included, see each Dockerfile)
+/README.md
+/CLAUDE.md
+
+# Standalone Dockerfiles — each image uses its own Dockerfile by path
+# (avoids accidentally embedding sibling Dockerfiles into images)
+**/Dockerfile.*

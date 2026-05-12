@@ -1,0 +1,29 @@
+# Runtime data
+*.db
+
+# Deno cache and lock
+deno.lock
+*_cache_v2/
+
+# Tool/IDE specific
+.claude/
+.playwright-mcp/
+
+# User data directories (protected from git overwrites)
+/identity/
+/memories/
+/backgrounds/
+/custom-tools/
+.psycheros/
+/.snapshots/
+
+# Entity-core data (if running from wrong directory)
+data/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
