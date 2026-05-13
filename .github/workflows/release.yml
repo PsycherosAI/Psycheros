@@ -20,7 +20,7 @@ jobs:
     name: launcher
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Stage launcher bundle
         env:
@@ -51,7 +51,7 @@ jobs:
     name: entity-core
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Stage source tarball
         env:
@@ -76,7 +76,7 @@ jobs:
     name: entity-loom
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Stage source tarball
         env:
