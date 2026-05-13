@@ -56,23 +56,53 @@ bump happens at release time, when the maintainer decides how the change
 maps to semver weight (PATCH for fixes, MINOR for backwards-compatible
 additions, MAJOR for breaking changes).
 
+### Release notes — `CHANGELOG.md` as source of truth
+
+Each package keeps a [Keep a Changelog](https://keepachangelog.com/)-format
+file at `packages/<pkg>/CHANGELOG.md`. This is the canonical source for
+"what changed in this release" — it ships with the source tarball / launcher
+bundle / container image, and the GitHub Release page for each tag is
+auto-generated from the matching entry.
+
+When a new release version ships, the maintainer:
+
+1. Bumps `packages/<pkg>/deno.json:version`.
+2. Prepends a new entry to `packages/<pkg>/CHANGELOG.md` of the form:
+   ```markdown
+   ## [<new-version>] - <YYYY-MM-DD>
+
+   ### Fixed
+   - <bullet per fix>
+
+   ### Changed
+   - <bullet per behavior change>
+
+   ### Added
+   - <bullet per new feature>
+   ```
+3. Adds the `[<new-version>]: https://...` link reference at the file's
+   bottom block (preserve newest-first order).
+4. Commits both files together: `git commit -S -m "bump(<pkg>): <old> → <new>"`.
+5. Tags + pushes — `release.yml` extracts the new entry and posts it to the
+   GH Release page automatically.
+
 ### The flow for a single release event
 
 For each package the maintainer decides to ship:
 
-1. **For DRIFT packages**: bump `packages/<pkg>/deno.json:version` on `main`,
-   commit (signed), push.
-2. **Cut a signed annotated tag** of the form `<package>-v<version>` against
-   the current `main` tip:
+1. **For DRIFT packages**: bump `packages/<pkg>/deno.json:version` AND
+   append the new `CHANGELOG.md` entry on `main`, commit (signed), push.
+2. **Cut a signed annotated tag** of the form `<package>-v<version>`
+   against the current `main` tip:
    ```bash
    git tag -s -a <package>-v<version> -m "<one-line release summary>" <SHA>
    git push origin <package>-v<version>
    ```
-3. **Override the auto-generated release notes** with curated notes if the
-   GitHub-generated notes aren't sufficient:
-   ```bash
-   gh release edit <package>-v<version> --notes-file <path-to-curated-notes>.md
-   ```
+3. **Done.** The auto-fire workflow extracts the CHANGELOG entry and
+   creates the GH Release page with curated notes. No manual override
+   step is needed in the normal flow. (For corrections to an
+   already-published release page, `gh release edit <tag> --notes-file
+   <(path/to/notes>` is still available as a recovery path.)
 
 ### What auto-fires on tag push
 
@@ -80,14 +110,21 @@ A `<package>-v*` tag push fires the appropriate workflows immediately:
 
 | Tag prefix | docker.yml | release.yml |
 |---|---|---|
-| `psycheros-v*` | Builds + pushes `ghcr.io/psycherosai/psycheros:<semver>` + `:latest` + `:sha-<short>` | Self-bootstraps the GH Release with auto-generated notes (Latest badge) |
-| `launcher-v*` | — | Self-bootstraps the GH Release; uploads bundle `.zip` / `.tar.gz` + raw `dashboard.ts` / `run.sh` / `run.ps1` |
-| `entity-core-v*` | — | Self-bootstraps the GH Release; uploads scoped source `.tar.gz` / `.zip` |
-| `entity-loom-v*` | — | Self-bootstraps the GH Release; uploads scoped source `.tar.gz` / `.zip` |
+| `psycheros-v*` | Builds + pushes `ghcr.io/psycherosai/psycheros:<semver>` + `:latest` + `:sha-<short>` | Creates GH Release (Latest badge), notes from `packages/psycheros/CHANGELOG.md` |
+| `launcher-v*` | — | Creates GH Release, notes from `packages/launcher/CHANGELOG.md`; uploads bundle `.zip` / `.tar.gz` + raw `dashboard.ts` / `run.sh` / `run.ps1` |
+| `entity-core-v*` | — | Creates GH Release, notes from `packages/entity-core/CHANGELOG.md`; uploads scoped source `.tar.gz` / `.zip` |
+| `entity-loom-v*` | — | Creates GH Release, notes from `packages/entity-loom/CHANGELOG.md`; uploads scoped source `.tar.gz` / `.zip` |
 
-Both workflows are also preserved as `workflow_dispatch`-capable for manual
-retries (e.g. transient network failures or cache misses); the canonical
-trigger is the tag push.
+The note-extraction logic lives in
+`.github/scripts/extract-changelog-entry.sh` — it reads the latest
+top-level entry from the package's CHANGELOG.md at the tagged SHA and
+writes it to a tempfile passed to `gh release create --notes-file`. If
+the entry is missing or empty, the workflow falls back to
+`--generate-notes` and emits a `::warning::`.
+
+Both workflows are also preserved as `workflow_dispatch`-capable for
+manual retries (e.g. transient network failures or cache misses); the
+canonical trigger is the tag push.
 
 ## Image tag conventions (psycheros)
 

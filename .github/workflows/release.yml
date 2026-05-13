@@ -31,18 +31,31 @@ jobs:
       - uses: actions/checkout@v6
 
       # Self-bootstrap the GH Release. With auto-fire on tag push, this job
-      # runs immediately when the tag lands — before the operator has a
-      # chance to `gh release create` with hand-written notes. Create with
-      # auto-generated notes as a fallback; operator can `gh release edit
-      # --notes-file ...` afterward to swap in curated notes. --latest=false
-      # because the source packages don't claim the Latest badge (psycheros
-      # does — see psycheros-notes job).
+      # runs immediately when the tag lands. Release notes come from
+      # `packages/<pkg>/CHANGELOG.md` (Keep-a-Changelog format): the
+      # extract script pulls the entry whose header is "## [<version>] ..."
+      # and writes it to a tempfile passed via `--notes-file`. Falls back
+      # to `--generate-notes` only when the CHANGELOG entry is missing /
+      # empty (warning emitted). --latest=false because the source
+      # packages don't claim the Latest badge (psycheros does — see the
+      # psycheros-notes job).
       - name: Ensure release exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REF: ${{ github.ref_name }}
         run: |
-          if ! gh release view "$REF" >/dev/null 2>&1; then
+          if gh release view "$REF" >/dev/null 2>&1; then
+            echo "Release $REF already exists; skipping create."
+            exit 0
+          fi
+          PKG="${REF%-v*}"
+          VERSION="${REF#${PKG}-v}"
+          NOTES_FILE="$(mktemp)"
+          if .github/scripts/extract-changelog-entry.sh "$PKG" "$VERSION" > "$NOTES_FILE"; then
+            echo "Creating release from packages/${PKG}/CHANGELOG.md entry [$VERSION]."
+            gh release create "$REF" --title "$REF" --notes-file "$NOTES_FILE" --latest=false --verify-tag
+          else
+            echo "::warning::Falling back to --generate-notes for $REF (no CHANGELOG entry)."
             gh release create "$REF" --title "$REF" --generate-notes --latest=false --verify-tag
           fi
 
@@ -82,7 +95,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REF: ${{ github.ref_name }}
         run: |
-          if ! gh release view "$REF" >/dev/null 2>&1; then
+          if gh release view "$REF" >/dev/null 2>&1; then
+            echo "Release $REF already exists; skipping create."
+            exit 0
+          fi
+          PKG="${REF%-v*}"
+          VERSION="${REF#${PKG}-v}"
+          NOTES_FILE="$(mktemp)"
+          if .github/scripts/extract-changelog-entry.sh "$PKG" "$VERSION" > "$NOTES_FILE"; then
+            echo "Creating release from packages/${PKG}/CHANGELOG.md entry [$VERSION]."
+            gh release create "$REF" --title "$REF" --notes-file "$NOTES_FILE" --latest=false --verify-tag
+          else
+            echo "::warning::Falling back to --generate-notes for $REF (no CHANGELOG entry)."
             gh release create "$REF" --title "$REF" --generate-notes --latest=false --verify-tag
           fi
 
@@ -116,7 +140,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REF: ${{ github.ref_name }}
         run: |
-          if ! gh release view "$REF" >/dev/null 2>&1; then
+          if gh release view "$REF" >/dev/null 2>&1; then
+            echo "Release $REF already exists; skipping create."
+            exit 0
+          fi
+          PKG="${REF%-v*}"
+          VERSION="${REF#${PKG}-v}"
+          NOTES_FILE="$(mktemp)"
+          if .github/scripts/extract-changelog-entry.sh "$PKG" "$VERSION" > "$NOTES_FILE"; then
+            echo "Creating release from packages/${PKG}/CHANGELOG.md entry [$VERSION]."
+            gh release create "$REF" --title "$REF" --notes-file "$NOTES_FILE" --latest=false --verify-tag
+          else
+            echo "::warning::Falling back to --generate-notes for $REF (no CHANGELOG entry)."
             gh release create "$REF" --title "$REF" --generate-notes --latest=false --verify-tag
           fi
 
@@ -153,15 +188,27 @@ jobs:
       - uses: actions/checkout@v6
 
       # psycheros is the harness lineage and claims the Latest badge for the
-      # repo. Same auto-bootstrap pattern as the other jobs, but with
-      # --latest=true. The actual image push is docker.yml's job; this
-      # workflow only ensures the release page exists.
+      # repo. Same CHANGELOG-driven pattern as the other jobs, but with
+      # `--latest` (the Latest badge tracks psycheros only). The actual
+      # image push is docker.yml's job; this workflow only ensures the
+      # release page exists with curated notes.
       - name: Ensure release exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REF: ${{ github.ref_name }}
         run: |
-          if ! gh release view "$REF" >/dev/null 2>&1; then
+          if gh release view "$REF" >/dev/null 2>&1; then
+            echo "Release $REF already exists; skipping create."
+            exit 0
+          fi
+          PKG="${REF%-v*}"
+          VERSION="${REF#${PKG}-v}"
+          NOTES_FILE="$(mktemp)"
+          if .github/scripts/extract-changelog-entry.sh "$PKG" "$VERSION" > "$NOTES_FILE"; then
+            echo "Creating release from packages/${PKG}/CHANGELOG.md entry [$VERSION]."
+            gh release create "$REF" --title "$REF" --notes-file "$NOTES_FILE" --latest --verify-tag
+          else
+            echo "::warning::Falling back to --generate-notes for $REF (no CHANGELOG entry)."
             gh release create "$REF" --title "$REF" --generate-notes --latest --verify-tag
           fi
 
@@ -171,4 +218,4 @@ jobs:
         run: |
           echo "::notice::Tag '$REF' is the Psycheros harness lineage."
           echo "::notice::No release artifacts to attach — the container image is built + pushed by the docker workflow."
-          echo "::notice::Operator can edit the release notes via 'gh release edit \"$REF\" --notes-file ...' to swap auto-generated notes for curated ones."
+          echo "::notice::Release notes are derived from packages/psycheros/CHANGELOG.md; edit the CHANGELOG on staging for future releases. Manual override of this release's page is still possible via 'gh release edit \"$REF\" --notes-file ...'."
