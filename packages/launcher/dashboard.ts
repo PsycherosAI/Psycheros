@@ -21,7 +21,12 @@ const MONOREPO_REPO = resolveMonorepoSlug();
 const PSYCHEROS_PACKAGE = "psycheros";
 const ENTITY_LOOM_PACKAGE = "entity-loom";
 const ENTITY_LOOM_PORT = 3210;
-const PORT = 3001;
+// Launcher dashboard binds here. Override with PSYCHEROS_LAUNCHER_PORT when
+// :3001 is already in use (uptimekuma, Verdaccio, and other common homelab
+// tools all squat here). The launcher's own port is independent of the
+// psycheros daemon's port — that's PSYCHEROS_PORT and lives in psycheros's
+// .env, read at runtime by /api/psycheros-url.
+const PORT = parseInt(Deno.env.get("PSYCHEROS_LAUNCHER_PORT") ?? "3001", 10);
 const MAX_LOG_LINES = 500;
 
 // --- State ---
