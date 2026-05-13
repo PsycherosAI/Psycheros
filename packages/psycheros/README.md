@@ -66,8 +66,8 @@ concurrency model, the state-changes pattern — see [`CLAUDE.md`](CLAUDE.md).
 
 ## Deep references
 
-- [`PHILOSOPHY.md`](../../PHILOSOPHY.md) (repo root) — first-person
-  convention, ownership, the multi-embodiment model
+- [`PHILOSOPHY.md`](../../PHILOSOPHY.md) (repo root) — first-person convention,
+  ownership, the multi-embodiment model
 - [`docs/configuration.md`](docs/configuration.md) — full env-var reference,
   tools list, MCP / RAG settings
 - [`docs/tools-reference.md`](docs/tools-reference.md) — tool system, identity
@@ -78,8 +78,8 @@ concurrency model, the state-changes pattern — see [`CLAUDE.md`](CLAUDE.md).
   editing, situational awareness, graph viz
 - [`docs/api-reference.md`](docs/api-reference.md) — full API endpoints, dual
   SSE architecture, retry stream
-- [`docs/security-audit.md`](docs/security-audit.md) — security audit
-  with threat model + accepted-risk rationale
+- [`docs/security-audit.md`](docs/security-audit.md) — security audit with
+  threat model + accepted-risk rationale
 
 ## Companion packages
 

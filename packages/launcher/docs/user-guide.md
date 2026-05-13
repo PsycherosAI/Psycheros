@@ -72,8 +72,8 @@ Kindroid, Letta). Available once the monorepo is installed. See the
 Click the **Settings** gear to configure:
 
 - **Install path** — where the Psycheros monorepo is cloned. Default
-  `~/psycheros`. Change this if you've already cloned the monorepo elsewhere
-  and want the launcher to use that copy.
+  `~/psycheros`. Change this if you've already cloned the monorepo elsewhere and
+  want the launcher to use that copy.
 - **Your name** — what the entity calls you in conversations.
 - **Entity name** — what the entity is called.
 - **Timezone** — used by the entity's daily-memory consolidation and Pulse
@@ -101,10 +101,9 @@ A single monorepo clone at your install path:
 
 ## Prerequisites
 
-None. The launcher installs [Deno](https://deno.land) automatically if you
-don't have it. Git is optional — with git, updates use `git pull` (fast);
-without git, the launcher downloads the latest source directly (works fine,
-just slower).
+None. The launcher installs [Deno](https://deno.land) automatically if you don't
+have it. Git is optional — with git, updates use `git pull` (fast); without git,
+the launcher downloads the latest source directly (works fine, just slower).
 
 ## After installing
 
@@ -121,15 +120,13 @@ the [Entity Loom user guide](/Psycheros/entity-loom/user-guide/).
 
 ## Updating
 
-Click **Update** in the dashboard. The launcher runs `git pull --ff-only` on
-the install directory (or re-downloads the latest source if git isn't
-available). Restart Psycheros via **Stop** then **Start** to pick up the new
-version.
+Click **Update** in the dashboard. The launcher runs `git pull --ff-only` on the
+install directory (or re-downloads the latest source if git isn't available).
+Restart Psycheros via **Stop** then **Start** to pick up the new version.
 
 ## Command line (advanced)
 
-If you prefer the terminal, the install scripts work without the launcher
-UI:
+If you prefer the terminal, the install scripts work without the launcher UI:
 
 ```bash
 # macOS / Linux
@@ -152,14 +149,14 @@ whichever interface you prefer.
 
 ## Troubleshooting
 
-**"Deno not found" after restart.** Some systems need a terminal restart to
-pick up the new PATH. Close and reopen your terminal.
+**"Deno not found" after restart.** Some systems need a terminal restart to pick
+up the new PATH. Close and reopen your terminal.
 
 **"Could not clone" error.** Check your internet connection and try again. If
 git isn't installed, the launcher will fall back to a direct download.
 
-**First run is slow.** Deno downloads its dependencies on the first launch.
-This only happens once.
+**First run is slow.** Deno downloads its dependencies on the first launch. This
+only happens once.
 
 **Port 3000 already in use.** Stop the other program using that port, or make
 sure you don't have another instance of Psycheros running. Port 3000 is
@@ -176,7 +173,7 @@ already running. Close it before starting a new one.
 
 The launcher is the recommended path for non-technical operators. If you're
 deploying Psycheros to a server, embedding it in your own infrastructure, or
-running it as a container under an orchestrator, the [Docker image](
-https://github.com/PsycherosAI/Psycheros/pkgs/container/psycheros) or building
-from source is a better fit. See the repo
+running it as a container under an orchestrator, the
+[Docker image](https://github.com/PsycherosAI/Psycheros/pkgs/container/psycheros)
+or building from source is a better fit. See the repo
 [README](https://github.com/PsycherosAI/Psycheros#docker) for those paths.

@@ -15,7 +15,7 @@ All Psycheros configuration is via environment variables. Copy `.env.example` to
 | `PSYCHEROS_HOST`                    | No       | `0.0.0.0`     | Server hostname                                                                                                                                      |
 | `PSYCHEROS_ACCENT_COLOR`            | No       | `#39ff14`     | UI accent color (hex). Overridden by any preset theme selected in Settings > Appearance.                                                             |
 | `PSYCHEROS_TOOLS`                   | No       | (all)         | Comma-separated list of enabled tools. Default: all tools enabled. Use `none` to disable all non-auto tools, or list specific tools to limit access. |
-| `PSYCHEROS_MEMORY_HOUR`             | No       | `4`           | Fallback UTC hour for daily summarization (0-23). Only used when `PSYCHEROS_DISPLAY_TZ` is not set.                                                   |
+| `PSYCHEROS_MEMORY_HOUR`             | No       | `4`           | Fallback UTC hour for daily summarization (0-23). Only used when `PSYCHEROS_DISPLAY_TZ` is not set.                                                  |
 | `PSYCHEROS_SNAPSHOT_HOUR`           | No       | `3`           | Hour to run daily identity snapshots (0-23)                                                                                                          |
 | `PSYCHEROS_SNAPSHOT_RETENTION_DAYS` | No       | `30`          | Days to retain snapshots before cleanup                                                                                                              |
 | `PSYCHEROS_WEB_SEARCH`              | No       | `disabled`    | Web search provider: `disabled`, `tavily`, or `brave`                                                                                                |
@@ -43,11 +43,11 @@ Optional. When enabled, an sshd inside the container exposes a shell for
 operator access. Disabled by default. When enabling, you must also map the port
 at `docker run -p <host>:<port>`.
 
-| Variable                         | Required | Default | Description                                                                                                                                                                                          |
-| -------------------------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PSYCHEROS_SSH_ENABLED`          | No       | `false` | Enable the in-container sshd                                                                                                                                                                         |
-| `PSYCHEROS_SSH_PORT`             | No       | `47291` | Port sshd listens on inside the container                                                                                                                                                            |
-| `PSYCHEROS_SSH_AUTHORIZED_KEYS`  | No       | —       | Authorized public keys, separated by **commas** (not newlines — UnRAID and many container UIs strip newlines). Alternatively, mount a file at `/root/.ssh/authorized_keys`; the env var takes precedence. |
+| Variable                        | Required | Default | Description                                                                                                                                                                                               |
+| ------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PSYCHEROS_SSH_ENABLED`         | No       | `false` | Enable the in-container sshd                                                                                                                                                                              |
+| `PSYCHEROS_SSH_PORT`            | No       | `47291` | Port sshd listens on inside the container                                                                                                                                                                 |
+| `PSYCHEROS_SSH_AUTHORIZED_KEYS` | No       | —       | Authorized public keys, separated by **commas** (not newlines — UnRAID and many container UIs strip newlines). Alternatively, mount a file at `/root/.ssh/authorized_keys`; the env var takes precedence. |
 
 ## Discord Gateway Settings
 

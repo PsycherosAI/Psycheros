@@ -2,7 +2,6 @@
 title: "Security Audit"
 ---
 
-
 Status: **Complete** — reviewed for homelab deployment behind Authelia.
 
 ## Threat Model

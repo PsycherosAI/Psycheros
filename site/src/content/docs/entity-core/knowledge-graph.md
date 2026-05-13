@@ -2,7 +2,6 @@
 title: "Knowledge Graph"
 ---
 
-
 The knowledge graph is a relational index of concrete, durable facts about
 people and their relationships. It tracks who exists in someone's world, what
 they're like, and how they relate to each other. It supplements the hierarchical

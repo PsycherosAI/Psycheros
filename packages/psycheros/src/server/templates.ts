@@ -417,9 +417,16 @@ export function renderHeader(): string {
 function renderVersionChip(): string {
   const baseHtml = escapeHtml(VERSION_BASE);
   if (IS_PRERELEASE) {
-    return `<span class="psy-version-chip psy-version-chip--staging" title="${escapeHtml(VERSION)}">v${baseHtml}<span class="psy-version-chip__flavor"> · ${escapeHtml(FLAVOR_LABEL)}</span></span>`;
+    return `<span class="psy-version-chip psy-version-chip--staging" title="${
+      escapeHtml(VERSION)
+    }">v${baseHtml}<span class="psy-version-chip__flavor"> · ${
+      escapeHtml(FLAVOR_LABEL)
+    }</span></span>`;
   }
-  const href = `https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v${encodeURIComponent(VERSION_BASE)}`;
+  const href =
+    `https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v${
+      encodeURIComponent(VERSION_BASE)
+    }`;
   return `<a class="psy-version-chip" href="${href}" target="_blank" rel="noopener" title="Release notes for v${baseHtml}">v${baseHtml}</a>`;
 }
 

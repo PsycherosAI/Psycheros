@@ -8,12 +8,12 @@ move in lockstep with `entity-core`, `entity-loom`, or `launcher`.
 
 Every release tag uses the form `<package>-v<ver>`:
 
-| Package       | Tag prefix      | Example              | Shipped as                                       |
-| ------------- | --------------- | -------------------- | ------------------------------------------------ |
-| `psycheros`   | `psycheros-v`   | `psycheros-v0.1.0`   | Docker image at `ghcr.io/psycherosai/psycheros`  |
-| `entity-core` | `entity-core-v` | `entity-core-v0.1.0` | Tagged source release (tarball + zip)            |
-| `entity-loom` | `entity-loom-v` | `entity-loom-v0.2.0` | Tagged source release (tarball + zip)            |
-| `launcher`    | `launcher-v`    | `launcher-v0.1.0`    | Bundle (zip + tarball) + raw install scripts     |
+| Package       | Tag prefix      | Example              | Shipped as                                      |
+| ------------- | --------------- | -------------------- | ----------------------------------------------- |
+| `psycheros`   | `psycheros-v`   | `psycheros-v0.1.0`   | Docker image at `ghcr.io/psycherosai/psycheros` |
+| `entity-core` | `entity-core-v` | `entity-core-v0.1.0` | Tagged source release (tarball + zip)           |
+| `entity-loom` | `entity-loom-v` | `entity-loom-v0.2.0` | Tagged source release (tarball + zip)           |
+| `launcher`    | `launcher-v`    | `launcher-v0.1.0`    | Bundle (zip + tarball) + raw install scripts    |
 
 Each package follows [Semantic Versioning 2.0](https://semver.org/). MAJOR for
 breaking changes, MINOR for backwards-compatible additions, PATCH for fixes. The
@@ -33,36 +33,36 @@ everything downstream of that is mechanical.
 
 ### A release event is a sweep across all four packages
 
-Each of the four packages has an **independent semver lineage**. A release
-event is not a single-package decision — it's a survey across all four,
-producing 0–N tag-cuts depending on which packages are ready to ship.
+Each of the four packages has an **independent semver lineage**. A release event
+is not a single-package decision — it's a survey across all four, producing 0–N
+tag-cuts depending on which packages are ready to ship.
 
 Per release event, each package is in one of three states:
 
-| State | Condition | Action |
-|---|---|---|
-| **CLEAN** | `packages/<pkg>/deno.json:version` on `main` equals the version in the most recent `<pkg>-v*` tag, and the `packages/<pkg>/` source tree matches what that tag points at | Skip this package this cycle |
-| **PENDING_TAG** | `deno.json:version` on `main` is greater than the latest tag | Cut `<pkg>-v<version>` |
-| **DRIFT** | versions equal, source tree differs | Bump `packages/<pkg>/deno.json`'s `version` field on `main`, then cut the tag |
+| State           | Condition                                                                                                                                                                | Action                                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| **CLEAN**       | `packages/<pkg>/deno.json:version` on `main` equals the version in the most recent `<pkg>-v*` tag, and the `packages/<pkg>/` source tree matches what that tag points at | Skip this package this cycle                                                  |
+| **PENDING_TAG** | `deno.json:version` on `main` is greater than the latest tag                                                                                                             | Cut `<pkg>-v<version>`                                                        |
+| **DRIFT**       | versions equal, source tree differs                                                                                                                                      | Bump `packages/<pkg>/deno.json`'s `version` field on `main`, then cut the tag |
 
 **Drift policy is a soft warning.** A drifted package does not block other
 packages from being released. Maintainers may have valid reasons to keep a
-package drifted across multiple release cycles (in-progress work not yet
-ready for consumption). Surface drift; don't force resolution.
+package drifted across multiple release cycles (in-progress work not yet ready
+for consumption). Surface drift; don't force resolution.
 
-**Version bumps are part of the release decision, not a precondition for
-work.** Source changes accumulate on `main` between releases; the version
-bump happens at release time, when the maintainer decides how the change
-maps to semver weight (PATCH for fixes, MINOR for backwards-compatible
-additions, MAJOR for breaking changes).
+**Version bumps are part of the release decision, not a precondition for work.**
+Source changes accumulate on `main` between releases; the version bump happens
+at release time, when the maintainer decides how the change maps to semver
+weight (PATCH for fixes, MINOR for backwards-compatible additions, MAJOR for
+breaking changes).
 
 ### Release notes — `CHANGELOG.md` as source of truth
 
-Each package keeps a [Keep a Changelog](https://keepachangelog.com/)-format
-file at `packages/<pkg>/CHANGELOG.md`. This is the canonical source for
-"what changed in this release" — it ships with the source tarball / launcher
-bundle / container image, and the GitHub Release page for each tag is
-auto-generated from the matching entry.
+Each package keeps a [Keep a Changelog](https://keepachangelog.com/)-format file
+at `packages/<pkg>/CHANGELOG.md`. This is the canonical source for "what changed
+in this release" — it ships with the source tarball / launcher bundle /
+container image, and the GitHub Release page for each tag is auto-generated from
+the matching entry.
 
 When a new release version ships, the maintainer:
 
@@ -72,59 +72,62 @@ When a new release version ships, the maintainer:
    ## [<new-version>] - <YYYY-MM-DD>
 
    ### Fixed
+
    - <bullet per fix>
 
    ### Changed
+
    - <bullet per behavior change>
 
    ### Added
+
    - <bullet per new feature>
    ```
-3. Adds the `[<new-version>]: https://...` link reference at the file's
-   bottom block (preserve newest-first order).
+3. Adds the `[<new-version>]: https://...` link reference at the file's bottom
+   block (preserve newest-first order).
 4. Commits both files together: `git commit -S -m "bump(<pkg>): <old> → <new>"`.
-5. Tags + pushes — `release.yml` extracts the new entry and posts it to the
-   GH Release page automatically.
+5. Tags + pushes — `release.yml` extracts the new entry and posts it to the GH
+   Release page automatically.
 
 ### The flow for a single release event
 
 For each package the maintainer decides to ship:
 
-1. **For DRIFT packages**: bump `packages/<pkg>/deno.json:version` AND
-   append the new `CHANGELOG.md` entry on `main`, commit (signed), push.
-2. **Cut a signed annotated tag** of the form `<package>-v<version>`
-   against the current `main` tip:
+1. **For DRIFT packages**: bump `packages/<pkg>/deno.json:version` AND append
+   the new `CHANGELOG.md` entry on `main`, commit (signed), push.
+2. **Cut a signed annotated tag** of the form `<package>-v<version>` against the
+   current `main` tip:
    ```bash
    git tag -s -a <package>-v<version> -m "<one-line release summary>" <SHA>
    git push origin <package>-v<version>
    ```
-3. **Done.** The auto-fire workflow extracts the CHANGELOG entry and
-   creates the GH Release page with curated notes. No manual override
-   step is needed in the normal flow. (For corrections to an
-   already-published release page, `gh release edit <tag> --notes-file
-   <(path/to/notes>` is still available as a recovery path.)
+3. **Done.** The auto-fire workflow extracts the CHANGELOG entry and creates the
+   GH Release page with curated notes. No manual override step is needed in the
+   normal flow. (For corrections to an already-published release page,
+   `gh release edit <tag> --notes-file
+   <(path/to/notes>` is still available
+   as a recovery path.)
 
 ### What auto-fires on tag push
 
 A `<package>-v*` tag push fires the appropriate workflows immediately:
 
-| Tag prefix | docker.yml | release.yml |
-|---|---|---|
-| `psycheros-v*` | Builds + pushes `ghcr.io/psycherosai/psycheros:<semver>` + `:latest` + `:sha-<short>` | Creates GH Release (Latest badge), notes from `packages/psycheros/CHANGELOG.md` |
-| `launcher-v*` | — | Creates GH Release, notes from `packages/launcher/CHANGELOG.md`; uploads bundle `.zip` / `.tar.gz` + raw `install.sh` / `install.ps1` |
-| `entity-core-v*` | — | Creates GH Release, notes from `packages/entity-core/CHANGELOG.md`; uploads scoped source `.tar.gz` / `.zip` |
-| `entity-loom-v*` | — | Creates GH Release, notes from `packages/entity-loom/CHANGELOG.md`; uploads scoped source `.tar.gz` / `.zip` |
+| Tag prefix       | docker.yml                                                                            | release.yml                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `psycheros-v*`   | Builds + pushes `ghcr.io/psycherosai/psycheros:<semver>` + `:latest` + `:sha-<short>` | Creates GH Release (Latest badge), notes from `packages/psycheros/CHANGELOG.md`                                                       |
+| `launcher-v*`    | —                                                                                     | Creates GH Release, notes from `packages/launcher/CHANGELOG.md`; uploads bundle `.zip` / `.tar.gz` + raw `install.sh` / `install.ps1` |
+| `entity-core-v*` | —                                                                                     | Creates GH Release, notes from `packages/entity-core/CHANGELOG.md`; uploads scoped source `.tar.gz` / `.zip`                          |
+| `entity-loom-v*` | —                                                                                     | Creates GH Release, notes from `packages/entity-loom/CHANGELOG.md`; uploads scoped source `.tar.gz` / `.zip`                          |
 
-The note-extraction logic lives in
-`.github/scripts/extract-changelog-entry.sh` — it reads the latest
-top-level entry from the package's CHANGELOG.md at the tagged SHA and
-writes it to a tempfile passed to `gh release create --notes-file`. If
-the entry is missing or empty, the workflow falls back to
-`--generate-notes` and emits a `::warning::`.
+The note-extraction logic lives in `.github/scripts/extract-changelog-entry.sh`
+— it reads the latest top-level entry from the package's CHANGELOG.md at the
+tagged SHA and writes it to a tempfile passed to
+`gh release create --notes-file`. If the entry is missing or empty, the workflow
+falls back to `--generate-notes` and emits a `::warning::`.
 
-Both workflows are also preserved as `workflow_dispatch`-capable for
-manual retries (e.g. transient network failures or cache misses); the
-canonical trigger is the tag push.
+Both workflows are also preserved as `workflow_dispatch`-capable for manual
+retries (e.g. transient network failures or cache misses); the canonical trigger
+is the tag push.
 
 ## Image tag conventions (psycheros)
 
@@ -224,15 +227,15 @@ launcher-v0.2.0/
 ```
 
 The runtime entry-point `dashboard.ts` imports `./version.ts`, which imports
-`./deno.json` — so a runnable launcher needs the full bundle, not just the
-boot script. `release.yml` runs `deno check` against the staged bundle as a
-smoke test before upload to catch any future siblings being added without
-the bundle step being updated.
+`./deno.json` — so a runnable launcher needs the full bundle, not just the boot
+script. `release.yml` runs `deno check` against the staged bundle as a smoke
+test before upload to catch any future siblings being added without the bundle
+step being updated.
 
 Plus the raw `install.sh` and `install.ps1` files attached at the top of the
 Release for direct fetch. These clone the Psycheros monorepo themselves and
-don't depend on bundle siblings, so they work as standalone downloads for
-users who want a one-step bootstrap.
+don't depend on bundle siblings, so they work as standalone downloads for users
+who want a one-step bootstrap.
 
 ## Workflow files
 

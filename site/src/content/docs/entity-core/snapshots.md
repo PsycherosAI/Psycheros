@@ -2,7 +2,6 @@
 title: "Snapshot System"
 ---
 
-
 Identity file snapshots are automatic backups that protect against accidental
 data loss. They capture the state of identity files before changes are applied.
 

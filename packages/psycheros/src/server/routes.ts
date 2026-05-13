@@ -142,7 +142,9 @@ import {
   VERSION_SUFFIX,
 } from "../version.ts";
 import { getServerStartTime } from "./diagnostics.ts";
-import entityCoreDenoJson from "../../../entity-core/deno.json" with { type: "json" };
+import entityCoreDenoJson from "../../../entity-core/deno.json" with {
+  type: "json",
+};
 
 /**
  * Context passed to route handlers containing dependencies.

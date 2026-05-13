@@ -10,8 +10,15 @@
 import type { RouteContext } from "./routes.ts";
 import { getVecVersion, isVectorModuleAvailable } from "../db/vector.ts";
 import { getBroadcaster } from "./broadcaster.ts";
-import { IS_STAGING, VERSION, VERSION_BASE, VERSION_SUFFIX } from "../version.ts";
-import entityCoreDenoJson from "../../../entity-core/deno.json" with { type: "json" };
+import {
+  IS_STAGING,
+  VERSION,
+  VERSION_BASE,
+  VERSION_SUFFIX,
+} from "../version.ts";
+import entityCoreDenoJson from "../../../entity-core/deno.json" with {
+  type: "json",
+};
 
 /** Complete system diagnostics snapshot. */
 export interface DiagnosticsSnapshot {

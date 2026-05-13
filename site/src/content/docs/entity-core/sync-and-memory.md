@@ -2,7 +2,6 @@
 title: "Sync Protocol & Memory System"
 ---
 
-
 The sync protocol and memory system are tightly coupled — embodiments sync
 memories with instance tagging, and the memory hierarchy consolidates them over
 time. This document covers both systems.

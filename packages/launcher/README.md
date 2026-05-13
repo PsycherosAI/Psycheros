@@ -6,9 +6,9 @@ Install, update, and run Psycheros from your browser. No terminal required.
 
 Grab the launcher bundle from the most recent
 [`launcher-v*` release](https://github.com/PsycherosAI/Psycheros/releases?q=launcher-v):
-either `launcher-v*.tar.gz` (macOS / Linux) or `launcher-v*.zip` (Windows).
-The bundle contains everything the launcher needs to run — `run.sh` /
-`run.ps1` are inside it, alongside their sibling files.
+either `launcher-v*.tar.gz` (macOS / Linux) or `launcher-v*.zip` (Windows). The
+bundle contains everything the launcher needs to run — `run.sh` / `run.ps1` are
+inside it, alongside their sibling files.
 
 ### Windows
 

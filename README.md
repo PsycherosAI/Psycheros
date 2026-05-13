@@ -25,12 +25,12 @@ experience required.
 2. Run it. The installer clones Psycheros, installs Deno if needed, and walks
    through setup.
 3. Run `./run.sh` (or right-click `run.ps1` → **Run with PowerShell**) from
-   inside `packages/launcher/`. A browser opens at `http://localhost:3001`
-   with Install / Update / Start / Stop buttons.
+   inside `packages/launcher/`. A browser opens at `http://localhost:3001` with
+   Install / Update / Start / Stop buttons.
 
 Prefer not to clone the whole repo? Grab `launcher-v*.tar.gz` (or `.zip`) from
-the same release page, extract it, and run `./run.sh` from inside the
-extracted folder — the bundle is self-contained.
+the same release page, extract it, and run `./run.sh` from inside the extracted
+folder — the bundle is self-contained.
 
 ### Docker
 
@@ -43,11 +43,10 @@ docker run -d --name psycheros -p 3000:3000 \
   ghcr.io/psycherosai/psycheros:latest
 ```
 
-`PSYCHEROS_MCP_ENABLED=true` is the default; setting it explicitly is
-defensive. Full env-var reference is
-[`packages/psycheros/.env.example`](packages/psycheros/.env.example) —
-optional knobs for the LLM endpoint, RAG, web search, Discord, image
-generation, etc.
+`PSYCHEROS_MCP_ENABLED=true` is the default; setting it explicitly is defensive.
+Full env-var reference is
+[`packages/psycheros/.env.example`](packages/psycheros/.env.example) — optional
+knobs for the LLM endpoint, RAG, web search, Discord, image generation, etc.
 
 ### From source
 

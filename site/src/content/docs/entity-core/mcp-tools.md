@@ -2,7 +2,6 @@
 title: "MCP Tools Reference"
 ---
 
-
 Complete reference for all MCP tools exposed by entity-core. Tools are organized
 by domain and use first-person descriptions reflecting the entity's perspective.
 Tool names are underscore-separated by domain (e.g., `identity_get_all`,
@@ -60,7 +59,7 @@ MCP server — what an LLM actually calls — are the underscore forms shown her
 | `memory_list`        | List my memories by granularity, with optional pagination and date range filtering                                                                                                                                                                                                                                                                                                                                                       |
 | `memory_read`        | Read a single memory entry by granularity and date. Returns full content and metadata (source instance, version, timestamps).                                                                                                                                                                                                                                                                                                            |
 | `memory_update`      | Overwrite a memory entry (no append merge). Use to correct inaccuracies in recorded memories. Preserves existing metadata (source instance, chat IDs), increments version, sets `updatedAt`. Re-extracts entities to the knowledge graph in the background. Tracks who made the edit via `editedBy`.                                                                                                                                     |
-| `memory_delete`      | **DESTRUCTIVE** — permanently delete a memory entry. I use this to remove memories that are no longer relevant or were created in error. The file is removed from storage and its embedding is dropped from the vector cache. Prefer `memory_update` when the content is salvageable.                                                                                                                                                   |
+| `memory_delete`      | **DESTRUCTIVE** — permanently delete a memory entry. I use this to remove memories that are no longer relevant or were created in error. The file is removed from storage and its embedding is dropped from the vector cache. Prefer `memory_update` when the content is salvageable.                                                                                                                                                    |
 | `memory_consolidate` | Consolidate memories across time periods (daily→weekly, weekly→monthly, monthly→yearly). Use `all=true` for catch-up consolidation of all unconsolidated periods. Use `granularity` for a specific level. Requires `ENTITY_CORE_LLM_API_KEY`.                                                                                                                                                                                            |
 
 ### memory_create Inputs
@@ -122,8 +121,8 @@ Returns the full `MemoryEntry` object on success:
 | `slug`        | string | No       | Required for significant granularity to identify which file (significant memories share dates).                                      |
 
 Returns `{ success: boolean }`. The file is deleted from storage and its
-embedding is dropped from the vector cache; the operation is not reversible
-from inside entity-core (recover via snapshot if needed).
+embedding is dropped from the vector cache; the operation is not reversible from
+inside entity-core (recover via snapshot if needed).
 
 ### memory_list Inputs
 

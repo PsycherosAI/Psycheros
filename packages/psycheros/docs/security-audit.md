@@ -2,17 +2,16 @@
 
 Status: **Complete** — reviewed for homelab deployment behind Authelia.
 
-> **How to read this document.** This audit assumes Psycheros is deployed as
-> a **single-user installation behind an authentication layer** (the
-> maintainer's reference setup is Authelia in front of a Docker container).
-> Every finding is either **fixed in the shipped code** or **explicitly
-> accepted by design** for that deployment shape. The "Accepted" entries
-> below (open CORS, no per-route auth, the optional shell tool, the LLM test
-> endpoint) are not live exposure in a properly-deployed Psycheros — they
-> rely on the reverse-proxy auth layer to gate them. If you intend to run
-> Psycheros **multi-user, on the open internet, or without an upstream auth
-> layer**, treat the Accepted entries as work-required-before-deploy and
-> harden them yourself before publishing.
+> **How to read this document.** This audit assumes Psycheros is deployed as a
+> **single-user installation behind an authentication layer** (the maintainer's
+> reference setup is Authelia in front of a Docker container). Every finding is
+> either **fixed in the shipped code** or **explicitly accepted by design** for
+> that deployment shape. The "Accepted" entries below (open CORS, no per-route
+> auth, the optional shell tool, the LLM test endpoint) are not live exposure in
+> a properly-deployed Psycheros — they rely on the reverse-proxy auth layer to
+> gate them. If you intend to run Psycheros **multi-user, on the open internet,
+> or without an upstream auth layer**, treat the Accepted entries as
+> work-required-before-deploy and harden them yourself before publishing.
 
 ## Threat Model
 

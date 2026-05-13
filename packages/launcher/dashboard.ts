@@ -396,7 +396,8 @@ async function getUpdateStatus(): Promise<UpdateStatus> {
   const cached = await loadUpdateCache();
   const now = Date.now();
   if (
-    cached && (now - new Date(cached.fetched_at).getTime()) < UPDATE_CACHE_TTL_MS
+    cached &&
+    (now - new Date(cached.fetched_at).getTime()) < UPDATE_CACHE_TTL_MS
   ) {
     return {
       enabled: true,

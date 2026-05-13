@@ -2,7 +2,6 @@
 title: "Entity Loom — User Guide"
 ---
 
-
 Entity Loom is a tool that converts your old AI companion chat histories into a
 package Psycheros can use. It parses exports from ChatGPT, Claude, SillyTavern,
 Kindroid, and Letta, then generates daily summaries, picks out significant

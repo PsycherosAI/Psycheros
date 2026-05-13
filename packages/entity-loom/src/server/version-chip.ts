@@ -17,7 +17,9 @@ import {
   VERSION_BASE,
   VERSION_SUFFIX,
 } from "../version.ts";
-import entityCoreDenoJson from "../../../entity-core/deno.json" with { type: "json" };
+import entityCoreDenoJson from "../../../entity-core/deno.json" with {
+  type: "json",
+};
 
 const ENTITY_CORE_VERSION: string = entityCoreDenoJson.version;
 
@@ -67,7 +69,9 @@ export function renderVersionChip(): string {
     `entity-loom ${VERSION} · entity-core ${ENTITY_CORE_VERSION}`,
   );
   if (IS_PRERELEASE) {
-    return `${CHIP_STYLES}<span class="psy-version-chip psy-version-chip--staging" title="${tooltip}">v${baseHtml}<span class="psy-version-chip__flavor"> · ${escapeHtml(FLAVOR_LABEL)}</span></span>`;
+    return `${CHIP_STYLES}<span class="psy-version-chip psy-version-chip--staging" title="${tooltip}">v${baseHtml}<span class="psy-version-chip__flavor"> · ${
+      escapeHtml(FLAVOR_LABEL)
+    }</span></span>`;
   }
   const href =
     `https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v${

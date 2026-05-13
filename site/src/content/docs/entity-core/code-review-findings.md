@@ -2,7 +2,6 @@
 title: "Code Review Findings"
 ---
 
-
 Status: **Complete** — all critical and high-severity issues fixed.
 
 ## Scope

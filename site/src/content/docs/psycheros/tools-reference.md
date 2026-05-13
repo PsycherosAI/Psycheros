@@ -2,7 +2,6 @@
 title: "Tools & Identity System"
 ---
 
-
 ## Tool System Overview
 
 Tools are registered in `src/tools/registry.ts` via `AVAILABLE_TOOLS`. Each tool

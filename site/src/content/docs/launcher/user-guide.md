@@ -2,7 +2,6 @@
 title: "Launcher — User Guide"
 ---
 
-
 The launcher is the easiest way to install, update, and run Psycheros. It opens
 a small dashboard in your browser at `http://localhost:3001` with buttons for
 **Install / Update / Start / Stop / Wipe**. No terminal usage required.
@@ -24,8 +23,8 @@ installs itself — the launcher will create or use a separate install directory
 
 If you'd rather skip the bundle and use the one-step installer, download
 `install.sh` (macOS / Linux) or `install.ps1` (Windows) from the same release
-page — those clone the Psycheros monorepo for you and don't need any other
-files alongside.
+page — those clone the Psycheros monorepo for you and don't need any other files
+alongside.
 
 ## Running the launcher
 
@@ -79,32 +78,31 @@ Kindroid, Letta). Available once the monorepo is installed. See the
 ## Version chips + update checks
 
 The dashboard header carries a small version chip (`v0.2.0`) for the launcher
-itself. While Psycheros and Entity Loom are running, their service cards show
-a "running v…" line with the version reported by each service's `/health` or
+itself. While Psycheros and Entity Loom are running, their service cards show a
+"running v…" line with the version reported by each service's `/health` or
 `/api/version` endpoint — including the linked entity-core version where
 relevant. Click any chip to open that package's release page on GitHub.
 
-The launcher checks GitHub Releases once a day (anonymous HTTPS, no
-telemetry) for newer versions of psycheros, entity-core, entity-loom, and
-itself. When a newer version exists, a small orange dot appears on the
-relevant service card. The first time the launcher starts, a one-click
-modal asks whether you want this enabled — your answer is saved to the
-launcher state file and can be changed there.
+The launcher checks GitHub Releases once a day (anonymous HTTPS, no telemetry)
+for newer versions of psycheros, entity-core, entity-loom, and itself. When a
+newer version exists, a small orange dot appears on the relevant service card.
+The first time the launcher starts, a one-click modal asks whether you want this
+enabled — your answer is saved to the launcher state file and can be changed
+there.
 
-Chips render `· staging` or `· local` flavor (non-interactive) when the
-running build isn't a tagged public release — staging dogfood images,
-local docker builds, or a launcher pointed at a non-canonical
-`PSYCHEROS_REPO`. These flavored chips don't link out (the matching
-release page wouldn't exist). The full version with build-metadata suffix
-is exposed via the chip's hover tooltip.
+Chips render `· staging` or `· local` flavor (non-interactive) when the running
+build isn't a tagged public release — staging dogfood images, local docker
+builds, or a launcher pointed at a non-canonical `PSYCHEROS_REPO`. These
+flavored chips don't link out (the matching release page wouldn't exist). The
+full version with build-metadata suffix is exposed via the chip's hover tooltip.
 
 ## Settings
 
 Click the **Settings** gear to configure:
 
 - **Install path** — where the Psycheros monorepo is cloned. Default
-  `~/psycheros`. Change this if you've already cloned the monorepo elsewhere
-  and want the launcher to use that copy.
+  `~/psycheros`. Change this if you've already cloned the monorepo elsewhere and
+  want the launcher to use that copy.
 - **Your name** — what the entity calls you in conversations.
 - **Entity name** — what the entity is called.
 - **Timezone** — used by the entity's daily-memory consolidation and Pulse
@@ -132,10 +130,9 @@ A single monorepo clone at your install path:
 
 ## Prerequisites
 
-None. The launcher installs [Deno](https://deno.land) automatically if you
-don't have it. Git is optional — with git, updates use `git pull` (fast);
-without git, the launcher downloads the latest source directly (works fine,
-just slower).
+None. The launcher installs [Deno](https://deno.land) automatically if you don't
+have it. Git is optional — with git, updates use `git pull` (fast); without git,
+the launcher downloads the latest source directly (works fine, just slower).
 
 ## After installing
 
@@ -152,15 +149,13 @@ the [Entity Loom user guide](/Psycheros/entity-loom/user-guide/).
 
 ## Updating
 
-Click **Update** in the dashboard. The launcher runs `git pull --ff-only` on
-the install directory (or re-downloads the latest source if git isn't
-available). Restart Psycheros via **Stop** then **Start** to pick up the new
-version.
+Click **Update** in the dashboard. The launcher runs `git pull --ff-only` on the
+install directory (or re-downloads the latest source if git isn't available).
+Restart Psycheros via **Stop** then **Start** to pick up the new version.
 
 ## Command line (advanced)
 
-If you prefer the terminal, the install scripts work without the launcher
-UI:
+If you prefer the terminal, the install scripts work without the launcher UI:
 
 ```bash
 # macOS / Linux
@@ -183,14 +178,14 @@ whichever interface you prefer.
 
 ## Troubleshooting
 
-**"Deno not found" after restart.** Some systems need a terminal restart to
-pick up the new PATH. Close and reopen your terminal.
+**"Deno not found" after restart.** Some systems need a terminal restart to pick
+up the new PATH. Close and reopen your terminal.
 
 **"Could not clone" error.** Check your internet connection and try again. If
 git isn't installed, the launcher will fall back to a direct download.
 
-**First run is slow.** Deno downloads its dependencies on the first launch.
-This only happens once.
+**First run is slow.** Deno downloads its dependencies on the first launch. This
+only happens once.
 
 **Port 3000 already in use.** Stop the other program using that port, or make
 sure you don't have another instance of Psycheros running. Port 3000 is
@@ -208,7 +203,7 @@ already running. Close it before starting a new one.
 
 The launcher is the recommended path for non-technical operators. If you're
 deploying Psycheros to a server, embedding it in your own infrastructure, or
-running it as a container under an orchestrator, the [Docker image](
-https://github.com/PsycherosAI/Psycheros/pkgs/container/psycheros) or building
-from source is a better fit. See the repo
+running it as a container under an orchestrator, the
+[Docker image](https://github.com/PsycherosAI/Psycheros/pkgs/container/psycheros)
+or building from source is a better fit. See the repo
 [README](https://github.com/PsycherosAI/Psycheros#docker) for those paths.
