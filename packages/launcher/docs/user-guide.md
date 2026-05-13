@@ -6,47 +6,69 @@ a small dashboard in your browser at `http://localhost:3001` with buttons for
 
 If you've never run Psycheros before, start here.
 
-## What you download
+## Installing
 
-Two files from the
-[latest release](https://github.com/PsycherosAI/Psycheros/releases) under the
-`launcher-v*` tag:
+The launcher ships an installer script for each platform. Filenames are
+version-less and the download URLs always resolve to the most recent launcher
+release — safe to link to, hardcode, or share.
 
-- `run.sh` (macOS / Linux) **or** `run.ps1` (Windows) — boots the launcher.
-- `dashboard.ts` — the launcher itself.
+### macOS / Linux
 
-Put both files in the same folder. Your Desktop is fine, or any folder you can
-get back to later. The folder you choose is **not** where Psycheros installs
-itself — the launcher will create or use a separate install directory (default
-`~/psycheros`), which you can change in Settings.
-
-## Running the launcher
+```bash
+curl -L -o install.sh https://github.com/PsycherosAI/Psycheros/releases/latest/download/install.sh
+bash install.sh
+```
 
 ### Windows
 
-1. Right-click `run.ps1` → **Run with PowerShell**.
-2. A browser window opens to the dashboard.
-3. Click **Install**, fill in your settings, then click **Start**.
+Download
+[`install.ps1`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/install.ps1)
+and right-click → **Run with PowerShell**.
 
-If PowerShell refuses to run unsigned scripts, you may need to allow scripts
-once: open PowerShell as your user and run
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+If PowerShell refuses to run unsigned scripts, allow them once: open PowerShell
+as your user and run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-### macOS
+### What the installer does
 
-1. Open the **Terminal** app (in Applications → Utilities).
-2. Drag `run.sh` into the terminal window and press **Enter**.
-3. A browser window opens to the dashboard.
-4. Click **Install**, fill in your settings, then click **Start**.
+- Checks for Git and Deno (installs Deno if missing).
+- Asks where you want Psycheros to live (default `~/psycheros`).
+- Clones the Psycheros monorepo there.
+- Asks for your name, your entity's name, and your timezone.
+- Generates `start.sh` / `stop.sh` / `update.sh` helpers next to the clone.
 
-### Linux
+### Opening the launcher dashboard
 
-Same as macOS, or run directly:
+The installer doesn't auto-open the dashboard — once it finishes, run the
+launcher yourself:
 
 ```bash
-chmod +x run.sh
+# macOS / Linux
+cd ~/psycheros/packages/launcher
 ./run.sh
 ```
+
+```powershell
+# Windows
+cd ~/psycheros/packages/launcher
+.\run.ps1
+```
+
+A browser window opens to the dashboard at `http://localhost:3001` — control
+panel with Install / Update / Start / Stop / Wipe buttons (see
+[The dashboard](#the-dashboard) below).
+
+If you'd rather skip the dashboard entirely, `cd ~/psycheros && ./start.sh` runs
+Psycheros directly.
+
+### Offline / no-clone alternative
+
+If your machine can't clone from GitHub during install, the launcher also ships
+as a self-contained bundle. From the most recent
+[`launcher-v*` release](https://github.com/PsycherosAI/Psycheros/releases?q=launcher-v),
+download `launcher-v*.tar.gz` (macOS / Linux) or `launcher-v*.zip` (Windows),
+extract it, and run `./run.sh` (or right-click `run.ps1`) from inside the
+extracted folder. The dashboard opens with the full UI; clicking **Install**
+there will still need network access to reach GitHub for the rest of Psycheros.
 
 ## The dashboard
 
@@ -162,9 +184,11 @@ only happens once.
 sure you don't have another instance of Psycheros running. Port 3000 is
 Psycheros's web UI; the launcher itself uses port 3001.
 
-**Dashboard won't open.** Make sure `run.ps1` (or `run.sh`) and `dashboard.ts`
-are in the **same folder**. The boot script looks for `dashboard.ts` next to
-itself.
+**Dashboard won't open.** Run `run.ps1` / `run.sh` from inside the launcher
+directory itself — either `~/psycheros/packages/launcher/` after `install.sh` /
+`install.ps1`, or the extracted `launcher-v*/` folder if you used the offline
+bundle. The boot script needs `dashboard.ts`, `version.ts`, and `deno.json` as
+siblings in the same directory — running it in isolation won't work.
 
 **Launcher port 3001 already in use.** Another launcher session is probably
 already running. Close it before starting a new one.

@@ -4,39 +4,57 @@ Install, update, and run Psycheros from your browser. No terminal required.
 
 ## Easy mode (recommended)
 
-Grab the launcher bundle from the most recent
-[`launcher-v*` release](https://github.com/PsycherosAI/Psycheros/releases?q=launcher-v):
-either `launcher-v*.tar.gz` (macOS / Linux) or `launcher-v*.zip` (Windows). The
-bundle contains everything the launcher needs to run — `run.sh` / `run.ps1` are
-inside it, alongside their sibling files.
+The launcher ships an installer script for each platform. Filenames are
+version-less and the download URLs always resolve to the most recent launcher
+release.
+
+### macOS / Linux
+
+```bash
+curl -L -o install.sh https://github.com/PsycherosAI/Psycheros/releases/latest/download/install.sh
+bash install.sh
+```
 
 ### Windows
 
-1. Download `launcher-v*.zip` from the latest launcher release.
-2. Extract the archive (right-click → **Extract All**) somewhere convenient —
-   your Desktop is fine.
-3. Open the extracted folder, right-click `run.ps1` → **Run with PowerShell**.
-4. A browser window opens automatically.
-5. Click **Install**, fill in the settings, then click **Start**.
+Download
+[`install.ps1`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/install.ps1)
+and right-click → **Run with PowerShell**.
 
-### macOS
+If PowerShell refuses to run unsigned scripts, allow them once:
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-1. Download `launcher-v*.tar.gz` from the latest launcher release.
-2. Double-click the archive in Finder to extract it.
-3. Open the **Terminal** app, drag `run.sh` from the extracted folder into the
-   terminal window, and press **Enter**.
-4. A browser window opens automatically.
-5. Click **Install**, fill in the settings, then click **Start**.
+### Opening the launcher dashboard
 
-### Linux
-
-Same as macOS, or from a terminal:
+The installer clones Psycheros and writes settings, but doesn't auto-open the
+dashboard. Once it finishes:
 
 ```bash
-tar -xzf launcher-v*.tar.gz
-cd launcher-v*/
-./run.sh
+# macOS / Linux
+cd ~/psycheros/packages/launcher && ./run.sh
 ```
+
+```powershell
+# Windows
+cd ~/psycheros/packages/launcher; .\run.ps1
+```
+
+A browser opens to the dashboard at `http://localhost:3001`. From there click
+**Start** and you're running.
+
+### Offline / no-clone alternative
+
+If your machine can't clone from GitHub during install, the launcher also ships
+as a self-contained bundle on each release. From the most recent
+[`launcher-v*` release](https://github.com/PsycherosAI/Psycheros/releases?q=launcher-v):
+
+- **macOS / Linux** — download `launcher-v*.tar.gz`, extract, run `./run.sh`
+  from inside.
+- **Windows** — download `launcher-v*.zip`, extract, right-click `run.ps1` →
+  **Run with PowerShell**.
+
+Clicking **Install** in the dashboard then handles cloning the rest of Psycheros
+for you (still needs network access to reach GitHub).
 
 ## What the dashboard does
 
@@ -123,9 +141,11 @@ only happens once.
 **Port 3000 already in use.** Stop the other program using that port, or make
 sure you don't have another instance of Psycheros running.
 
-**Dashboard won't open.** Run `run.ps1` / `run.sh` from inside the extracted
-launcher folder — the boot script needs its sibling files (`dashboard.ts`,
-`version.ts`, `deno.json`) in the same directory.
+**Dashboard won't open.** Run `run.ps1` / `run.sh` from inside the launcher
+folder itself — either `~/psycheros/packages/launcher/` after `install.sh` /
+`install.ps1`, or the extracted `launcher-v*/` folder if you used the offline
+bundle. The boot script needs its sibling files (`dashboard.ts`, `version.ts`,
+`deno.json`) in the same directory.
 
 ## Companion packages
 
