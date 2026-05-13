@@ -70,6 +70,28 @@ importing chat histories from other AI platforms (ChatGPT, Claude, SillyTavern,
 Kindroid, Letta). Available once the monorepo is installed. See the
 [entity-loom user guide](/Psycheros/entity-loom/user-guide/) for what it does.
 
+## Version chips + update checks
+
+The dashboard header carries a small version chip (`v0.2.0`) for the launcher
+itself. While Psycheros and Entity Loom are running, their service cards show
+a "running v…" line with the version reported by each service's `/health` or
+`/api/version` endpoint — including the linked entity-core version where
+relevant. Click any chip to open that package's release page on GitHub.
+
+The launcher checks GitHub Releases once a day (anonymous HTTPS, no
+telemetry) for newer versions of psycheros, entity-core, entity-loom, and
+itself. When a newer version exists, a small orange dot appears on the
+relevant service card. The first time the launcher starts, a one-click
+modal asks whether you want this enabled — your answer is saved to the
+launcher state file and can be changed there.
+
+Chips render `· staging` or `· local` flavor (non-interactive) when the
+running build isn't a tagged public release — staging dogfood images,
+local docker builds, or a launcher pointed at a non-canonical
+`PSYCHEROS_REPO`. These flavored chips don't link out (the matching
+release page wouldn't exist). The full version with build-metadata suffix
+is exposed via the chip's hover tooltip.
+
 ## Settings
 
 Click the **Settings** gear to configure:

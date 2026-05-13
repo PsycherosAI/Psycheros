@@ -7,6 +7,7 @@
 
 import { dirname, join } from "@std/path";
 import { Database } from "@db/sqlite";
+import { injectVersionChip } from "../server/version-chip.ts";
 
 const __dirname = dirname(new URL(import.meta.url).pathname);
 
@@ -58,7 +59,7 @@ export async function startGraphServer(
   const htmlPath = join(__dirname, "..", "..", "web", "graph.html");
   let htmlContent: string;
   try {
-    htmlContent = await Deno.readTextFile(htmlPath);
+    htmlContent = injectVersionChip(await Deno.readTextFile(htmlPath));
   } catch {
     console.error(`graph.html not found at ${htmlPath}`);
     Deno.exit(1);

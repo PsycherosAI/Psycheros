@@ -15,8 +15,7 @@ import { prepareVectorExtension } from "./db/mod.ts";
 import { getDefaultWebSearchSettings } from "./llm/web-search-settings.ts";
 import { loadEntityCoreLLMSettings } from "./llm/entity-core-settings.ts";
 import { join } from "@std/path";
-
-const VERSION = "0.1.0";
+import { VERSION } from "./version.ts";
 
 /**
  * Parse the PSYCHEROS_TOOLS environment variable into an array of tool names.

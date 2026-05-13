@@ -161,6 +161,7 @@ import {
   handleHealth,
   handleImportSillyTavernLorebook,
   handleIndex,
+  handleServiceWorker,
   handleListAnchorImages,
   handleListBackgrounds,
   handleListConversations,
@@ -2432,6 +2433,12 @@ export class Server {
     // GET / - Serve app shell
     if (path === "/" || path === "/index.html") {
       return handleIndex(ctx);
+    }
+
+    // GET /sw.js - Version-stamped service worker. Substitutes the running
+    // VERSION into the cache-name so each release evicts stale offline assets.
+    if (path === "/sw.js") {
+      return await handleServiceWorker(ctx);
     }
 
     // GET /c/:id - Serve conversation page (always full app shell)

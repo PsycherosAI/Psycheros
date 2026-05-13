@@ -5,22 +5,39 @@
  * No CLI needed — just run this file with Deno and click buttons.
  */
 
+import {
+  FLAVOR_LABEL,
+  IS_PRERELEASE,
+  IS_STAGING,
+  VERSION,
+  VERSION_BASE,
+} from "./version.ts";
+
 // --- Constants ---
+
+// Canonical public repo. Update-check phone-home only runs when PSYCHEROS_REPO
+// resolves to this slug; any other value indicates dev / staging mode and the
+// launcher suppresses both the network fetch and the in-UI update dots so
+// devs aren't nagged to "update" to a version of the public repo that would
+// wipe their staging work.
+const CANONICAL_REPO = "PsycherosAI/Psycheros";
 
 // Default to the public canonical repo. Set PSYCHEROS_REPO to override (e.g.
 // "PsycherosAI/Psycheros-staging" or a full URL) when testing the install flow
 // against a fork or the private staging repo.
 function resolveMonorepoSlug(): string {
-  const input = Deno.env.get("PSYCHEROS_REPO") ?? "PsycherosAI/Psycheros";
+  const input = Deno.env.get("PSYCHEROS_REPO") ?? CANONICAL_REPO;
   return input
     .replace(/^https:\/\/github\.com\//, "")
     .replace(/^git@github\.com:/, "")
     .replace(/\.git$/, "");
 }
 const MONOREPO_REPO = resolveMonorepoSlug();
+const IS_DEV_MODE = MONOREPO_REPO !== CANONICAL_REPO;
 const PSYCHEROS_PACKAGE = "psycheros";
 const ENTITY_LOOM_PACKAGE = "entity-loom";
 const ENTITY_LOOM_PORT = 3210;
+const PSYCHEROS_HTTP_PORT_DEFAULT = 3000;
 // Launcher dashboard binds here. Override with PSYCHEROS_LAUNCHER_PORT when
 // :3001 is already in use (uptimekuma, Verdaccio, and other common homelab
 // tools all squat here). The launcher's own port is independent of the
@@ -46,6 +63,10 @@ interface Settings {
   userName: string;
   entityName: string;
   timezone: string;
+  // Update-check preference. `null` = never asked (first-run prompts in the
+  // dashboard); `true` / `false` = user explicit choice. In dev mode (non-
+  // canonical PSYCHEROS_REPO) we never phone home regardless of this value.
+  updateCheckOptIn: boolean | null;
 }
 
 function resolveHome(p: string): string {
@@ -70,6 +91,7 @@ function defaultSettings(): Settings {
     userName: "You",
     entityName: "Assistant",
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    updateCheckOptIn: null,
   };
 }
 
@@ -123,12 +145,16 @@ function legacyPsycherosDir(installDir: string): string {
 
 function loadSettings(): Settings {
   let installDir = "";
+  let updateCheckOptIn: boolean | null = null;
 
   // Try new path first, then legacy path (for migration from older versions).
   const statePaths = [getDashboardStatePath(), getLegacyStatePath()];
   for (const statePath of statePaths) {
     try {
       const state = JSON.parse(Deno.readTextFileSync(statePath));
+      if (typeof state.updateCheckOptIn === "boolean") {
+        updateCheckOptIn = state.updateCheckOptIn;
+      }
       if (typeof state.installDir === "string" && state.installDir) {
         installDir = state.installDir;
         break;
@@ -143,6 +169,7 @@ function loadSettings(): Settings {
   }
 
   const prefs = defaultSettings();
+  prefs.updateCheckOptIn = updateCheckOptIn;
   if (installDir) {
     prefs.installDir = installDir;
     // Read user prefs from the in-tree settings file. Try the monorepo
@@ -181,7 +208,14 @@ function saveDashboardState(settings: Settings): void {
     Deno.mkdirSync(getConfigDir(), { recursive: true });
     Deno.writeTextFileSync(
       statePath,
-      JSON.stringify({ installDir: settings.installDir }, null, 2),
+      JSON.stringify(
+        {
+          installDir: settings.installDir,
+          updateCheckOptIn: settings.updateCheckOptIn,
+        },
+        null,
+        2,
+      ),
     );
   } catch (e) {
     appendLog(
@@ -205,6 +239,319 @@ function savePsycherosSettings(settings: Settings): void {
       2,
     ) + "\n",
   );
+}
+
+// --- Update check ---
+//
+// The launcher is the ONLY component that phones home for update info; the
+// daemon and entity-loom stay strictly local (Psycheros's local-first
+// posture). We query GitHub's anonymous Releases API once per 24h, cached
+// to disk by a hash of the resolved repo slug so a PSYCHEROS_REPO switch
+// doesn't poison the cache. Dev mode (PSYCHEROS_REPO non-canonical) and
+// explicit opt-out both short-circuit the fetch.
+
+interface UpdateCache {
+  slug_hash: string;
+  fetched_at: string;
+  packages: Record<string, string>;
+}
+
+interface UpdateStatus {
+  enabled: boolean;
+  disabled_reason: string | null;
+  fetched_at: string | null;
+  packages: Record<string, string>;
+}
+
+const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const TRACKED_PACKAGES = [
+  "psycheros",
+  "entity-core",
+  "entity-loom",
+  "launcher",
+];
+
+async function slugHash(slug: string): Promise<string> {
+  const data = new TextEncoder().encode(slug);
+  const buf = await crypto.subtle.digest("SHA-1", data);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 12);
+}
+
+function getUpdateCachePath(): string {
+  return pathJoin(getConfigDir(), "update-cache.json");
+}
+
+async function loadUpdateCache(): Promise<UpdateCache | null> {
+  try {
+    const raw = await Deno.readTextFile(getUpdateCachePath());
+    const parsed = JSON.parse(raw) as UpdateCache;
+    const expected = await slugHash(MONOREPO_REPO);
+    if (parsed.slug_hash !== expected) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function saveUpdateCache(
+  packages: Record<string, string>,
+): Promise<void> {
+  try {
+    Deno.mkdirSync(getConfigDir(), { recursive: true });
+    const cache: UpdateCache = {
+      slug_hash: await slugHash(MONOREPO_REPO),
+      fetched_at: new Date().toISOString(),
+      packages,
+    };
+    await Deno.writeTextFile(
+      getUpdateCachePath(),
+      JSON.stringify(cache, null, 2),
+    );
+  } catch (e) {
+    appendLog(`WARNING: Failed to save update cache: ${e}`);
+  }
+}
+
+/**
+ * Strict semver compare; build metadata (`+...`) and prerelease (`-...`)
+ * are dropped before comparing, matching the spec's "build metadata MUST
+ * be ignored when determining version precedence" rule.
+ */
+function semverCompare(a: string, b: string): number {
+  const parse = (v: string): [number, number, number] => {
+    const clean = v.replace(/[+-].*$/, "");
+    const parts = clean.split(".").map((n) => parseInt(n, 10) || 0);
+    return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+  };
+  const av = parse(a);
+  const bv = parse(b);
+  for (let i = 0; i < 3; i++) {
+    if (av[i] !== bv[i]) return av[i] - bv[i];
+  }
+  return 0;
+}
+
+async function fetchLatestReleases(): Promise<Record<string, string>> {
+  const r = await fetch(
+    `https://api.github.com/repos/${CANONICAL_REPO}/releases?per_page=30`,
+    {
+      headers: {
+        "Accept": "application/vnd.github+json",
+        // GitHub recommends a meaningful UA on anonymous requests; ours
+        // identifies the launcher version so a future abuse complaint
+        // can trace back to a specific release.
+        "User-Agent": `psycheros-launcher/${VERSION}`,
+      },
+    },
+  );
+  if (!r.ok) throw new Error(`GitHub API responded ${r.status}`);
+  const releases = await r.json() as Array<{ tag_name: string }>;
+  const latest: Record<string, string> = {};
+  for (const pkg of TRACKED_PACKAGES) {
+    const prefix = `${pkg}-v`;
+    const versions = releases
+      .map((rel) => rel.tag_name)
+      .filter((tag) => tag.startsWith(prefix))
+      .map((tag) => tag.slice(prefix.length))
+      .filter((v) => /^\d+\.\d+\.\d+/.test(v));
+    if (versions.length > 0) {
+      versions.sort(semverCompare);
+      latest[pkg] = versions[versions.length - 1];
+    }
+  }
+  return latest;
+}
+
+async function getUpdateStatus(): Promise<UpdateStatus> {
+  if (IS_DEV_MODE) {
+    return {
+      enabled: false,
+      disabled_reason:
+        `Dev mode — launcher is pointed at ${MONOREPO_REPO}, not ${CANONICAL_REPO}.`,
+      fetched_at: null,
+      packages: {},
+    };
+  }
+  const settings = loadSettings();
+  if (settings.updateCheckOptIn === false) {
+    return {
+      enabled: false,
+      disabled_reason: "Update checks disabled in settings.",
+      fetched_at: null,
+      packages: {},
+    };
+  }
+  if (settings.updateCheckOptIn !== true) {
+    // First-run state — render the prompt without fetching yet.
+    return {
+      enabled: false,
+      disabled_reason: "First-run: opt-in required.",
+      fetched_at: null,
+      packages: {},
+    };
+  }
+  const cached = await loadUpdateCache();
+  const now = Date.now();
+  if (
+    cached && (now - new Date(cached.fetched_at).getTime()) < UPDATE_CACHE_TTL_MS
+  ) {
+    return {
+      enabled: true,
+      disabled_reason: null,
+      fetched_at: cached.fetched_at,
+      packages: cached.packages,
+    };
+  }
+  try {
+    const packages = await fetchLatestReleases();
+    await saveUpdateCache(packages);
+    return {
+      enabled: true,
+      disabled_reason: null,
+      fetched_at: new Date().toISOString(),
+      packages,
+    };
+  } catch (e) {
+    // Stale-cache fallback so the dashboard never shows an empty update panel
+    // because GitHub blipped.
+    if (cached) {
+      return {
+        enabled: true,
+        disabled_reason: `Last fetch failed (${e}); showing cached.`,
+        fetched_at: cached.fetched_at,
+        packages: cached.packages,
+      };
+    }
+    return {
+      enabled: true,
+      disabled_reason: `Fetch failed: ${e}`,
+      fetched_at: null,
+      packages: {},
+    };
+  }
+}
+
+// --- Service version readers ---
+//
+// Pulls each running service's own /health or /api/version so the dashboard
+// renders the actually-running version (which may differ from deno.json in
+// the install directory if the service hasn't been restarted after a pull).
+
+interface ServiceVersion {
+  name: string;
+  version: string;
+  version_base: string;
+  is_staging: boolean;
+  is_prerelease: boolean;
+  flavor: string;
+  entity_core_version?: string;
+}
+
+async function fetchJsonWithTimeout(
+  url: string,
+  timeoutMs: number,
+): Promise<unknown | null> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, { signal: ctl.signal });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Read the daemon's HTTP port from the install dir's .env file. Mirrors the
+ * `/api/psycheros-url` handler so both stay in sync — if a user has set
+ * PSYCHEROS_PORT in their .env, the launcher hits the right port.
+ */
+function readPsycherosPort(): number {
+  try {
+    const settings = loadSettings();
+    const envFile = pathJoin(
+      psycherosPackageDir(settings.installDir),
+      ".env",
+    );
+    const env = Deno.readTextFileSync(envFile);
+    const match = env.match(/^PSYCHEROS_PORT=(\d+)/m);
+    if (match) return parseInt(match[1], 10);
+  } catch { /* fall through */ }
+  return PSYCHEROS_HTTP_PORT_DEFAULT;
+}
+
+async function readPsycherosVersion(): Promise<ServiceVersion | null> {
+  const port = readPsycherosPort();
+  const payload = await fetchJsonWithTimeout(
+    `http://127.0.0.1:${port}/health`,
+    1500,
+  ) as
+    | {
+      name?: string;
+      version?: string;
+      version_base?: string;
+      is_staging?: boolean;
+      is_prerelease?: boolean;
+      flavor?: string;
+      entity_core_version?: string;
+    }
+    | null;
+  if (!payload || typeof payload.version !== "string") return null;
+  return normalizeServicePayload(payload, "psycheros");
+}
+
+async function readEntityLoomVersion(): Promise<ServiceVersion | null> {
+  const payload = await fetchJsonWithTimeout(
+    `http://127.0.0.1:${ENTITY_LOOM_PORT}/api/version`,
+    1500,
+  ) as
+    | {
+      name?: string;
+      version?: string;
+      version_base?: string;
+      is_staging?: boolean;
+      is_prerelease?: boolean;
+      flavor?: string;
+      entity_core_version?: string;
+    }
+    | null;
+  if (!payload || typeof payload.version !== "string") return null;
+  return normalizeServicePayload(payload, "entity-loom");
+}
+
+/**
+ * Coerce a partially-typed service-version payload into a ServiceVersion.
+ * Fills `is_prerelease` and `flavor` from the staging flag when older
+ * service builds don't yet ship them.
+ */
+function normalizeServicePayload(
+  payload: {
+    name?: string;
+    version?: string;
+    version_base?: string;
+    is_staging?: boolean;
+    is_prerelease?: boolean;
+    flavor?: string;
+    entity_core_version?: string;
+  },
+  defaultName: string,
+): ServiceVersion {
+  const isStaging = !!payload.is_staging;
+  return {
+    name: payload.name ?? defaultName,
+    version: payload.version!,
+    version_base: payload.version_base ?? payload.version!,
+    is_staging: isStaging,
+    is_prerelease: payload.is_prerelease ?? isStaging,
+    flavor: payload.flavor ?? (isStaging ? "staging" : ""),
+    entity_core_version: payload.entity_core_version,
+  };
 }
 
 // --- Logging ---
@@ -698,6 +1045,59 @@ async function handleRequest(req: Request): Promise<Response> {
     return json({ running: isRunning, entityLoomRunning, installed });
   }
 
+  if (path === "/api/launcher-status") {
+    const update = await getUpdateStatus();
+    const settings = loadSettings();
+    // The launcher has no container-build env var to set
+    // PSYCHEROS_VERSION_SUFFIX, so IS_STAGING / IS_PRERELEASE alone don't
+    // know about dev mode. Compose with IS_DEV_MODE so the client chip
+    // renders non-interactive (and avoids 404 links) when the launcher
+    // is pointed at a non-canonical repo. flavor falls back to "dev" so
+    // the user can tell at a glance.
+    const effectivePrerelease = IS_PRERELEASE || IS_DEV_MODE;
+    const effectiveFlavor = FLAVOR_LABEL ||
+      (IS_DEV_MODE ? "dev" : "");
+    return json({
+      launcher: {
+        name: "launcher",
+        version: VERSION,
+        version_base: VERSION_BASE,
+        is_staging: IS_STAGING,
+        is_prerelease: effectivePrerelease,
+        flavor: effectiveFlavor,
+      },
+      repo: MONOREPO_REPO,
+      canonical_repo: CANONICAL_REPO,
+      dev_mode: IS_DEV_MODE,
+      update_check_opt_in: settings.updateCheckOptIn,
+      updates: update,
+    });
+  }
+
+  if (path === "/api/service-versions") {
+    // Concurrent so a slow service doesn't stall the dashboard refresh.
+    const [psy, loom] = await Promise.all([
+      isRunning ? readPsycherosVersion() : Promise.resolve(null),
+      entityLoomRunning ? readEntityLoomVersion() : Promise.resolve(null),
+    ]);
+    return json({ psycheros: psy, entityLoom: loom });
+  }
+
+  if (path === "/api/set-update-opt-in" && req.method === "POST") {
+    try {
+      const body = await req.json() as { optIn?: unknown };
+      if (typeof body.optIn !== "boolean") {
+        return json({ error: "optIn must be a boolean" }, 400);
+      }
+      const settings = loadSettings();
+      settings.updateCheckOptIn = body.optIn;
+      saveDashboardState(settings);
+      return json({ ok: true });
+    } catch (e) {
+      return json({ error: String(e) }, 400);
+    }
+  }
+
   if (path === "/api/prerequisites") {
     const prereqs = await checkPrerequisites();
     return json(prereqs);
@@ -755,6 +1155,7 @@ async function handleRequest(req: Request): Promise<Response> {
       entityName: body.entityName || "Assistant",
       timezone: body.timezone ||
         Intl.DateTimeFormat().resolvedOptions().timeZone,
+      updateCheckOptIn: null,
     };
 
     appendLog(`Installing Psycheros monorepo to ${settings.installDir}...`);
@@ -784,6 +1185,7 @@ async function handleRequest(req: Request): Promise<Response> {
       userName: body.userName || current.userName,
       entityName: body.entityName || current.entityName,
       timezone: body.timezone || current.timezone,
+      updateCheckOptIn: current.updateCheckOptIn,
     };
 
     try {
@@ -1033,11 +1435,34 @@ function getHTML(): string {
   .modal-cancel:hover { background: var(--border); }
   .modal-confirm { padding: 10px 20px; background: var(--red); border: none; color: #fff; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 500; }
   .modal-confirm:hover { opacity: 0.85; }
+
+  /* Version chip + update indicators */
+  .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 12px; flex-wrap: wrap; }
+  .header-row h1 { margin-bottom: 0; }
+  .psy-version-chip { font-family: "SF Mono", "Cascadia Code", "Consolas", monospace; font-size: 0.75rem; color: var(--text-dim); text-decoration: none; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); white-space: nowrap; transition: color 0.2s, background-color 0.2s, border-color 0.2s; }
+  .psy-version-chip:hover { color: var(--text); border-color: var(--text-dim); }
+  .psy-version-chip--staging, .psy-version-chip--staging:hover { color: var(--text-dim); cursor: default; }
+  .psy-version-chip__flavor { color: var(--yellow); font-style: italic; }
+  .psy-version-chip__dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); margin-left: 6px; vertical-align: middle; }
+  .service-version { font-family: "SF Mono", "Cascadia Code", "Consolas", monospace; font-size: 0.75rem; color: var(--text-dim); margin-top: 4px; }
+  .service-version-staging { color: var(--yellow); font-style: italic; }
+  .service-version-dot { color: var(--yellow); margin-left: 6px; }
+  .update-banner { background: #1a2e1a; border: 1px solid #2d5a2d; color: var(--green); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 0.85rem; display: none; }
+  .update-banner a { color: var(--green); text-decoration: underline; }
+  .opt-in-modal .modal { border-color: var(--blue); }
+  .opt-in-modal h2 { color: var(--blue); }
+  .opt-in-confirm { background: var(--blue); }
+  .opt-in-decline { background: var(--surface2); border: 1px solid var(--border); color: var(--text); }
 </style>
 </head>
 <body>
 <div class="container">
-  <h1><span class="status-dot" id="statusDot"></span> Psycheros Launcher</h1>
+  <div class="header-row">
+    <h1><span class="status-dot" id="statusDot"></span> Psycheros Launcher</h1>
+    <span id="launcherVersionChip"></span>
+  </div>
+
+  <div class="update-banner" id="updateBanner"></div>
 
   <div class="prereq-warn" id="prereqWarn"></div>
 
@@ -1059,6 +1484,7 @@ function getHTML(): string {
       <button class="btn btn-open" id="btnOpen" onclick="openPsycheros()" style="grid-column: 1 / -1; margin-top: 6px;">
         <span class="btn-label">Open Psycheros</span>
       </button>
+      <div class="service-version" id="psycherosVersion" style="grid-column: 1 / -1; display:none;"></div>
       <div style="height: 1px; background: var(--border); margin: 10px 0; grid-column: 1 / -1;"></div>
       <button class="btn btn-wipe" id="btnWipe" onclick="showWipeModal()" style="grid-column: 1 / -1;">
         <span class="btn-label">Wipe All Data</span>
@@ -1077,6 +1503,7 @@ function getHTML(): string {
         <span class="btn-label">Open Wizard</span>
       </button>
     </div>
+    <div class="service-version" id="loomVersion" style="display:none;"></div>
   </div>
 
   <div class="card">
@@ -1125,6 +1552,17 @@ function getHTML(): string {
     <div class="modal-actions">
       <button class="modal-cancel" onclick="hideWipeModal()">Cancel</button>
       <button class="modal-confirm" id="btnWipeConfirm" onclick="doWipe()">Wipe Everything</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay opt-in-modal" id="optInModal">
+  <div class="modal">
+    <h2>Check for updates?</h2>
+    <p>Once a day, the launcher can check GitHub Releases anonymously for new versions of Psycheros, Entity Core, Entity Loom, and the launcher itself. The check is a single HTTPS request to the public GitHub API — no telemetry, no identifying info. You can change this later in your launcher state file.</p>
+    <div class="modal-actions">
+      <button class="modal-cancel opt-in-decline" onclick="doSetUpdateOptIn(false)">No thanks</button>
+      <button class="modal-confirm opt-in-confirm" onclick="doSetUpdateOptIn(true)">Yes, check daily</button>
     </div>
   </div>
 </div>
@@ -1380,6 +1818,127 @@ function getHTML(): string {
   }
   pollStatus();
   setInterval(pollStatus, 3000);
+
+  // --- Version chip + update orchestration ---
+
+  function compareSemver(a, b) {
+    const parse = v => {
+      const clean = String(v).replace(/[+\\-].*$/, "");
+      const parts = clean.split(".").map(n => parseInt(n, 10) || 0);
+      return [parts[0]||0, parts[1]||0, parts[2]||0];
+    };
+    const av = parse(a), bv = parse(b);
+    for (let i = 0; i < 3; i++) { if (av[i] !== bv[i]) return av[i] - bv[i]; }
+    return 0;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;" }[c]));
+  }
+
+  function renderChip(version, versionBase, isPrerelease, flavor, latest, releasePrefix) {
+    const baseHtml = escapeHtml(versionBase);
+    const tooltipFull = escapeHtml(version);
+    const updateAvailable = latest && !isPrerelease && compareSemver(versionBase, latest) < 0;
+    const dotHtml = updateAvailable ? '<span class="psy-version-chip__dot" title="Update available: ' + escapeHtml(latest) + '"></span>' : "";
+    if (isPrerelease) {
+      const flavorTxt = flavor || "build";
+      return '<span class="psy-version-chip psy-version-chip--staging" title="' + tooltipFull + '">v' + baseHtml + '<span class="psy-version-chip__flavor"> · ' + escapeHtml(flavorTxt) + '</span></span>';
+    }
+    const tag = releasePrefix + "v" + encodeURIComponent(versionBase);
+    const href = "https://github.com/PsycherosAI/Psycheros/releases/tag/" + tag;
+    return '<a class="psy-version-chip" href="' + href + '" target="_blank" rel="noopener" title="Release notes for v' + baseHtml + '">v' + baseHtml + dotHtml + '</a>';
+  }
+
+  function renderServiceVersion(payload, latest, releasePrefix) {
+    if (!payload) return "";
+    const baseHtml = escapeHtml(payload.version_base);
+    const tooltipFull = escapeHtml(payload.version);
+    const isPrerelease = payload.is_prerelease || payload.is_staging;
+    const updateAvailable = latest && !isPrerelease && compareSemver(payload.version_base, latest) < 0;
+    const dot = updateAvailable ? ' <span class="service-version-dot" title="Update available: ' + escapeHtml(latest) + '">●</span>' : "";
+    const extra = payload.entity_core_version ? ' · entity-core ' + escapeHtml(payload.entity_core_version) : "";
+    if (isPrerelease) {
+      const flavorTxt = payload.flavor || (payload.is_staging ? "staging" : "build");
+      return '<span class="service-version-staging" title="' + tooltipFull + '">running v' + baseHtml + ' · ' + escapeHtml(flavorTxt) + extra + '</span>';
+    }
+    const tag = releasePrefix + "v" + encodeURIComponent(payload.version_base);
+    const href = "https://github.com/PsycherosAI/Psycheros/releases/tag/" + tag;
+    return '<a href="' + href + '" target="_blank" rel="noopener" style="color:var(--text-dim);text-decoration:none;" title="Release notes for v' + baseHtml + '">running v' + baseHtml + extra + '</a>' + dot;
+  }
+
+  function renderUpdateBanner(launcher, updates) {
+    const banner = document.getElementById("updateBanner");
+    if (!updates || !updates.enabled || updates.disabled_reason) {
+      banner.style.display = "none";
+      return;
+    }
+    const updatesAvailable = [];
+    if (updates.packages.launcher && compareSemver(launcher.version_base, updates.packages.launcher) < 0) {
+      updatesAvailable.push("launcher " + updates.packages.launcher);
+    }
+    if (updatesAvailable.length === 0) {
+      banner.style.display = "none";
+      return;
+    }
+    banner.style.display = "block";
+    banner.innerHTML = "Launcher update available: " + escapeHtml(updatesAvailable.join(", ")) + ' &mdash; <a href="https://github.com/PsycherosAI/Psycheros/releases" target="_blank" rel="noopener">release notes</a>';
+  }
+
+  let launcherInfo = null;
+
+  function pollLauncherInfo() {
+    fetch("/api/launcher-status").then(r => r.json()).then(s => {
+      launcherInfo = s;
+      const chip = document.getElementById("launcherVersionChip");
+      const latestLauncher = s.updates && s.updates.packages ? s.updates.packages.launcher : null;
+      chip.innerHTML = renderChip(s.launcher.version, s.launcher.version_base, s.launcher.is_prerelease, s.launcher.flavor, latestLauncher, "launcher-");
+      renderUpdateBanner(s.launcher, s.updates);
+      // First-run opt-in prompt: only show when canonical AND user hasn't been asked.
+      if (!s.dev_mode && s.update_check_opt_in === null) {
+        document.getElementById("optInModal").classList.add("active");
+      }
+    }).catch(() => { /* server gone, ignore */ });
+  }
+
+  function pollServiceVersions() {
+    fetch("/api/service-versions").then(r => r.json()).then(v => {
+      const psyEl = document.getElementById("psycherosVersion");
+      const loomEl = document.getElementById("loomVersion");
+      const latestPsy = launcherInfo && launcherInfo.updates && launcherInfo.updates.packages ? launcherInfo.updates.packages.psycheros : null;
+      const latestLoom = launcherInfo && launcherInfo.updates && launcherInfo.updates.packages ? launcherInfo.updates.packages["entity-loom"] : null;
+      if (v.psycheros) {
+        psyEl.innerHTML = renderServiceVersion(v.psycheros, latestPsy, "psycheros-");
+        psyEl.style.display = "block";
+      } else {
+        psyEl.style.display = "none";
+      }
+      if (v.entityLoom) {
+        loomEl.innerHTML = renderServiceVersion(v.entityLoom, latestLoom, "entity-loom-");
+        loomEl.style.display = "block";
+      } else {
+        loomEl.style.display = "none";
+      }
+    }).catch(() => { /* ignore */ });
+  }
+
+  globalThis.doSetUpdateOptIn = function (optIn) {
+    fetch("/api/set-update-opt-in", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ optIn })
+    }).then(() => {
+      document.getElementById("optInModal").classList.remove("active");
+      pollLauncherInfo();
+    });
+  };
+
+  pollLauncherInfo();
+  pollServiceVersions();
+  setInterval(pollLauncherInfo, 15 * 60 * 1000); // 15 min — well under daily cache TTL
+  // Versions don't change at runtime; 30s is enough to pick up "service just
+  // started" without hammering /health every 5s.
+  setInterval(pollServiceVersions, 30000);
 
   // Connect to log stream
   const logPanel = document.getElementById("logPanel");

@@ -1,0 +1,78 @@
+---
+title: Releases
+description: Current versions of every Psycheros package, with links to release notes and CHANGELOG entries.
+---
+
+import psycherosPkg from "../../../../packages/psycheros/deno.json";
+import entityCorePkg from "../../../../packages/entity-core/deno.json";
+import entityLoomPkg from "../../../../packages/entity-loom/deno.json";
+import launcherPkg from "../../../../packages/launcher/deno.json";
+
+export const PACKAGES = [
+  {
+    name: "psycheros",
+    version: psycherosPkg.version,
+    description: "The harness daemon — chat UI, persistent memory loop, tool registry.",
+  },
+  {
+    name: "entity-core",
+    version: entityCorePkg.version,
+    description: "Identity + memory engine consumed by psycheros via MCP.",
+  },
+  {
+    name: "entity-loom",
+    version: entityLoomPkg.version,
+    description: "Wizard for extracting memories and knowledge graphs from past conversations.",
+  },
+  {
+    name: "launcher",
+    version: launcherPkg.version,
+    description: "Browser-based installer + runtime dashboard.",
+  },
+];
+
+Each Psycheros package has its own semver lineage. The four packages release independently; running versions can drift between them. Use the table below as the source of truth for "what's the latest version of X?"
+
+<table>
+  <thead>
+    <tr>
+      <th>Package</th>
+      <th>Current version</th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    {PACKAGES.map((pkg) => (
+      <tr>
+        <td>
+          <code>{pkg.name}</code>
+          <div style={{ color: "var(--sl-color-gray-3)", fontSize: "0.85em", marginTop: "4px" }}>{pkg.description}</div>
+        </td>
+        <td>
+          <a href={`https://github.com/PsycherosAI/Psycheros/releases/tag/${pkg.name}-v${pkg.version}`}>
+            <code>v{pkg.version}</code>
+          </a>
+        </td>
+        <td>
+          <a href={`https://github.com/PsycherosAI/Psycheros/blob/main/packages/${pkg.name}/CHANGELOG.md`}>CHANGELOG</a>
+          {" · "}
+          <a href={`https://github.com/PsycherosAI/Psycheros/releases?q=${pkg.name}-v`}>all releases</a>
+        </td>
+      </tr>
+    ))}
+  </tbody>
+</table>
+
+## How to read this page
+
+The version numbers above are read from each package's `deno.json` at site build time. The site rebuilds and re-deploys on every push to `main`, so the page reflects whatever was just released in the last release sweep.
+
+Inside a running Psycheros, the chat-header chip, launcher dashboard, and `/api/health` JSON all surface the version the daemon was *built with*, which may differ from the latest tag for a few minutes during a release sweep or for the lifetime of a container that hasn't been restarted after an upgrade.
+
+## Release process
+
+Releases happen in **sweeps** — one ritual evaluates all four packages and cuts the tags that have moved. The canonical procedure lives in [`runbooks/psyops-curated-release.md`](https://github.com/PsycherosAI/Psycheros/blob/main/runbooks/psyops-curated-release.md) (private), but the user-facing shape is:
+
+- Each released tag carries a **CHANGELOG entry** as its GitHub release notes (auto-extracted from the per-package `CHANGELOG.md`).
+- The four packages have **independent semver lineages**. A release sweep may bump some packages and leave others unchanged.
+- Docker images on the **`psycheros`** package are tagged `<semver>` plus `latest`; the **`psycheros-staging`** image stream is push-driven and isn't part of the public release surface.

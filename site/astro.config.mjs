@@ -31,6 +31,7 @@ export default defineConfig({
       // GitHub source readers but aren't surfaced here.
       sidebar: [
         { label: "Philosophy", slug: "philosophy" },
+        { label: "Releases", slug: "releases" },
         {
           label: "Launcher",
           items: ["launcher/user-guide"],

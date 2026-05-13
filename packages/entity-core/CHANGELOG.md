@@ -4,6 +4,15 @@ All notable changes to entity-core are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and this package follows [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-05-13
+
+### Added
+
+- `ENTITY_CORE_VERSION` exported from `mod.ts` for consumers that want
+  to surface the linked entity-core version (e.g., psycheros's admin
+  diagnostics, entity-loom's version chip tooltip). Backed by
+  `src/version.ts`, a JSON import of `deno.json`.
+
 ## [0.1.1] - 2026-05-13
 
 ### Fixed

@@ -40,6 +40,7 @@ export * from "./types.ts";
 export * from "./tools/mod.ts";
 export * from "./sync/mod.ts";
 export * from "./consolidation/mod.ts";
+export { VERSION as ENTITY_CORE_VERSION } from "./version.ts";
 
 // Main entry point
 if (import.meta.main) {

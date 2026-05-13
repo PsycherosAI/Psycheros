@@ -167,6 +167,19 @@ ENV PSYCHEROS_ENTITY_CORE_DATA_DIR=/app/packages/entity-core/data
 ENV PSYCHEROS_SSH_ENABLED=false
 ENV PSYCHEROS_SSH_PORT=47291
 
+# Version metadata. Set by CI build-args: public tag builds pass
+# PSYCHEROS_VERSION only (clean semver); staging builds add
+# PSYCHEROS_VERSION_SUFFIX=+staging.<sha>. Local `docker build` without
+# --build-arg falls back to a "+local" suffix so the chip in the chat
+# header renders non-interactive (rather than a clickable link to a
+# non-existent release page). Placed late in the Dockerfile so the
+# SHA-changing suffix doesn't bust the apt-get / deno install layer
+# cache on every staging push.
+ARG PSYCHEROS_VERSION="0.0.0-dev"
+ARG PSYCHEROS_VERSION_SUFFIX="+local"
+LABEL org.opencontainers.image.version="${PSYCHEROS_VERSION}${PSYCHEROS_VERSION_SUFFIX}"
+ENV PSYCHEROS_VERSION_SUFFIX="${PSYCHEROS_VERSION_SUFFIX}"
+
 # Health check (start-period accounts for embedding model load time)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD deno eval "const r = await fetch('http://localhost:3000/health'); if (!r.ok) Deno.exit(1);"

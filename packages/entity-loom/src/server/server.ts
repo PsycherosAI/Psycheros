@@ -16,6 +16,7 @@ import { significantRoutes } from "../stages/significant-stage.ts";
 import { dailyRoutes } from "../stages/daily-stage.ts";
 import { graphRoutes } from "../stages/graph-stage.ts";
 import { abortRunningStage } from "./stage-lock.ts";
+import { getVersionPayload, injectVersionChip } from "./version-chip.ts";
 
 const __dirname = dirname(new URL(import.meta.url).pathname);
 const ROOT_DIR = join(__dirname, "..", "..");
@@ -32,12 +33,14 @@ export async function startServer(port = 3210): Promise<void> {
   const logFilePath = await initLogger(ROOT_DIR);
   log("info", `Entity Loom server starting on port ${port}`);
 
-  // Load static HTML files
+  // Load static HTML files and stamp the running version into the chip
+  // placeholder. Substitution at startup (not per-request) keeps serving
+  // hot; VERSION never changes during a server lifetime.
   const wizardHtml = await Deno.readTextFile(
     join(ROOT_DIR, "web", "wizard.html"),
-  ).catch(() => null);
+  ).then(injectVersionChip).catch(() => null);
   const graphHtml = await Deno.readTextFile(join(ROOT_DIR, "web", "graph.html"))
-    .catch(() => null);
+    .then(injectVersionChip).catch(() => null);
 
   // Build router with all stage routes
   const router = new Router();
@@ -70,6 +73,11 @@ export async function startServer(port = 3210): Promise<void> {
           "Cache-Control": "no-cache, no-store",
         },
       });
+    }
+
+    // ─── Version ──────────────────────────────────────────────────
+    if (url.pathname === "/api/version" && req.method === "GET") {
+      return json(getVersionPayload());
     }
 
     // ─── SSE Stream ───────────────────────────────────────────────

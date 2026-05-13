@@ -153,7 +153,32 @@ export function renderAdminDiagnostics(snapshot: DiagnosticsSnapshot): string {
     ? `${snapshot.knowledgeGraph.stats.totalNodes} nodes, ${snapshot.knowledgeGraph.stats.totalEdges} edges`
     : "unavailable";
 
+  const psycherosVersionCell = snapshot.versions.isStaging
+    ? `${snapshot.versions.psycherosBase} <span class="admin-version-flavor">· staging</span>`
+    : snapshot.versions.psycheros;
+  const psycherosFullVersion = snapshot.versions.psycheros;
+
   return `<div class="admin-diagnostics">
+
+  <div class="admin-section">
+    <h3 class="admin-section-title">Versions</h3>
+    <div class="admin-stats-grid">
+      <div class="admin-stat">
+        <span class="admin-stat-label">psycheros</span>
+        <span class="admin-stat-value" title="${psycherosFullVersion}">${psycherosVersionCell}</span>
+      </div>
+      <div class="admin-stat">
+        <span class="admin-stat-label">entity-core</span>
+        <span class="admin-stat-value">${snapshot.versions.entityCore}</span>
+      </div>
+      <div class="admin-stat">
+        <span class="admin-stat-label">sqlite-vec</span>
+        <span class="admin-stat-value">${
+    statusDot(snapshot.vector.available)
+  } ${snapshot.vector.version ?? "not loaded"}</span>
+      </div>
+    </div>
+  </div>
 
   <div class="admin-section">
     <h3 class="admin-section-title">Overview</h3>
@@ -189,14 +214,6 @@ export function renderAdminDiagnostics(snapshot: DiagnosticsSnapshot): string {
 
   <div class="admin-section">
     <h3 class="admin-section-title">Vector System</h3>
-    <div class="admin-stats-grid">
-      <div class="admin-stat">
-        <span class="admin-stat-label">sqlite-vec</span>
-        <span class="admin-stat-value">${
-    statusDot(snapshot.vector.available)
-  } ${snapshot.vector.version ?? "not loaded"}</span>
-      </div>
-    </div>
     <table class="admin-table">
       <thead><tr><th>Table Pair</th><th>Main</th><th>Vec</th><th>Sync</th></tr></thead>
       <tbody>

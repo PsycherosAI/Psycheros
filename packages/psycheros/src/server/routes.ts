@@ -133,6 +133,16 @@ import {
   saveSubscription,
 } from "../push/mod.ts";
 import { renderMarkdown } from "./markdown.ts";
+import {
+  FLAVOR_LABEL,
+  IS_PRERELEASE,
+  IS_STAGING,
+  VERSION,
+  VERSION_BASE,
+  VERSION_SUFFIX,
+} from "../version.ts";
+import { getServerStartTime } from "./diagnostics.ts";
+import entityCoreDenoJson from "../../../entity-core/deno.json" with { type: "json" };
 
 /**
  * Context passed to route handlers containing dependencies.
@@ -1671,11 +1681,55 @@ export async function handleStaticFile(
 
 /**
  * Handle health check requests.
+ *
+ * Returns JSON with the daemon's identity + version metadata so consumers
+ * (the launcher dashboard, ops scripts) can surface the running version
+ * without scraping logs. Container HEALTHCHECK only checks `r.ok` so the
+ * body is free to grow as needed.
  */
 export function handleHealth(): Response {
-  return new Response(JSON.stringify({ status: "ok" }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
+  const started = getServerStartTime();
+  return new Response(
+    JSON.stringify({
+      status: "ok",
+      name: "psycheros",
+      version: VERSION,
+      version_base: VERSION_BASE,
+      version_suffix: VERSION_SUFFIX,
+      is_staging: IS_STAGING,
+      is_prerelease: IS_PRERELEASE,
+      flavor: FLAVOR_LABEL,
+      entity_core_version: entityCoreDenoJson.version,
+      started_at: started ? started.toISOString() : null,
+    }),
+    {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
+/**
+ * Serve the service worker with the cache name stamped to the running
+ * version. The raw file in web/sw.js carries a `__VERSION__` placeholder;
+ * this handler substitutes it at serve time so every released build owns
+ * a distinct cache key and stale offline assets are evicted on upgrade.
+ */
+export async function handleServiceWorker(
+  ctx: RouteContext,
+): Promise<Response> {
+  const swPath = `${ctx.projectRoot}/web/sw.js`;
+  const raw = await Deno.readTextFile(swPath);
+  // Replace `+` and `.` with `-` to produce a cache-name-safe slug
+  // (`0.1.2+staging.abc1234` -> `0-1-2-staging-abc1234`).
+  const safeVersion = VERSION.replace(/[+.]/g, "-");
+  const body = raw.replace(/__VERSION__/g, safeVersion);
+  return new Response(body, {
+    headers: {
+      "Content-Type": "application/javascript",
+      "Cache-Control": "no-cache",
+      "Service-Worker-Allowed": "/",
+    },
   });
 }
 

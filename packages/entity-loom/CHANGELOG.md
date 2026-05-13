@@ -4,6 +4,21 @@ All notable changes to entity-loom are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and this package follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-05-13
+
+### Added
+
+- Version chip in the wizard and graph viewer (lower-right corner).
+  Clicks through to the GitHub release page for the running version;
+  staging builds render the chip non-interactive with `· staging`
+  flavor. Tooltip surfaces both entity-loom and entity-core versions
+  since the graph engine version is often the operationally important
+  one.
+- `/api/version` endpoint on the main wizard server returns the
+  version payload as JSON so the launcher dashboard can render an
+  entity-loom service card the same way it consumes psycheros's
+  `/health`.
+
 ## [0.2.1] - 2026-05-13
 
 ### Changed

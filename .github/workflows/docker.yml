@@ -46,6 +46,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Read package version
+        id: pkg
+        run: echo "version=$(jq -r .version packages/psycheros/deno.json)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -97,5 +101,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PSYCHEROS_VERSION=${{ steps.pkg.outputs.version }}
+            PSYCHEROS_VERSION_SUFFIX=
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}

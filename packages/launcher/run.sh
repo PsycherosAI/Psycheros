@@ -28,18 +28,26 @@ if ! command -v deno &> /dev/null; then
   echo -e "${GREEN}  Deno installed!${NC}"
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 # Check for Git (optional — dashboard can download repos without it)
 if command -v git &> /dev/null; then
   echo -e "  Git:  $(git --version | head -1)"
 else
   echo -e "  Git:  ${YELLOW}not found (updates will be slower without it)${NC}"
 fi
+
+# Launcher version (read from the sibling deno.json — same source as the
+# dashboard's in-UI chip).
+LAUNCHER_VERSION="$(awk -F'"' '/"version"/ {print $4; exit}' "$SCRIPT_DIR/deno.json" 2>/dev/null)"
+if [[ -n "$LAUNCHER_VERSION" ]]; then
+  echo -e "  Launcher: v${LAUNCHER_VERSION}"
+fi
 echo ""
 echo -e "${CYAN}  Opening dashboard in your browser...${NC}"
 echo ""
 
-# Find dashboard.ts — same directory as this script
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Find dashboard.ts
 DASHBOARD="$SCRIPT_DIR/dashboard.ts"
 
 if [ ! -f "$DASHBOARD" ]; then

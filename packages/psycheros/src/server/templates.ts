@@ -38,6 +38,12 @@ import {
 import type { Tool } from "../tools/mod.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { pulseIconSvg } from "../pulse/templates.ts";
+import {
+  FLAVOR_LABEL,
+  IS_PRERELEASE,
+  VERSION,
+  VERSION_BASE,
+} from "../version.ts";
 import type { ExtractionHealth } from "../mcp-client/mod.ts";
 
 // =============================================================================
@@ -379,6 +385,7 @@ export function renderHeader(): string {
     <span class="logo-sub" id="header-title"></span>
   </div>
   <div class="header-right">
+    ${renderVersionChip()}
     <button id="intimacy-status-btn" class="header-icon" style="display:none;" aria-label="Intimacy status">
       <svg width="20" height="20" viewBox="0 0 24 24" style="color:var(--c-accent);fill:currentColor;stroke:none;">
         <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
@@ -392,6 +399,28 @@ export function renderHeader(): string {
     </button>
   </div>
 </header>`;
+}
+
+/**
+ * Render the version chip displayed in the header.
+ *
+ * Two rendering modes, driven by whether the embedded VERSION carries a
+ * build-metadata suffix:
+ * - Tagged public release (no suffix): clickable `<a>` linking to the
+ *   GitHub release page for `psycheros-v<base>`. CHANGELOG entry is the
+ *   canonical home for release notes (release.yml extracts it).
+ * - Any pre-release (staging container, local docker build, etc.):
+ *   non-interactive `<span>` with a flavor pill (` · staging`, ` · local`,
+ *   ` · build`). The matching release page wouldn't exist; clicking through
+ *   would 404. Full suffix is exposed via the title tooltip.
+ */
+function renderVersionChip(): string {
+  const baseHtml = escapeHtml(VERSION_BASE);
+  if (IS_PRERELEASE) {
+    return `<span class="psy-version-chip psy-version-chip--staging" title="${escapeHtml(VERSION)}">v${baseHtml}<span class="psy-version-chip__flavor"> · ${escapeHtml(FLAVOR_LABEL)}</span></span>`;
+  }
+  const href = `https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v${encodeURIComponent(VERSION_BASE)}`;
+  return `<a class="psy-version-chip" href="${href}" target="_blank" rel="noopener" title="Release notes for v${baseHtml}">v${baseHtml}</a>`;
 }
 
 /**

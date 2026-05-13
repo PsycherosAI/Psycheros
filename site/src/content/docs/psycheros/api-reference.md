@@ -49,7 +49,7 @@ Managed by `EventBroadcaster` singleton in `src/server/broadcaster.ts`.
 | ------ | -------------- | ----------------------- |
 | `GET`  | `/`            | App shell HTML          |
 | `GET`  | `/c/:id`       | Conversation page       |
-| `GET`  | `/health`      | Health check endpoint   |
+| `GET`  | `/health`      | Identity + version JSON (`name`, `version`, `version_base`, `version_suffix`, `is_staging`, `is_prerelease`, `flavor`, `entity_core_version`, `started_at`). Container `HEALTHCHECK` ignores the body and only reads `r.ok`. |
 | `GET`  | `/api/events`  | Persistent SSE channel  |
 | `GET`  | `/fragments/*` | HTML fragments for HTMX |
 

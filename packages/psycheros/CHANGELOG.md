@@ -4,6 +4,33 @@ All notable changes to the Psycheros harness daemon are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and this package follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-05-13
+
+### Added
+
+- Version chip in the chat header (lower-right). Clicks through to the
+  GitHub release page for the running version; staging builds render
+  the chip non-interactive with a `· staging` flavor and the full sha
+  in the tooltip.
+- `/health` now returns identity + version JSON (`name`, `version`,
+  `version_base`, `version_suffix`, `is_staging`, `entity_core_version`,
+  `started_at`). Container `HEALTHCHECK` still only reads `r.ok`.
+- Admin "Versions" section in the diagnostics dashboard, showing
+  psycheros, entity-core, and sqlite-vec versions side by side.
+  Copy-as-markdown export includes the same block.
+- Service worker cache key now stamps the running version
+  (`psycheros-offline-<safe-version>`), evicting stale offline assets
+  on every upgrade instead of forever pinning the v2 cache.
+- Container image carries `org.opencontainers.image.version` LABEL
+  matching the running version (visible in `docker inspect` and the
+  GHCR sidebar).
+
+### Fixed
+
+- Startup banner version no longer shows hardcoded `0.1.0` regardless
+  of the actual release. `src/version.ts` is now the source of truth
+  for the running version, sourced from `deno.json` via a JSON import.
+
 ## [0.1.2] - 2026-05-13
 
 ### Fixed

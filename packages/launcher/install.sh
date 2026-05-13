@@ -103,6 +103,10 @@ else
     exit 1
   fi
 fi
+LAUNCHER_VERSION="$(awk -F'"' '/"version"/ {print $4; exit}' "$INSTALL_DIR/packages/launcher/deno.json" 2>/dev/null)"
+if [[ -n "$LAUNCHER_VERSION" ]]; then
+  echo -e "  ${GREEN}Launcher: v${LAUNCHER_VERSION}${NC}"
+fi
 echo ""
 
 # --- Step 4: Settings ---

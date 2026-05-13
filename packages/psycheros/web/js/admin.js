@@ -109,8 +109,15 @@
         ? s.knowledgeGraph.stats.totalNodes + " nodes, " + s.knowledgeGraph.stats.totalEdges + " edges"
         : "unavailable";
 
+      var psycherosVersion = s.versions ? s.versions.psycheros : "unknown";
+      var entityCoreVersion = s.versions ? s.versions.entityCore : "unknown";
+
       var text = "# Psycheros Diagnostics\n";
       text += "Timestamp: " + s.timestamp + "\n\n";
+      text += "## Versions\n";
+      text += "- psycheros: " + psycherosVersion + "\n";
+      text += "- entity-core: " + entityCoreVersion + "\n";
+      text += "- sqlite-vec: " + vecStatus + "\n\n";
       text += "## Overview\n";
       text += "- Uptime: " + uptime + "\n";
       text += "- SSE Clients: " + s.sse.connectedClients + "\n";
@@ -123,7 +130,6 @@
       text += "| lorebook_entries | " + s.database.lorebookEntries + " |\n";
       text += "| memory_summaries | " + s.database.memorySummaries + " |\n\n";
       text += "## Vector System\n";
-      text += "- sqlite-vec: " + vecStatus + "\n";
       text += "- message_embeddings: " + s.vector.messageEmbeddings + " main / " + s.vector.vecMessages + " vec — " + msgSync + "\n";
       text += "- memory_chunks: " + s.vector.memoryChunks + " main / " + s.vector.vecMemoryChunks + " vec — " + memSync + "\n\n";
       text += "## RAG\n";

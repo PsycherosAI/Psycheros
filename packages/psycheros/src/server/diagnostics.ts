@@ -10,11 +10,21 @@
 import type { RouteContext } from "./routes.ts";
 import { getVecVersion, isVectorModuleAvailable } from "../db/vector.ts";
 import { getBroadcaster } from "./broadcaster.ts";
+import { IS_STAGING, VERSION, VERSION_BASE, VERSION_SUFFIX } from "../version.ts";
+import entityCoreDenoJson from "../../../entity-core/deno.json" with { type: "json" };
 
 /** Complete system diagnostics snapshot. */
 export interface DiagnosticsSnapshot {
   timestamp: string;
   uptime: number;
+
+  versions: {
+    psycheros: string;
+    psycherosBase: string;
+    psycherosSuffix: string;
+    isStaging: boolean;
+    entityCore: string;
+  };
 
   database: {
     conversations: number;
@@ -91,6 +101,13 @@ const CACHE_TTL_MS = 5000;
  */
 export function setServerStartTime(time: Date): void {
   serverStartTime = time;
+}
+
+/**
+ * Read the server start time. Returns null if not yet set.
+ */
+export function getServerStartTime(): Date | null {
+  return serverStartTime;
 }
 
 /**
@@ -269,9 +286,18 @@ export async function collectDiagnostics(
   // Graph write tools are no longer exposed — entity-core handles graph automatically
   const graphWriteToolsEnabled = false;
 
+  const versions: DiagnosticsSnapshot["versions"] = {
+    psycheros: VERSION,
+    psycherosBase: VERSION_BASE,
+    psycherosSuffix: VERSION_SUFFIX,
+    isStaging: IS_STAGING,
+    entityCore: entityCoreDenoJson.version,
+  };
+
   const snapshot: DiagnosticsSnapshot = {
     timestamp: new Date().toISOString(),
     uptime,
+    versions,
     database,
     vector,
     rag,
