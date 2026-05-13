@@ -62,31 +62,6 @@ The launcher handles install, update, start, and stop. Pick your platform:
 Full reference and troubleshooting:
 [Launcher user guide](/Psycheros/launcher/user-guide/).
 
-## Architecture
-
-```
-┌──────────────────────────────────────────┐
-│      entity-core (MCP server, stdio)     │
-│  • Identity files                        │
-│  • Hierarchical memory                   │
-│  • Knowledge graph (SQLite + sqlite-vec) │
-│  • Pull / push sync across embodiments   │
-└────────────────────┬─────────────────────┘
-                     │ stdio MCP
-       ┌─────────────┴───────────┐
-       │     other embodiments   │
-   ┌───┴───┐   ┌──────────┐    (SillyTavern,
-   │ Psy-  │   │  Loom    │     OpenWebUI,
-   │cheros │   │  (import │     Claude Code,
-   │       │   │  wizard) │     etc.)
-   └───────┘   └──────────┘
-```
-
-**entity-core is canonical** for identity and memory. Psycheros — and any
-other embodiment — spawns it over stdio MCP and syncs through pull/push.
-**entity-loom** is one-shot: a wizard for converting a chat-history export
-from a foreign platform into an importable package.
-
 ## What's in the box
 
 <CardGrid>
