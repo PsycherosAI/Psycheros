@@ -53,6 +53,15 @@ jobs:
           NOTES_FILE="$(mktemp)"
           if .github/scripts/extract-changelog-entry.sh "$PKG" "$VERSION" > "$NOTES_FILE"; then
             echo "Creating release from packages/${PKG}/CHANGELOG.md entry [$VERSION]."
+            # Append the per-package "How to install" footer so visitors on
+            # the release page can tell our scoped uploads apart from
+            # GitHub's auto-attached full-monorepo source archives (which
+            # are not real assets and cannot be disabled on free-tier
+            # public repos).
+            if [ -f ".github/release-footers/$PKG.md" ]; then
+              printf "\n" >> "$NOTES_FILE"
+              cat ".github/release-footers/$PKG.md" >> "$NOTES_FILE"
+            fi
             gh release create "$REF" --title "$REF" --notes-file "$NOTES_FILE" --latest=false --verify-tag
           else
             echo "::warning::Falling back to --generate-notes for $REF (no CHANGELOG entry)."
@@ -127,6 +136,15 @@ jobs:
           NOTES_FILE="$(mktemp)"
           if .github/scripts/extract-changelog-entry.sh "$PKG" "$VERSION" > "$NOTES_FILE"; then
             echo "Creating release from packages/${PKG}/CHANGELOG.md entry [$VERSION]."
+            # Append the per-package "How to install" footer so visitors on
+            # the release page can tell our scoped uploads apart from
+            # GitHub's auto-attached full-monorepo source archives (which
+            # are not real assets and cannot be disabled on free-tier
+            # public repos).
+            if [ -f ".github/release-footers/$PKG.md" ]; then
+              printf "\n" >> "$NOTES_FILE"
+              cat ".github/release-footers/$PKG.md" >> "$NOTES_FILE"
+            fi
             gh release create "$REF" --title "$REF" --notes-file "$NOTES_FILE" --latest=false --verify-tag
           else
             echo "::warning::Falling back to --generate-notes for $REF (no CHANGELOG entry)."
@@ -172,6 +190,15 @@ jobs:
           NOTES_FILE="$(mktemp)"
           if .github/scripts/extract-changelog-entry.sh "$PKG" "$VERSION" > "$NOTES_FILE"; then
             echo "Creating release from packages/${PKG}/CHANGELOG.md entry [$VERSION]."
+            # Append the per-package "How to install" footer so visitors on
+            # the release page can tell our scoped uploads apart from
+            # GitHub's auto-attached full-monorepo source archives (which
+            # are not real assets and cannot be disabled on free-tier
+            # public repos).
+            if [ -f ".github/release-footers/$PKG.md" ]; then
+              printf "\n" >> "$NOTES_FILE"
+              cat ".github/release-footers/$PKG.md" >> "$NOTES_FILE"
+            fi
             gh release create "$REF" --title "$REF" --notes-file "$NOTES_FILE" --latest=false --verify-tag
           else
             echo "::warning::Falling back to --generate-notes for $REF (no CHANGELOG entry)."
@@ -229,6 +256,15 @@ jobs:
           NOTES_FILE="$(mktemp)"
           if .github/scripts/extract-changelog-entry.sh "$PKG" "$VERSION" > "$NOTES_FILE"; then
             echo "Creating release from packages/${PKG}/CHANGELOG.md entry [$VERSION]."
+            # Append the per-package "How to install" footer so visitors on
+            # the release page can tell our scoped uploads apart from
+            # GitHub's auto-attached full-monorepo source archives (which
+            # are not real assets and cannot be disabled on free-tier
+            # public repos).
+            if [ -f ".github/release-footers/$PKG.md" ]; then
+              printf "\n" >> "$NOTES_FILE"
+              cat ".github/release-footers/$PKG.md" >> "$NOTES_FILE"
+            fi
             gh release create "$REF" --title "$REF" --notes-file "$NOTES_FILE" --latest --verify-tag
           else
             echo "::warning::Falling back to --generate-notes for $REF (no CHANGELOG entry)."
