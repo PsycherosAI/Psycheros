@@ -70,11 +70,11 @@ function parseProvider(
  * Falls back to environment variable defaults if the file doesn't exist.
  */
 export async function loadWebSearchSettings(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<WebSearchSettings> {
   const defaults = getDefaultWebSearchSettings();
   const settingsPath = join(
-    projectRoot,
+    dataRoot,
     ".psycheros",
     "web-search-settings.json",
   );
@@ -95,10 +95,10 @@ export async function loadWebSearchSettings(
  * Creates the `.psycheros/` directory if it doesn't exist.
  */
 export async function saveWebSearchSettings(
-  projectRoot: string,
+  dataRoot: string,
   settings: WebSearchSettings,
 ): Promise<void> {
-  const settingsDir = join(projectRoot, ".psycheros");
+  const settingsDir = join(dataRoot, ".psycheros");
   const settingsPath = join(settingsDir, "web-search-settings.json");
 
   await Deno.mkdir(settingsDir, { recursive: true });

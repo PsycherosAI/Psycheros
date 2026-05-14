@@ -18,9 +18,9 @@ import { join } from "@std/path";
  * Returns empty record if the directory doesn't exist.
  */
 export async function loadCustomTools(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<Record<string, Tool>> {
-  const customDir = join(projectRoot, "custom-tools");
+  const customDir = join(dataRoot, "custom-tools");
   const tools: Record<string, Tool> = {};
 
   let entries;

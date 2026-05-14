@@ -49,9 +49,9 @@ const VAPID_KEYS_PATH = "push-vapid-keys.json";
  * Auto-generated on first run using web-push's generateVAPIDKeys().
  */
 export async function loadOrGenerateKeys(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<VAPIDKeys> {
-  const keysPath = join(projectRoot, ".psycheros", VAPID_KEYS_PATH);
+  const keysPath = join(dataRoot, ".psycheros", VAPID_KEYS_PATH);
 
   try {
     const text = await Deno.readTextFile(keysPath);
@@ -67,7 +67,7 @@ export async function loadOrGenerateKeys(
   const keys = webPush.generateVAPIDKeys();
 
   // Save to disk
-  const dir = join(projectRoot, ".psycheros");
+  const dir = join(dataRoot, ".psycheros");
   await Deno.mkdir(dir, { recursive: true });
   await Deno.writeTextFile(keysPath, JSON.stringify(keys, null, 2) + "\n");
 

@@ -55,10 +55,10 @@ export function getDefaultHomeSettings(): HomeSettings {
  * Falls back to defaults if the file doesn't exist.
  */
 export async function loadHomeSettings(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<HomeSettings> {
   const defaults = getDefaultHomeSettings();
-  const settingsPath = join(projectRoot, ".psycheros", "home-settings.json");
+  const settingsPath = join(dataRoot, ".psycheros", "home-settings.json");
 
   try {
     const text = await Deno.readTextFile(settingsPath);
@@ -74,10 +74,10 @@ export async function loadHomeSettings(
  * Creates the `.psycheros/` directory if it doesn't exist.
  */
 export async function saveHomeSettings(
-  projectRoot: string,
+  dataRoot: string,
   settings: HomeSettings,
 ): Promise<void> {
-  const settingsDir = join(projectRoot, ".psycheros");
+  const settingsDir = join(dataRoot, ".psycheros");
   const settingsPath = join(settingsDir, "home-settings.json");
 
   await Deno.mkdir(settingsDir, { recursive: true });

@@ -150,7 +150,7 @@ function collectConversationsForDate(
 async function generateDailySummary(
   conversations: ConversationForSummary[],
   llm: LLMClient,
-  projectRoot: string,
+  dataRoot: string,
   platformActivity?: string,
   platformChatId?: string,
   memoryInstructions?: string,
@@ -159,7 +159,7 @@ async function generateDailySummary(
     return [];
   }
 
-  const identitySystemMessage = await buildIdentitySystemMessage(projectRoot);
+  const identitySystemMessage = await buildIdentitySystemMessage(dataRoot);
   let prompt = withInstanceId(DAILY_SUMMARY_PROMPT).replace(
     "{{CONVERSATIONS}}",
     conversations.length > 0
@@ -219,7 +219,7 @@ async function generateDailySummary(
  *
  * @param date - The date to summarize
  * @param db - Database client
- * @param projectRoot - Root directory of the project
+ * @param dataRoot - Root directory of the project
  * @param config - Optional configuration overrides
  * @returns The created memory file, or null if summarization failed or was skipped
  */
@@ -227,7 +227,7 @@ export async function summarizeDay(
   date: Date,
   db: DBClient,
   mcpClient: MCPClient,
-  projectRoot: string,
+  dataRoot: string,
   config?: Partial<SummarizerConfig>,
   options?: { llm?: LLMClient; activeProfile?: LLMConnectionProfile },
 ): Promise<MemoryFile | null> {
@@ -276,7 +276,7 @@ export async function summarizeDay(
   let discordSyntheticChatId = "";
   let discordConversationIds: string[] = [];
   try {
-    const gatewayConfig = await loadDiscordGatewayConfig(projectRoot);
+    const gatewayConfig = await loadDiscordGatewayConfig(dataRoot);
     if (
       gatewayConfig.includeInDailyMemories && gatewayConfig.servers.length > 0
     ) {
@@ -288,7 +288,7 @@ export async function summarizeDay(
         date,
         db,
         llm,
-        projectRoot,
+        dataRoot,
         {
           timezone: cfg.timezone,
           cutoffHour: cfg.cutoffHour,
@@ -334,7 +334,7 @@ export async function summarizeDay(
     const bulletPoints = await generateDailySummary(
       conversations,
       llm,
-      projectRoot,
+      dataRoot,
       platformActivity || undefined,
       discordSyntheticChatId || undefined,
       discordMemoryInstructions || undefined,

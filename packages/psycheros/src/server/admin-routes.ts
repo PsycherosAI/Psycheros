@@ -317,7 +317,7 @@ export async function handleAdminAddInstanceSuffix(
   const candidates: RenameCandidate[] = [];
   const errors: string[] = [];
 
-  const psycherosMemories = join(ctx.projectRoot, "memories");
+  const psycherosMemories = join(ctx.dataRoot, "memories");
 
   // Scan Psycheros memories
   if (scopes === "psycheros" || scopes === "both") {
@@ -774,7 +774,7 @@ export async function handleAdminDataMigrationChats(
     }
 
     // Write uploaded file to temp location
-    const tmpDir = join(ctx.projectRoot, ".psycheros", "tmp");
+    const tmpDir = join(ctx.dataRoot, ".psycheros", "tmp");
     await Deno.mkdir(tmpDir, { recursive: true });
     const tempPath = join(tmpDir, `chat-import-${Date.now()}.db`);
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -1231,7 +1231,7 @@ export async function handleAdminDataMigrationGraph(
     }
 
     // Write uploaded file to temp location
-    const tmpDir = join(ctx.projectRoot, ".psycheros", "tmp");
+    const tmpDir = join(ctx.dataRoot, ".psycheros", "tmp");
     await Deno.mkdir(tmpDir, { recursive: true });
     const tempPath = join(tmpDir, `graph-import-${Date.now()}.db`);
     const bytes = new Uint8Array(await file.arrayBuffer());

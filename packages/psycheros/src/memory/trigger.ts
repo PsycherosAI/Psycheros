@@ -80,7 +80,7 @@ export async function repairOrphanedSummaries(
 export async function catchUpSummarization(
   db: DBClient,
   mcpClient: MCPClient,
-  projectRoot: string,
+  dataRoot: string,
   config?: Partial<SummarizerConfig>,
   activeProfile?: LLMConnectionProfile,
 ): Promise<number> {
@@ -106,7 +106,7 @@ export async function catchUpSummarization(
       new Date(date),
       db,
       mcpClient,
-      projectRoot,
+      dataRoot,
       config,
       { activeProfile },
     );

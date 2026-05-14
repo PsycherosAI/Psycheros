@@ -15,10 +15,10 @@ const IDENTITY_SUBDIRS = ["self", "user", "relationship", "custom"] as const;
  * Used to substitute {{entityName}} placeholders when seeding identity
  * templates on first run.
  */
-async function loadEntityName(projectRoot: string): Promise<string> {
+async function loadEntityName(dataRoot: string): Promise<string> {
   try {
     const text = await Deno.readTextFile(
-      join(projectRoot, ".psycheros", "general-settings.json"),
+      join(dataRoot, ".psycheros", "general-settings.json"),
     );
     const settings = JSON.parse(text) as { entityName?: string };
     return settings.entityName?.trim() || "Assistant";
@@ -115,10 +115,11 @@ async function copyTemplateFiles(
  */
 export async function initializeFromTemplates(
   projectRoot: string,
+  dataRoot: string,
 ): Promise<void> {
   const templatesDir = join(projectRoot, "templates", "identity");
-  const identityDir = join(projectRoot, "identity");
-  const substitutions = { entityName: await loadEntityName(projectRoot) };
+  const identityDir = join(dataRoot, "identity");
+  const substitutions = { entityName: await loadEntityName(dataRoot) };
 
   let totalCopied = 0;
 
@@ -152,9 +153,12 @@ export async function initializeFromTemplates(
 /**
  * Seed the custom-tools/ directory with template files if it doesn't exist.
  */
-async function initializeCustomToolsDir(projectRoot: string): Promise<void> {
+async function initializeCustomToolsDir(
+  projectRoot: string,
+  dataRoot: string,
+): Promise<void> {
   const templateDir = join(projectRoot, "templates", "custom-tools");
-  const targetDir = join(projectRoot, "custom-tools");
+  const targetDir = join(dataRoot, "custom-tools");
 
   try {
     const entries = Array.from(Deno.readDirSync(templateDir));
@@ -173,8 +177,15 @@ async function initializeCustomToolsDir(projectRoot: string): Promise<void> {
 
 /**
  * Run all initialization tasks
+ *
+ * @param projectRoot - Source root, where `templates/` lives
+ * @param dataRoot - Runtime state root, where seeded files are written
+ *   (typically equal to projectRoot unless PSYCHEROS_DATA_DIR is set)
  */
-export async function initialize(projectRoot: string): Promise<void> {
-  await initializeFromTemplates(projectRoot);
-  await initializeCustomToolsDir(projectRoot);
+export async function initialize(
+  projectRoot: string,
+  dataRoot: string,
+): Promise<void> {
+  await initializeFromTemplates(projectRoot, dataRoot);
+  await initializeCustomToolsDir(projectRoot, dataRoot);
 }

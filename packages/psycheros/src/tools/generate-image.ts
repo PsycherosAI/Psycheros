@@ -536,7 +536,7 @@ async function execute(
     };
   }
 
-  const projectRoot = ctx.config.projectRoot;
+  const dataRoot = ctx.config.dataRoot;
 
   // Load anchor images if provided
   const anchorImages: Array<{ data: string; mediaType: string }> = [];
@@ -554,7 +554,7 @@ async function execute(
           };
         }
         const filePath = join(
-          projectRoot,
+          dataRoot,
           ".psycheros",
           "anchors",
           row.filename,
@@ -580,7 +580,7 @@ async function execute(
   if (user_image_path) {
     try {
       // user_image_path is relative to .psycheros/
-      const filePath = join(projectRoot, ".psycheros", user_image_path);
+      const filePath = join(dataRoot, ".psycheros", user_image_path);
       const fileData = await Deno.readFile(filePath);
       const base64 = uint8ToBase64(fileData);
       const mediaType = getMediaType(user_image_path);
@@ -600,7 +600,7 @@ async function execute(
   let inputImage: { data: string; mediaType: string } | undefined;
   if (input_image_path) {
     try {
-      const filePath = join(projectRoot, ".psycheros", input_image_path);
+      const filePath = join(dataRoot, ".psycheros", input_image_path);
       const fileData = await Deno.readFile(filePath);
       const base64 = uint8ToBase64(fileData);
       const mediaType = getMediaType(input_image_path);
@@ -669,7 +669,7 @@ async function execute(
     // Save the generated image to disk
     const ext = getExtensionFromMediaType(result.mediaType);
     const filename = `${crypto.randomUUID()}.${ext}`;
-    const generatedDir = join(projectRoot, ".psycheros", "generated-images");
+    const generatedDir = join(dataRoot, ".psycheros", "generated-images");
     await Deno.mkdir(generatedDir, { recursive: true });
     const filePath = join(generatedDir, filename);
     const imageBytes = Uint8Array.from(

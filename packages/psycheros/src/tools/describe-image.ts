@@ -460,12 +460,12 @@ async function executeDescribeImage(
     } else if (path) {
       // path is relative to .psycheros/
       // If the path has no extension, look up the actual file in the directory
-      let resolvedPath = join(ctx.config.projectRoot, ".psycheros", path);
+      let resolvedPath = join(ctx.config.dataRoot, ".psycheros", path);
       try {
         await Deno.stat(resolvedPath);
       } catch {
         // No extension — try to find the actual file by prefix
-        const dir = join(ctx.config.projectRoot, ".psycheros", path).replace(
+        const dir = join(ctx.config.dataRoot, ".psycheros", path).replace(
           /[^/]+$/,
           "",
         );

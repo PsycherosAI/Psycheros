@@ -159,7 +159,7 @@ export const sendDiscordDmTool: Tool = {
         // Send with image attachment via multipart/form-data
         const relativePath = imagePath.trim();
         const absolutePath = join(
-          ctx.config.projectRoot,
+          ctx.config.dataRoot,
           ".psycheros",
           relativePath,
         );

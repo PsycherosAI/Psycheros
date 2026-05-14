@@ -196,6 +196,11 @@ export interface ServerConfig {
   dataDir: string;
   /** Whether RAG is enabled */
   ragEnabled: boolean;
+  /**
+   * Optional scheduler reference — passed so the entity_import handler can
+   * update the scheduler's DB handle after graph.db is replaced on disk.
+   */
+  scheduler?: import("@psycheros/scheduler").Scheduler;
   /** Minimum score threshold for RAG retrieval */
   ragMinScore?: number;
   /** Maximum chunks to retrieve */

@@ -8,7 +8,9 @@
   ],
   "nodeModulesDir": "auto",
   "tasks": {
-    "test": "deno test -A packages/scheduler/tests/ packages/psycheros/tests/"
+    "test": "deno test -A packages/scheduler/tests/ packages/psycheros/tests/",
+    "fmt": "deno fmt",
+    "fmt:check": "deno fmt --check"
   },
   "imports": {
     "@std/path": "jsr:@std/path@^1",

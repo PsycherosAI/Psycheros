@@ -149,7 +149,7 @@ export async function summarizeDiscordActivity(
   date: Date,
   db: DBClient,
   llm: LLMClient,
-  projectRoot: string,
+  dataRoot: string,
   config: { timezone?: string; cutoffHour?: number; instructions?: string },
 ): Promise<DiscordSummaryResult> {
   const dateStr = date.toISOString().split("T")[0];
@@ -158,7 +158,7 @@ export async function summarizeDiscordActivity(
   let entityName = "the AI entity";
   try {
     const text = await Deno.readTextFile(
-      join(projectRoot, ".psycheros", "general-settings.json"),
+      join(dataRoot, ".psycheros", "general-settings.json"),
     );
     const saved = JSON.parse(text) as { entityName?: string };
     if (saved.entityName) entityName = saved.entityName;
@@ -225,7 +225,7 @@ export async function summarizeDiscordActivity(
     .replace("{{INSTRUCTIONS}}", instructionsBlock)
     .replace("{{MESSAGES}}", formatted);
 
-  const identitySystemMessage = await buildIdentitySystemMessage(projectRoot);
+  const identitySystemMessage = await buildIdentitySystemMessage(dataRoot);
   const chatMessages: ChatMessage[] = [
     { role: "system", content: identitySystemMessage },
     { role: "user", content: prompt },

@@ -92,7 +92,7 @@ export const identityAppendTool: Tool = {
     // Create file manager and perform append
     const manager = new IdentityFileManager(
       ctx.config.mcpClient ?? null,
-      ctx.config.projectRoot,
+      ctx.config.dataRoot,
     );
 
     const result = await manager.append(

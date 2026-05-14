@@ -30,20 +30,20 @@ export const IDENTITY_CATEGORIES: SnapshotCategory[] = [
 /**
  * Create a full snapshot of all identity files.
  *
- * @param projectRoot - Root directory of the project
+ * @param dataRoot - Root directory of the project
  * @param reason - Why the snapshot is being created
  * @param source - Which system is creating the snapshot
  * @returns Array of created snapshot metadata
  */
 export async function createFullSnapshot(
-  projectRoot: string,
+  dataRoot: string,
   reason: SnapshotReason,
   source: SnapshotSource,
 ): Promise<SnapshotMeta[]> {
   const snapshots: SnapshotMeta[] = [];
 
   for (const category of IDENTITY_CATEGORIES) {
-    const categoryPath = join(projectRoot, "identity", category);
+    const categoryPath = join(dataRoot, "identity", category);
 
     try {
       const entries = Deno.readDir(categoryPath);
@@ -52,7 +52,7 @@ export async function createFullSnapshot(
 
         const content = await Deno.readTextFile(join(categoryPath, entry.name));
         const snapshot = await createSnapshot(
-          projectRoot,
+          dataRoot,
           category,
           entry.name,
           content,
@@ -76,7 +76,7 @@ export async function createFullSnapshot(
 /**
  * Create a snapshot of a single identity file.
  *
- * @param projectRoot - Root directory of the project
+ * @param dataRoot - Root directory of the project
  * @param category - The identity category
  * @param filename - The filename to snapshot
  * @param content - The content to snapshot
@@ -85,7 +85,7 @@ export async function createFullSnapshot(
  * @returns The created snapshot metadata, or null if failed
  */
 export async function createSnapshot(
-  projectRoot: string,
+  dataRoot: string,
   category: SnapshotCategory,
   filename: string,
   content: string,
@@ -95,7 +95,7 @@ export async function createSnapshot(
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const date = new Date().toISOString().split("T")[0];
   const snapshotFilename = `${filename.replace(/\.md$/, "")}_${timestamp}.md`;
-  const snapshotDir = join(projectRoot, ".snapshots", category);
+  const snapshotDir = join(dataRoot, ".snapshots", category);
   const snapshotPath = join(snapshotDir, snapshotFilename);
 
   try {
@@ -132,18 +132,18 @@ ${content}
 /**
  * List available snapshots with optional filtering.
  *
- * @param projectRoot - Root directory of the project
+ * @param dataRoot - Root directory of the project
  * @param category - Optional category filter
  * @param filename - Optional filename filter
  * @returns Object with success status and array of snapshot metadata
  */
 export async function listSnapshots(
-  projectRoot: string,
+  dataRoot: string,
   category?: SnapshotCategory,
   filename?: string,
 ): Promise<SnapshotListResult> {
   const snapshots: SnapshotMeta[] = [];
-  const snapshotsDir = join(projectRoot, ".snapshots");
+  const snapshotsDir = join(dataRoot, ".snapshots");
 
   const categories = category ? [category] : IDENTITY_CATEGORIES;
 
@@ -258,12 +258,12 @@ async function readSnapshotHeader(
 /**
  * Get the content of a specific snapshot.
  *
- * @param projectRoot - Root directory of the project
+ * @param dataRoot - Root directory of the project
  * @param snapshotId - The snapshot ID (category/filename_timestamp)
  * @returns Object with success status and content
  */
 export async function getSnapshotContent(
-  projectRoot: string,
+  dataRoot: string,
   snapshotId: string,
 ): Promise<SnapshotContentResult> {
   // Parse the snapshot ID - remove .md extension if present
@@ -281,7 +281,7 @@ export async function getSnapshotContent(
 
   const category = categoryStr as SnapshotCategory;
   const snapshotPath = join(
-    projectRoot,
+    dataRoot,
     ".snapshots",
     category,
     `${filenamePart}.md`,
@@ -298,13 +298,13 @@ export async function getSnapshotContent(
 /**
  * Restore a snapshot to the current identity file.
  *
- * @param projectRoot - Root directory of the project
+ * @param dataRoot - Root directory of the project
  * @param snapshotId - The snapshot ID to restore
  * @param mcpClient - Optional MCP client for syncing with entity-core
  * @returns Object with success status and message
  */
 export async function restoreSnapshot(
-  projectRoot: string,
+  dataRoot: string,
   snapshotId: string,
   mcpClient?: {
     writeIdentityFile: (
@@ -316,7 +316,7 @@ export async function restoreSnapshot(
   },
 ): Promise<SnapshotRestoreResult> {
   // Get the snapshot content
-  const contentResult = await getSnapshotContent(projectRoot, snapshotId);
+  const contentResult = await getSnapshotContent(dataRoot, snapshotId);
   if (!contentResult.success || !contentResult.content) {
     return {
       success: false,
@@ -351,11 +351,11 @@ export async function restoreSnapshot(
   const content = lines.slice(contentStart).join("\n");
 
   // Create a snapshot of current file before restoring
-  const currentPath = join(projectRoot, "identity", category, filename);
+  const currentPath = join(dataRoot, "identity", category, filename);
   try {
     const currentContent = await Deno.readTextFile(currentPath);
     await createSnapshot(
-      projectRoot,
+      dataRoot,
       category,
       filename,
       currentContent,
@@ -373,10 +373,10 @@ export async function restoreSnapshot(
         category,
         filename,
         content,
-        projectRoot,
+        dataRoot,
       );
     } else {
-      await Deno.mkdir(join(projectRoot, "identity", category), {
+      await Deno.mkdir(join(dataRoot, "identity", category), {
         recursive: true,
       });
       await Deno.writeTextFile(currentPath, content);
@@ -399,12 +399,12 @@ export async function restoreSnapshot(
 /**
  * Clean up snapshots older than the retention period.
  *
- * @param projectRoot - Root directory of the project
+ * @param dataRoot - Root directory of the project
  * @param retentionDays - Number of days to keep snapshots
  * @returns Object with deleted and kept counts
  */
 export async function cleanupOldSnapshots(
-  projectRoot: string,
+  dataRoot: string,
   retentionDays: number,
 ): Promise<SnapshotCleanupResult> {
   const cutoffDate = new Date();
@@ -414,7 +414,7 @@ export async function cleanupOldSnapshots(
   let kept = 0;
 
   for (const category of IDENTITY_CATEGORIES) {
-    const catDir = join(projectRoot, ".snapshots", category);
+    const catDir = join(dataRoot, ".snapshots", category);
     try {
       const entries = Deno.readDir(catDir);
       for await (const entry of entries) {

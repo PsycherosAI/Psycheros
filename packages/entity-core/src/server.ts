@@ -1252,6 +1252,14 @@ export function createServer(config: Partial<ServerConfig> = {}): McpServer {
       await graphStore.initialize();
       const handler = createEntityImportHandler(store, graphStore);
       const result = await handler({ data, mode });
+
+      // After import, graphStore may have been closed and reinitialized
+      // (graph.db replaced on disk). Update the scheduler's DB handle so
+      // it doesn't keep using the stale (closed) connection.
+      if (fullConfig.scheduler) {
+        fullConfig.scheduler.replaceDatabase(graphStore.getRawDb());
+      }
+
       return {
         content: [{
           type: "text" as const,

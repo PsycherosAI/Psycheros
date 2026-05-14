@@ -112,7 +112,7 @@ export const customFileTool: Tool = {
 
     const manager = new IdentityFileManager(
       ctx.config.mcpClient ?? null,
-      ctx.config.projectRoot,
+      ctx.config.dataRoot,
     );
 
     switch (operation) {

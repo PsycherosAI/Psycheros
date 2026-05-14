@@ -18,7 +18,8 @@
  * const tools = createDefaultRegistry();
  *
  * const turn = new EntityTurn(llm, db, () => tools, {
- *   projectRoot: "/path/to/project",
+ *   projectRoot: "/path/to/source",
+ *   dataRoot: "/path/to/data", // typically same as projectRoot
  * });
  *
  * const conversation = db.createConversation();

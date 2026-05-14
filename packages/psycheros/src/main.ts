@@ -50,10 +50,18 @@ function parseRagEnabled(): boolean {
 // Configuration from environment or defaults
 const allowedTools = parseAllowedTools();
 const ragEnabled = parseRagEnabled();
+const projectRoot = Deno.cwd();
+// PSYCHEROS_DATA_DIR lets the launcher (or operators) point runtime state at
+// a stable location independent of where psycheros source lives. When unset
+// dataRoot falls back to projectRoot, preserving today's `deno task start`
+// behaviour exactly. See packages/launcher-v2/docs/architecture.md for the
+// launcher-side context.
+const dataRoot = Deno.env.get("PSYCHEROS_DATA_DIR") || projectRoot;
 const config = {
   port: parseInt(Deno.env.get("PSYCHEROS_PORT") || "3000"),
   hostname: Deno.env.get("PSYCHEROS_HOST") || "0.0.0.0",
-  projectRoot: Deno.cwd(),
+  projectRoot,
+  dataRoot,
   allowedTools,
   ragConfig: {
     enabled: ragEnabled,
@@ -70,11 +78,15 @@ console.log(`
 ╚═══════════════════════════════════════╝
 `);
 
-// Initialize user data directories from templates
-await initialize(config.projectRoot);
+// Initialize user data directories from templates. Reads templates from
+// projectRoot (source bundle), writes to dataRoot (runtime state location).
+await initialize(config.projectRoot, config.dataRoot);
 
 console.log(`Starting server on http://${config.hostname}:${config.port}`);
 console.log(`Project root: ${config.projectRoot}`);
+if (config.dataRoot !== config.projectRoot) {
+  console.log(`Data root:    ${config.dataRoot}`);
+}
 console.log(
   `Tools enabled (PSYCHEROS_TOOLS): ${
     allowedTools.length > 0 ? allowedTools.join(", ") : "(default — all tools)"
@@ -92,7 +104,7 @@ const mcpEnabled = Deno.env.get("PSYCHEROS_MCP_ENABLED") !== "false";
 // Load LLM profile settings for entity-core env vars
 const { loadProfileSettings, getActiveProfile } = await import("./llm/mod.ts");
 const activeProfile = getActiveProfile(
-  await loadProfileSettings(config.projectRoot),
+  await loadProfileSettings(config.dataRoot),
 );
 if (activeProfile) {
   console.log(
@@ -114,7 +126,7 @@ if (mcpEnabled) {
   console.log(`MCP enabled: connecting to entity-core as ${mcpInstance}`);
 
   // Load entity-core LLM overrides (model/temperature/maxTokens independent of chat model)
-  const ecLLMSettings = await loadEntityCoreLLMSettings(config.projectRoot);
+  const ecLLMSettings = await loadEntityCoreLLMSettings(config.dataRoot);
   const ecTemperature = ecLLMSettings.temperature ?? 0.3;
   const ecMaxTokens = ecLLMSettings.maxTokens ?? 8000;
 
@@ -143,7 +155,7 @@ if (mcpEnabled) {
     },
     syncOnStartup: true,
     offlineFallback: true,
-    localBasePath: config.projectRoot,
+    localBasePath: config.dataRoot,
   });
 
   // Await connection before server init to avoid race conditions

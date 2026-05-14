@@ -61,13 +61,13 @@ async function executeLookCloser(
   }
 
   try {
-    let resolvedPath = join(ctx.config.projectRoot, ".psycheros", image_path);
+    let resolvedPath = join(ctx.config.dataRoot, ".psycheros", image_path);
 
     // If no extension, try to find the actual file by prefix
     try {
       await Deno.stat(resolvedPath);
     } catch {
-      const dir = join(ctx.config.projectRoot, ".psycheros", image_path)
+      const dir = join(ctx.config.dataRoot, ".psycheros", image_path)
         .replace(/[^/]+$/, "");
       const prefix = image_path.split("/").pop()!;
       try {

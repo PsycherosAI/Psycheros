@@ -104,11 +104,11 @@ export function getDefaultImageGenSettings(): ImageGenSettings {
 // =============================================================================
 
 export async function loadImageGenSettings(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<ImageGenSettings> {
   const defaults = getDefaultImageGenSettings();
   const settingsPath = join(
-    projectRoot,
+    dataRoot,
     ".psycheros",
     "image-gen-settings.json",
   );
@@ -123,10 +123,10 @@ export async function loadImageGenSettings(
 }
 
 export async function saveImageGenSettings(
-  projectRoot: string,
+  dataRoot: string,
   settings: ImageGenSettings,
 ): Promise<void> {
-  const settingsDir = join(projectRoot, ".psycheros");
+  const settingsDir = join(dataRoot, ".psycheros");
   const settingsPath = join(settingsDir, "image-gen-settings.json");
 
   await Deno.mkdir(settingsDir, { recursive: true });

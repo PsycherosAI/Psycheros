@@ -64,10 +64,10 @@ export function getDefaultLovenseSettings(): LovenseSettings {
  * Falls back to defaults if the file doesn't exist.
  */
 export async function loadLovenseSettings(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<LovenseSettings> {
   const defaults = getDefaultLovenseSettings();
-  const settingsPath = join(projectRoot, ".psycheros", "lovense-settings.json");
+  const settingsPath = join(dataRoot, ".psycheros", "lovense-settings.json");
 
   try {
     const text = await Deno.readTextFile(settingsPath);
@@ -97,10 +97,10 @@ export async function loadLovenseSettings(
  * Creates the `.psycheros/` directory if it doesn't exist.
  */
 export async function saveLovenseSettings(
-  projectRoot: string,
+  dataRoot: string,
   settings: LovenseSettings,
 ): Promise<void> {
-  const settingsDir = join(projectRoot, ".psycheros");
+  const settingsDir = join(dataRoot, ".psycheros");
   const settingsPath = join(settingsDir, "lovense-settings.json");
 
   await Deno.mkdir(settingsDir, { recursive: true });

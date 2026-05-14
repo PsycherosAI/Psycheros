@@ -120,11 +120,12 @@ filtered by `handler = 'pulse.execute'` and the JSON-extracted
 
 Inactivity-triggered pulses are recurring schedules that fire every minute
 (`* * * * *`). The `pulse.execute` handler checks
-`DBClient.getLastUserMessageTimestamp()` and the pulse's last completed run
+`DBClient.getLastUserMessageTimestamp()` and the pulse's last **successful** run
 before actually firing — if either guard fails the run is marked `skipped` with
-no LLM call and no chat side effects. The last-user-message timestamp is
-computed from the `messages` table, not an in-memory cache, so it survives
-process restart.
+no LLM call and no chat side effects. The cooldown only gates on successful runs
+so that consecutive skipped ticks (threshold not yet met) don't block the first
+real fire. The last-user-message timestamp is computed from the `messages`
+table, not an in-memory cache, so it survives process restart.
 
 ## Operating the scheduler
 

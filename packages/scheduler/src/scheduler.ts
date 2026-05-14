@@ -191,7 +191,7 @@ function computeNextFireAt(
  * The durable scheduler. One instance per daemon.
  */
 export class Scheduler {
-  private readonly db: Database;
+  private db: Database;
   private readonly workerId: string;
   private readonly tickIntervalMs: number;
   private readonly leaseDurationMs: number;
@@ -213,6 +213,15 @@ export class Scheduler {
     this.concurrency = config.concurrency ?? DEFAULT_CONCURRENCY;
     this.retryBackoffMs = config.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
     this.log = config.logger ?? defaultLogger;
+  }
+
+  /**
+   * Replace the database connection. Used after an entity-core import
+   * replaces graph.db on disk — the scheduler must operate on the new DB
+   * or its stale handle will fail every tick.
+   */
+  replaceDatabase(db: Database): void {
+    this.db = db;
   }
 
   // ===========================================================================
@@ -677,6 +686,11 @@ export class Scheduler {
         // Fire-and-forget — the dispatch tracks itself in `inflight`.
         this.dispatch(job);
       }
+    } catch (err) {
+      this.log(
+        "error",
+        `Tick failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       this.tickInProgress = false;
     }

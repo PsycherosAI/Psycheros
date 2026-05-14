@@ -156,8 +156,17 @@ export interface RouteContext {
   llm: LLMClient;
   /** Tool registry getter for tool execution */
   tools: () => ToolRegistry;
-  /** Root directory of the project for file serving */
+  /**
+   * Source root — used for serving static web/ assets, source-relative
+   * reads, templates, etc.
+   */
   projectRoot: string;
+  /**
+   * Data root — where user-mutable runtime state lives (.psycheros/,
+   * identity/, .snapshots/, memories/, custom-tools/, backgrounds/).
+   * Equal to projectRoot when PSYCHEROS_DATA_DIR is unset.
+   */
+  dataRoot: string;
   /** Pulse engine for autonomous entity prompts */
   pulseEngine?: import("../pulse/mod.ts").PulseEngine;
   /** Durable scheduler — schedules and job_runs. */
@@ -515,7 +524,7 @@ export async function handleChatFragment(
     }
   }
 
-  const displayNames = await loadGeneralSettings(ctx.projectRoot);
+  const displayNames = await loadGeneralSettings(ctx.dataRoot);
   const chatHtml = renderChatView(messages, metricsMap, displayNames, hasMore);
 
   // Generate OOB swaps for header title using unified helper
@@ -564,7 +573,7 @@ export async function handleMessagesPaginated(
     }
   }
 
-  const displayNames = await loadGeneralSettings(ctx.projectRoot);
+  const displayNames = await loadGeneralSettings(ctx.dataRoot);
   const html = renderMessages(result.messages, metricsMap, displayNames);
 
   // Get the timestamp of the oldest message in this batch for the next cursor
@@ -800,7 +809,7 @@ export async function handleUpdateMessage(
 
   // Render updated message HTML for HTMX swap
   const { renderMessage } = await import("./templates.ts");
-  const displayNames = await loadGeneralSettings(ctx.projectRoot);
+  const displayNames = await loadGeneralSettings(ctx.dataRoot);
   const html = renderMessage(updatedMsg, metrics, displayNames);
 
   return new Response(html, {
@@ -1141,7 +1150,7 @@ export async function handleChat(
           // Resolve the actual filename (attachment is saved as {uuid}.{ext} but we only have the UUID)
           let attachmentFilename = body.attachmentId;
           try {
-            const attachDir = `${ctx.projectRoot}/.psycheros/chat-attachments`;
+            const attachDir = `${ctx.dataRoot}/.psycheros/chat-attachments`;
             for await (const entry of Deno.readDir(attachDir)) {
               if (entry.name.startsWith(body.attachmentId)) {
                 attachmentFilename = entry.name;
@@ -1154,7 +1163,7 @@ export async function handleChat(
           if (captioningSettings?.enabled) {
             try {
               const attachmentPath =
-                `${ctx.projectRoot}/.psycheros/chat-attachments/${attachmentFilename}`;
+                `${ctx.dataRoot}/.psycheros/chat-attachments/${attachmentFilename}`;
               const fileData = await Deno.readFile(attachmentPath);
               const base64 = uint8ToBase64(fileData);
               const mediaType = getImageMediaType(attachmentFilename);
@@ -1197,6 +1206,7 @@ export async function handleChat(
           ctx.tools,
           {
             projectRoot: ctx.projectRoot,
+            dataRoot: ctx.dataRoot,
             chatRAG: ctx.chatRAG,
             mcpClient: ctx.mcpClient,
             lorebookManager: ctx.lorebookManager,
@@ -1387,6 +1397,7 @@ export async function handleChatRetry(
           ctx.tools,
           {
             projectRoot: ctx.projectRoot,
+            dataRoot: ctx.dataRoot,
             chatRAG: ctx.chatRAG,
             mcpClient: ctx.mcpClient,
             lorebookManager: ctx.lorebookManager,
@@ -1905,7 +1916,7 @@ export async function handleSettingsFileListFragment(
 
   try {
     // List .md files in the directory
-    const dirPath = `${ctx.projectRoot}/identity/${directory}`;
+    const dirPath = `${ctx.dataRoot}/identity/${directory}`;
     const files: string[] = [];
 
     for await (const entry of Deno.readDir(dirPath)) {
@@ -1930,7 +1941,7 @@ export async function handleSettingsFileListFragment(
     if (error instanceof Deno.errors.NotFound) {
       // For custom directory, create it and return empty list
       if (directory === "custom") {
-        const customDir = `${ctx.projectRoot}/identity/custom`;
+        const customDir = `${ctx.dataRoot}/identity/custom`;
         await Deno.mkdir(customDir, { recursive: true });
         const html = renderFileList("custom", []);
         return new Response(html, {
@@ -1980,7 +1991,7 @@ export async function handleSettingsFileEditorFragment(
 
   try {
     // Read file content
-    const filePath = `${ctx.projectRoot}/identity/${directory}/${filename}`;
+    const filePath = `${ctx.dataRoot}/identity/${directory}/${filename}`;
     const content = await Deno.readTextFile(filePath);
 
     // Load prompt label from entity-core
@@ -2070,11 +2081,11 @@ export async function handleSaveSettingsFile(
         directory as "self" | "user" | "relationship" | "custom",
         filename,
         content,
-        ctx.projectRoot,
+        ctx.dataRoot,
       );
     } else {
       // Fallback to direct file write when MCP is not enabled
-      const filePath = `${ctx.projectRoot}/identity/${directory}/${filename}`;
+      const filePath = `${ctx.dataRoot}/identity/${directory}/${filename}`;
       await Deno.writeTextFile(filePath, content);
     }
 
@@ -2198,7 +2209,7 @@ export async function handleCreateCustomFile(
     }
 
     // Ensure custom directory exists
-    const customDir = `${ctx.projectRoot}/identity/custom`;
+    const customDir = `${ctx.dataRoot}/identity/custom`;
     await Deno.mkdir(customDir, { recursive: true });
 
     // Create file with XML tags based on filename
@@ -2216,7 +2227,7 @@ export async function handleCreateCustomFile(
         "custom",
         fullFilename,
         initialContent,
-        ctx.projectRoot,
+        ctx.dataRoot,
       );
     }
 
@@ -2270,7 +2281,7 @@ export async function handleDeleteCustomFile(
     if (ctx.mcpClient) {
       const result = await ctx.mcpClient.deleteCustomFile(
         decodedFilename,
-        ctx.projectRoot,
+        ctx.dataRoot,
       );
       if (result.success) {
         return new Response(
@@ -2290,7 +2301,7 @@ export async function handleDeleteCustomFile(
     }
 
     // Fallback: direct file delete when MCP is not enabled
-    const filePath = `${ctx.projectRoot}/identity/custom/${decodedFilename}`;
+    const filePath = `${ctx.dataRoot}/identity/custom/${decodedFilename}`;
     await Deno.remove(filePath);
 
     return new Response(
@@ -3166,7 +3177,7 @@ export async function handleRestoreSnapshot(
   if (decodedId.startsWith("/")) {
     const manager = new IdentityFileManager(
       ctx.mcpClient ?? null,
-      ctx.projectRoot,
+      ctx.dataRoot,
     );
     const result = await manager.restoreFromSnapshot(decodedId);
 
@@ -3239,8 +3250,8 @@ export async function handleRestoreSnapshot(
     );
     if (restored) {
       try {
-        const localPath = `${ctx.projectRoot}/identity/${cat}/${fname}`;
-        await Deno.mkdir(`${ctx.projectRoot}/identity/${cat}`, {
+        const localPath = `${ctx.dataRoot}/identity/${cat}/${fname}`;
+        await Deno.mkdir(`${ctx.dataRoot}/identity/${cat}`, {
           recursive: true,
         });
         await Deno.writeTextFile(localPath, restored.content);
@@ -4660,7 +4671,7 @@ export async function handleUpdateGraphEdge(
 export async function handleListBackgrounds(
   ctx: RouteContext,
 ): Promise<Response> {
-  const backgroundsDir = `${ctx.projectRoot}/.psycheros/backgrounds`;
+  const backgroundsDir = `${ctx.dataRoot}/.psycheros/backgrounds`;
   const backgrounds: Array<{ filename: string; url: string }> = [];
 
   try {
@@ -4745,7 +4756,7 @@ export async function handleUploadBackground(
     }
 
     // Ensure backgrounds directory exists (inside .psycheros/ for persistence across container rebuilds)
-    const backgroundsDir = `${ctx.projectRoot}/.psycheros/backgrounds`;
+    const backgroundsDir = `${ctx.dataRoot}/.psycheros/backgrounds`;
     await Deno.mkdir(backgroundsDir, { recursive: true });
 
     // Generate unique filename
@@ -4830,7 +4841,7 @@ export async function handleDeleteBackground(
 
   try {
     const filePath =
-      `${ctx.projectRoot}/.psycheros/backgrounds/${decodedFilename}`;
+      `${ctx.dataRoot}/.psycheros/backgrounds/${decodedFilename}`;
     await Deno.remove(filePath);
 
     return new Response(
@@ -4900,8 +4911,7 @@ export async function handleServeBackground(
     });
   }
 
-  const filePath =
-    `${ctx.projectRoot}/.psycheros/backgrounds/${decodedFilename}`;
+  const filePath = `${ctx.dataRoot}/.psycheros/backgrounds/${decodedFilename}`;
 
   try {
     const content = await Deno.readFile(filePath);
@@ -6444,7 +6454,7 @@ export async function handleUploadAnchorImage(
     const id = crypto.randomUUID();
     const ext = file.name.split(".").pop() || "png";
     const filename = `${id}.${ext}`;
-    const anchorsDir = `${ctx.projectRoot}/.psycheros/anchors`;
+    const anchorsDir = `${ctx.dataRoot}/.psycheros/anchors`;
     await Deno.mkdir(anchorsDir, { recursive: true });
 
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -6578,7 +6588,7 @@ export function handleDeleteAnchorImage(
 
     // Delete the file
     try {
-      Deno.removeSync(`${ctx.projectRoot}/.psycheros/anchors/${row.filename}`);
+      Deno.removeSync(`${ctx.dataRoot}/.psycheros/anchors/${row.filename}`);
     } catch {
       // File may already be deleted
     }
@@ -6636,7 +6646,7 @@ export async function handleServeImageFile(
     return new Response("Forbidden", { status: 403 });
   }
 
-  const filePath = `${ctx.projectRoot}/.psycheros/${dirName}/${filename}`;
+  const filePath = `${ctx.dataRoot}/.psycheros/${dirName}/${filename}`;
   try {
     const data = await Deno.readFile(filePath);
     const ext = filename.split(".").pop()?.toLowerCase();
@@ -6691,7 +6701,7 @@ export async function handleUploadChatAttachment(
     const id = crypto.randomUUID();
     const ext = file.name.split(".").pop() || "png";
     const filename = `${id}.${ext}`;
-    const attachmentsDir = `${ctx.projectRoot}/.psycheros/chat-attachments`;
+    const attachmentsDir = `${ctx.dataRoot}/.psycheros/chat-attachments`;
     await Deno.mkdir(attachmentsDir, { recursive: true });
 
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -6969,7 +6979,7 @@ export async function handleUploadCustomTool(
       );
     }
 
-    const customDir = `${ctx.projectRoot}/custom-tools`;
+    const customDir = `${ctx.dataRoot}/custom-tools`;
     try {
       await Deno.mkdir(customDir, { recursive: true });
     } catch {
@@ -6981,7 +6991,7 @@ export async function handleUploadCustomTool(
     await Deno.writeFile(destPath, bytes);
 
     // Reload custom tools to pick up the new file
-    const newTools = await loadCustomTools(ctx.projectRoot);
+    const newTools = await loadCustomTools(ctx.dataRoot);
     ctx.customTools = newTools;
 
     // Detect the tool name from the newly loaded tools
@@ -7007,9 +7017,9 @@ interface SASettings {
 
 const SA_SETTINGS_PATH = ".psycheros/sa-settings.json";
 
-async function loadSASettings(projectRoot: string): Promise<SASettings> {
+async function loadSASettings(dataRoot: string): Promise<SASettings> {
   try {
-    const text = await Deno.readTextFile(`${projectRoot}/${SA_SETTINGS_PATH}`);
+    const text = await Deno.readTextFile(`${dataRoot}/${SA_SETTINGS_PATH}`);
     const saved = JSON.parse(text) as Partial<SASettings>;
     return { enabled: saved.enabled !== false };
   } catch {
@@ -7023,7 +7033,7 @@ async function loadSASettings(projectRoot: string): Promise<SASettings> {
 export async function handleGetSASettings(
   ctx: RouteContext,
 ): Promise<Response> {
-  const settings = await loadSASettings(ctx.projectRoot);
+  const settings = await loadSASettings(ctx.dataRoot);
   return new Response(JSON.stringify(settings), {
     headers: {
       "Content-Type": "application/json",
@@ -7041,13 +7051,13 @@ export async function handleSaveSASettings(
 ): Promise<Response> {
   try {
     const body = await request.json() as Partial<SASettings>;
-    const current = await loadSASettings(ctx.projectRoot);
+    const current = await loadSASettings(ctx.dataRoot);
 
     const updated: SASettings = {
       enabled: body.enabled !== undefined ? body.enabled : current.enabled,
     };
 
-    const settingsDir = `${ctx.projectRoot}/.psycheros`;
+    const settingsDir = `${ctx.dataRoot}/.psycheros`;
     await Deno.mkdir(settingsDir, { recursive: true });
     await Deno.writeTextFile(
       `${settingsDir}/sa-settings.json`,
@@ -7081,7 +7091,7 @@ export async function handleSaveSASettings(
 export async function handleSASettingsFragment(
   ctx: RouteContext,
 ): Promise<Response> {
-  const settings = await loadSASettings(ctx.projectRoot);
+  const settings = await loadSASettings(ctx.dataRoot);
   const html = renderSASettings(settings);
   return new Response(html, {
     headers: {
@@ -7104,11 +7114,11 @@ function jsonResp(data: unknown, status = 200): Response {
 const GENERAL_SETTINGS_PATH = ".psycheros/general-settings.json";
 
 async function loadGeneralSettings(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<GeneralSettings> {
   try {
     const text = await Deno.readTextFile(
-      `${projectRoot}/${GENERAL_SETTINGS_PATH}`,
+      `${dataRoot}/${GENERAL_SETTINGS_PATH}`,
     );
     const saved = JSON.parse(text) as Partial<GeneralSettings>;
     return {
@@ -7127,7 +7137,7 @@ async function loadGeneralSettings(
 export async function handleGetGeneralSettings(
   ctx: RouteContext,
 ): Promise<Response> {
-  const settings = await loadGeneralSettings(ctx.projectRoot);
+  const settings = await loadGeneralSettings(ctx.dataRoot);
   return new Response(JSON.stringify(settings), {
     headers: {
       "Content-Type": "application/json",
@@ -7145,7 +7155,7 @@ export async function handleSaveGeneralSettings(
 ): Promise<Response> {
   try {
     const body = await request.json() as Partial<GeneralSettings>;
-    const current = await loadGeneralSettings(ctx.projectRoot);
+    const current = await loadGeneralSettings(ctx.dataRoot);
 
     const updated: GeneralSettings = {
       entityName: body.entityName || current.entityName,
@@ -7153,7 +7163,7 @@ export async function handleSaveGeneralSettings(
       timezone: body.timezone !== undefined ? body.timezone : current.timezone,
     };
 
-    const settingsDir = `${ctx.projectRoot}/.psycheros`;
+    const settingsDir = `${ctx.dataRoot}/.psycheros`;
     await Deno.mkdir(settingsDir, { recursive: true });
     await Deno.writeTextFile(
       `${settingsDir}/general-settings.json`,
@@ -7194,7 +7204,7 @@ export async function handleSaveGeneralSettings(
 export async function handleGeneralSettingsFragment(
   ctx: RouteContext,
 ): Promise<Response> {
-  const settings = await loadGeneralSettings(ctx.projectRoot);
+  const settings = await loadGeneralSettings(ctx.dataRoot);
   const html = renderGeneralSettings(settings);
   return new Response(html, {
     headers: {
@@ -7228,11 +7238,11 @@ const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
 };
 
 async function loadAppearanceSettings(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<AppearanceSettings> {
   try {
     const text = await Deno.readTextFile(
-      `${projectRoot}/${APPEARANCE_SETTINGS_PATH}`,
+      `${dataRoot}/${APPEARANCE_SETTINGS_PATH}`,
     );
     const saved = JSON.parse(text) as Partial<AppearanceSettings>;
     return { ...DEFAULT_APPEARANCE_SETTINGS, ...saved };
@@ -7247,7 +7257,7 @@ async function loadAppearanceSettings(
 export async function handleGetAppearanceSettings(
   ctx: RouteContext,
 ): Promise<Response> {
-  const settings = await loadAppearanceSettings(ctx.projectRoot);
+  const settings = await loadAppearanceSettings(ctx.dataRoot);
   return new Response(JSON.stringify(settings), {
     headers: {
       "Content-Type": "application/json",
@@ -7265,7 +7275,7 @@ export async function handleSaveAppearanceSettings(
 ): Promise<Response> {
   try {
     const body = await request.json() as Partial<AppearanceSettings>;
-    const current = await loadAppearanceSettings(ctx.projectRoot);
+    const current = await loadAppearanceSettings(ctx.dataRoot);
 
     const updated: AppearanceSettings = {
       preset: body.preset !== undefined ? body.preset : current.preset,
@@ -7282,7 +7292,7 @@ export async function handleSaveAppearanceSettings(
         : current.glassEnabled,
     };
 
-    const settingsDir = `${ctx.projectRoot}/.psycheros`;
+    const settingsDir = `${ctx.dataRoot}/.psycheros`;
     await Deno.mkdir(settingsDir, { recursive: true });
     await Deno.writeTextFile(
       `${settingsDir}/appearance-settings.json`,
@@ -7815,7 +7825,7 @@ export async function handlePushSubscribe(
     );
 
     // Return VAPID public key so client can verify
-    const vapidKeys = await loadOrGenerateKeys(ctx.projectRoot);
+    const vapidKeys = await loadOrGenerateKeys(ctx.dataRoot);
 
     return new Response(
       JSON.stringify({ success: true, publicKey: vapidKeys.publicKey }),
@@ -7912,7 +7922,7 @@ export async function handlePushVapidKey(
   ctx: RouteContext,
 ): Promise<Response> {
   try {
-    const vapidKeys = await loadOrGenerateKeys(ctx.projectRoot);
+    const vapidKeys = await loadOrGenerateKeys(ctx.dataRoot);
     return new Response(
       JSON.stringify({ publicKey: vapidKeys.publicKey }),
       {
@@ -8075,7 +8085,7 @@ export async function handleEntityCoreSnapshots(
   if (snapshots.length === 0) {
     const manager = new IdentityFileManager(
       ctx.mcpClient ?? null,
-      ctx.projectRoot,
+      ctx.dataRoot,
     );
     const localSnapshots = await manager.listSnapshots();
     snapshots = localSnapshots.map((s) => ({
@@ -8402,8 +8412,8 @@ async function scanGalleryImages(
   offset: number,
   limit: number,
 ): Promise<GalleryResult> {
-  const genDir = `${ctx.projectRoot}/.psycheros/generated-images`;
-  const attDir = `${ctx.projectRoot}/.psycheros/chat-attachments`;
+  const genDir = `${ctx.dataRoot}/.psycheros/generated-images`;
+  const attDir = `${ctx.dataRoot}/.psycheros/chat-attachments`;
 
   const allImages: GalleryImage[] = [];
 

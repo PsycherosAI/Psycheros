@@ -22,12 +22,13 @@ per-package `CLAUDE.md` files. Per-package deep docs live in
 ```bash
 # Install Deno 2.7.5 or later: https://deno.land/install
 git clone <repo-url> && cd <repo>
+git config core.hooksPath .githooks   # one-time: run deno fmt --check pre-commit
 deno check packages/entity-core/src/mod.ts \
   packages/entity-loom/src/main.ts \
   packages/psycheros/src/main.ts \
   packages/launcher/dashboard.ts
 deno lint
-deno fmt --check
+deno task fmt:check
 ```
 
 ## Conventions

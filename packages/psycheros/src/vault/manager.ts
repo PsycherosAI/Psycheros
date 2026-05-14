@@ -6,7 +6,7 @@
  * chunking, embedding, and vector search.
  */
 
-import { join } from "@std/path";
+import { isAbsolute, join } from "@std/path";
 import type { Database } from "@db/sqlite";
 import type { DBClient } from "../db/mod.ts";
 import type {
@@ -118,11 +118,15 @@ async function hashContent(content: string): Promise<string> {
 export class VaultManager {
   private db: DBClient;
   private useVectorExt: boolean;
+  /** Source root — for reading templates/vault/ seeds. */
   private projectRoot: string;
+  /** Data root — for writing .psycheros/vault/documents/. */
+  private dataRoot: string;
 
-  constructor(db: DBClient, projectRoot: string) {
+  constructor(db: DBClient, projectRoot: string, dataRoot: string) {
     this.db = db;
     this.projectRoot = projectRoot;
+    this.dataRoot = dataRoot;
     this.useVectorExt = getVecVersion(db.getRawDb()) !== null;
   }
 
@@ -450,7 +454,7 @@ export class VaultManager {
   private getVaultDir(opts: VaultCreateOptions): string {
     // Store vault files inside .psycheros/ so they persist across Docker
     // container recreations (the .psycheros/ directory is a volume mount).
-    const baseDir = join(this.projectRoot, ".psycheros", "vault", "documents");
+    const baseDir = join(this.dataRoot, ".psycheros", "vault", "documents");
     if (opts.scope === "chat" && opts.conversationId) {
       return join(baseDir, `chat-${opts.conversationId}`);
     }
@@ -767,6 +771,13 @@ export class VaultManager {
   // ===========================================================================
 
   private rowToDocument(row: VaultDocumentRow): VaultDocument {
+    // file_path is stored either absolute (legacy: seed/upload code paths)
+    // or relative-to-dataRoot (import code path). Resolve to absolute so
+    // every consumer of VaultDocument.filePath gets a path it can pass
+    // straight to Deno.readFile.
+    const filePath = isAbsolute(row.file_path)
+      ? row.file_path
+      : join(this.dataRoot, row.file_path);
     return {
       id: row.id,
       title: row.title,
@@ -774,7 +785,7 @@ export class VaultManager {
       fileType: row.file_type as VaultFileType,
       scope: row.scope as VaultDocument["scope"],
       conversationId: row.conversation_id ?? undefined,
-      filePath: row.file_path,
+      filePath,
       fileSize: row.file_size,
       contentHash: row.content_hash,
       chunkCount: row.chunk_count,

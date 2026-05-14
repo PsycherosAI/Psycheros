@@ -142,9 +142,9 @@ const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
  * Returns defaults if the file doesn't exist or is invalid.
  */
 export async function loadToolsSettings(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<ToolsSettings> {
-  const settingsPath = join(projectRoot, ".psycheros", "tools-settings.json");
+  const settingsPath = join(dataRoot, ".psycheros", "tools-settings.json");
 
   try {
     const text = await Deno.readTextFile(settingsPath);
@@ -164,10 +164,10 @@ export async function loadToolsSettings(
  * Creates the `.psycheros/` directory if it doesn't exist.
  */
 export async function saveToolsSettings(
-  projectRoot: string,
+  dataRoot: string,
   settings: ToolsSettings,
 ): Promise<void> {
-  const settingsDir = join(projectRoot, ".psycheros");
+  const settingsDir = join(dataRoot, ".psycheros");
   const settingsPath = join(settingsDir, "tools-settings.json");
 
   await Deno.mkdir(settingsDir, { recursive: true });

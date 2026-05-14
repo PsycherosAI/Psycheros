@@ -98,8 +98,7 @@ export function createEntityImportHandler(
       if (parts.identity) {
         const categories = ["self", "user", "relationship", "custom"] as const;
         for (const category of categories) {
-          const folder = zip.folder(`entity-core/identity/${category}`);
-          if (!folder) continue;
+          const prefix = `entity-core/identity/${category}/`;
 
           const categoryDir = join(dataDir, category);
           await ensureDir(categoryDir);
@@ -111,13 +110,11 @@ export function createEntityImportHandler(
             }
           }
 
-          // Restore from zip
-          for (const [filename, file] of Object.entries(folder.files)) {
-            if (file.dir) continue;
-            const basename = filename.replace(
-              /^entity-core\/identity\/[^/]+\//,
-              "",
-            );
+          // Restore from zip — iterate the full file map and filter by prefix
+          // (JSZip folder().files returns ALL entries, not just the subfolder)
+          for (const [filename, file] of Object.entries(zip.files)) {
+            if (file.dir || !filename.startsWith(prefix)) continue;
+            const basename = filename.slice(prefix.length);
             if (!basename || basename.includes("/")) continue;
             const content = await file.async("string");
             await Deno.writeTextFile(join(categoryDir, basename), content);
@@ -147,8 +144,7 @@ export function createEntityImportHandler(
           "significant",
         ] as const;
         for (const granularity of granularities) {
-          const folder = zip.folder(`entity-core/memories/${granularity}`);
-          if (!folder) continue;
+          const prefix = `entity-core/memories/${granularity}/`;
 
           const granularityDir = join(dataDir, "memories", granularity);
           await ensureDir(granularityDir);
@@ -160,13 +156,11 @@ export function createEntityImportHandler(
             }
           }
 
-          // Restore from zip
-          for (const [filename, file] of Object.entries(folder.files)) {
-            if (file.dir) continue;
-            const basename = filename.replace(
-              /^entity-core\/memories\/[^/]+\//,
-              "",
-            );
+          // Restore from zip — iterate the full file map and filter by prefix
+          // (JSZip folder().files returns ALL entries, not just the subfolder)
+          for (const [filename, file] of Object.entries(zip.files)) {
+            if (file.dir || !filename.startsWith(prefix)) continue;
+            const basename = filename.slice(prefix.length);
             if (!basename || basename.includes("/")) continue;
             const content = await file.async("string");
             await Deno.writeTextFile(join(granularityDir, basename), content);
@@ -183,7 +177,11 @@ export function createEntityImportHandler(
           try {
             const dbBytes = await sqliteFile.async("uint8array");
             const dbPath = join(dataDir, "graph.db");
-            await Deno.writeFile(dbPath, dbBytes);
+            // Write to a temp file then rename — avoids corrupting the DB
+            // for any other connection that has it open (the mod.ts scheduler).
+            const tmpPath = join(dataDir, "graph.db.tmp");
+            await Deno.writeFile(tmpPath, dbBytes);
+            await Deno.rename(tmpPath, dbPath);
             graphRestored = true;
 
             // Re-initialize graph store with the new database

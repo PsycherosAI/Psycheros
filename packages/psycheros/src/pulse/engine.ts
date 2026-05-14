@@ -108,7 +108,10 @@ class Semaphore {
  * Engine configuration — mirrors the services available to the entity turn.
  */
 export interface PulseEngineConfig {
+  /** Source root — psycheros source location. */
   projectRoot: string;
+  /** Data root — runtime state location (PSYCHEROS_DATA_DIR or projectRoot). */
+  dataRoot: string;
   chatRAG?: ConversationRAG;
   mcpClient?: MCPClient;
   lorebookManager?: LorebookManager;
@@ -598,11 +601,13 @@ export class PulseEngine {
     }
 
     // Cooldown: don't fire again until the full threshold has elapsed
-    // since the last successful run. Derived from job_runs rather than
-    // an in-memory cache so it survives restart.
-    const stats = this.db.getPulseStats(pulse.id);
-    if (stats.lastRunAt) {
-      const sinceLastRunMs = Date.now() - new Date(stats.lastRunAt).getTime();
+    // since the last successful run. Derived from job_runs (via a
+    // success-only query) rather than an in-memory cache so it survives
+    // restart. Must NOT gate on `skipped` ticks — those are produced by
+    // this very check, so gating on them would self-deadlock the pulse.
+    const lastSuccessAt = this.db.getLastSuccessfulPulseRunAt(pulse.id);
+    if (lastSuccessAt) {
+      const sinceLastRunMs = Date.now() - new Date(lastSuccessAt).getTime();
       if (sinceLastRunMs < thresholdMs) {
         return { ok: false, reason: "Cooldown active" };
       }
@@ -663,6 +668,7 @@ export class PulseEngine {
 
     const entityConfig: EntityConfig = {
       projectRoot: this.config.projectRoot,
+      dataRoot: this.config.dataRoot,
       chatRAG: this.config.chatRAG,
       mcpClient: this.config.mcpClient,
       lorebookManager: this.config.lorebookManager,

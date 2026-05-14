@@ -4,9 +4,88 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-05-14
+
+### Fixed
+
+- **Inactivity-pulse cooldown deadlock.** The inactivity cooldown used
+  `getPulseStats().lastRunAt`, which returned the last completed run of any
+  status (including `skipped`) — so the cooldown always saw a run from ~1 minute
+  ago and blocked every real fire. The cooldown check now calls a dedicated
+  `getLastSuccessfulPulseRunAt()` method that filters to successful runs only,
+  while `getPulseStats()` continues to surface the most recent run regardless of
+  status so the user-facing pulse UI shows real failures.
+
+- **Entity import upload blocked by body-size cap.** The entity-data import
+  endpoint wasn't whitelisted as an upload route, so it hit the 1 MB
+  `MAX_REQUEST_BODY_SIZE` instead of the larger upload limit. Export zips for
+  real companion entities (months/years of data) easily exceed that. The upload
+  body-size limit is now `Infinity` — Psycheros is self-hosted software, so an
+  artificial cap on user uploads doesn't protect against anything meaningful and
+  just breaks large imports.
+
+- **Entity import wrote all files to every identity/memory category.** JSZip's
+  `folder().files` returns ALL entries in the zip, not just the subfolder's
+  entries. The entity-core import handler relied on `folder.files` to scope
+  identity files and memories to their correct category/granularity, so every
+  file ended up in every directory. Fixed by iterating `zip.files` directly with
+  a prefix check. Also fixed `syncIdentityToLocal` to clear stale files before
+  writing so leftovers from a broken import don't persist.
+
+- **Entity import crashed entity-core (stale DB handle).** The import handler
+  replaced `graph.db` on disk with `Deno.writeFile`, which truncates the file
+  in-place — any SQLite connection with the file open (entity-core's scheduler)
+  saw a corrupted/empty DB. Now uses an atomic temp-file + rename. Also fixed
+  `GraphStore.close()` to reset the `initialized` flag so `initialize()`
+  actually re-runs, added `Scheduler.replaceDatabase()` for updating the handle,
+  and made `Scheduler.tick()` catch synchronous errors instead of crashing the
+  process. Post-import, Psycheros restarts the MCP subprocess so entity-core
+  gets a fully clean state.
+
+- **Vault export → import round-trip silently destroyed every vault document.**
+  Three layered bugs: (1) the export query filtered to `scope = 'global'`,
+  missing per-conversation docs; (2) the export reader built file paths from
+  `projectRoot` instead of `dataRoot`, and `join(projectRoot, absolutePath)`
+  concatenates rather than resolves — so the actual `.md` files were dropped
+  from every export, with a silent `catch` hiding the `ENOENT`s; (3) the
+  importer wrote restored files under `projectRoot/.psycheros/vault/` instead of
+  `dataRoot/.psycheros/vault/`, putting them in the wrong location whenever
+  `PSYCHEROS_DATA_DIR` differed from the source root. Because the importer wipes
+  the destination vault before restoring, a round-trip on a populated vault
+  produced an empty vault. All three are fixed: the exporter now iterates every
+  scope and bundles file content via `dataRoot`, with a tolerant `isAbsolute()`
+  branch that handles both legacy absolute paths (stored by the seeder and
+  upload code) and the relative paths the importer writes. Full DB metadata is
+  preserved in `vault-metadata.json` so scope and conversation association
+  round-trip too. The importer now writes to `dataRoot`.
+  `VaultManager.rowToDocument` resolves `file_path` to absolute on read so every
+  consumer of `VaultDocument.filePath` sees a path it can pass straight to
+  `Deno.readFile`. Generated-image export/import paths had the same
+  `projectRoot` mistake and are corrected in the same pass.
+
 ## [0.3.0] - 2026-05-14
 
+### Added
+
+- **`PSYCHEROS_DATA_DIR` env var.** Lets a launcher or container point runtime
+  state at a stable location independent of where the source bundle lives. When
+  set, `.psycheros/`, `identity/`, `.snapshots/`, `memories/`, `custom-tools/`,
+  and `backgrounds/` all resolve relative to this path instead of `Deno.cwd()`.
+  Non-breaking: when unset, paths resolve exactly as before. Templates and other
+  source-relative reads still resolve against the source root. The companion
+  `PSYCHEROS_ENTITY_CORE_DATA_DIR` is unchanged. See
+  [`docs/configuration.md`](docs/configuration.md) for details. This unblocks
+  the desktop launcher v2 work (Tauri app + persistent daemon) — see
+  `packages/launcher-v2/`.
+
 ### Changed
+
+- **Internal: `projectRoot` split into `projectRoot` + `dataRoot`** in
+  `ServerConfig`, `EntityConfig`, `PulseEngineConfig`, and `RouteContext`.
+  Source-relative reads (templates, `web/` static, `lib/` extensions) stay on
+  `projectRoot`; user-mutable state reads/writes go through `dataRoot`. No
+  public surface area changed — env var defaults preserve byte-identical
+  behaviour when `PSYCHEROS_DATA_DIR` is unset.
 
 - **Durable scheduler replaces `Deno.cron` everywhere.** Every scheduled or
   event-triggered task — daily memory summarization, identity snapshots, MCP

@@ -533,13 +533,22 @@ export class MCPClient {
     let synced = 0;
 
     for (const category of categories) {
-      const files = this.cache.identity[category];
-      if (!files || files.length === 0) continue;
-
+      const files = this.cache.identity[category] ?? [];
       const dir = `${this.config.localBasePath}/identity/${category}`;
       try {
         await Deno.mkdir(dir, { recursive: true });
       } catch { /* already exists */ }
+
+      // Clear stale files before writing — always run, even when the
+      // category has no canonical files, so leftovers from a broken import
+      // or a deleted identity file get removed
+      try {
+        for await (const entry of Deno.readDir(dir)) {
+          if (entry.isFile && entry.name.endsWith(".md")) {
+            await Deno.remove(`${dir}/${entry.name}`);
+          }
+        }
+      } catch { /* directory may not exist yet */ }
 
       for (const file of files) {
         try {

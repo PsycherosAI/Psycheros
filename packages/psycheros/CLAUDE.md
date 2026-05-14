@@ -94,17 +94,36 @@ background updates and Pulse streaming.
 
 ## User data and runtime state
 
-- `identity/` and `.snapshots/` are **runtime-only** — gitignored, never
-  committed. They contain user-specific entity data. Never `git add` files from
-  them.
-- Vault documents live in `.psycheros/vault/documents/` (persisted via the
-  `.psycheros/` volume mount in Docker).
-- To change identity _defaults_, edit `templates/identity/` (committed).
-  `src/init/mod.ts` seeds `identity/` from templates on first run when empty.
-  `templates/vault/` is seeded into the global Data Vault on first startup.
-- **Memories are stored exclusively in `entity-core` via MCP.** There is no
-  Psycheros-local memory store. Daily summarization in `src/memory/mod.ts`
-  writes through the MCP client.
+All user-mutable state resolves under **`dataRoot`** — defaulting to
+`Deno.cwd()` so today's `deno task start` behaviour is unchanged, overridable
+via `PSYCHEROS_DATA_DIR` for launcher-managed deployments that put source and
+data in separate directories. Source-relative reads (templates, web assets, vec0
+extension) still resolve under **`projectRoot`**. Configs that need both fields
+are `ServerConfig`, `EntityConfig`, `PulseEngineConfig`, and `RouteContext`.
+
+The data tree (rooted at `dataRoot`):
+
+- `identity/` and `.snapshots/` — **runtime-only**, gitignored, never committed.
+  User-specific entity data. Never `git add` files from them.
+- `.psycheros/` — DB (`psycheros.db`), settings JSON files, vault documents
+  (`.psycheros/vault/documents/`), generated images, chat attachments,
+  background images, anchor images.
+- `memories/` — daily/weekly/monthly/yearly memory summaries.
+- `custom-tools/` — user-imported tool JS files.
+- `backgrounds/` — UI background images.
+
+Docker users currently bind-mount `.psycheros/` only; setting
+`PSYCHEROS_DATA_DIR=/data` and bind-mounting `/data` is the cleaner way to
+persist the entire data tree uniformly.
+
+To change identity _defaults_, edit `templates/identity/` (committed,
+source-root). `src/init/mod.ts` seeds `dataRoot/identity/` from
+`projectRoot/templates/identity/` on first run when empty. `templates/vault/` is
+seeded into the global Data Vault on first startup.
+
+**Memories are stored exclusively in `entity-core` via MCP.** There is no
+Psycheros-local memory store. Daily summarization in `src/memory/mod.ts` writes
+through the MCP client.
 
 ## Token budget
 

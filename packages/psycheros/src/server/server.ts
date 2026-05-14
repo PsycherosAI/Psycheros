@@ -289,9 +289,19 @@ export interface ServerConfig {
   port: number;
   /** Hostname to bind to (default: "localhost") */
   hostname?: string;
-  /** Root directory of the project for file serving */
+  /**
+   * Source root — where psycheros source lives. Used for serving static
+   * web/ assets, reading templates, finding scripts, etc.
+   */
   projectRoot: string;
-  /** Optional database path (default: {projectRoot}/.psycheros/psycheros.db) */
+  /**
+   * Data root — where user-mutable runtime state lives (.psycheros/,
+   * identity/, .snapshots/, memories/, custom-tools/, backgrounds/).
+   * Set via PSYCHEROS_DATA_DIR env. Defaults to projectRoot for
+   * backward compatibility with `deno task start` deployments.
+   */
+  dataRoot: string;
+  /** Optional database path (default: {dataRoot}/.psycheros/psycheros.db) */
   dbPath?: string;
   /** List of tool names the entity is allowed to use (empty = no tools) */
   allowedTools?: string[];
@@ -366,7 +376,7 @@ export class Server {
 
     // Initialize database
     const dbPath = config.dbPath ||
-      `${config.projectRoot}/.psycheros/psycheros.db`;
+      `${config.dataRoot}/.psycheros/psycheros.db`;
     this.db = new DBClient(dbPath);
 
     // Initialize LLM client with env-var defaults (will be reloaded from settings in init())
@@ -419,7 +429,7 @@ export class Server {
       ...DEFAULT_RAG_CONFIG,
       ...config.ragConfig,
       memoriesDir: join(
-        config.projectRoot,
+        config.dataRoot,
         config.ragConfig?.memoriesDir ?? DEFAULT_RAG_CONFIG.memoriesDir,
       ),
     };
@@ -436,7 +446,11 @@ export class Server {
     this.lorebookManager = new LorebookManager(this.db);
 
     // Initialize vault manager
-    this.vaultManager = new VaultManager(this.db, config.projectRoot);
+    this.vaultManager = new VaultManager(
+      this.db,
+      config.projectRoot,
+      config.dataRoot,
+    );
 
     // Create abort controller for graceful shutdown
     this.abortController = new AbortController();
@@ -455,24 +469,24 @@ export class Server {
    */
   async init(): Promise<void> {
     this.llmProfileSettings = await loadProfileSettings(
-      this.config.projectRoot,
+      this.config.dataRoot,
     );
     this.webSearchSettings = await loadWebSearchSettings(
-      this.config.projectRoot,
+      this.config.dataRoot,
     );
-    this.discordSettings = await loadDiscordSettings(this.config.projectRoot);
+    this.discordSettings = await loadDiscordSettings(this.config.dataRoot);
     this.discordGatewayConfig = await loadDiscordGatewayConfig(
-      this.config.projectRoot,
+      this.config.dataRoot,
     );
-    this.homeSettings = await loadHomeSettings(this.config.projectRoot);
-    this.lovenseSettings = await loadLovenseSettings(this.config.projectRoot);
-    this.buttplugSettings = await loadButtplugSettings(this.config.projectRoot);
-    this.imageGenSettings = await loadImageGenSettings(this.config.projectRoot);
+    this.homeSettings = await loadHomeSettings(this.config.dataRoot);
+    this.lovenseSettings = await loadLovenseSettings(this.config.dataRoot);
+    this.buttplugSettings = await loadButtplugSettings(this.config.dataRoot);
+    this.imageGenSettings = await loadImageGenSettings(this.config.dataRoot);
     this.entityCoreLLMSettings = await loadEntityCoreLLMSettings(
-      this.config.projectRoot,
+      this.config.dataRoot,
     );
-    this.toolSettings = await loadToolsSettings(this.config.projectRoot);
-    this.customTools = await loadCustomTools(this.config.projectRoot);
+    this.toolSettings = await loadToolsSettings(this.config.dataRoot);
+    this.customTools = await loadCustomTools(this.config.dataRoot);
     this.reloadLLMClient();
     this.reloadToolRegistry();
 
@@ -482,7 +496,7 @@ export class Server {
     // Load general settings to set PSYCHEROS_DISPLAY_TZ for server-side timestamp formatting
     try {
       const settingsText = await Deno.readTextFile(
-        `${this.config.projectRoot}/.psycheros/general-settings.json`,
+        `${this.config.dataRoot}/.psycheros/general-settings.json`,
       );
       const settings = JSON.parse(settingsText) as { timezone?: string };
       if (settings.timezone) {
@@ -544,7 +558,7 @@ export class Server {
    */
   async updateLLMProfileSettings(settings: LLMProfileSettings): Promise<void> {
     this.llmProfileSettings = settings;
-    await saveProfileSettings(this.config.projectRoot, settings);
+    await saveProfileSettings(this.config.dataRoot, settings);
     this.reloadLLMClient();
   }
 
@@ -561,7 +575,7 @@ export class Server {
    */
   async setActiveProfile(profileId: string): Promise<void> {
     this.llmProfileSettings.activeProfileId = profileId;
-    await saveProfileSettings(this.config.projectRoot, this.llmProfileSettings);
+    await saveProfileSettings(this.config.dataRoot, this.llmProfileSettings);
     this.reloadLLMClient();
 
     // Restart entity-core to pick up new LLM credentials
@@ -570,7 +584,7 @@ export class Server {
       if (active) {
         // Apply entity-core LLM overrides on top of the active profile
         const ecSettings = await loadEntityCoreLLMSettings(
-          this.config.projectRoot,
+          this.config.dataRoot,
         );
         const ecTemperature = ecSettings.temperature ?? 0.3;
         const ecMaxTokens = ecSettings.maxTokens ?? 8000;
@@ -609,7 +623,7 @@ export class Server {
    */
   async updateWebSearchSettings(settings: WebSearchSettings): Promise<void> {
     this.webSearchSettings = settings;
-    await saveWebSearchSettings(this.config.projectRoot, settings);
+    await saveWebSearchSettings(this.config.dataRoot, settings);
     this.reloadToolRegistry();
   }
 
@@ -626,7 +640,7 @@ export class Server {
   async updateDiscordSettings(settings: DiscordSettings): Promise<void> {
     const prevGatewayEnabled = this.discordSettings.gatewayEnabled;
     this.discordSettings = settings;
-    await saveDiscordSettings(this.config.projectRoot, settings);
+    await saveDiscordSettings(this.config.dataRoot, settings);
     this.reloadToolRegistry();
 
     // Handle gateway enable/disable toggle
@@ -652,7 +666,7 @@ export class Server {
   ): Promise<void> {
     const merged = { ...getDefaultDiscordGatewayConfig(), ...config };
     this.discordGatewayConfig = merged;
-    await saveDiscordGatewayConfig(this.config.projectRoot, merged);
+    await saveDiscordGatewayConfig(this.config.dataRoot, merged);
 
     // Hot-reload the router config if gateway is running
     if (this.discordRouter) {
@@ -826,6 +840,7 @@ export class Server {
       () => discordTools,
       {
         projectRoot: this.config.projectRoot,
+        dataRoot: this.config.dataRoot,
         chatRAG: this.chatRAG ?? undefined,
         mcpClient: this.mcpClient ?? undefined,
         lorebookManager: this.lorebookManager,
@@ -906,7 +921,7 @@ export class Server {
    */
   async updateHomeSettings(settings: HomeSettings): Promise<void> {
     this.homeSettings = settings;
-    await saveHomeSettings(this.config.projectRoot, settings);
+    await saveHomeSettings(this.config.dataRoot, settings);
     this.reloadToolRegistry();
   }
 
@@ -922,7 +937,7 @@ export class Server {
    */
   async updateLovenseSettings(settings: LovenseSettings): Promise<void> {
     this.lovenseSettings = settings;
-    await saveLovenseSettings(this.config.projectRoot, settings);
+    await saveLovenseSettings(this.config.dataRoot, settings);
     this.reloadToolRegistry();
   }
 
@@ -938,7 +953,7 @@ export class Server {
    */
   async updateButtplugSettings(settings: ButtplugSettings): Promise<void> {
     this.buttplugSettings = settings;
-    await saveButtplugSettings(this.config.projectRoot, settings);
+    await saveButtplugSettings(this.config.dataRoot, settings);
     this.reloadToolRegistry();
   }
 
@@ -961,7 +976,7 @@ export class Server {
    */
   async updateImageGenSettings(settings: ImageGenSettings): Promise<void> {
     this.imageGenSettings = settings;
-    await saveImageGenSettings(this.config.projectRoot, settings);
+    await saveImageGenSettings(this.config.dataRoot, settings);
     this.reloadToolRegistry();
   }
 
@@ -979,7 +994,7 @@ export class Server {
     settings: EntityCoreLLMSettings,
   ): Promise<void> {
     this.entityCoreLLMSettings = settings;
-    await saveEntityCoreLLMSettings(this.config.projectRoot, settings);
+    await saveEntityCoreLLMSettings(this.config.dataRoot, settings);
 
     // Restart entity-core with updated LLM settings
     if (this.mcpClient) {
@@ -1020,7 +1035,7 @@ export class Server {
    */
   async updateToolSettings(settings: ToolsSettings): Promise<void> {
     this.toolSettings = settings;
-    await saveToolsSettings(this.config.projectRoot, settings);
+    await saveToolsSettings(this.config.dataRoot, settings);
     this.reloadToolRegistry();
   }
 
@@ -1115,7 +1130,7 @@ export class Server {
     const identityDirs = ["self", "user", "relationship", "custom"];
     for (const dir of identityDirs) {
       try {
-        const identityDir = join(this.config.projectRoot, "identity", dir);
+        const identityDir = join(this.config.dataRoot, "identity", dir);
         await Deno.mkdir(identityDir, { recursive: true });
       } catch {
         // Directory already exists, ignore
@@ -1130,7 +1145,7 @@ export class Server {
     ];
     for (const dir of imageDirs) {
       try {
-        await Deno.mkdir(join(this.config.projectRoot, dir), {
+        await Deno.mkdir(join(this.config.dataRoot, dir), {
           recursive: true,
         });
       } catch {
@@ -1226,7 +1241,7 @@ export class Server {
         const count = await catchUpSummarization(
           this.db,
           mcp,
-          this.config.projectRoot,
+          this.config.dataRoot,
           memoryConfig,
           this.getActiveLLMProfile() ?? undefined,
         );
@@ -1344,6 +1359,7 @@ export class Server {
       () => this.tools,
       {
         projectRoot: this.config.projectRoot,
+        dataRoot: this.config.dataRoot,
         chatRAG: this.chatRAG ?? undefined,
         mcpClient: this.mcpClient ?? undefined,
         lorebookManager: this.lorebookManager,
@@ -1434,6 +1450,7 @@ export class Server {
       llm: this.llm,
       tools: () => this.tools,
       projectRoot: this.config.projectRoot,
+      dataRoot: this.config.dataRoot,
       chatRAG: this.chatRAG ?? undefined,
       ragConfig: this.ragConfig,
       memoryEnabled: this.config.memoryEnabled ?? true,
@@ -1509,7 +1526,8 @@ export class Server {
         const size = parseInt(contentLength);
         const isUpload = path === "/api/backgrounds" ||
           path === "/api/chat-attachments" || path === "/api/anchor-images" ||
-          path === "/api/admin/data-migration/memories";
+          path === "/api/admin/data-migration/memories" ||
+          path === "/api/admin/entity-data/import";
         const limit = isUpload ? MAX_UPLOAD_BODY_SIZE : MAX_REQUEST_BODY_SIZE;
         if (size > limit) {
           return new Response(
@@ -2810,7 +2828,7 @@ export class Server {
       try {
         const gs = JSON.parse(
           await Deno.readTextFile(
-            `${this.config.projectRoot}/.psycheros/general-settings.json`,
+            `${this.config.dataRoot}/.psycheros/general-settings.json`,
           ),
         );
         if (gs.entityName) entityName = gs.entityName;

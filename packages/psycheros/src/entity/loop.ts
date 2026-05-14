@@ -191,8 +191,17 @@ export interface ProcessOptions {
  * Configuration for the entity turn processor.
  */
 export interface EntityConfig {
-  /** Root directory of the project (where Psycheros identity files live) */
+  /**
+   * Source root — where psycheros source lives. Used for reading
+   * templates and source-relative assets.
+   */
   projectRoot: string;
+  /**
+   * Data root — where the entity's persistent state lives (identity,
+   * snapshots, .psycheros settings, memories, custom tools).
+   * Equal to projectRoot when PSYCHEROS_DATA_DIR is unset.
+   */
+  dataRoot: string;
   /** Maximum tool iterations before stopping (prevents infinite loops) */
   maxToolIterations?: number;
   /** Optional chat RAG for searching conversation history */
@@ -404,19 +413,19 @@ export class EntityTurn {
     // Load self files, user files, relationship files, and custom files, build system message
     // Use MCP client if available, otherwise fall back to local files
     const selfContent = await loadSelfContent(
-      this.config.projectRoot,
+      this.config.dataRoot,
       this.config.mcpClient,
     );
     const userContent = await loadUserContent(
-      this.config.projectRoot,
+      this.config.dataRoot,
       this.config.mcpClient,
     );
     const relationshipContent = await loadRelationshipContent(
-      this.config.projectRoot,
+      this.config.dataRoot,
       this.config.mcpClient,
     );
     const customContent = await loadCustomContent(
-      this.config.projectRoot,
+      this.config.dataRoot,
       this.config.mcpClient,
     );
 
@@ -566,7 +575,7 @@ export class EntityTurn {
     }
 
     const baseInstructions = await loadBaseInstructions(
-      this.config.projectRoot,
+      this.config.dataRoot,
       this.config.mcpClient,
       conversationId,
     );

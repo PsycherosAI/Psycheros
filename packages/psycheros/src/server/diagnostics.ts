@@ -167,7 +167,7 @@ export async function collectDiagnostics(
 
   // DB file size
   try {
-    const dbPath = `${ctx.projectRoot}/.psycheros/psycheros.db`;
+    const dbPath = `${ctx.dataRoot}/.psycheros/psycheros.db`;
     const stat = await Deno.stat(dbPath);
     database.dbSizeBytes = stat.size;
   } catch {

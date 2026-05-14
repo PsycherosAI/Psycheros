@@ -1,0 +1,40 @@
+#!/bin/sh
+# Mirrors the `deno lint` + `deno fmt --check` gates in
+# .github/workflows/check.yml so style/lint drift is caught locally instead
+# of after a failed CI run on main. (Type-check is intentionally skipped —
+# it's slower and editors catch it interactively via LSP.)
+#
+# One-time activation per clone:
+#
+#     git config core.hooksPath .githooks
+#
+# Bypass for an emergency commit:
+#
+#     git commit --no-verify
+#
+# If `deno` is not on PATH the hook prints a warning and lets the commit
+# proceed — contributors without Deno installed shouldn't be hard-blocked,
+# CI will still catch them.
+
+set -eu
+
+if ! command -v deno >/dev/null 2>&1; then
+  printf 'pre-commit: deno not found on PATH, skipping checks\n' >&2
+  exit 0
+fi
+
+if ! deno fmt --check >/dev/null 2>&1; then
+  printf '\npre-commit: deno fmt --check failed.\n' >&2
+  printf '            Run `deno task fmt` to auto-fix, then re-stage and re-commit.\n' >&2
+  printf '            (Re-run with --no-verify to bypass; CI still gates on it.)\n\n' >&2
+  deno fmt --check >&2 || true
+  exit 1
+fi
+
+if ! deno lint >/dev/null 2>&1; then
+  printf '\npre-commit: deno lint failed.\n' >&2
+  printf '            Try `deno lint --fix` for auto-fixable rules; otherwise edit by hand.\n' >&2
+  printf '            (Re-run with --no-verify to bypass; CI still gates on it.)\n\n' >&2
+  deno lint >&2 || true
+  exit 1
+fi

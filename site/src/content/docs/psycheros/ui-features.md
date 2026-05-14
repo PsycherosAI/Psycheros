@@ -895,8 +895,8 @@ configured, behavior is unchanged (times treated as UTC).
 - The inactivity timer starts from when the Pulse is saved/enabled, not
   retroactively from the last user message
 - User activity (sending a message) resets the inactivity clock
-- A cooldown equal to the threshold prevents rapid-fire re-execution when the
-  user stays inactive
+- A cooldown equal to the threshold (measured from the last successful run)
+  prevents rapid-fire re-execution when the user stays inactive
 - With random jitter enabled, the fire window uses absolute elapsed times (e.g.,
   a 10-min threshold with jitter fires between 6.5–13.5 min), not threshold +
   offset

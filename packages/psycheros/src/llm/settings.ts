@@ -222,9 +222,9 @@ function migrateLegacySettings(
  * Falls back to a default profile from environment variables if no file exists.
  */
 export async function loadProfileSettings(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<LLMProfileSettings> {
-  const settingsPath = join(projectRoot, ".psycheros", "llm-settings.json");
+  const settingsPath = join(dataRoot, ".psycheros", "llm-settings.json");
 
   try {
     const text = await Deno.readTextFile(settingsPath);
@@ -237,7 +237,7 @@ export async function loadProfileSettings(
     ) {
       const migrated = migrateLegacySettings(parsed);
       // Save migrated format back to disk
-      await saveProfileSettings(projectRoot, migrated);
+      await saveProfileSettings(dataRoot, migrated);
       return migrated;
     }
 
@@ -265,7 +265,7 @@ export async function loadProfileSettings(
       profiles: [defaultProfile],
       activeProfileId: defaultProfile.id,
     };
-    await saveProfileSettings(projectRoot, settingsWithDefault);
+    await saveProfileSettings(dataRoot, settingsWithDefault);
     return settingsWithDefault;
   } catch {
     // File doesn't exist or is invalid — create default from env
@@ -282,10 +282,10 @@ export async function loadProfileSettings(
  * Creates the `.psycheros/` directory if it doesn't exist.
  */
 export async function saveProfileSettings(
-  projectRoot: string,
+  dataRoot: string,
   settings: LLMProfileSettings,
 ): Promise<void> {
-  const settingsDir = join(projectRoot, ".psycheros");
+  const settingsDir = join(dataRoot, ".psycheros");
   const settingsPath = join(settingsDir, "llm-settings.json");
 
   await Deno.mkdir(settingsDir, { recursive: true });
@@ -303,8 +303,8 @@ export async function saveProfileSettings(
  * Load LLM settings (legacy flat format).
  * @deprecated Use loadProfileSettings() and getActiveProfile() instead.
  */
-export async function loadSettings(projectRoot: string): Promise<LLMSettings> {
-  const profileSettings = await loadProfileSettings(projectRoot);
+export async function loadSettings(dataRoot: string): Promise<LLMSettings> {
+  const profileSettings = await loadProfileSettings(dataRoot);
   const active = getActiveProfile(profileSettings);
   if (!active) {
     return getDefaultSettings();
@@ -317,10 +317,10 @@ export async function loadSettings(projectRoot: string): Promise<LLMSettings> {
  * @deprecated Use saveProfileSettings() instead.
  */
 export async function saveSettings(
-  projectRoot: string,
+  dataRoot: string,
   settings: LLMSettings,
 ): Promise<void> {
-  const settingsDir = join(projectRoot, ".psycheros");
+  const settingsDir = join(dataRoot, ".psycheros");
   const settingsPath = join(settingsDir, "llm-settings.json");
 
   await Deno.mkdir(settingsDir, { recursive: true });

@@ -95,7 +95,7 @@ export const sendNotificationTool: Tool = {
       }
 
       // Load VAPID keys
-      const vapidKeys = await loadOrGenerateKeys(ctx.config.projectRoot);
+      const vapidKeys = await loadOrGenerateKeys(ctx.config.dataRoot);
 
       const payload: PushPayload = {
         title: title.trim().substring(0, 100),

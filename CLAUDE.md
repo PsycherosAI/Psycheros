@@ -23,18 +23,20 @@ psycheros-workspace/
 │   ├── psycheros/         # harness daemon (port 3000) — embodiment
 │   ├── entity-core/       # MCP server (stdio) — canonical identity + memory
 │   ├── entity-loom/       # chat-history import wizard (port 3210)
-│   ├── launcher/          # bootstrap installer + dashboard (port 3001)
+│   ├── launcher/          # v1: bootstrap installer + dashboard (port 3001)
+│   ├── launcher-v2/       # v2: Tauri desktop app + OS-supervised daemon — Rust + HTML/JS
 │   └── scheduler/         # @psycheros/scheduler — shared durable job scheduler
 └── .github/workflows/     # multi-package CI matrix
 ```
 
-| Package                | Per-package agent guide                                                                     |
-| ---------------------- | ------------------------------------------------------------------------------------------- |
-| `packages/psycheros`   | [`packages/psycheros/CLAUDE.md`](packages/psycheros/CLAUDE.md)                              |
-| `packages/entity-core` | [`packages/entity-core/CLAUDE.md`](packages/entity-core/CLAUDE.md)                          |
-| `packages/entity-loom` | [`packages/entity-loom/CLAUDE.md`](packages/entity-loom/CLAUDE.md)                          |
-| `packages/launcher`    | no per-package CLAUDE.md — see [`packages/launcher/README.md`](packages/launcher/README.md) |
-| `packages/scheduler`   | see [`packages/psycheros/docs/scheduler.md`](packages/psycheros/docs/scheduler.md)          |
+| Package                | Per-package agent guide                                                                       |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| `packages/psycheros`   | [`packages/psycheros/CLAUDE.md`](packages/psycheros/CLAUDE.md)                                |
+| `packages/entity-core` | [`packages/entity-core/CLAUDE.md`](packages/entity-core/CLAUDE.md)                            |
+| `packages/entity-loom` | [`packages/entity-loom/CLAUDE.md`](packages/entity-loom/CLAUDE.md)                            |
+| `packages/launcher`    | v1, being replaced — see [`packages/launcher/README.md`](packages/launcher/README.md)         |
+| `packages/launcher-v2` | [`packages/launcher-v2/CLAUDE.md`](packages/launcher-v2/CLAUDE.md) — Rust + HTML/JS, not Deno |
+| `packages/scheduler`   | see [`packages/psycheros/docs/scheduler.md`](packages/psycheros/docs/scheduler.md)            |
 
 ## The cross-cutting truth
 

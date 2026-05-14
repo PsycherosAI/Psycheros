@@ -48,11 +48,11 @@ export function getDefaultEntityCoreLLMSettings(): EntityCoreLLMSettings {
  * Falls back to defaults if the file doesn't exist.
  */
 export async function loadEntityCoreLLMSettings(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<EntityCoreLLMSettings> {
   const defaults = getDefaultEntityCoreLLMSettings();
   const settingsPath = join(
-    projectRoot,
+    dataRoot,
     ".psycheros",
     "entity-core-llm-settings.json",
   );
@@ -71,10 +71,10 @@ export async function loadEntityCoreLLMSettings(
  * Creates the `.psycheros/` directory if it doesn't exist.
  */
 export async function saveEntityCoreLLMSettings(
-  projectRoot: string,
+  dataRoot: string,
   settings: EntityCoreLLMSettings,
 ): Promise<void> {
-  const settingsDir = join(projectRoot, ".psycheros");
+  const settingsDir = join(dataRoot, ".psycheros");
   const settingsPath = join(settingsDir, "entity-core-llm-settings.json");
 
   await Deno.mkdir(settingsDir, { recursive: true });

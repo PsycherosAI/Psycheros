@@ -154,6 +154,7 @@ export class GraphStore {
    */
   close(): void {
     this.db.close();
+    this.initialized = false;
   }
 
   /**

@@ -242,13 +242,14 @@ jobs:
       # 2026-05-13). Keep this step even though the job uploads no assets.
       - uses: actions/checkout@v6
 
-      # psycheros is the canonical harness artifact (image at GHCR), but the
-      # repo-wide "Latest" badge is owned by the launcher — see RELEASES.md
-      # "Latest badge policy". Strangers landing on /releases should be
-      # guided to the installer, not the notes-only harness release. The
+      # Launcher owns the repo-wide "Latest" badge — see RELEASES.md
+      # "Latest badge policy". Strangers landing on /releases (and
+      # `https://github.com/.../releases/latest/download/install.sh`) should be
+      # guided to the installer, not to this notes-only harness release. The
       # actual image push is docker.yml's job; this workflow only ensures
       # the release page exists with curated notes. --latest=false below
-      # keeps the badge on the launcher.
+      # keeps the badge on the launcher. No other per-package job runs
+      # after launcher to avoid clobbering the Latest badge.
       - name: Ensure release exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

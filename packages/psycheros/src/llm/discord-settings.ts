@@ -134,10 +134,10 @@ export function getDefaultDiscordGatewayConfig(): DiscordGatewayConfig {
 // =============================================================================
 
 export async function loadDiscordSettings(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<DiscordSettings> {
   const defaults = getDefaultDiscordSettings();
-  const settingsPath = join(projectRoot, ".psycheros", "discord-settings.json");
+  const settingsPath = join(dataRoot, ".psycheros", "discord-settings.json");
 
   try {
     const text = await Deno.readTextFile(settingsPath);
@@ -149,10 +149,10 @@ export async function loadDiscordSettings(
 }
 
 export async function saveDiscordSettings(
-  projectRoot: string,
+  dataRoot: string,
   settings: DiscordSettings,
 ): Promise<void> {
-  const settingsDir = join(projectRoot, ".psycheros");
+  const settingsDir = join(dataRoot, ".psycheros");
   const settingsPath = join(settingsDir, "discord-settings.json");
 
   await Deno.mkdir(settingsDir, { recursive: true });
@@ -176,10 +176,10 @@ export function maskDiscordSettings(
 // =============================================================================
 
 export async function loadDiscordGatewayConfig(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<DiscordGatewayConfig> {
   const defaults = getDefaultDiscordGatewayConfig();
-  const settingsPath = join(projectRoot, ".psycheros", "discord-gateway.json");
+  const settingsPath = join(dataRoot, ".psycheros", "discord-gateway.json");
 
   try {
     const text = await Deno.readTextFile(settingsPath);
@@ -191,10 +191,10 @@ export async function loadDiscordGatewayConfig(
 }
 
 export async function saveDiscordGatewayConfig(
-  projectRoot: string,
+  dataRoot: string,
   config: DiscordGatewayConfig,
 ): Promise<void> {
-  const settingsDir = join(projectRoot, ".psycheros");
+  const settingsDir = join(dataRoot, ".psycheros");
   const settingsPath = join(settingsDir, "discord-gateway.json");
 
   await Deno.mkdir(settingsDir, { recursive: true });

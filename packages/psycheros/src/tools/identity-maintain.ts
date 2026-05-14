@@ -126,7 +126,7 @@ export const maintainIdentityTool: Tool = {
     // Create file manager
     const manager = new IdentityFileManager(
       ctx.config.mcpClient ?? null,
-      ctx.config.projectRoot,
+      ctx.config.dataRoot,
     );
 
     // Validate file first
@@ -230,7 +230,7 @@ export const listIdentitySnapshotsTool: Tool = {
     // Create file manager
     const manager = new IdentityFileManager(
       ctx.config.mcpClient ?? null,
-      ctx.config.projectRoot,
+      ctx.config.dataRoot,
     );
 
     try {

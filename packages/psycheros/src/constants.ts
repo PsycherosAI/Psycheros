@@ -20,8 +20,11 @@ export const MAX_TITLE_LENGTH = 50;
 /** Maximum request body size for JSON/form endpoints (1MB) */
 export const MAX_REQUEST_BODY_SIZE = 1 * 1024 * 1024;
 
-/** Maximum request body size for file upload endpoints (10MB) */
-export const MAX_UPLOAD_BODY_SIZE = 10 * 1024 * 1024;
+/**
+ * Maximum request body size for file upload endpoints.
+ * Self-hosted software — no artificial cap on user uploads.
+ */
+export const MAX_UPLOAD_BODY_SIZE = Infinity;
 
 // =============================================================================
 // SSE Streaming

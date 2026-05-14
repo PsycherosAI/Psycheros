@@ -1774,7 +1774,12 @@ export class DBClient {
 
   /**
    * Aggregate run statistics for a pulse, derived from `job_runs`.
-   * Replaces the old denormalized columns on `pulses`.
+   * Replaces the old denormalized columns on `pulses`. The `lastRunAt` /
+   * `lastCompletedAt` fields reflect the most recent run regardless of
+   * status, so the user-facing pulse UI surfaces failures and errors.
+   * For the inactivity-pulse cooldown check (which must gate on success
+   * only to avoid self-deadlocking on skipped ticks), call
+   * {@link getLastSuccessfulPulseRunAt} instead.
    */
   getPulseStats(pulseId: string): PulseStats {
     const aggStmt = this.db.prepare(
@@ -1814,6 +1819,29 @@ export class DBClient {
       lastResult: (latest?.result_summary as string) ?? null,
       lastError: (latest?.error_message as string) ?? null,
     };
+  }
+
+  /**
+   * Timestamp of the most recent successful run of a pulse, or null if
+   * the pulse has never completed successfully. Scoped narrowly for the
+   * inactivity-pulse cooldown check — the cooldown must not gate on
+   * `skipped` ticks (the cooldown check itself produces skipped rows, so
+   * gating on them would self-deadlock the pulse) or `error`/`dead`
+   * runs (a failing pulse shouldn't be punished into permanent silence).
+   */
+  getLastSuccessfulPulseRunAt(pulseId: string): string | null {
+    const stmt = this.db.prepare(
+      `SELECT started_at
+       FROM job_runs
+       WHERE handler = 'pulse.execute'
+         AND json_extract(payload_json, '$.pulseId') = ?
+         AND status = 'success'
+         AND completed_at IS NOT NULL
+       ORDER BY completed_at DESC LIMIT 1`,
+    );
+    const row = stmt.get(pulseId) as { started_at: string } | undefined;
+    stmt.finalize();
+    return row?.started_at ?? null;
   }
 
   /**

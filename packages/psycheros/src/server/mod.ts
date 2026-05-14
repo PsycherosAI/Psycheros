@@ -14,6 +14,7 @@
  * const server = new Server({
  *   port: 8080,
  *   projectRoot: Deno.cwd(),
+ *   dataRoot: Deno.env.get("PSYCHEROS_DATA_DIR") ?? Deno.cwd(),
  * });
  *
  * await server.start();

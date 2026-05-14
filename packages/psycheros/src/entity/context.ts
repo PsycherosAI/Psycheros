@@ -78,19 +78,19 @@ const CUSTOM_FILE_ORDER: string[] = [];
  * Load all .md files from a directory and concatenate them in specified order.
  * Returns empty string if directory doesn't exist or is empty.
  *
- * @param projectRoot - The root directory of the project
+ * @param dataRoot - The root directory of the project
  * @param dirName - The name of the subdirectory to load from
  * @param fileOrder - The order in which files should be loaded
  * @param excludeFiles - Optional list of filenames to exclude from loading
  * @returns The concatenated contents of all .md files
  */
 async function loadFilesFromDirectory(
-  projectRoot: string,
+  dataRoot: string,
   dirName: string,
   fileOrder: string[],
   excludeFiles: string[] = [],
 ): Promise<string> {
-  const dir = join(projectRoot, dirName);
+  const dir = join(dataRoot, dirName);
 
   try {
     // Read all entries in the directory
@@ -151,11 +151,11 @@ async function loadFilesFromDirectory(
  * Excludes base_instructions.md (loaded separately via loadBaseInstructions).
  * Returns empty string if directory doesn't exist or is empty.
  *
- * @param projectRoot - The root directory of the project
+ * @param dataRoot - The root directory of the project
  * @returns The concatenated contents of all self/*.md files except base_instructions.md
  */
-export async function loadSelfMd(projectRoot: string): Promise<string> {
-  return await loadFilesFromDirectory(projectRoot, SELF_DIR, SELF_FILE_ORDER, [
+export async function loadSelfMd(dataRoot: string): Promise<string> {
+  return await loadFilesFromDirectory(dataRoot, SELF_DIR, SELF_FILE_ORDER, [
     BASE_INSTRUCTIONS_FILE,
   ]);
 }
@@ -164,25 +164,25 @@ export async function loadSelfMd(projectRoot: string): Promise<string> {
  * Load all .md files from the user/ directory and concatenate them.
  * Returns empty string if directory doesn't exist or is empty.
  *
- * @param projectRoot - The root directory of the project
+ * @param dataRoot - The root directory of the project
  * @returns The concatenated contents of all user/*.md files
  */
-export async function loadUserFiles(projectRoot: string): Promise<string> {
-  return await loadFilesFromDirectory(projectRoot, USER_DIR, USER_FILE_ORDER);
+export async function loadUserFiles(dataRoot: string): Promise<string> {
+  return await loadFilesFromDirectory(dataRoot, USER_DIR, USER_FILE_ORDER);
 }
 
 /**
  * Load all .md files from the relationship/ directory and concatenate them.
  * Returns empty string if directory doesn't exist or is empty.
  *
- * @param projectRoot - The root directory of the project
+ * @param dataRoot - The root directory of the project
  * @returns The concatenated contents of all relationship/*.md files
  */
 export async function loadRelationshipFiles(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<string> {
   return await loadFilesFromDirectory(
-    projectRoot,
+    dataRoot,
     RELATIONSHIP_DIR,
     RELATIONSHIP_FILE_ORDER,
   );
@@ -193,12 +193,12 @@ export async function loadRelationshipFiles(
  * Files are sorted alphabetically (no predefined order).
  * Returns empty string if directory doesn't exist or is empty.
  *
- * @param projectRoot - The root directory of the project
+ * @param dataRoot - The root directory of the project
  * @returns The concatenated contents of all custom/*.md files
  */
-export async function loadCustomFiles(projectRoot: string): Promise<string> {
+export async function loadCustomFiles(dataRoot: string): Promise<string> {
   return await loadFilesFromDirectory(
-    projectRoot,
+    dataRoot,
     CUSTOM_DIR,
     CUSTOM_FILE_ORDER,
   );
@@ -220,13 +220,13 @@ function applyTemplateVariables(content: string, chatId?: string): string {
  * Replaces {{timestamp}} with the current ISO timestamp and {{chatId}} with the conversation ID.
  * Returns a fallback default if the file doesn't exist anywhere.
  *
- * @param projectRoot - The root directory of the project
+ * @param dataRoot - The root directory of the project
  * @param mcpClient - Optional MCP client for loading from entity-core
  * @param chatId - Optional current conversation ID for {{chatId}} substitution
  * @returns The base instructions string (with XML tags intact)
  */
 export async function loadBaseInstructions(
-  projectRoot: string,
+  dataRoot: string,
   mcpClient?: MCPClient,
   chatId?: string,
 ): Promise<string> {
@@ -254,7 +254,7 @@ export async function loadBaseInstructions(
   }
 
   // Fall back to local file
-  const filePath = join(projectRoot, SELF_DIR, BASE_INSTRUCTIONS_FILE);
+  const filePath = join(dataRoot, SELF_DIR, BASE_INSTRUCTIONS_FILE);
 
   try {
     const content = await Deno.readTextFile(filePath);
@@ -318,12 +318,12 @@ function identityFilesToString(
 /**
  * Load self content from MCP client or local files.
  *
- * @param projectRoot - The root directory of the project
+ * @param dataRoot - The root directory of the project
  * @param mcpClient - Optional MCP client for loading from entity-core
  * @returns The concatenated contents of all self/*.md files
  */
 export async function loadSelfContent(
-  projectRoot: string,
+  dataRoot: string,
   mcpClient?: MCPClient,
 ): Promise<string> {
   if (mcpClient) {
@@ -336,18 +336,18 @@ export async function loadSelfContent(
       return identityFilesToString(filtered, SELF_FILE_ORDER);
     }
   }
-  return await loadSelfMd(projectRoot);
+  return await loadSelfMd(dataRoot);
 }
 
 /**
  * Load user content from MCP client or local files.
  *
- * @param projectRoot - The root directory of the project
+ * @param dataRoot - The root directory of the project
  * @param mcpClient - Optional MCP client for loading from entity-core
  * @returns The concatenated contents of all user/*.md files
  */
 export async function loadUserContent(
-  projectRoot: string,
+  dataRoot: string,
   mcpClient?: MCPClient,
 ): Promise<string> {
   if (mcpClient) {
@@ -356,18 +356,18 @@ export async function loadUserContent(
       return identityFilesToString(identity.user, USER_FILE_ORDER);
     }
   }
-  return await loadUserFiles(projectRoot);
+  return await loadUserFiles(dataRoot);
 }
 
 /**
  * Load relationship content from MCP client or local files.
  *
- * @param projectRoot - The root directory of the project
+ * @param dataRoot - The root directory of the project
  * @param mcpClient - Optional MCP client for loading from entity-core
  * @returns The concatenated contents of all relationship/*.md files
  */
 export async function loadRelationshipContent(
-  projectRoot: string,
+  dataRoot: string,
   mcpClient?: MCPClient,
 ): Promise<string> {
   if (mcpClient) {
@@ -379,19 +379,19 @@ export async function loadRelationshipContent(
       );
     }
   }
-  return await loadRelationshipFiles(projectRoot);
+  return await loadRelationshipFiles(dataRoot);
 }
 
 /**
  * Load custom content from MCP client or local files.
  * Custom files are sorted alphabetically.
  *
- * @param projectRoot - The root directory of the project
+ * @param dataRoot - The root directory of the project
  * @param mcpClient - Optional MCP client for loading from entity-core
  * @returns The concatenated contents of all custom/*.md files
  */
 export async function loadCustomContent(
-  projectRoot: string,
+  dataRoot: string,
   mcpClient?: MCPClient,
 ): Promise<string> {
   if (mcpClient) {
@@ -401,7 +401,7 @@ export async function loadCustomContent(
       return identityFilesToString(identity.custom, CUSTOM_FILE_ORDER);
     }
   }
-  return await loadCustomFiles(projectRoot);
+  return await loadCustomFiles(dataRoot);
 }
 
 /**
@@ -409,21 +409,21 @@ export async function loadCustomContent(
  * background processes like the memory summarizer that need entity identity
  * context but no retrieval augmentation.
  *
- * @param projectRoot - The root directory of the project
+ * @param dataRoot - The root directory of the project
  * @returns The formatted system message containing all identity context
  */
 export async function buildIdentitySystemMessage(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<string> {
   const baseInstructions = await loadBaseInstructions(
-    projectRoot,
+    dataRoot,
     undefined,
     "memory-writing",
   );
-  const selfContent = await loadSelfContent(projectRoot);
-  const userContent = await loadUserContent(projectRoot);
-  const relationshipContent = await loadRelationshipContent(projectRoot);
-  const customContent = await loadCustomContent(projectRoot);
+  const selfContent = await loadSelfContent(dataRoot);
+  const userContent = await loadUserContent(dataRoot);
+  const relationshipContent = await loadRelationshipContent(dataRoot);
+  const customContent = await loadCustomContent(dataRoot);
 
   return buildSystemMessage(
     baseInstructions,

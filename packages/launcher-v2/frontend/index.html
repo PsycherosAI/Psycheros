@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Psycheros</title>
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <style>
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--sp-8);
+      }
+      .card {
+        width: 100%;
+        max-width: 560px;
+        background: var(--c-bg-raised);
+        border: 1px solid var(--c-border);
+        border-radius: 14px;
+        padding: var(--sp-8) calc(var(--sp-8) + var(--sp-1))
+          calc(var(--sp-8) + var(--sp-2));
+        box-shadow:
+          0 24px 60px -20px rgba(0, 0, 0, 0.7),
+          0 0 0 1px var(--c-accent-subtle);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: var(--sp-6);
+      }
+      .brand {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--c-fg-muted);
+        margin: 0;
+      }
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: 4px 10px;
+        background: var(--c-bg-sunken);
+        border: 1px solid var(--c-border);
+        border-radius: 999px;
+        font-size: var(--font-size-xs);
+        color: var(--c-fg-muted);
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--c-state-not-installed);
+        transition: background-color 200ms ease, box-shadow 200ms ease;
+      }
+      body[data-state="running"] .dot {
+        background: var(--c-state-running);
+        box-shadow: 0 0 10px var(--c-accent-glow);
+      }
+      body[data-state="installed"] .dot {
+        background: var(--c-state-installed);
+      }
+      body[data-state="not-installed"] .dot {
+        background: var(--c-state-not-installed);
+      }
+      h1 {
+        font-size: var(--font-size-xl);
+        font-weight: var(--font-weight-medium);
+        margin: 0 0 var(--sp-2) 0;
+        color: var(--c-fg-strong);
+        letter-spacing: -0.01em;
+      }
+      .detail {
+        font-size: var(--font-size-sm);
+        line-height: 1.55;
+        color: var(--c-fg-muted);
+        margin: 0 0 var(--sp-6) 0;
+      }
+      .actions {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-2);
+        margin-bottom: var(--sp-6);
+      }
+      button {
+        font: inherit;
+        cursor: pointer;
+        padding: 11px 16px;
+        border-radius: 8px;
+        border: 1px solid var(--c-border-strong);
+        background: var(--c-bg-hover);
+        color: var(--c-fg);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        text-align: left;
+        transition:
+          background 120ms ease,
+          border-color 120ms ease,
+          transform 60ms ease;
+      }
+      button:hover {
+        background: var(--c-bg-raised);
+        border-color: var(--c-fg-subtle);
+      }
+      button:active {
+        transform: translateY(1px);
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      button.primary {
+        background: var(--c-accent-muted);
+        border-color: var(--c-accent);
+        color: var(--c-fg-strong);
+      }
+      button.primary:hover {
+        background: var(--c-accent);
+        border-color: var(--c-accent-hover);
+      }
+      button.danger {
+        background: transparent;
+        border-color: rgba(255, 68, 68, 0.35);
+        color: var(--c-error);
+      }
+      button.danger:hover {
+        background: rgba(255, 68, 68, 0.08);
+        border-color: var(--c-error);
+      }
+      .meta {
+        font-size: var(--font-size-xs);
+        color: var(--c-fg-subtle);
+        line-height: 1.6;
+        border-top: 1px solid var(--c-border);
+        padding-top: var(--sp-4);
+        text-align: center;
+      }
+      .error {
+        background: rgba(255, 68, 68, 0.08);
+        border: 1px solid rgba(255, 68, 68, 0.35);
+        color: var(--c-error);
+        padding: var(--sp-3);
+        border-radius: 8px;
+        font-size: var(--font-size-sm);
+        margin-bottom: var(--sp-4);
+        white-space: pre-wrap;
+        display: none;
+      }
+      .error.visible {
+        display: block;
+      }
+    </style>
+  </head>
+  <body data-state="unknown">
+    <main class="card">
+      <header>
+        <h2 class="brand">Psycheros · Manager</h2>
+        <span class="status-pill">
+          <span class="dot"></span>
+          <span id="status-text">checking…</span>
+        </span>
+      </header>
+
+      <h1 id="title">Checking daemon…</h1>
+      <p class="detail" id="detail"></p>
+
+      <div class="error" id="error"></div>
+
+      <div class="actions" id="actions"></div>
+
+      <div class="meta" id="meta"></div>
+    </main>
+
+    <script type="module" src="./js/manager.js"></script>
+  </body>
+</html>

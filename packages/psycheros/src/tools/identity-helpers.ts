@@ -232,7 +232,7 @@ function stripLeadingHeading(content: string, sectionName: string): string {
 export class IdentityFileManager {
   constructor(
     private mcpClient: MCPClient | null,
-    private projectRoot: string,
+    private dataRoot: string,
   ) {}
 
   /**
@@ -304,7 +304,7 @@ export class IdentityFileManager {
    * Get the full path to an identity file.
    */
   getFilePath(category: IdentityCategory, filename: string): string {
-    return join(this.projectRoot, "identity", category, filename);
+    return join(this.dataRoot, "identity", category, filename);
   }
 
   /**
@@ -337,7 +337,7 @@ export class IdentityFileManager {
     const filePath = this.getFilePath(category, filename);
 
     // Ensure directory exists
-    const dirPath = join(this.projectRoot, "identity", category);
+    const dirPath = join(this.dataRoot, "identity", category);
     await Deno.mkdir(dirPath, { recursive: true });
 
     await Deno.writeTextFile(filePath, content);
@@ -363,7 +363,7 @@ export class IdentityFileManager {
           category,
           filename,
           content,
-          this.projectRoot,
+          this.dataRoot,
         );
 
         if (result.success) {
@@ -433,7 +433,7 @@ export class IdentityFileManager {
           category,
           filename,
           content,
-          this.projectRoot,
+          this.dataRoot,
         );
 
         if (result.success) {
@@ -505,7 +505,7 @@ export class IdentityFileManager {
           filename,
           sectionName,
           content,
-          this.projectRoot,
+          this.dataRoot,
         );
 
         if (result.success) {
@@ -588,7 +588,7 @@ export class IdentityFileManager {
           filename,
           sectionName,
           content,
-          this.projectRoot,
+          this.dataRoot,
         );
 
         if (result.success) {
@@ -658,7 +658,7 @@ export class IdentityFileManager {
     const today = new Date().toISOString().split("T")[0];
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const snapshotFilename = `${filename.replace(/\.md$/, "")}_${timestamp}.md`;
-    const snapshotDir = join(this.projectRoot, ".snapshots", category);
+    const snapshotDir = join(this.dataRoot, ".snapshots", category);
     const snapshotPath = join(snapshotDir, snapshotFilename);
 
     try {
@@ -691,7 +691,7 @@ ${content}
     const snapshots: Array<
       { category: string; filename: string; date: string; path: string }
     > = [];
-    const snapshotsDir = join(this.projectRoot, ".snapshots");
+    const snapshotsDir = join(this.dataRoot, ".snapshots");
 
     try {
       const categories = category
@@ -852,7 +852,7 @@ ${content}
           category,
           filename,
           content,
-          this.projectRoot,
+          this.dataRoot,
         );
         if (success) {
           console.log(`[Identity] Created ${category}/${filename} via MCP`);
@@ -906,7 +906,7 @@ ${content}
       try {
         const result = await this.mcpClient.deleteCustomFile(
           filename,
-          this.projectRoot,
+          this.dataRoot,
         );
         if (result.success) {
           console.log(`[Identity] Deleted custom file ${filename} via MCP`);

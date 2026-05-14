@@ -44,7 +44,8 @@ code changes are needed.
 2. The file must export
    `{ definition: { type: "function", function: { name, description, parameters } }, execute: async (args, ctx) => { ... } }`
 3. `ctx` provides: `toolCallId`, `conversationId`, `db` (database client),
-   `config` (with `projectRoot`)
+   `config` (with `projectRoot` for source paths and `dataRoot` for user-mutable
+   state like `.psycheros/`, `identity/`, `custom-tools/`)
 4. Restart the server — the tool appears in Settings > Tools under Custom Tools
 5. Toggle it on to enable it for the entity
 

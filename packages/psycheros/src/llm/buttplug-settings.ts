@@ -47,11 +47,11 @@ export function getDefaultButtplugSettings(): ButtplugSettings {
  * Falls back to defaults if the file doesn't exist.
  */
 export async function loadButtplugSettings(
-  projectRoot: string,
+  dataRoot: string,
 ): Promise<ButtplugSettings> {
   const defaults = getDefaultButtplugSettings();
   const settingsPath = join(
-    projectRoot,
+    dataRoot,
     ".psycheros",
     "buttplug-settings.json",
   );
@@ -73,10 +73,10 @@ export async function loadButtplugSettings(
  * Creates the `.psycheros/` directory if it doesn't exist.
  */
 export async function saveButtplugSettings(
-  projectRoot: string,
+  dataRoot: string,
   settings: ButtplugSettings,
 ): Promise<void> {
-  const settingsDir = join(projectRoot, ".psycheros");
+  const settingsDir = join(dataRoot, ".psycheros");
   const settingsPath = join(settingsDir, "buttplug-settings.json");
 
   await Deno.mkdir(settingsDir, { recursive: true });

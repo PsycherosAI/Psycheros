@@ -1,0 +1,46 @@
+[package]
+name = "psycheros-launcher"
+version = "0.0.1"
+edition = "2021"
+description = "Psycheros desktop launcher — Tauri app + OS-supervised daemon"
+license = "MIT"
+publish = false
+rust-version = "1.77"
+
+[lib]
+name = "psycheros_launcher_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "psycheros-launcher"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+# Tauri-plugin-updater wires up signed in-app updates of the shell binary.
+# Source-bundle updates are a separate channel — see docs/release.md.
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Cross-platform path resolution (data_dir, cache_dir, etc.) so the launcher
+# uses the right per-OS conventions without bespoke #[cfg] in every file.
+dirs = "5"
+# Structured errors at module boundaries — far better DX than stringly-typed
+# Result<T, String> when something goes wrong in the supervisor.
+thiserror = "1"
+
+[features]
+default = []
+# Enables the macOS launchd supervisor implementation. Selected automatically
+# by `target_os = "macos"`; this feature exists so test/build pipelines can
+# audit which OS code is being compiled.
+launchd = []
+# Linux systemd-user supervisor.
+systemd-user = []
+# Windows Task Scheduler supervisor.
+task-scheduler = []

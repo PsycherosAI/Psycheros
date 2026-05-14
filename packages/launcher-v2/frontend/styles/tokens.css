@@ -1,0 +1,112 @@
+/**
+ * Design tokens — mirrors packages/psycheros/web/css/tokens.css so the
+ * launcher and the embedded chat client share one visual identity.
+ *
+ * Keep these in sync when the canonical tokens change.
+ */
+
+:root {
+  /* Backgrounds — true black for OLED */
+  --c-bg: #000000;
+  --c-bg-raised: #0a0a0a;
+  --c-bg-sunken: #050505;
+  --c-bg-hover: #111111;
+
+  /* Foregrounds — high contrast */
+  --c-fg: #e8e8e8;
+  --c-fg-muted: #888888;
+  --c-fg-strong: #ffffff;
+  --c-fg-subtle: #555555;
+  --c-fg-label: #888888;
+
+  /* Primary accent — violet dream (mirrors the psycheros default preset) */
+  --c-accent: #a855f7;
+  --c-accent-hover: #c084fc;
+  --c-accent-muted: #7e22ce;
+  --c-accent-subtle: rgba(168, 85, 247, 0.08);
+  --c-accent-glow: rgba(168, 85, 247, 0.25);
+
+  /* Semantic */
+  --c-error: #ff4444;
+  --c-warning: #ffaa00;
+  --c-success: var(--c-accent);
+
+  /* Borders */
+  --c-border: #1a1a1a;
+  --c-border-strong: #2a2a2a;
+
+  /* Spacing (4px base scale) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* Typography */
+  --font-sans:
+    "IBM Plex Sans",
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  --font-mono:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    "SF Mono",
+    "Fira Code",
+    "Consolas",
+    monospace;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 13px;
+  --font-size-base: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 20px;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* State pill dot colors per daemon state */
+  --c-state-running: var(--c-accent);
+  --c-state-installed: var(--c-warning);
+  --c-state-not-installed: var(--c-fg-subtle);
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--c-bg);
+  color: var(--c-fg);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+kbd {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border-strong);
+  border-radius: 4px;
+  padding: 1px 5px;
+}

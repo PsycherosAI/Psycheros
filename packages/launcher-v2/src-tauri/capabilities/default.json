@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for the main launcher window. The supervisor and daemon-control commands are invoked from the frontend via tauri::command; nothing else is exposed to the webview.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

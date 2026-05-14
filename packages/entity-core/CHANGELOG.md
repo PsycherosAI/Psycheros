@@ -4,6 +4,24 @@ All notable changes to entity-core are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and this package follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-05-14
+
+### Fixed
+
+- **Entity import wrote all files to every identity/memory category.** JSZip's
+  `folder().files` returns ALL entries in the zip, not just the subfolder's
+  entries. The import handler iterated `folder.files` to scope identity files
+  and memories to their correct category/granularity, so every file ended up in
+  every directory. Fixed by iterating `zip.files` directly with a prefix check.
+
+- **Entity import crashed on stale DB handle.** The import handler replaced
+  `graph.db` on disk with `Deno.writeFile`, which truncates the file in-place —
+  any SQLite connection with the file open saw a corrupted/empty DB. Now uses an
+  atomic temp-file + rename. Also fixed `GraphStore.close()` to reset the
+  `initialized` flag so `initialize()` actually re-runs, added
+  `Scheduler.replaceDatabase()` for updating the handle, and made
+  `Scheduler.tick()` catch synchronous errors instead of crashing the process.
+
 ## [0.2.0] - 2026-05-14
 
 ### Changed

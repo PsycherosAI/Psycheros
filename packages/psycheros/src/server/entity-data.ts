@@ -9,7 +9,7 @@
  */
 
 import JSZip from "jszip";
-import { join } from "@std/path";
+import { isAbsolute, join } from "@std/path";
 import { ensureDir } from "@std/fs";
 import type { RouteContext } from "./routes.ts";
 import type { MCPClient } from "../mcp-client/mod.ts";
@@ -247,7 +247,7 @@ export async function exportEntityData(ctx: RouteContext): Promise<Uint8Array> {
     JSON.stringify(anchorImages, null, 2),
   );
 
-  // Vault documents (global scope only)
+  // Vault documents (all scopes)
   const vaultDocs = queryAll<
     {
       id: string;
@@ -267,26 +267,40 @@ export async function exportEntityData(ctx: RouteContext): Promise<Uint8Array> {
     }
   >(
     ctx,
-    "SELECT * FROM vault_documents WHERE scope = 'global' ORDER BY created_at",
+    "SELECT * FROM vault_documents ORDER BY created_at",
   );
   vaultDocCount = vaultDocs.length;
 
   if (vaultDocs.length > 0) {
     const vaultFolder = zip.folder("psycheros/vault")!;
     for (const doc of vaultDocs) {
+      // file_path may be absolute (seed/upload) or dataRoot-relative
+      // (import). `join` concatenates two absolutes, so branch.
+      const fullPath = isAbsolute(doc.file_path)
+        ? doc.file_path
+        : join(ctx.dataRoot, doc.file_path);
       try {
-        const fullPath = join(ctx.projectRoot, doc.file_path);
         const bytes = await Deno.readFile(fullPath);
         vaultFolder.file(doc.filename, bytes);
-      } catch {
-        // File may have been deleted
+      } catch (err) {
+        console.error(
+          `[entity-data] Vault file missing during export, skipping: ${fullPath}`,
+          err instanceof Error ? err.message : err,
+        );
       }
     }
+
+    // Preserve full metadata so import can reconstruct with correct
+    // scope, conversation_id, title, etc.
+    zip.file(
+      "psycheros/vault-metadata.json",
+      JSON.stringify(vaultDocs, null, 2),
+    );
   }
 
   // Generated images
   const generatedImagesDir = join(
-    ctx.projectRoot,
+    ctx.dataRoot,
     ".psycheros",
     "generated-images",
   );
@@ -299,12 +313,15 @@ export async function exportEntityData(ctx: RouteContext): Promise<Uint8Array> {
         const bytes = await Deno.readFile(filePath);
         imagesFolder.file(entry.name, bytes);
         imageCount++;
-      } catch {
-        // Skip unreadable files
+      } catch (err) {
+        console.error(
+          `[entity-data] Image file unreadable during export, skipping: ${filePath}`,
+          err instanceof Error ? err.message : err,
+        );
       }
     }
   } catch {
-    // Directory may not exist
+    // generated-images directory absent — nothing to export
   }
 
   // Build manifest
@@ -348,8 +365,18 @@ export async function importEntityData(
   ctx: RouteContext,
   zipData: Uint8Array,
 ): Promise<ImportResult> {
+  const importStart = Date.now();
+  console.log(
+    "[entity-data] Starting import, zip size:",
+    (zipData.length / 1024 / 1024).toFixed(2),
+    "MB",
+  );
   try {
     const zip = await JSZip.loadAsync(zipData);
+    console.log(
+      "[entity-data] Zip parsed, file count:",
+      Object.keys(zip.files).length,
+    );
 
     // Validate manifest
     const manifestFile = zip.file("manifest.json");
@@ -509,33 +536,88 @@ export async function importEntityData(
       }
     }
 
-    // Vault documents (global scope)
+    // Vault documents (all scopes)
     if (psycherosParts.vault) {
-      const vaultFolder = zip.folder("psycheros/vault");
-      if (vaultFolder) {
-        const vaultDocsDir = join(
-          ctx.projectRoot,
+      const vaultPrefix = "psycheros/vault/";
+
+      // Clear existing vault chunks and documents
+      execSql(ctx, "DELETE FROM vault_chunks");
+      execSql(ctx, "DELETE FROM vault_documents");
+
+      // Read metadata if available (preserves scope, conversation_id, etc.)
+      const metadataFile = zip.file("psycheros/vault-metadata.json");
+      const metadata = metadataFile
+        ? JSON.parse(await metadataFile.async("string")) as Array<
+          Record<string, unknown>
+        >
+        : null;
+      const metadataMap = metadata
+        ? new Map(metadata.map((d) => [String(d.filename), d]))
+        : null;
+
+      // Ensure scope subdirectories exist
+      const scopeDirs = new Set<string>();
+      if (metadataMap) {
+        for (const doc of metadataMap.values()) {
+          scopeDirs.add(String(doc.scope ?? "global"));
+        }
+      } else {
+        scopeDirs.add("global");
+      }
+      for (const scope of scopeDirs) {
+        await ensureDir(
+          join(ctx.dataRoot, ".psycheros", "vault", "documents", scope),
+        );
+      }
+
+      let docCount = 0;
+      for (const [filename, file] of Object.entries(zip.files)) {
+        if (file.dir || !filename.startsWith(vaultPrefix)) continue;
+        const basename = filename.slice(vaultPrefix.length);
+        if (!basename || basename.includes("/")) continue;
+        // Skip metadata file
+        if (basename === "vault-metadata.json") continue;
+
+        const meta = metadataMap?.get(basename);
+        const scope = meta ? String(meta.scope ?? "global") : "global";
+        const scopeDir = join(
+          ctx.dataRoot,
           ".psycheros",
           "vault",
           "documents",
-          "global",
+          scope,
         );
-        await ensureDir(vaultDocsDir);
+        await ensureDir(scopeDir);
 
-        // Clear existing vault chunks and documents
-        execSql(ctx, "DELETE FROM vault_chunks");
-        execSql(ctx, "DELETE FROM vault_documents WHERE scope = 'global'");
+        const bytes = await file.async("uint8array");
+        await Deno.writeFile(join(scopeDir, basename), bytes);
 
-        let docCount = 0;
-        for (const [filename, file] of Object.entries(vaultFolder.files)) {
-          if (file.dir) continue;
-          const basename = filename.replace(/^psycheros\/vault\//, "");
-          if (!basename || basename.includes("/")) continue;
-
-          const bytes = await file.async("uint8array");
-          await Deno.writeFile(join(vaultDocsDir, basename), bytes);
-
-          // Insert DB row
+        if (meta) {
+          // Restore with original metadata
+          execSql(
+            ctx,
+            `INSERT INTO vault_documents
+                (id, title, filename, file_type, scope, conversation_id, file_path, file_size, content_hash, chunk_count, source, enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              String(meta.id ?? `vault-import-${docCount}`),
+              String(meta.title ?? basename),
+              String(meta.filename ?? basename),
+              String(meta.file_type ?? "unknown"),
+              scope,
+              meta.conversation_id ? String(meta.conversation_id) : null,
+              join(".psycheros", "vault", "documents", scope, basename),
+              bytes.length,
+              String(meta.content_hash ?? ""),
+              Number(meta.chunk_count ?? 0),
+              String(meta.source ?? "upload"),
+              Number(meta.enabled ?? 1),
+              String(meta.created_at ?? new Date().toISOString()),
+              String(meta.updated_at ?? new Date().toISOString()),
+            ],
+          );
+        } else {
+          // No metadata — insert with defaults
           const ext = basename.split(".").pop()?.toLowerCase() || "unknown";
           const id = `vault-import-${docCount}`;
           const title = basename.replace(/\.[^.]+$/, "").replace(
@@ -547,51 +629,50 @@ export async function importEntityData(
           execSql(
             ctx,
             `INSERT INTO vault_documents
-              (id, title, filename, file_type, scope, file_path, file_size, content_hash, chunk_count, source, enabled, created_at, updated_at)
-              VALUES (?, ?, ?, ?, 'global', ?, ?, '', 0, 'upload', 1, ?, ?)`,
+                (id, title, filename, file_type, scope, file_path, file_size, content_hash, chunk_count, source, enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, 'upload', 1, ?, ?)`,
             [
               id,
               title,
               basename,
               ext,
-              join(".psycheros", "vault", "documents", "global", basename),
+              scope,
+              join(".psycheros", "vault", "documents", scope, basename),
               bytes.length,
               now,
               now,
             ],
           );
-
-          docCount++;
         }
 
-        details.psycheros.vault_documents_restored = docCount;
+        docCount++;
       }
+
+      details.psycheros.vault_documents_restored = docCount;
     }
 
     // Images
     if (psycherosParts.images) {
-      const imagesFolder = zip.folder("psycheros/images");
-      if (imagesFolder) {
-        const generatedDir = join(
-          ctx.projectRoot,
-          ".psycheros",
-          "generated-images",
-        );
-        await ensureDir(generatedDir);
+      const imagesPrefix = "psycheros/images/";
+      const generatedDir = join(
+        ctx.dataRoot,
+        ".psycheros",
+        "generated-images",
+      );
+      await ensureDir(generatedDir);
 
-        let imgCount = 0;
-        for (const [filename, file] of Object.entries(imagesFolder.files)) {
-          if (file.dir) continue;
-          const basename = filename.replace(/^psycheros\/images\//, "");
-          if (!basename || basename.includes("/")) continue;
+      let imgCount = 0;
+      for (const [filename, file] of Object.entries(zip.files)) {
+        if (file.dir || !filename.startsWith(imagesPrefix)) continue;
+        const basename = filename.slice(imagesPrefix.length);
+        if (!basename || basename.includes("/")) continue;
 
-          const bytes = await file.async("uint8array");
-          await Deno.writeFile(join(generatedDir, basename), bytes);
-          imgCount++;
-        }
-
-        details.psycheros.images_restored = imgCount;
+        const bytes = await file.async("uint8array");
+        await Deno.writeFile(join(generatedDir, basename), bytes);
+        imgCount++;
       }
+
+      details.psycheros.images_restored = imgCount;
     }
 
     // Anchor images
@@ -626,6 +707,7 @@ export async function importEntityData(
 
     // --- Import entity-core data via MCP ---
     if (entityCoreParts && ctx.mcpClient?.isConnected()) {
+      console.log("[entity-data] Importing entity-core data via MCP…");
       try {
         // Re-zip only the entity-core portion
         const coreZip = new JSZip();
@@ -665,11 +747,21 @@ export async function importEntityData(
           type: "uint8array",
         });
         const base64 = uint8ArrayToBase64(coreZipBytes);
+        console.log(
+          "[entity-data] Entity-core zip prepared,",
+          (coreZipBytes.length / 1024).toFixed(0),
+          "KB — calling entity_import…",
+        );
 
         const result = await callMcpTool(ctx.mcpClient, "entity_import", {
           data: base64,
           mode: "overwrite",
         });
+
+        console.log(
+          "[entity-data] entity_import returned:",
+          result ? "ok" : "null",
+        );
 
         if (result) {
           const parsed = JSON.parse(result);
@@ -684,6 +776,7 @@ export async function importEntityData(
           };
         }
       } catch (error) {
+        console.error("[entity-data] entity_import failed:", error);
         details.entity_core = {
           success: false,
           error: error instanceof Error ? error.message : String(error),
@@ -697,13 +790,26 @@ export async function importEntityData(
       };
     }
 
-    // --- Post-import: sync pull + clear stale RAG tables ---
-    if (details.entity_core?.success && ctx.mcpClient?.isConnected()) {
+    // --- Post-import: restart MCP, then sync pull + clear stale RAG tables ---
+    // Entity-core's import handler replaces graph.db on disk, which leaves
+    // the entity-core process with stale DB handles. Restart MCP so entity-core
+    // gets a fresh process with a consistent state.
+    if (details.entity_core?.success && ctx.mcpClient) {
+      console.log("[entity-data] Restarting MCP for clean post-import state…");
       try {
-        await ctx.mcpClient.pull();
-        details.sync_pull = true;
-      } catch {
-        details.sync_pull = false;
+        await ctx.mcpClient.restart();
+      } catch (error) {
+        console.error("[entity-data] MCP restart failed:", error);
+      }
+
+      if (ctx.mcpClient.isConnected()) {
+        console.log("[entity-data] Running post-import sync pull…");
+        try {
+          await ctx.mcpClient.pull();
+          details.sync_pull = true;
+        } catch {
+          details.sync_pull = false;
+        }
       }
     }
 
@@ -723,8 +829,14 @@ export async function importEntityData(
       // Virtual tables may not be loaded
     }
 
+    console.log(
+      "[entity-data] Import complete in",
+      (Date.now() - importStart) / 1000,
+      "s",
+    );
     return { success: true, details };
   } catch (error) {
+    console.error("[entity-data] Import failed:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : String(error),
