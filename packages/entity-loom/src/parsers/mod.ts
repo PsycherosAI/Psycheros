@@ -13,6 +13,8 @@ export {
   getRegisteredPlatforms,
 } from "./registry.ts";
 export { ChatGPTParser } from "./chatgpt.ts";
+export { ChatGPTOfficialParser } from "./chatgpt-official.ts";
+export { ChatGPTPluginParser } from "./chatgpt-plugin.ts";
 export { ClaudeParser } from "./claude.ts";
 export { SillyTavernParser } from "./sillytavern.ts";
 export { KindroidParser } from "./kindroid.ts";

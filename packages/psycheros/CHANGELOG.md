@@ -4,6 +4,18 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] - 2026-05-14
+
+### Changed
+
+- **`@psycheros/scheduler` dissolved into psycheros's source tree.** The shared
+  workspace package is gone. The scheduler now lives at `src/scheduler/` as
+  internal source — no public API change for psycheros consumers, no schema
+  change, no behavior change. The dissolve removes a workspace-level coupling
+  that had grown vestigial: entity-core only used ~15% of the scheduler's
+  surface (three hardcoded recurring fires) and has been migrated to a local
+  `ConsolidationRunner` of its own. See entity-core's `[0.2.2]` entry.
+
 ## [0.3.1] - 2026-05-14
 
 ### Fixed

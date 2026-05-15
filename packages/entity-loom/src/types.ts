@@ -292,6 +292,8 @@ export interface WizardState {
   hasPackage: boolean;
   packageDir: string | null;
   stageStatuses: Record<StageName, StageStatus>;
+  runningStage: StageName | null;
+  progress: { current: number; total: number; percent: number } | null;
   finalized?: boolean;
 }
 

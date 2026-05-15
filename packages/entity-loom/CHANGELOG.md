@@ -4,6 +4,25 @@ All notable changes to entity-loom are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and this package follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **ChatGPT parser split**: The monolithic `ChatGPTParser` is now a thin
+  dispatcher that delegates to `ChatGPTOfficialParser` (native OpenAI exports)
+  and `ChatGPTPluginParser` (3rd-party browser plugin exports like GerTex).
+  Shared types and utilities live in `chatgpt-shared.ts`. Fixes to one
+  sub-parser cannot break the other.
+- **Improved ChatGPT detection**: GerTex exports with large metadata blocks that
+  push `"mapping"` past the 2KB head window are now detected correctly. The
+  detection logic checks the file tail for `"current_node"` and accepts
+  `"conversation_id"` or `"create_time"` as head markers.
+- **Staging re-population resets inclusion**: When staging is re-populated
+  (e.g., re-running the wizard with the same package), conversations that
+  already exist in `staging.db` have their `included` state reset to `1`.
+  Previously, conversations excluded in a prior session would stay excluded even
+  after re-import, making them invisible to the commit step.
+
 ## [0.3.1] - 2026-05-14
 
 ### Changed

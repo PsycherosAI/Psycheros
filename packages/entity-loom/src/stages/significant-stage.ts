@@ -23,6 +23,7 @@ import {
   acquireStageLock,
   getRunningStage,
   releaseStageLock,
+  setProgressSnapshot,
 } from "../server/stage-lock.ts";
 import { sse } from "../server/sse.ts";
 import { log } from "../server/logger.ts";
@@ -198,10 +199,16 @@ async function runSignificantStage(signal: AbortSignal): Promise<void> {
         const percent = totalChunks > 0
           ? Math.round((chunksProcessed / totalChunks) * 100)
           : 0;
+        const snapshot = {
+          current: chunksProcessed,
+          total: totalChunks,
+          percent,
+        };
+        setProgressSnapshot(snapshot);
         sse.broadcast({
           type: "stage_progress",
           stage: "significant",
-          data: { current: chunksProcessed, total: totalChunks, percent },
+          data: snapshot,
           timestamp: new Date().toISOString(),
         });
       }

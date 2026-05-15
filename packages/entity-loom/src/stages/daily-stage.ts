@@ -23,6 +23,7 @@ import {
   acquireStageLock,
   getRunningStage,
   releaseStageLock,
+  setProgressSnapshot,
 } from "../server/stage-lock.ts";
 import { sse } from "../server/sse.ts";
 import { log } from "../server/logger.ts";
@@ -224,14 +225,16 @@ async function runDailyStage(
         data: { index: i, title: date, result: "ok" },
         timestamp: new Date().toISOString(),
       });
+      const snapshot = {
+        current: i + 1,
+        total: datesToProcess.length,
+        percent: Math.round(((i + 1) / datesToProcess.length) * 100),
+      };
+      setProgressSnapshot(snapshot);
       sse.broadcast({
         type: "stage_progress",
         stage: "daily",
-        data: {
-          current: i + 1,
-          total: datesToProcess.length,
-          percent: Math.round(((i + 1) / datesToProcess.length) * 100),
-        },
+        data: snapshot,
         timestamp: new Date().toISOString(),
       });
 

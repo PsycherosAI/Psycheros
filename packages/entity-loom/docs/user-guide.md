@@ -219,6 +219,8 @@ safely write to the database.
   `http://localhost:3210`. On the Setup page you'll see your existing package —
   click **Resume** to pick up where you left off. Entity Loom saves progress
   after every step, so you won't lose work.
+- You can also just refresh the page during processing — the progress bar and
+  abort button will reappear at the correct position.
 - If you want to delete everything and start fresh, click **Purge** next to the
   package name on the Setup page. This permanently deletes all chats, memories,
   staging data, and graph data for that package.

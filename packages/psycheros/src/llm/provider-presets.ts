@@ -190,17 +190,36 @@ export function createDefaultProfile(): LLMConnectionProfile {
   const model = Deno.env.get("ZAI_MODEL") || "";
   const workerModel = Deno.env.get("ZAI_WORKER_MODEL") || "";
 
-  // ZAI_* env vars name Z.ai explicitly, so fall back to the zai preset when
-  // ZAI_BASE_URL is unset rather than picking a different provider.
-  const provider = baseUrl ? inferProvider(baseUrl) : "zai";
-  const preset = LLM_PROVIDER_PRESETS[provider];
+  if (apiKey) {
+    const provider = baseUrl ? inferProvider(baseUrl) : "zai";
+    const preset = LLM_PROVIDER_PRESETS[provider];
+    return {
+      id: crypto.randomUUID(),
+      name: preset.label,
+      provider,
+      baseUrl: baseUrl || preset.baseUrl,
+      apiKey,
+      model: model || preset.defaultModel,
+      workerModel: workerModel || preset.defaultWorkerModel,
+      temperature: 0.7,
+      topP: 1,
+      topK: 0,
+      frequencyPenalty: 0,
+      presencePenalty: 0,
+      maxTokens: 4096,
+      contextLength: 128000,
+      thinkingEnabled: provider === "zai" || provider === "openrouter" ||
+        provider === "nanogpt" || provider === "custom",
+    };
+  }
 
+  const preset = LLM_PROVIDER_PRESETS.openrouter;
   return {
     id: crypto.randomUUID(),
-    name: preset.label,
-    provider,
-    baseUrl: baseUrl || preset.baseUrl,
-    apiKey,
+    name: "Default Connection",
+    provider: "openrouter",
+    baseUrl: preset.baseUrl,
+    apiKey: "",
     model: model || preset.defaultModel,
     workerModel: workerModel || preset.defaultWorkerModel,
     temperature: 0.7,
@@ -210,7 +229,6 @@ export function createDefaultProfile(): LLMConnectionProfile {
     presencePenalty: 0,
     maxTokens: 4096,
     contextLength: 128000,
-    thinkingEnabled: provider === "zai" || provider === "openrouter" ||
-      provider === "nanogpt" || provider === "custom",
+    thinkingEnabled: true,
   };
 }

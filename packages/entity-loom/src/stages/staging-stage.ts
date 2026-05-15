@@ -66,28 +66,40 @@ export function stagingRoutes(): Array<
           const staging = getStagingWriter(packageDir);
           const existingIds = staging.getExistingStagedIds();
           let newlyStaged = 0;
+          let reStaged = 0;
           let skipped = 0;
 
           for (const conv of conversations) {
             if (existingIds.has(conv.id)) {
-              skipped++;
-              continue;
+              // Re-write to update content if changed and reset included=1
+              const wrote = await staging.writeConversation(conv);
+              if (wrote > 0) {
+                reStaged++;
+              } else {
+                // Content unchanged — still ensure included=1
+                staging.setIncluded(conv.id, true);
+                skipped++;
+              }
+            } else {
+              await staging.writeConversation(conv);
+              newlyStaged++;
             }
-            await staging.writeConversation(conv);
-            newlyStaged++;
           }
 
+          const stats = staging.getStats();
           staging.close();
 
           log(
             "info",
-            `Staging populated: ${newlyStaged} new, ${skipped} existing`,
+            `Staging populated: ${newlyStaged} new, ${reStaged} updated, ${skipped} unchanged — ${stats.total} total, ${stats.included} included`,
           );
           return json({
             success: true,
             newlyStaged,
+            reStaged,
             skipped,
-            totalStaged: existingIds.size + newlyStaged,
+            totalStaged: stats.total,
+            totalIncluded: stats.included,
           });
         } catch (error) {
           const message = error instanceof Error

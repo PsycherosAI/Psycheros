@@ -91,8 +91,8 @@ data/
 `sqlite-vec` extension auto-downloads from GitHub releases on first use.
 
 For the agent's-eye view of the codebase — why snapshots are load-bearing, how
-the consolidation schedules are wired through the durable scheduler, the
-`periods.ts` ISO-week trap — see [`CLAUDE.md`](CLAUDE.md).
+the weekly/monthly/yearly consolidation runner ticks on its own table in
+`graph.db`, the `periods.ts` ISO-week trap — see [`CLAUDE.md`](CLAUDE.md).
 
 ## Deep references
 

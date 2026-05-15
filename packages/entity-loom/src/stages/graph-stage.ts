@@ -26,6 +26,7 @@ import {
   acquireStageLock,
   getRunningStage,
   releaseStageLock,
+  setProgressSnapshot,
 } from "../server/stage-lock.ts";
 import { sse } from "../server/sse.ts";
 import { log } from "../server/logger.ts";
@@ -265,14 +266,16 @@ async function runGraphStage(signal: AbortSignal): Promise<void> {
         });
       }
 
+      const snapshot = {
+        current: processedCount,
+        total: totalItems,
+        percent: Math.round((processedCount / totalItems) * 100),
+      };
+      setProgressSnapshot(snapshot);
       sse.broadcast({
         type: "stage_progress",
         stage: "graph",
-        data: {
-          current: processedCount,
-          total: totalItems,
-          percent: Math.round((processedCount / totalItems) * 100),
-        },
+        data: snapshot,
         timestamp: new Date().toISOString(),
       });
 

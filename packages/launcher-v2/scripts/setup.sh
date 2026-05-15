@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # Dev bootstrap: stage local Deno into the Tauri sidecar slot + generate
 # placeholder RGBA icons. Run this once before `cargo tauri dev` on a fresh
-# checkout. The CI release pipeline does the equivalent (see
-# scripts/bundle-source.sh + .github/workflows/) at build time.
+# checkout.
+#
+# Deno version note: whatever `deno` is on PATH at the time this script runs
+# gets copied verbatim into `src-tauri/binaries/deno-<triple>` and — once a
+# release pipeline exists for launcher-v2 — ships to end users inside the
+# Tauri app bundle. There is no second pinning layer downstream. Confirm
+# `deno --version` matches /.deno-version (currently 2.7.14) before running
+# this for a build that will be distributed. Dev builds tolerate drift; user
+# builds should not.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

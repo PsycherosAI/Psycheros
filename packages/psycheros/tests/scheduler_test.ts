@@ -11,7 +11,7 @@ import {
   initSchedulerTables,
   nextFireAtFromCron,
   Scheduler,
-} from "../src/mod.ts";
+} from "../src/scheduler/mod.ts";
 
 function makeDb(): Database {
   const db = new Database(":memory:");

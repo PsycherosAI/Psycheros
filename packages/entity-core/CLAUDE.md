@@ -72,13 +72,20 @@ restore tool depends on it.
 
 ## Memory consolidation
 
-Daily → weekly → monthly → yearly consolidation runs through the durable
-scheduler ([`@psycheros/scheduler`](../scheduler/)) — weekly/monthly/yearly
-schedules are defined in `src/mod.ts` against a Scheduler instance whose tables
-live alongside the knowledge graph in `graph.db`. The consolidator module is
-`src/consolidation/`:
+Daily → weekly → monthly → yearly consolidation runs through a local
+single-purpose runner at `src/consolidation/runner.ts`. The runner owns its own
+`consolidation_runs` table in `graph.db`, hardcodes the three cadences (weekly
+Sundays / monthly 1st / yearly Jan 1, all at 5 AM UTC) without a general cron
+parser, and uses a composite primary key on `(period, scheduled_for)` to
+structurally prevent double-fire across ticks. Missed boundaries during downtime
+catch up on the first tick after boot (`fire_once_then_align` semantics — one
+fire per missed boundary, the catch-up loop inside the handler then drains every
+unconsolidated period).
 
-- `consolidator.ts` — core logic, LLM calls
+The consolidator module is `src/consolidation/`:
+
+- `runner.ts` — the ticker, schema, fire-time math
+- `consolidator.ts` — core consolidation logic, LLM calls
 - `prompts.ts` — LLM prompt templates
 - `periods.ts` — ISO week helpers, date filtering
 

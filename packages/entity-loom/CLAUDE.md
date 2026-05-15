@@ -13,6 +13,7 @@ name, and writes memories as their own experience.
 
 ```bash
 deno task start    # start the wizard server on port 3210
+deno task test     # run tests
 deno check src/main.ts
 deno lint
 ```
@@ -35,13 +36,35 @@ Stages 3–5 run as background async tasks with SSE progress (`/api/events`),
 abort support, and per-item checkpointing. Stage 5 is skippable — the checkpoint
 marks it complete and finalize / download proceed without it.
 
+## SSE and progress
+
+The wizard uses Server-Sent Events (`src/server/sse.ts`) for real-time updates.
+A 200-event ring buffer lets late-joining or reconnecting clients replay recent
+state. **The client must close the old EventSource before creating a new one** —
+EventSource auto-reconnects by default, so failing to close creates duplicate
+connections and double-processed events.
+
+`stage-lock.ts` holds a progress snapshot (`setProgressSnapshot` /
+`getProgressSnapshot`) alongside the running-stage lock. Each background stage
+updates it on every progress broadcast. `/api/status` includes this snapshot as
+`runningStage` + `progress`, so a page reload can restore the progress bar
+without relying on SSE buffer replay alone.
+
+Client-side DOM performance matters for long runs (hundreds of conversations):
+`addLogEntry` uses `insertAdjacentHTML` with a 500-entry cap, and memory list
+refreshes are debounced — never call `loadMemories` on every `item_completed`
+event directly.
+
 ## Module structure
 
 Each `src/*/` has a `mod.ts` barrel.
 
 - `src/server/` — HTTP, SSE, router, logger, cost estimator, stage-lock
 - `src/stages/` — one file per wizard stage
-- `src/parsers/` — one file per platform
+- `src/parsers/` — one file per platform; ChatGPT is split into a dispatcher
+  (`chatgpt.ts`), an official export parser (`chatgpt-official.ts`), a plugin
+  export parser (`chatgpt-plugin.ts`), and shared types/utilities
+  (`chatgpt-shared.ts`)
 - `src/writers/` — DB and memory file writers
 - `src/pipeline/` — chunker, signaled LLM wrapper
 - `src/dedup/` — checkpoint / resume state
@@ -73,6 +96,14 @@ it doesn't.
 Memory `[via:platform]` tags come from the per-conversation source platform
 stored in this column, not the tool's instance ID. Daily memory filenames stay
 `<date>_entity-loom.md` (tool identity, not platform).
+
+## Staging re-population
+
+`staging.db` persists across wizard sessions. When staging is re-populated
+(e.g., re-running with the same package), conversations that already exist are
+**not skipped** — their content is updated if changed, and `included` is always
+reset to `1`. This prevents stale exclusion state from a prior session from
+hiding conversations.
 
 ## Staging vs. chats DB
 

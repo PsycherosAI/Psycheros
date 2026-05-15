@@ -162,7 +162,7 @@ export class MCPClient {
    * this only happens before the scheduler is wired up.
    */
   private scheduler:
-    | import("@psycheros/scheduler").Scheduler
+    | import("../scheduler/mod.ts").Scheduler
     | null = null;
 
   constructor(config: MCPClientConfig) {
@@ -174,7 +174,7 @@ export class MCPClient {
    * crashes. Called by the server after both pieces are constructed.
    */
   setScheduler(
-    scheduler: import("@psycheros/scheduler").Scheduler,
+    scheduler: import("../scheduler/mod.ts").Scheduler,
   ): void {
     this.scheduler = scheduler;
   }

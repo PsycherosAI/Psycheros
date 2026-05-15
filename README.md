@@ -50,8 +50,9 @@ knobs for the LLM endpoint, RAG, web search, Discord, image generation, etc.
 
 ### From source
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) — Deno 2.7.5+, then `deno task dev` from
-inside the package you want to work on.
+See [CONTRIBUTING.md](CONTRIBUTING.md) — Deno version pinned in
+[`.deno-version`](.deno-version), then `deno task dev` from inside the package
+you want to work on.
 
 ## What's in the box
 

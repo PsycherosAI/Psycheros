@@ -20,7 +20,9 @@ per-package `CLAUDE.md` files. Per-package deep docs live in
 ## Setup
 
 ```bash
-# Install Deno 2.7.5 or later: https://deno.land/install
+# Install the Deno version in /.deno-version (currently 2.7.14):
+# https://deno.land/install — this is the version CI uses; running a
+# different patch can cause deno fmt drift on long CSS font-family lists.
 git clone <repo-url> && cd <repo>
 git config core.hooksPath .githooks   # one-time: run deno fmt --check pre-commit
 deno check packages/entity-core/src/mod.ts \

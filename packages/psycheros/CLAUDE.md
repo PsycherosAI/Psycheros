@@ -138,7 +138,7 @@ user message is always preserved. Budget =
 
 Every scheduled or event-triggered task — daily memory summarization, identity
 snapshots, MCP identity-change pushes, every flavour of Pulse trigger — routes
-through the durable scheduler in [`@psycheros/scheduler`](../scheduler/). One
+through the durable scheduler at [`src/scheduler/`](src/scheduler/). One
 process-local instance lives on `PsycherosServer.scheduler`. Schedules and run
 history live in `schedules` and `job_runs` in the main SQLite database. See
 [`docs/scheduler.md`](docs/scheduler.md) for catch-up policies, registered

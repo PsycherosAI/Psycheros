@@ -9,7 +9,7 @@
 
 import type { LogEntry } from "./logger.ts";
 import type { DiagnosticsSnapshot } from "./diagnostics.ts";
-import type { Scheduler } from "@psycheros/scheduler";
+import type { Scheduler } from "../scheduler/mod.ts";
 import { escapeHtml } from "./templates.ts";
 
 /**

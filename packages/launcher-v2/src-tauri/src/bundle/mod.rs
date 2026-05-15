@@ -1,7 +1,7 @@
 //! Release-bundle extraction + bundled-deno staging.
 //!
 //! At build time, CI produces `release-bundle.tar.gz` containing pruned
-//! source (psycheros + entity-core + scheduler) and embeds it as a Tauri
+//! source (psycheros + entity-core) and embeds it as a Tauri
 //! resource (see `tauri.conf.json` → `bundle.resources`). At runtime on
 //! first launch (or post-shell-update), the launcher:
 //!

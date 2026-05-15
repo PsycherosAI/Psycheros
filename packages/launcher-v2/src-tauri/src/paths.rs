@@ -10,7 +10,7 @@
 //!
 //! Inside `<launcher_data_dir>/`:
 //! - `config.json` — user preferences (install path, port, autostart toggle)
-//! - `source/` — extracted release bundle (psycheros + entity-core + scheduler)
+//! - `source/` — extracted release bundle (psycheros + entity-core)
 //! - `data/` — `PSYCHEROS_DATA_DIR` target — runtime entity state
 //! - `bin/deno` — bundled Deno copied here on first run (stable path the
 //!   service definition can reference)

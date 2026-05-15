@@ -24,6 +24,7 @@ import {
 import { CheckpointManager } from "../dedup/checkpoint.ts";
 import { sse } from "../server/sse.ts";
 import { log } from "../server/logger.ts";
+import { getProgressSnapshot, getRunningStage } from "../server/stage-lock.ts";
 
 const OUTPUT_DIR = join(Deno.cwd(), ".loom-exports");
 
@@ -86,6 +87,8 @@ export function buildWizardState(): WizardState {
     hasPackage: activePackageDir !== null,
     packageDir: activePackageDir,
     stageStatuses,
+    runningStage: getRunningStage(),
+    progress: getProgressSnapshot(),
     finalized,
   };
 }

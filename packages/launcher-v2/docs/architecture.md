@@ -52,8 +52,7 @@ The launcher writes everything under the OS-conventional app-data dir:
 ├── source/              Extracted release bundle
 │   └── packages/
 │       ├── psycheros/   The daemon source — daemon's `projectRoot`
-│       ├── entity-core/ MCP server source
-│       └── scheduler/   Shared scheduler dep
+│       └── entity-core/ MCP server source
 ├── bin/
 │   └── deno             Bundled Deno copied to stable path (plist references this)
 ├── data/                The daemon's `PSYCHEROS_DATA_DIR` target

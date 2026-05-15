@@ -22,12 +22,12 @@
  * @module
  */
 
-import type { Scheduler } from "@psycheros/scheduler";
+import type { Scheduler } from "../scheduler/mod.ts";
 import type {
   HandlerContext,
   HandlerResult,
   JobRunRow,
-} from "@psycheros/scheduler";
+} from "../scheduler/mod.ts";
 import type { DBClient } from "../db/mod.ts";
 import type { LLMClient } from "../llm/mod.ts";
 import type { WebSearchSettings } from "../llm/web-search-settings.ts";

@@ -24,8 +24,7 @@ psycheros-workspace/
 │   ├── entity-core/       # MCP server (stdio) — canonical identity + memory
 │   ├── entity-loom/       # chat-history import wizard (port 3210)
 │   ├── launcher/          # v1: bootstrap installer + dashboard (port 3001)
-│   ├── launcher-v2/       # v2: Tauri desktop app + OS-supervised daemon — Rust + HTML/JS
-│   └── scheduler/         # @psycheros/scheduler — shared durable job scheduler
+│   └── launcher-v2/       # v2: Tauri desktop app + OS-supervised daemon — Rust + HTML/JS
 └── .github/workflows/     # multi-package CI matrix
 ```
 
@@ -36,7 +35,6 @@ psycheros-workspace/
 | `packages/entity-loom` | [`packages/entity-loom/CLAUDE.md`](packages/entity-loom/CLAUDE.md)                            |
 | `packages/launcher`    | v1, being replaced — see [`packages/launcher/README.md`](packages/launcher/README.md)         |
 | `packages/launcher-v2` | [`packages/launcher-v2/CLAUDE.md`](packages/launcher-v2/CLAUDE.md) — Rust + HTML/JS, not Deno |
-| `packages/scheduler`   | see [`packages/psycheros/docs/scheduler.md`](packages/psycheros/docs/scheduler.md)            |
 
 ## The cross-cutting truth
 
@@ -99,6 +97,6 @@ is long enough to need subheadings, it probably belongs in `docs/`.
 
 ## Contributing
 
-[`CONTRIBUTING.md`](CONTRIBUTING.md) covers setup (Deno 2.7.5+), the
-first-person convention as it applies to PRs, and CI gates (`deno check` +
-`deno lint` + `deno fmt --check`).
+[`CONTRIBUTING.md`](CONTRIBUTING.md) covers setup (Deno version pinned in
+[`.deno-version`](.deno-version)), the first-person convention as it applies to
+PRs, and CI gates (`deno check` + `deno lint` + `deno fmt --check`).

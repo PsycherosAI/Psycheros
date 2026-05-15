@@ -21,18 +21,13 @@
 
 import "@std/dotenv/load";
 import { ensureDir } from "@std/fs";
-import { Scheduler } from "@psycheros/scheduler";
-import type { HandlerResult } from "@psycheros/scheduler";
 import { startServer } from "./server.ts";
 import { DEFAULT_SERVER_CONFIG } from "./types.ts";
 import { FileStore } from "./storage/mod.ts";
 import { GraphStore } from "./graph/mod.ts";
 import { EmbeddingCache } from "./embeddings/mod.ts";
 import { getEmbedder } from "./embeddings/mod.ts";
-import {
-  findUnconsolidatedPeriods,
-  runConsolidation,
-} from "./consolidation/mod.ts";
+import { ConsolidationRunner } from "./consolidation/mod.ts";
 import { consolidateGraph } from "./graph/mod.ts";
 
 // Re-export public API
@@ -51,85 +46,46 @@ if (import.meta.main) {
   await ensureDir(dataDir);
   console.error(`Starting Entity Core with data directory: ${dataDir}`);
 
-  await startServer({
-    ...DEFAULT_SERVER_CONFIG,
-    dataDir,
-  });
-
-  // Set up the durable scheduler that runs consolidation
+  // Construct the storage stack once and share it with both surfaces
+  // that need it: the MCP server (via startServer config) and the
+  // local consolidation runner. Sharing a single GraphStore is what
+  // makes `entity_import` work end-to-end — the import handler closes
+  // and reinitializes this same instance, then re-arms the runner via
+  // `runner.replaceDatabase(graphStore.getRawDb())`, so all sides
+  // converge on the new SQLite connection after a graph.db swap.
   const store = new FileStore(dataDir);
   const graphStore = new GraphStore(dataDir);
   await store.initialize();
   await graphStore.initialize();
 
-  /**
-   * Run catch-up consolidation for a given granularity. Finds all
-   * unconsolidated periods and consolidates them in date order.
-   * Idempotent — already-consolidated periods are filtered out.
-   */
-  const catchUpConsolidation = async (
-    granularity: "weekly" | "monthly" | "yearly",
-  ): Promise<HandlerResult> => {
-    const periods = await findUnconsolidatedPeriods(store, granularity);
-    if (periods.length === 0) {
-      return {
-        status: "success",
-        result: `No unconsolidated ${granularity} periods`,
-      };
-    }
+  // Local consolidation runner — owns its own table in graph.db and
+  // fires weekly/monthly/yearly memory consolidation at 5 AM UTC on the
+  // appropriate boundary. Missed fires during downtime catch up on the
+  // first tick after boot (runs immediately as part of `start()`).
+  const runner = new ConsolidationRunner(
+    graphStore.getRawDb(),
+    store,
+    graphStore,
+  );
 
-    console.error(
-      `[Consolidation] Catch-up: ${periods.length} unconsolidated ${granularity} period(s) found`,
-    );
-    let consolidated = 0;
-    const failures: string[] = [];
-    for (const dateStr of periods) {
-      console.error(`[Consolidation] Processing ${granularity}: ${dateStr}`);
-      const result = await runConsolidation(
-        store,
-        graphStore,
-        granularity,
-        dateStr,
-      );
-      if (result.success) {
-        console.error(`[Consolidation] Complete: ${granularity}/${dateStr}`);
-        consolidated++;
-      } else {
-        console.error(
-          `[Consolidation] Failed ${granularity}/${dateStr}: ${result.error}`,
-        );
-        failures.push(`${dateStr}: ${result.error ?? "unknown"}`);
-      }
-    }
+  await startServer({
+    ...DEFAULT_SERVER_CONFIG,
+    dataDir,
+    store,
+    graphStore,
+    consolidationRunner: runner,
+  });
 
-    if (failures.length > 0) {
-      throw new Error(
-        `Consolidated ${consolidated}, failed ${failures.length}: ${
-          failures.join("; ")
-        }`,
-      );
-    }
-    return {
-      status: "success",
-      result: `Consolidated ${consolidated} ${granularity} period(s)`,
-    };
-  };
+  runner.start();
+  console.error(
+    "[ConsolidationRunner] Memory consolidation scheduled (weekly/monthly/yearly at 5 AM UTC)",
+  );
 
-  // Startup tasks: catch up missed consolidation, consolidate graph,
-  // backfill embedding cache. Fire-and-forget so stdio MCP startup isn't
-  // gated on heavy work.
+  // Remaining startup work: graph consolidation + embedding-cache
+  // backfill. Fire-and-forget so stdio MCP startup isn't gated on heavy
+  // work. Memory-consolidation catch-up is no longer here — the runner
+  // owns that path now and fires it on its own first tick.
   (async () => {
-    try {
-      await catchUpConsolidation("weekly");
-      await catchUpConsolidation("monthly");
-      await catchUpConsolidation("yearly");
-    } catch (error) {
-      console.error(
-        "[Consolidation] Startup catch-up failed:",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-
     try {
       consolidateGraph(dataDir);
     } catch (error) {
@@ -185,68 +141,4 @@ if (import.meta.main) {
       );
     }
   })();
-
-  // Durable scheduler — same primitive Psycheros uses, but over my own
-  // graph.db. Memory consolidation at every granularity routes through
-  // it. Missed fires during downtime are caught up once per granularity
-  // on the next boot (`fire_once_then_align`).
-  const scheduler = new Scheduler({
-    db: graphStore.getRawDb(),
-    workerId: `entity-core-${Deno.pid}-${Date.now()}`,
-  });
-
-  scheduler.register(
-    "memory.consolidate-weekly",
-    () => catchUpConsolidation("weekly"),
-  );
-  scheduler.register(
-    "memory.consolidate-monthly",
-    () => catchUpConsolidation("monthly"),
-  );
-  scheduler.register(
-    "memory.consolidate-yearly",
-    () => catchUpConsolidation("yearly"),
-  );
-
-  scheduler.defineSchedule({
-    id: "memory-weekly-consolidation",
-    kind: "recurring",
-    handler: "memory.consolidate-weekly",
-    cronExpr: "0 5 * * 7",
-    catchupPolicy: "fire_once_then_align",
-    maxAttempts: 1,
-    metadata: {
-      name: "Weekly Memory Consolidation",
-      description: "Sundays at 5 AM UTC",
-    },
-  });
-  scheduler.defineSchedule({
-    id: "memory-monthly-consolidation",
-    kind: "recurring",
-    handler: "memory.consolidate-monthly",
-    cronExpr: "0 5 1 * *",
-    catchupPolicy: "fire_once_then_align",
-    maxAttempts: 1,
-    metadata: {
-      name: "Monthly Memory Consolidation",
-      description: "1st of month at 5 AM UTC",
-    },
-  });
-  scheduler.defineSchedule({
-    id: "memory-yearly-consolidation",
-    kind: "recurring",
-    handler: "memory.consolidate-yearly",
-    cronExpr: "0 5 1 1 *",
-    catchupPolicy: "fire_once_then_align",
-    maxAttempts: 1,
-    metadata: {
-      name: "Yearly Memory Consolidation",
-      description: "Jan 1 at 5 AM UTC",
-    },
-  });
-
-  scheduler.start();
-  console.error(
-    "[Scheduler] Memory consolidation schedules registered (weekly/monthly/yearly at 5 AM UTC)",
-  );
 }

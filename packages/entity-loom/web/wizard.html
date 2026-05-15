@@ -2471,6 +2471,15 @@
         "letta",
       ];
 
+      // Debounced memory list refresh — avoids DOM rebuild on every item_completed
+      const _memoryRefreshTimers = {};
+      function debouncedLoadMemories(type) {
+        if (_memoryRefreshTimers[type]) {
+          clearTimeout(_memoryRefreshTimers[type]);
+        }
+        _memoryRefreshTimers[type] = setTimeout(() => loadMemories(type), 2000);
+      }
+
       // ─── Init ────────────────────────────────────────────────────────────────
 
       async function init() {
@@ -2482,8 +2491,15 @@
 
       // ─── SSE ─────────────────────────────────────────────────────────────────
 
+      let _activeEventSource = null;
+
       function connectSSE() {
+        // Close any existing connection before opening a new one
+        if (_activeEventSource) {
+          _activeEventSource.close();
+        }
         const es = new EventSource("/api/events");
+        _activeEventSource = es;
         es.onmessage = (e) => {
           try {
             const event = JSON.parse(e.data);
@@ -2527,8 +2543,8 @@
             "info",
             `${stage}: completed ${data?.title || ""} ${result}`,
           );
-          if (stage === "significant") loadMemories("significant");
-          if (stage === "daily") loadMemories("daily");
+          if (stage === "significant") debouncedLoadMemories("significant");
+          if (stage === "daily") debouncedLoadMemories("daily");
           return;
         }
         if (type === "item_error") {
@@ -2610,6 +2626,14 @@
           renderStepper();
           updatePanelVisibility();
           updateStatusBadges();
+
+          // Restore progress bar from server snapshot for running stages
+          if (wizardState.runningStage && wizardState.progress) {
+            updateProgress(
+              wizardState.runningStage,
+              wizardState.progress,
+            );
+          }
         } catch { /* server may not be up yet */ }
 
         // Also load packages for resume
@@ -2723,21 +2747,47 @@
         for (const [stage, status] of Object.entries(statuses)) {
           const el = document.getElementById(`${stage}-status-info`);
           if (!el) continue;
+
+          const startActions = document.getElementById(
+            `${stage}-start-actions`,
+          );
+          const completeActions = document.getElementById(
+            `${stage}-complete-actions`,
+          );
+          const progressSection = document.getElementById(
+            `${stage}-progress-section`,
+          );
+
           if (status === "completed") {
             el.className = "wiz-badge wiz-badge--success";
             el.textContent = "Completed";
+            if (startActions) startActions.style.display = "none";
+            if (completeActions) completeActions.style.display = "flex";
+            if (progressSection) progressSection.style.display = "none";
           } else if (status === "running") {
             el.className = "wiz-badge wiz-badge--info";
             el.textContent = "Running...";
+            if (startActions) startActions.style.display = "none";
+            if (completeActions) completeActions.style.display = "none";
+            if (progressSection) progressSection.style.display = "block";
           } else if (status === "aborted") {
             el.className = "wiz-badge wiz-badge--warn";
             el.textContent = "Aborted (resumable)";
+            if (startActions) startActions.style.display = "flex";
+            if (completeActions) completeActions.style.display = "none";
+            if (progressSection) progressSection.style.display = "none";
           } else if (status === "error") {
             el.className = "wiz-badge wiz-badge--error";
             el.textContent = "Error";
+            if (startActions) startActions.style.display = "flex";
+            if (completeActions) completeActions.style.display = "none";
+            if (progressSection) progressSection.style.display = "none";
           } else {
             el.className = "wiz-badge wiz-badge--muted";
             el.textContent = "Pending";
+            if (startActions) startActions.style.display = "flex";
+            if (completeActions) completeActions.style.display = "none";
+            if (progressSection) progressSection.style.display = "none";
           }
         }
         // Show graph viewer + finalize/download if graph is completed
@@ -3533,6 +3583,9 @@
         );
       }
 
+      const MAX_LOG_ENTRIES = 500;
+      let logEntryCount = 0;
+
       function addLogEntry(level, message) {
         const el = document.getElementById("log-entries");
         if (!el) return;
@@ -3540,10 +3593,18 @@
         const levelClass =
           { INFO: "info", WARN: "warn", ERROR: "error" }[level] ||
           "info";
-        el.innerHTML +=
+        el.insertAdjacentHTML(
+          "beforeend",
           `<div class="wiz-log-entry"><span class="wiz-log-time">${time}</span><span class="wiz-log-level wiz-log-level--${levelClass}">${level}</span><span class="wiz-log-msg">${
             esc(message)
-          }</span></div>`;
+          }</span></div>`,
+        );
+        logEntryCount++;
+        // Prune oldest entries to keep the DOM size bounded
+        while (logEntryCount > MAX_LOG_ENTRIES && el.firstChild) {
+          el.removeChild(el.firstChild);
+          logEntryCount--;
+        }
         el.scrollTop = el.scrollHeight;
       }
 

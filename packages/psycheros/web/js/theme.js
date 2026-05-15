@@ -127,7 +127,7 @@ function applyTheme(theme) {
   const root = document.documentElement;
 
   // Determine the effective accent color
-  const accentColor = theme.customAccent || THEMES[theme.preset]?.accent || THEMES.phosphor.accent;
+  const accentColor = theme.customAccent || THEMES[theme.preset]?.accent || THEMES.violet.accent;
 
   // Generate and apply color variants
   const variants = generateColorVariants(accentColor);

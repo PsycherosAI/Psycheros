@@ -1575,37 +1575,6 @@
   background-color: var(--c-bg-hover);
 }
 
-/* Version chip in the header. Two variants:
-   - default: clickable link to the release page for the running tag
-   - staging: non-interactive span (staging is usually ahead of the public tag) */
-.psy-version-chip {
-  font-family: monospace;
-  font-size: 0.75rem;
-  color: var(--c-fg-muted);
-  text-decoration: none;
-  padding: 2px 6px;
-  border-radius: 4px;
-  white-space: nowrap;
-  transition: color var(--transition), background-color var(--transition);
-}
-
-.psy-version-chip:hover {
-  color: var(--c-accent);
-  background-color: var(--c-bg-hover);
-}
-
-.psy-version-chip--staging,
-.psy-version-chip--staging:hover {
-  color: var(--c-fg-muted);
-  background: transparent;
-  cursor: default;
-}
-
-.psy-version-chip__flavor {
-  color: var(--c-accent-muted);
-  font-style: italic;
-}
-
 /* Admin "Versions" section — flavor tag mirrors the chat-header chip
    so the staging signal renders the same way in both places. */
 .admin-version-flavor {

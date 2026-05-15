@@ -197,10 +197,31 @@ export interface ServerConfig {
   /** Whether RAG is enabled */
   ragEnabled: boolean;
   /**
-   * Optional scheduler reference — passed so the entity_import handler can
-   * update the scheduler's DB handle after graph.db is replaced on disk.
+   * Optional shared FileStore. When not provided, `createServer`
+   * constructs its own. Pass one when the calling process wants to
+   * share state with the server — the main entry in `mod.ts` does this
+   * so the consolidation runner and the MCP tool handlers operate on
+   * the same instance.
    */
-  scheduler?: import("@psycheros/scheduler").Scheduler;
+  store?: import("./storage/mod.ts").FileStore;
+  /**
+   * Optional shared GraphStore. **Load-bearing for `entity_import`:**
+   * when the import handler swaps `graph.db` on disk it closes and
+   * reinitializes this store, then calls
+   * `consolidationRunner.replaceDatabase(getRawDb())` so the runner
+   * picks up the new handle. Sharing the same instance is what makes
+   * those two callbacks affect both surfaces at once. When not
+   * provided, `createServer` constructs its own and the runner-resync
+   * is a no-op.
+   */
+  graphStore?: import("./graph/mod.ts").GraphStore;
+  /**
+   * Optional consolidation runner reference. When provided alongside
+   * `graphStore`, the `entity_import` handler updates the runner's DB
+   * handle after `graph.db` is replaced on disk so the runner doesn't
+   * keep using a stale (closed) connection.
+   */
+  consolidationRunner?: import("./consolidation/runner.ts").ConsolidationRunner;
   /** Minimum score threshold for RAG retrieval */
   ragMinScore?: number;
   /** Maximum chunks to retrieve */

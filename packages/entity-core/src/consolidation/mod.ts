@@ -28,3 +28,10 @@ export {
   WEEKLY_CONSOLIDATION_PROMPT,
   YEARLY_CONSOLIDATION_PROMPT,
 } from "./prompts.ts";
+
+export {
+  type ConsolidationPeriod,
+  ConsolidationRunner,
+  type ConsolidationRunnerOptions,
+  mostRecentFireAt,
+} from "./runner.ts";

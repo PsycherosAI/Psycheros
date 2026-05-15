@@ -1,15 +1,19 @@
 # Scheduler
 
-Every scheduled or event-triggered task in Psycheros and entity-core runs
-through a single durable primitive: the
-[`@psycheros/scheduler`](../../scheduler/) package. Each daemon instantiates its
-own `Scheduler`, gives it a SQLite database to own two tables on (`schedules`,
-`job_runs`), and a 5-second ticker materializes due fires, reclaims expired
-leases, and dispatches handlers.
+Every scheduled or event-triggered task in Psycheros runs through a single
+durable primitive: the internal scheduler module at
+[`src/scheduler/`](../src/scheduler/). The daemon instantiates one `Scheduler`,
+gives it a SQLite database to own two tables on (`schedules`, `job_runs`), and a
+5-second ticker materializes due fires, reclaims expired leases, and dispatches
+handlers.
 
-This page covers what the scheduler does for Psycheros specifically — which
-schedules are defined, which handlers are registered, and the durability
-guarantees the system gives.
+This page covers which schedules are defined, which handlers are registered, and
+the durability guarantees the system gives.
+
+> entity-core used to share this scheduler but now runs its weekly / monthly /
+> yearly memory consolidation through its own narrower `ConsolidationRunner` —
+> see
+> [`packages/entity-core/src/consolidation/runner.ts`](../../entity-core/src/consolidation/runner.ts).
 
 ## The two tables
 
@@ -31,9 +35,8 @@ When I'm down and a scheduled fire elapses, the `catchup_policy` on each
 schedule decides what happens on next boot:
 
 - **`fire_once_then_align`** — fire once now, then resume the normal cadence.
-  The right choice for daily summarization, daily identity snapshots, and the
-  weekly/monthly/yearly consolidation in entity-core. Catching up matters;
-  flooding does not.
+  The right choice for daily summarization and daily identity snapshots.
+  Catching up matters; flooding does not.
 - **`skip_missed`** — drop missed fires and resume on the next scheduled time.
   The default for user-created Pulses. A user pulse "every hour: remind me to
   stretch" doesn't want fifty reminders after a week of downtime.
@@ -69,8 +72,6 @@ entity-facing `pulse` tool, and chain execution) enqueue the same way.
 
 - **Catch-up across downtime.** Daily summarization and identity snapshots will
   fire once on next boot if their scheduled time elapsed while I was down.
-  Weekly/monthly/yearly consolidation in entity-core behaves the same way for
-  its own schedules.
 - **Crash recovery for in-flight runs.** Single-process invariant: on boot, any
   row left in `running` state belongs to a dead worker by definition.
   `reclaimOnBoot` reclaims every such row regardless of `lease_until` — if the

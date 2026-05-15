@@ -1,5 +1,0 @@
-{
-  "name": "@psycheros/scheduler",
-  "version": "0.1.0",
-  "exports": "./src/mod.ts"
-}

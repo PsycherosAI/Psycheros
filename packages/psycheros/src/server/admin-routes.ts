@@ -17,7 +17,7 @@ import {
   queryLogs,
 } from "./logger.ts";
 import { collectDiagnostics } from "./diagnostics.ts";
-import type { Scheduler } from "@psycheros/scheduler";
+import type { Scheduler } from "../scheduler/mod.ts";
 import {
   buildAdminJobsViewModel,
   renderAdminActions,

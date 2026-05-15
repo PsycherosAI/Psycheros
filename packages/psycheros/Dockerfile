@@ -16,7 +16,10 @@
 #     -v /path/to/psycheros:/app/packages/psycheros/.psycheros \
 #     psycheros
 
-FROM denoland/deno:2.7.5
+# Deno version: keep in sync with /.deno-version at repo root. The Dockerfile
+# FROM directive can't read a file at parse time without a build-arg dance,
+# so this literal is the second copy. When bumping, update both.
+FROM denoland/deno:2.7.14
 
 # Install dumb-init for proper PID 1 signal handling, plus an SSH server and a
 # small set of diagnostic tools used when an operator (or an external Claude
@@ -94,12 +97,10 @@ COPY packages/psycheros/deno.json /app/packages/psycheros/deno.json
 COPY packages/entity-core/deno.json /app/packages/entity-core/deno.json
 COPY packages/entity-loom/deno.json /app/packages/entity-loom/deno.json
 COPY packages/launcher/deno.json /app/packages/launcher/deno.json
-COPY packages/scheduler/deno.json /app/packages/scheduler/deno.json
 
 # Source for the packages that run in (or are imported by) this image
 COPY packages/psycheros /app/packages/psycheros/
 COPY packages/entity-core /app/packages/entity-core/
-COPY packages/scheduler /app/packages/scheduler/
 
 # Entrypoint script — co-located with the psycheros package
 RUN chmod +x /app/packages/psycheros/entrypoint.sh

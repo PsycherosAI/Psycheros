@@ -68,8 +68,8 @@ import {
   repairOrphanedSummaries,
 } from "../memory/mod.ts";
 import { DEFAULT_CUTOFF_HOUR } from "../memory/date-utils.ts";
-import { Scheduler } from "@psycheros/scheduler";
-import type { HandlerResult } from "@psycheros/scheduler";
+import { Scheduler } from "../scheduler/mod.ts";
+import type { HandlerResult } from "../scheduler/mod.ts";
 import { getDisplayTimezone, localTimeToUtcCron } from "../pulse/timezone.ts";
 
 import type { MCPClient } from "../mcp-client/mod.ts";

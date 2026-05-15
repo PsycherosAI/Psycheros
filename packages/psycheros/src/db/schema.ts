@@ -7,7 +7,7 @@
 
 import type { Database } from "@db/sqlite";
 import { getVecVersion, loadVectorExtension } from "./vector.ts";
-import { initSchedulerTables } from "@psycheros/scheduler";
+import { initSchedulerTables } from "../scheduler/mod.ts";
 
 /**
  * SQL schema for the Psycheros database.

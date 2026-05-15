@@ -170,7 +170,7 @@ export interface RouteContext {
   /** Pulse engine for autonomous entity prompts */
   pulseEngine?: import("../pulse/mod.ts").PulseEngine;
   /** Durable scheduler — schedules and job_runs. */
-  scheduler?: import("@psycheros/scheduler").Scheduler;
+  scheduler?: import("../scheduler/mod.ts").Scheduler;
   /** Optional chat RAG for searching conversation history */
   chatRAG?: ConversationRAG;
   /** RAG configuration */
@@ -7229,7 +7229,7 @@ interface AppearanceSettings {
 }
 
 const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
-  preset: "phosphor",
+  preset: "violet",
   customAccent: null,
   bgImage: null,
   bgBlur: 0,

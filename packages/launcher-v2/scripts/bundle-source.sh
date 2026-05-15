@@ -4,9 +4,8 @@
 # run (see src-tauri/src/bundle/mod.rs + docs/bundle.md).
 #
 # Contents of the bundle:
-#   packages/psycheros/      — harness daemon
+#   packages/psycheros/      — harness daemon (includes its internal scheduler)
 #   packages/entity-core/    — canonical identity / memory MCP server
-#   packages/scheduler/      — shared durable scheduler dep
 #   deno.json                — workspace root with hoisted deps
 #   deno.lock                — frozen for reproducible cache
 #
@@ -36,7 +35,7 @@ cp "$MONOREPO_ROOT/deno.lock" "$STAGE_DIR/"
 
 # Copy required packages (preserve directory structure)
 mkdir -p "$STAGE_DIR/packages"
-for pkg in psycheros entity-core scheduler; do
+for pkg in psycheros entity-core; do
   cp -R "$MONOREPO_ROOT/packages/$pkg" "$STAGE_DIR/packages/$pkg"
   # Strip runtime + dev-only state that may have been generated locally
   rm -rf "$STAGE_DIR/packages/$pkg/.psycheros" \

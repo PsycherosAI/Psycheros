@@ -1,6 +1,5 @@
 {
   "workspace": [
-    "./packages/scheduler",
     "./packages/psycheros",
     "./packages/entity-core",
     "./packages/entity-loom",
@@ -8,7 +7,7 @@
   ],
   "nodeModulesDir": "auto",
   "tasks": {
-    "test": "deno test -A packages/scheduler/tests/ packages/psycheros/tests/",
+    "test": "deno test -A packages/psycheros/tests/ packages/entity-core/tests/",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check"
   },

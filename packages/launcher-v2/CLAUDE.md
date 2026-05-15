@@ -154,8 +154,7 @@ the under-the-hood mechanics differ — see per-OS module doc comments and
 
 This package lives in the [Psycheros monorepo](../../README.md). It manages the
 lifecycle of the sibling [`psycheros`](../psycheros/) daemon and ships a pruned
-bundle of its source plus [`entity-core`](../entity-core/) and
-[`scheduler`](../scheduler/). It does not manage
+bundle of its source plus [`entity-core`](../entity-core/). It does not manage
 [`entity-loom`](../entity-loom/) — Loom is a separate utility with its own
 distribution story.
 

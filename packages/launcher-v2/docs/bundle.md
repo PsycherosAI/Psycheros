@@ -29,9 +29,8 @@ Resources/
 deno.json                 Workspace root with hoisted deps
 deno.lock                 Frozen for reproducible cache
 packages/
-├── psycheros/            Main daemon
-├── entity-core/          Canonical identity / memory MCP server
-└── scheduler/            Shared scheduler dep
+├── psycheros/            Main daemon (includes its internal scheduler)
+└── entity-core/          Canonical identity / memory MCP server
 ```
 
 ### Explicitly **not** in the bundle

@@ -90,7 +90,7 @@ jobs:
       - name: Set up Deno (for bundle smoke check)
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2
+          deno-version-file: .deno-version
 
       - name: Smoke-check the bundled launcher
         env:

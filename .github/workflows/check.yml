@@ -33,7 +33,7 @@ jobs:
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2
+          deno-version-file: .deno-version
 
       - name: Cache Deno deps
         uses: actions/cache@v5
@@ -48,7 +48,6 @@ jobs:
       - name: Type-check all packages
         run: |
           deno check \
-            packages/scheduler/src/mod.ts \
             packages/entity-core/src/mod.ts \
             packages/entity-loom/src/main.ts \
             packages/psycheros/src/main.ts \

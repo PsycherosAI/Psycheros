@@ -71,11 +71,13 @@ import { EmbeddingCache } from "./embeddings/mod.ts";
 export function createServer(config: Partial<ServerConfig> = {}): McpServer {
   const fullConfig: ServerConfig = { ...DEFAULT_SERVER_CONFIG, ...config };
 
-  // Initialize storage
-  const store = new FileStore(fullConfig.dataDir);
-
-  // Initialize graph store
-  const graphStore = new GraphStore(fullConfig.dataDir);
+  // Storage. Reuse the caller's instances when provided — the main
+  // entry in mod.ts shares its FileStore and GraphStore so the
+  // consolidation runner and the MCP tool handlers operate on the
+  // same SQLite connection.
+  const store = fullConfig.store ?? new FileStore(fullConfig.dataDir);
+  const graphStore = fullConfig.graphStore ??
+    new GraphStore(fullConfig.dataDir);
 
   // Initialize embedding cache (shares graph.db for sqlite-vec)
   const embeddingCache = new EmbeddingCache(fullConfig.dataDir);
@@ -1254,10 +1256,10 @@ export function createServer(config: Partial<ServerConfig> = {}): McpServer {
       const result = await handler({ data, mode });
 
       // After import, graphStore may have been closed and reinitialized
-      // (graph.db replaced on disk). Update the scheduler's DB handle so
-      // it doesn't keep using the stale (closed) connection.
-      if (fullConfig.scheduler) {
-        fullConfig.scheduler.replaceDatabase(graphStore.getRawDb());
+      // (graph.db replaced on disk). Update the consolidation runner's
+      // DB handle so it doesn't keep using the stale (closed) connection.
+      if (fullConfig.consolidationRunner) {
+        fullConfig.consolidationRunner.replaceDatabase(graphStore.getRawDb());
       }
 
       return {
