@@ -4,7 +4,7 @@ Thanks for your interest in contributing to Psycheros.
 
 ## Project shape
 
-This is a [Deno 2.x](https://deno.land) workspace containing four packages:
+This is a [Deno 2.x](https://deno.land) workspace containing five packages:
 
 | Package                | Role                                                         |
 | ---------------------- | ------------------------------------------------------------ |

@@ -1,4 +1,12 @@
-# Psycheros Launcher
+# Psycheros Launcher (v1 — deprecated)
+
+> **Deprecated.** This is the legacy v1 launcher — a browser-tab dashboard that
+> ran Psycheros as a child process. It has been replaced by
+> [launcher-v2](../launcher-v2/), a desktop app that installs Psycheros as an
+> OS-supervised background service (macOS + Windows). New users should start
+> with launcher-v2. The v1 installer scripts remain available on
+> [releases](https://github.com/PsycherosAI/Psycheros/releases?q=launcher-v) for
+> existing users.
 
 Install, update, and run Psycheros from your browser. No terminal required.
 

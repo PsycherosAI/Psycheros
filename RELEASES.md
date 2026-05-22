@@ -1,8 +1,9 @@
 # Releases
 
-How Psycheros releases are versioned, tagged, and published. The four packages
+How Psycheros releases are versioned, tagged, and published. The five packages
 in this workspace have **independent version lineages** — `psycheros` does not
-move in lockstep with `entity-core`, `entity-loom`, or `launcher`.
+move in lockstep with `entity-core`, `entity-loom`, `launcher-v2`, or
+`launcher`.
 
 ## Tag conventions
 
@@ -13,6 +14,7 @@ Every release tag uses the form `<package>-v<ver>`:
 | `psycheros`   | `psycheros-v`   | `psycheros-v0.1.0`   | Docker image at `ghcr.io/psycherosai/psycheros` |
 | `entity-core` | `entity-core-v` | `entity-core-v0.1.0` | Tagged source release (tarball + zip)           |
 | `entity-loom` | `entity-loom-v` | `entity-loom-v0.2.0` | Tagged source release (tarball + zip)           |
+| `launcher-v2` | `launcher-v2-v` | `launcher-v2-v0.2.0` | Desktop app (.dmg + .msi)                       |
 | `launcher`    | `launcher-v`    | `launcher-v0.1.0`    | Bundle (zip + tarball) + raw install scripts    |
 
 Each package follows [Semantic Versioning 2.0](https://semver.org/). MAJOR for
@@ -31,10 +33,10 @@ pushes **do auto-fire the corresponding artifact workflows** (see "What
 auto-fires on tag push" below). The maintainer's act is pushing the tag;
 everything downstream of that is mechanical.
 
-### A release event is a sweep across all four packages
+### A release event is a sweep across all five packages
 
-Each of the four packages has an **independent semver lineage**. A release event
-is not a single-package decision — it's a survey across all four, producing 0–N
+Each of the five packages has an **independent semver lineage**. A release event
+is not a single-package decision — it's a survey across all five, producing 0–N
 tag-cuts depending on which packages are ready to ship.
 
 Per release event, each package is in one of three states:
@@ -112,12 +114,13 @@ For each package the maintainer decides to ship:
 
 A `<package>-v*` tag push fires the appropriate workflows immediately:
 
-| Tag prefix       | docker.yml                                                                            | release.yml                                                                                                                                          |
-| ---------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `psycheros-v*`   | Builds + pushes `ghcr.io/psycherosai/psycheros:<semver>` + `:latest` + `:sha-<short>` | Creates GH Release, notes from `packages/psycheros/CHANGELOG.md`                                                                                     |
-| `launcher-v*`    | —                                                                                     | Creates GH Release (Latest badge), notes from `packages/launcher/CHANGELOG.md`; uploads bundle `.zip` / `.tar.gz` + raw `install.sh` / `install.ps1` |
-| `entity-core-v*` | —                                                                                     | Creates GH Release, notes from `packages/entity-core/CHANGELOG.md`; uploads scoped source `.tar.gz` / `.zip`                                         |
-| `entity-loom-v*` | —                                                                                     | Creates GH Release, notes from `packages/entity-loom/CHANGELOG.md`; uploads scoped source `.tar.gz` / `.zip`                                         |
+| Tag prefix       | docker.yml                                                                            | release.yml                                                                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `psycheros-v*`   | Builds + pushes `ghcr.io/psycherosai/psycheros:<semver>` + `:latest` + `:sha-<short>` | Creates GH Release, notes from `packages/psycheros/CHANGELOG.md`                                                                                                                            |
+| `launcher-v2-v*` | —                                                                                     | Creates GH Release (**Latest badge**), notes from `packages/launcher-v2/CHANGELOG.md`; uploads `.dmg` + `.msi` + stable-named `Psycheros-macOS-latest.dmg` / `Psycheros-Windows-latest.msi` |
+| `launcher-v*`    | —                                                                                     | Creates GH Release, notes from `packages/launcher/CHANGELOG.md`; uploads bundle `.zip` / `.tar.gz` + raw `install.sh` / `install.ps1`. **Deprecated — v1 lineage.**                         |
+| `entity-core-v*` | —                                                                                     | Creates GH Release, notes from `packages/entity-core/CHANGELOG.md`; uploads scoped source `.tar.gz` / `.zip`                                                                                |
+| `entity-loom-v*` | —                                                                                     | Creates GH Release, notes from `packages/entity-loom/CHANGELOG.md`; uploads scoped source `.tar.gz` / `.zip`                                                                                |
 
 The note-extraction logic lives in `.github/scripts/extract-changelog-entry.sh`
 — it reads the latest top-level entry from the package's CHANGELOG.md at the
@@ -167,26 +170,31 @@ pointer from the release version to the new branch build. Avoid dispatching
 ## Latest badge policy
 
 The repo-wide "Latest" badge is set explicitly via `gh release create --latest`
-/ `--latest=false` per release. The **launcher** lineage owns the badge — the
+/ `--latest=false` per release. The **launcher-v2** lineage owns the badge — the
 launcher is the user-facing entry point and the recommended Quickstart artifact
 for first-time visitors, so strangers landing on `/releases` should be guided
 there rather than to the notes-only harness release.
 
 | Tag prefix       | `--latest`       |
 | ---------------- | ---------------- |
-| `launcher-v*`    | `--latest`       |
+| `launcher-v2-v*` | `--latest`       |
+| `launcher-v*`    | `--latest=false` |
 | `psycheros-v*`   | `--latest=false` |
 | `entity-core-v*` | `--latest=false` |
 | `entity-loom-v*` | `--latest=false` |
 
-This buys two stable URLs the docs site (or anyone else) can hardcode without
-rebuilding on every launcher cut:
+This buys stable URLs the docs site (or anyone else) can hardcode without
+rebuilding on every launcher-v2 cut:
 
 - `https://github.com/PsycherosAI/Psycheros/releases/latest` redirects to the
-  newest launcher release page (its install footer sits right above the assets).
-- `https://github.com/PsycherosAI/Psycheros/releases/latest/download/install.sh`
-  and `.../install.ps1` redirect to the latest launcher's install scripts —
-  filenames are version-less by design specifically to make these URLs stable.
+  newest launcher-v2 release page.
+- `https://github.com/.../releases/latest/download/Psycheros-macOS-latest.dmg`
+  and `.../Psycheros-Windows-latest.msi` redirect to the latest desktop
+  installers — filenames are version-less by design specifically to make these
+  URLs stable.
+- `https://github.com/.../releases/latest/download/install.sh` and
+  `.../install.ps1` redirect to the latest v1 launcher's install scripts (still
+  available for existing users).
 
 The bundle archives (`launcher-v*.tar.gz` / `.zip`) embed the version in the
 filename, so a "latest bundle" URL would only work if we also renamed the

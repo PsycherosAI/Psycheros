@@ -1,14 +1,20 @@
 # Psycheros launcher
 
 Desktop app that installs and supervises Psycheros as a persistent background
-service on macOS, Linux, and Windows — then gives you a single window onto the
-chat UI when you want to talk to your entity.
+service on macOS and Windows — then gives you a single window onto the chat UI
+when you want to talk to your entity.
 
-> **Status: pre-release scaffold.** Architecture is locked, macOS and Windows
-> supervisors are implemented, Linux (systemd-user) remains stubbed. See
-> [`CHANGELOG.md`](CHANGELOG.md) and
-> [`docs/architecture.md`](docs/architecture.md) for what works today vs. what's
-> coming.
+> **macOS and Windows ship.** The launcher publishes stable evergreen downloads
+> that always point to the latest release:
+>
+> - **macOS:**
+>   [`Psycheros-macOS-latest.dmg`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/Psycheros-macOS-latest.dmg)
+> - **Windows:**
+>   [`Psycheros-Windows-latest.msi`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/Psycheros-Windows-latest.msi)
+>
+> Linux (systemd-user) remains deferred. See
+> [`docs/architecture.md`](docs/architecture.md) for the current platform
+> matrix.
 
 ## What it does
 
@@ -43,17 +49,17 @@ install over the top.
 
 ## Installing (end users)
 
-Pre-built artifacts will be published to GitHub Releases:
+Download the latest release for your platform:
 
-- **macOS:** download `Psycheros.dmg`, drag to `/Applications/`. **See "First
-  launch on macOS" below before opening it** — Psycheros is not code-signed and
-  Gatekeeper will block a normal double-click.
-- **Windows:** download `Psycheros-setup.msi`, run, click through SmartScreen's
-  "More info → Run anyway." Psycheros is not signed for Authenticode; the
-  warning is expected.
-- **Linux:** download `Psycheros.AppImage` or `.deb`. Linux users will need
-  `sudo loginctl enable-linger $USER` once for daemons to survive logout
-  (one-time, no other escalation in the flow).
+- **macOS:** download
+  [`Psycheros-macOS-latest.dmg`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/Psycheros-macOS-latest.dmg),
+  drag to `/Applications/`. **See "First launch on macOS" below before opening
+  it** — Psycheros is not code-signed and Gatekeeper will block a normal
+  double-click.
+- **Windows:** download
+  [`Psycheros-Windows-latest.msi`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/Psycheros-Windows-latest.msi),
+  run, click through SmartScreen's "More info → Run anyway." Psycheros is not
+  signed for Authenticode; the warning is expected.
 
 ### First launch on macOS
 

@@ -6,6 +6,7 @@ description: Current versions of every Psycheros package, with links to release 
 import psycherosPkg from "../../../../packages/psycheros/deno.json";
 import entityCorePkg from "../../../../packages/entity-core/deno.json";
 import entityLoomPkg from "../../../../packages/entity-loom/deno.json";
+import launcherV2Pkg from "../../../../packages/launcher-v2/src-tauri/tauri.conf.json";
 import launcherPkg from "../../../../packages/launcher/deno.json";
 
 export const PACKAGES = [
@@ -25,13 +26,18 @@ export const PACKAGES = [
     description: "Wizard for extracting memories and knowledge graphs from past conversations.",
   },
   {
+    name: "launcher-v2",
+    version: launcherV2Pkg.version,
+    description: "Desktop app — OS-supervised service + chat window (macOS + Windows).",
+  },
+  {
     name: "launcher",
     version: launcherPkg.version,
-    description: "Browser-based installer + runtime dashboard.",
+    description: "Legacy v1 launcher (deprecated). Browser-based installer + runtime dashboard.",
   },
 ];
 
-Each Psycheros package has its own semver lineage. The four packages release independently; running versions can drift between them. Use the table below as the source of truth for "what's the latest version of X?"
+Each Psycheros package has its own semver lineage. The five packages release independently; running versions can drift between them. Use the table below as the source of truth for "what's the latest version of X?"
 
 <table>
   <thead>
@@ -71,8 +77,8 @@ Inside a running Psycheros, the chat-header chip, launcher dashboard, and `/api/
 
 ## Release process
 
-Releases happen in **sweeps** — one ritual evaluates all four packages and cuts the tags that have moved. The canonical procedure lives in [`runbooks/psyops-curated-release.md`](https://github.com/PsycherosAI/Psycheros/blob/main/runbooks/psyops-curated-release.md) (private), but the user-facing shape is:
+Releases happen in **sweeps** — one ritual evaluates all five packages and cuts the tags that have moved. The canonical procedure lives in [`runbooks/psyops-curated-release.md`](https://github.com/PsycherosAI/Psycheros/blob/main/runbooks/psyops-curated-release.md) (private), but the user-facing shape is:
 
 - Each released tag carries a **CHANGELOG entry** as its GitHub release notes (auto-extracted from the per-package `CHANGELOG.md`).
-- The four packages have **independent semver lineages**. A release sweep may bump some packages and leave others unchanged.
+- The five packages have **independent semver lineages**. A release sweep may bump some packages and leave others unchanged.
 - Docker images on the **`psycheros`** package are tagged `<semver>` plus `latest`; the **`psycheros-staging`** image stream is push-driven and isn't part of the public release surface.

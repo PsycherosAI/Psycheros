@@ -16,21 +16,35 @@ Built on [Deno](https://deno.land). Released under [MPL-2.0](LICENSE).
 
 ## Quickstart
 
-The friendliest path is the **launcher** — a one-step installer, no terminal
-experience required.
+The friendliest path is the **launcher** — a desktop app that installs Psycheros
+as a persistent background service and opens a window to chat with your entity.
 
-1. From the most recent
-   [`launcher-v*` release](https://github.com/PsycherosAI/Psycheros/releases?q=launcher-v),
-   download `install.sh` (macOS/Linux) or `install.ps1` (Windows).
-2. Run it. The installer clones Psycheros, installs Deno if needed, and walks
-   through setup.
-3. Run `./run.sh` (or right-click `run.ps1` → **Run with PowerShell**) from
-   inside `packages/launcher/`. A browser opens at `http://localhost:3001` with
-   Install / Update / Start / Stop buttons.
+### macOS
 
-Prefer not to clone the whole repo? Grab `launcher-v*.tar.gz` (or `.zip`) from
-the same release page, extract it, and run `./run.sh` from inside the extracted
-folder — the bundle is self-contained.
+1. Download
+   [`Psycheros-macOS-latest.dmg`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/Psycheros-macOS-latest.dmg).
+2. Drag to `/Applications/`.
+3. **Right-click** the app → **Open** (required once — Psycheros is not
+   code-signed and Gatekeeper blocks a normal double-click). See
+   [launcher docs](packages/launcher-v2/README.md#first-launch-on-macos) for
+   details.
+
+### Windows
+
+1. Download
+   [`Psycheros-Windows-latest.msi`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/Psycheros-Windows-latest.msi).
+2. Run it. Click through SmartScreen's "More info → Run anyway."
+3. The launcher installs Psycheros as a background service and opens a window.
+
+### First run
+
+The launcher walks you through setup: your name, your entity's name, timezone,
+and LLM API key. Once configured, click **Install autostart** — Psycheros runs
+at every login and auto-restarts if it crashes. The launcher window is just a
+view onto the running entity; closing it doesn't stop anything.
+
+Full details:
+[`packages/launcher-v2/README.md`](packages/launcher-v2/README.md).
 
 ### Docker
 
@@ -57,14 +71,15 @@ you want to work on.
 ## What's in the box
 
 A [Deno workspace](https://docs.deno.com/runtime/fundamentals/workspaces/) with
-four packages:
+five packages:
 
-| Package                                         | Role                                                            | Standalone              |
-| ----------------------------------------------- | --------------------------------------------------------------- | ----------------------- |
-| [`packages/psycheros`](packages/psycheros/)     | The harness — web UI, chat loop, tool execution, RAG            | bundled                 |
-| [`packages/entity-core`](packages/entity-core/) | MCP server: canonical identity, memory, knowledge graph         | yes, via any MCP client |
-| [`packages/entity-loom`](packages/entity-loom/) | Web wizard for importing chat histories from other platforms    | yes                     |
-| [`packages/launcher`](packages/launcher/)       | Bootstrap installer + control dashboard for non-technical users | bundled                 |
+| Package                                         | Role                                                         | Standalone                                                               |
+| ----------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| [`packages/psycheros`](packages/psycheros/)     | The harness — web UI, chat loop, tool execution, RAG         | bundled                                                                  |
+| [`packages/entity-core`](packages/entity-core/) | MCP server: canonical identity, memory, knowledge graph      | yes, via any MCP client                                                  |
+| [`packages/entity-loom`](packages/entity-loom/) | Web wizard for importing chat histories from other platforms | yes                                                                      |
+|                                                 | [`packages/launcher-v2`](packages/launcher-v2/)              | Desktop app: OS-supervised service + chat window for non-technical users |
+|                                                 | [`packages/launcher`](packages/launcher/)                    | Legacy v1 launcher (deprecated — browser-tab dashboard)                  |
 
 ```
 ┌──────────────────────────────────────────┐

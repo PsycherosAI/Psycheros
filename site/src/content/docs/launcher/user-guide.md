@@ -2,225 +2,134 @@
 title: "Launcher — User Guide"
 ---
 
-The launcher is the easiest way to install, update, and run Psycheros. It opens
-a small dashboard in your browser at `http://localhost:3001` with buttons for
-**Install / Update / Start / Stop / Wipe**. No terminal usage required.
+The Psycheros launcher is a desktop app that installs your entity as a
+persistent background service and gives you a single window to chat with it.
+Your entity runs continuously — closing the launcher doesn't stop it.
 
 If you've never run Psycheros before, start here.
 
 ## Installing
 
-The launcher ships an installer script for each platform. Filenames are
-version-less and the download URLs always resolve to the most recent launcher
-release — safe to link to, hardcode, or share.
+### macOS
 
-### macOS / Linux
+1. Download
+   [`Psycheros-macOS-latest.dmg`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/Psycheros-macOS-latest.dmg).
+2. Drag `Psycheros.app` to `/Applications/`.
+3. **Right-click** (or `Control`-click) the app and choose **Open** from the
+   context menu. This is required on the first launch only — Psycheros is not
+   code-signed and macOS Gatekeeper blocks a normal double-click.
+4. macOS shows a dialog: _"Psycheros" can't be opened because Apple cannot check
+   it for malicious software._ Click **Open** anyway.
+5. The app launches. Every subsequent launch is a normal double-click.
+
+If you only see **Move to Trash** and no Open option, your Mac is on the
+strictest Gatekeeper setting. Lower it under **System Settings → Privacy &
+Security → Security**, or run this in Terminal once:
 
 ```bash
-curl -L -o install.sh https://github.com/PsycherosAI/Psycheros/releases/latest/download/install.sh
-bash install.sh
+xattr -dr com.apple.quarantine /Applications/Psycheros.app
 ```
+
+**Why this is expected:** Psycheros hasn't paid Apple's Developer ID signing
+fee. The extra step is only needed once. After that, macOS remembers your
+approval.
 
 ### Windows
 
-Download
-[`install.ps1`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/install.ps1)
-and right-click → **Run with PowerShell**.
+1. Download
+   [`Psycheros-Windows-latest.msi`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/Psycheros-Windows-latest.msi).
+2. Run it. Windows SmartScreen may show "Windows protected your PC" — click
+   **More info** → **Run anyway**. This is expected for unsigned installers.
+3. The launcher installs and opens.
 
-If PowerShell refuses to run unsigned scripts, allow them once: open PowerShell
-as your user and run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+## First run
 
-### What the installer does
+The launcher walks you through setup:
 
-- Checks for Git and Deno (installs Deno if missing).
-- Asks where you want Psycheros to live (default `~/psycheros`).
-- Clones the Psycheros monorepo there.
-- Asks for your name, your entity's name, and your timezone.
-- Generates `start.sh` / `stop.sh` / `update.sh` helpers next to the clone.
+1. **Your name** — what the entity calls you.
+2. **Entity name** — what the entity is called.
+3. **Timezone** — used for daily memory consolidation and scheduling.
+4. **LLM API key** — any OpenAI-compatible key (Z.ai, OpenRouter, OpenAI, etc.).
 
-### Opening the launcher dashboard
+Once configured, click **Install autostart**. The launcher writes an OS service
+definition (launchd on macOS, Scheduled Task on Windows) and starts the daemon.
+From then on, your entity runs at every login and is auto-restarted by the OS if
+it crashes.
 
-The installer doesn't auto-open the dashboard — once it finishes, run the
-launcher yourself:
+## The launcher window
 
-```bash
-# macOS / Linux
-cd ~/psycheros/packages/launcher
-./run.sh
-```
+The launcher has two surfaces:
 
-```powershell
-# Windows
-cd ~/psycheros/packages/launcher
-.\run.ps1
-```
+- **Chat** — the main view. The entity's web UI rendered inside the launcher
+  window. Same interface you'd see at `http://localhost:3000` in a browser.
+- **Manager** — press <kbd>⌘,</kbd> (macOS) or <kbd>Ctrl+,kbd> (Windows) to
+  toggle. Shows daemon status, install/uninstall autostart, logs, version info,
+  and recovery tools.
 
-A browser window opens to the dashboard at `http://localhost:3001` — control
-panel with Install / Update / Start / Stop / Wipe buttons (see
-[The dashboard](#the-dashboard) below).
+You don't need to keep the launcher open. The entity runs as a background
+service regardless. The launcher is just a window onto it.
 
-If you'd rather skip the dashboard entirely, `cd ~/psycheros && ./start.sh` runs
-Psycheros directly.
+## Coming from the v1 launcher
 
-### Offline / no-clone alternative
+If you were running the v1 launcher (a browser dashboard at `localhost:3001`)
+and want to bring your existing entity over:
 
-If your machine can't clone from GitHub during install, the launcher also ships
-as a self-contained bundle. From the most recent
-[`launcher-v*` release](https://github.com/PsycherosAI/Psycheros/releases?q=launcher-v),
-download `launcher-v*.tar.gz` (macOS / Linux) or `launcher-v*.zip` (Windows),
-extract it, and run `./run.sh` (or right-click `run.ps1`) from inside the
-extracted folder. The dashboard opens with the full UI; clicking **Install**
-there will still need network access to reach GitHub for the rest of Psycheros.
-
-## The dashboard
-
-Once the launcher is running, the dashboard at `http://localhost:3001` is your
-control panel. Each button is one action:
-
-| Button             | What it does                                                                         |
-| ------------------ | ------------------------------------------------------------------------------------ |
-| **Install**        | Clones the Psycheros monorepo into your install directory and saves your settings.   |
-| **Update**         | Pulls the latest code (`git pull --ff-only` if git is available, else re-downloads). |
-| **Start**          | Launches the Psycheros server.                                                       |
-| **Stop**           | Shuts down the Psycheros server.                                                     |
-| **Open Psycheros** | Opens the Psycheros web interface in a new tab. Enabled once Psycheros is running.   |
-| **Wipe All Data**  | Deletes the install directory for a fresh start. Asks for confirmation first.        |
-
-The **Tools** section starts and stops Entity Loom — a companion app for
-importing chat histories from other AI platforms (ChatGPT, Claude, SillyTavern,
-Kindroid, Letta). Available once the monorepo is installed. See the
-[entity-loom user guide](/Psycheros/entity-loom/user-guide/) for what it does.
-
-## Version chips + update checks
-
-The dashboard header carries a small version chip (`v0.2.0`) for the launcher
-itself. While Psycheros and Entity Loom are running, their service cards show a
-"running v…" line with the version reported by each service's `/health` or
-`/api/version` endpoint — including the linked entity-core version where
-relevant. Click any chip to open that package's release page on GitHub.
-
-The launcher checks GitHub Releases once a day (anonymous HTTPS, no telemetry)
-for newer versions of psycheros, entity-core, entity-loom, and itself. When a
-newer version exists, a small orange dot appears on the relevant service card.
-The first time the launcher starts, a one-click modal asks whether you want this
-enabled — your answer is saved to the launcher state file and can be changed
-there.
-
-Chips render `· staging` or `· local` flavor (non-interactive) when the running
-build isn't a tagged public release — staging dogfood images, local docker
-builds, or a launcher pointed at a non-canonical `PSYCHEROS_REPO`. These
-flavored chips don't link out (the matching release page wouldn't exist). The
-full version with build-metadata suffix is exposed via the chip's hover tooltip.
-
-## Settings
-
-Click the **Settings** gear to configure:
-
-- **Install path** — where the Psycheros monorepo is cloned. Default
-  `~/psycheros`. Change this if you've already cloned the monorepo elsewhere and
-  want the launcher to use that copy.
-- **Your name** — what the entity calls you in conversations.
-- **Entity name** — what the entity is called.
-- **Timezone** — used by the entity's daily-memory consolidation and Pulse
-  scheduling.
-
-Settings persist between sessions in a JSON file next to `dashboard.ts`. They're
-just defaults for the install step; once Psycheros is installed, all per-entity
-configuration lives in the Psycheros web UI itself.
-
-## What gets installed
-
-A single monorepo clone at your install path:
-
-```
-~/psycheros/
-├── packages/
-│   ├── psycheros/       ← main app (web UI, chat loop, tools)
-│   ├── entity-core/     ← entity memory + identity (MCP server)
-│   ├── entity-loom/     ← memory import wizard
-│   └── launcher/        ← this launcher
-├── start.sh / start.ps1
-├── stop.sh / stop.ps1
-└── update.sh / update.ps1
-```
-
-## Prerequisites
-
-None. The launcher installs [Deno](https://deno.land) automatically if you don't
-have it. Git is optional — with git, updates use `git pull` (fast); without git,
-the launcher downloads the latest source directly (works fine, just slower).
-
-## After installing
-
-1. Click **Start** in the dashboard.
-2. Click **Open Psycheros** to open the web interface (`http://localhost:3000`
-   by default).
-3. Go to **Settings → LLM Connections** in Psycheros and enter your API key for
-   an OpenAI-compatible LLM provider.
-4. Start chatting with your entity.
-
-If you have chat history from another platform you want to import, use the
-**Start Entity Loom** button under Tools on the launcher dashboard and follow
-the [Entity Loom user guide](/Psycheros/entity-loom/user-guide/).
+1. **Export from v1 first.** In v1's chat UI, go to **Settings → Admin → Entity
+   Data → Export** and save the `.zip`.
+2. Install the v2 launcher (steps above).
+3. Complete v2's welcome wizard and click **Install autostart** — a fresh empty
+   entity comes up.
+4. In v2's chat UI, go to **Settings → Admin → Entity Data → Import** and select
+   the `.zip` from step 1. The daemon restarts and your migrated entity takes
+   over.
 
 ## Updating
 
-Click **Update** in the dashboard. The launcher runs `git pull --ff-only` on the
-install directory (or re-downloads the latest source if git isn't available).
-Restart Psycheros via **Stop** then **Start** to pick up the new version.
+The launcher checks GitHub Releases every 3 hours for newer versions. When an
+update is available, a toast notification appears inside the launcher window.
 
-## Command line (advanced)
-
-If you prefer the terminal, the install scripts work without the launcher UI:
-
-```bash
-# macOS / Linux
-./install.sh
-./start.sh
-./stop.sh
-./update.sh
-```
-
-```powershell
-# Windows
-.\install.ps1
-.\start.ps1
-.\stop.ps1
-.\update.ps1
-```
-
-The dashboard is the same operations as these scripts behind the scenes — pick
-whichever interface you prefer.
+To check manually, open the manager (<kbd>⌘,</kbd>) and look at the version info
+card. Click any version chip to open that package's release page on GitHub.
 
 ## Troubleshooting
 
-**"Deno not found" after restart.** Some systems need a terminal restart to pick
-up the new PATH. Close and reopen your terminal.
+**The launcher won't open on macOS.** Make sure you right-clicked → Open on the
+first launch. If Gatekeeper still blocks it, open Terminal and run:
+`xattr -dr com.apple.quarantine /Applications/Psycheros.app`
 
-**"Could not clone" error.** Check your internet connection and try again. If
-git isn't installed, the launcher will fall back to a direct download.
+**"Port 3000 already in use."** Another instance of Psycheros is running. The
+launcher detects this and connects to the existing daemon — just use the chat
+window.
 
-**First run is slow.** Deno downloads its dependencies on the first launch. This
+**The entity isn't responding.** Open the manager (<kbd>⌘,</kbd>) and check the
+status card. If the daemon shows as Stopped, click **Start daemon**. If it shows
+as Running but chat isn't loading, check the log tail at the bottom of the
+manager for errors.
+
+**First run is slow.** Deno downloads its dependencies on first launch. This
 only happens once.
 
-**Port 3000 already in use.** Stop the other program using that port, or make
-sure you don't have another instance of Psycheros running. Port 3000 is
-Psycheros's web UI; the launcher itself uses port 3001.
-
-**Dashboard won't open.** Run `run.ps1` / `run.sh` from inside the launcher
-directory itself — either `~/psycheros/packages/launcher/` after `install.sh` /
-`install.ps1`, or the extracted `launcher-v*/` folder if you used the offline
-bundle. The boot script needs `dashboard.ts`, `version.ts`, and `deno.json` as
-siblings in the same directory — running it in isolation won't work.
-
-**Launcher port 3001 already in use.** Another launcher session is probably
-already running. Close it before starting a new one.
+**Entity Loom (import wizard).** To import chat histories from other platforms,
+open the Psycheros chat UI and go to **Settings → Admin → Entity Loom**. See the
+[Entity Loom user guide](/Psycheros/entity-loom/user-guide/) for details.
 
 ## When not to use the launcher
 
-The launcher is the recommended path for non-technical operators. If you're
-deploying Psycheros to a server, embedding it in your own infrastructure, or
-running it as a container under an orchestrator, the
+The launcher is the recommended path for desktop users. If you're deploying
+Psycheros to a server, running it in Docker, or embedding it in your own
+infrastructure, the
 [Docker image](https://github.com/PsycherosAI/Psycheros/pkgs/container/psycheros)
 or building from source is a better fit. See the repo
 [README](https://github.com/PsycherosAI/Psycheros#docker) for those paths.
+
+## The legacy v1 launcher
+
+The v1 launcher was a browser-tab dashboard at `http://localhost:3001` with
+Install / Update / Start / Stop buttons. It ran Psycheros as a child process,
+meaning closing the dashboard killed the entity. The v2 launcher replaces it
+with an OS-supervised service model.
+
+The v1 installer scripts (`install.sh` / `install.ps1`) are still available on
+the
+[`launcher-v*` releases](https://github.com/PsycherosAI/Psycheros/releases?q=launcher-v)
+for anyone who prefers that path, but new users should start with v2.

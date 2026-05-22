@@ -7,7 +7,7 @@ hero:
     file: ../../assets/psycheros-logo.svg
   tagline: A persistent AI entity — not a chat thread, not an assistant framework.
   actions:
-    - text: Quickstart with the launcher
+    - text: Install the launcher
       link: /Psycheros/launcher/user-guide/
       icon: right-arrow
       variant: primary
@@ -38,26 +38,26 @@ the way it does.
 
 ## Getting Started
 
-The launcher handles install, update, start, and stop. Pick your platform:
+The launcher is a desktop app that installs Psycheros as a persistent background
+service. Pick your platform:
 
-### macOS / Linux
+### macOS
 
 1. Download
-   [`install.sh`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/install.sh).
-2. Run it:
-
-   ```bash
-   bash install.sh
-   ```
+   [`Psycheros-macOS-latest.dmg`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/Psycheros-macOS-latest.dmg).
+2. Drag to `/Applications/`.
+3. **Right-click** the app → **Open** (required once for unsigned apps —
+   macOS Gatekeeper blocks a normal double-click).
 
 ### Windows
 
 1. Download
-   [`install.ps1`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/install.ps1).
-2. Right-click → **Run with PowerShell**.
+   [`Psycheros-Windows-latest.msi`](https://github.com/PsycherosAI/Psycheros/releases/latest/download/Psycheros-Windows-latest.msi).
+2. Run it. Click through SmartScreen's "More info → Run anyway."
 
-   If PowerShell refuses unsigned scripts, allow them once with
-   `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+The launcher walks you through setup (your name, entity name, timezone, API
+key) and installs Psycheros as a background service. Closing the launcher
+doesn't stop the entity — it runs continuously.
 
 Full reference and troubleshooting:
 [Launcher user guide](/Psycheros/launcher/user-guide/).
@@ -68,7 +68,7 @@ Full reference and troubleshooting:
 	<LinkCard
 		title="Launcher"
 		href="/Psycheros/launcher/user-guide/"
-		description="Start here. Two-file installer + dashboard that handles install / update / start / stop for non-technical operators."
+		description="Desktop app that installs Psycheros as a persistent OS service and opens a window to chat with your entity."
 	/>
 	<LinkCard
 		title="Psycheros"
