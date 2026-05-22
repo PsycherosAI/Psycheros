@@ -62,7 +62,7 @@ The launcher has two surfaces:
 
 - **Chat** — the main view. The entity's web UI rendered inside the launcher
   window. Same interface you'd see at `http://localhost:3000` in a browser.
-- **Manager** — press <kbd>⌘,</kbd> (macOS) or <kbd>Ctrl+,kbd> (Windows) to
+- **Manager** — press <kbd>⌘,</kbd> (macOS) or <kbd>Ctrl+,</kbd> (Windows) to
   toggle. Shows daemon status, install/uninstall autostart, logs, version info,
   and recovery tools.
 
