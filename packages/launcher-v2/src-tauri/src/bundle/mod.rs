@@ -383,6 +383,8 @@ pub fn list_tags(repo_url: &str, prefix: &str) -> Result<Vec<String>, BundleErro
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::process::Command;
 
     // --- stage_bundled_deno --------------------------------------------------
 
