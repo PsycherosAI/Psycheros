@@ -86,19 +86,19 @@ jobs:
               - '.deno-version'
 
       - name: Set up Rust
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
       - name: Set up Deno (for the backup_restore integration test + sidecar staging)
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         uses: denoland/setup-deno@v2
         with:
           deno-version-file: .deno-version
 
       - name: Stage sidecar Deno + icons (setup.sh)
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         # `cargo` won't build on a fresh checkout — tauri.conf.json
         # declares `binaries/deno` as an externalBin, so the build
         # script aborts unless `setup.sh` has staged the per-triple
@@ -108,17 +108,17 @@ jobs:
         run: ./scripts/setup.sh
 
       - name: cargo fmt --check
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/src-tauri
         run: cargo fmt --check
 
       - name: cargo clippy
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/src-tauri
         run: cargo clippy --all-targets -- -D warnings
 
       - name: cargo test (lib + integration)
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/src-tauri
         # --test-threads=1 because snapshot/prune tests mutate the
         # PSYCHEROS_LAUNCHER_DATA_DIR env var. Env vars are
@@ -128,12 +128,12 @@ jobs:
         run: cargo test --all-targets -- --test-threads=1
 
       - name: smoke (--smoke gate)
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/src-tauri
         run: cargo run --bin psycheros-launcher -- --smoke
 
       - name: cargo clippy (webdriver feature)
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/src-tauri
         # The webdriver feature pulls in a non-trivial transitive dep tree
         # (axum / hyper / tower for the WebDriver server). Lint it
@@ -141,7 +141,7 @@ jobs:
         run: cargo clippy --features webdriver --all-targets -- -D warnings
 
       - name: Set up Node (for E2E)
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -149,17 +149,17 @@ jobs:
           cache-dependency-path: packages/launcher-v2/e2e/package-lock.json
 
       - name: Build launcher with webdriver feature
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/src-tauri
         run: cargo build --features webdriver
 
       - name: Install E2E deps
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/e2e
         run: npm ci
 
       - name: Run E2E tests
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/e2e
         run: npm test
 
@@ -185,7 +185,7 @@ jobs:
               - '.deno-version'
 
       - name: Set up Rust (MSVC toolchain)
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -194,13 +194,13 @@ jobs:
         # we currently ship.
 
       - name: Set up Deno (for sidecar staging + integration test)
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         uses: denoland/setup-deno@v2
         with:
           deno-version-file: .deno-version
 
       - name: Stage sidecar Deno + verify icons (setup.ps1)
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         # PowerShell-equivalent of setup.sh. Stages the deno sidecar
         # into src-tauri/binaries/ and confirms committed icons are
         # present. The daemon-runner sidecar is a [[bin]] target
@@ -211,29 +211,29 @@ jobs:
         run: ./scripts/setup.ps1
 
       - name: cargo fmt --check
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/src-tauri
         run: cargo fmt --check
 
       - name: cargo clippy
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/src-tauri
         run: cargo clippy --all-targets -- -D warnings
 
       - name: cargo test (lib + integration)
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/src-tauri
         # --test-threads=1 because snapshot/prune tests mutate the
         # PSYCHEROS_LAUNCHER_DATA_DIR env var. Same reason as macOS.
         run: cargo test --all-targets -- --test-threads=1
 
       - name: smoke (--smoke gate)
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/src-tauri
         run: cargo run --bin psycheros-launcher -- --smoke
 
       - name: cargo clippy (webdriver feature)
-        if: steps.filter.outputs.launcher-v2 == 'true'
+        if: steps.filter.outputs.launcher-v2 == 'true' || startsWith(github.ref, 'refs/tags/')
         working-directory: packages/launcher-v2/src-tauri
         # Same rationale as the macOS job — the webdriver feature
         # pulls in axum/hyper/tower; keep feature-conditional code
