@@ -60,7 +60,10 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// explicit exception of "open this path in the user's file
 /// manager" (the user *wants* that window).
 pub fn hidden_command<S: AsRef<OsStr>>(program: S) -> Command {
+    #[cfg(target_os = "windows")]
     let mut cmd = Command::new(program);
+    #[cfg(not(target_os = "windows"))]
+    let cmd = Command::new(program);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;

@@ -2016,6 +2016,7 @@ fn resolve_pid_image_name(pid: u32) -> Option<String> {
 /// LISTENING state. UDP is ignored (no concept of LISTENING) and
 /// non-LISTENING TCP rows (ESTABLISHED, TIME_WAIT) are ignored — only
 /// the listener "owns" the port.
+#[cfg(target_os = "windows")]
 fn parse_netstat_listener_pid(text: &str, port: u16) -> Option<u32> {
     let suffix = format!(":{port}");
     for line in text.lines() {
@@ -2172,6 +2173,7 @@ mod tests {
 
     // ─── netstat parser (Windows port-conflict detection) ──────────────
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn parses_netstat_ipv4_listener() {
         // Real netstat -ano output, IPv4 listener row.
@@ -2182,6 +2184,7 @@ mod tests {
         assert_eq!(parse_netstat_listener_pid(canned, 3000), Some(12345));
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn parses_netstat_ipv6_listener() {
         // IPv6 listener (the row Tauri-style services usually print).
@@ -2190,6 +2193,7 @@ mod tests {
         assert_eq!(parse_netstat_listener_pid(canned, 3000), Some(12345));
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn netstat_ignores_non_listening_rows() {
         // ESTABLISHED/TIME_WAIT rows can also reference the same port
@@ -2200,6 +2204,7 @@ mod tests {
         assert!(parse_netstat_listener_pid(canned, 3000).is_none());
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn netstat_returns_none_when_port_not_bound() {
         let canned =
@@ -2207,6 +2212,7 @@ mod tests {
         assert!(parse_netstat_listener_pid(canned, 3000).is_none());
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn netstat_ignores_udp_rows() {
         // UDP doesn't have a LISTENING state; netstat shows `*:*` for
@@ -2217,6 +2223,7 @@ mod tests {
         assert!(parse_netstat_listener_pid(canned, 3000).is_none());
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn netstat_returns_first_listener_when_dual_stack() {
         // A daemon that binds both IPv4 and IPv6 produces two rows
