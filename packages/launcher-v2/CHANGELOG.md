@@ -7,6 +7,14 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-23
+
+### Fixed
+
+- macOS: "bundled deno sidecar not found in app resources" error on first run.
+  Tauri 2 places the Deno sidecar in `Contents/MacOS/`, not
+  `Contents/Resources/` — the resolver now checks both locations.
+
 ## [0.2.0] - 2026-05-22
 
 ### Added

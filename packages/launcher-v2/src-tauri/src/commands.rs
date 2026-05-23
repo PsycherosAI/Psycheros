@@ -689,6 +689,8 @@ fn resolve_sidecar_binary(
         format!("binaries/{basename}-{triple}{exe}"),
     ];
     candidates.extend(extra_candidates.iter().map(|s| s.to_string()));
+
+    // Check the Tauri Resource directory first (Contents/Resources/ on macOS).
     for name in &candidates {
         if let Ok(p) = app.path().resolve(name, BaseDirectory::Resource) {
             if p.exists() {
@@ -696,6 +698,22 @@ fn resolve_sidecar_binary(
             }
         }
     }
+
+    // Fallback: Tauri 2 on macOS places externalBin sidecars in
+    // Contents/MacOS/ (next to the main executable), NOT in
+    // Contents/Resources/.  Resolve relative to the current executable
+    // to catch this case.
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            for name in &candidates {
+                let p = exe_dir.join(name);
+                if p.exists() {
+                    return Ok(p);
+                }
+            }
+        }
+    }
+
     Err(format!(
         "bundled {basename} sidecar not found in app resources (checked: {})",
         candidates.join(", "),

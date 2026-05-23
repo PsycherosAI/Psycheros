@@ -6,6 +6,15 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-23
+
+### Fixed
+
+- Z.ai default base URL updated to the correct public endpoint, fixing
+  connection errors for new installs that rely on the seeded default profile.
+- Base instructions template simplified to a concise identity + framework
+  statement, giving entities a cleaner starting prompt.
+
 ## [0.4.0] - 2026-05-22
 
 ### Added
@@ -279,6 +288,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 - Entity identity and memory served by the sibling `entity-core` MCP server,
   spawned as a subprocess when `PSYCHEROS_MCP_ENABLED=true`.
 
+[0.4.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.1
 [0.4.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.0
 [0.3.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.3.3
 [0.3.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.3.2
