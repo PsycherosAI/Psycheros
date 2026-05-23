@@ -39,6 +39,7 @@ export default defineConfig({
         {
           label: "Psycheros",
           items: [
+            "psycheros/user-guide",
             "psycheros/configuration",
             "psycheros/ui-features",
             "psycheros/tools-reference",
