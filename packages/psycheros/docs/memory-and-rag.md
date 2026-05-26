@@ -85,6 +85,12 @@ at 5 AM in the user's local timezone (when `PSYCHEROS_DISPLAY_TZ` is set), or at
 doesn't exist in entity-core (e.g., from a failed MCP write), clears them, and
 re-summarizes.
 
+Imported conversations (from entity-loom) are excluded from summarization since
+entity-loom handles memory extraction during its pipeline. These are tagged with
+`source_type = 'import'` — a one-time migration retroactively tags existing
+imports by their `[platform]` title prefix, and the import endpoint sets the tag
+for new imports going forward. Discord conversations are also excluded.
+
 ### Context-Aware Chunking
 
 Active chat days can produce more conversation content than the worker model's
@@ -97,10 +103,11 @@ The budget is calculated from the active profile's `contextLength`: identity
 system message, prompt template, platform activity, custom instructions, output
 reserve (500 tokens), and a safety margin are subtracted to determine how many
 tokens are available for conversation content. Conversations are grouped into
-chunks by accumulating until the budget would be exceeded — a single
-conversation that exceeds the budget on its own gets its own chunk (with a
-warning log). Every conversation is included in exactly one chunk; no memories
-are silently dropped.
+chunks by accumulating until the budget would be exceeded. A single conversation
+that exceeds the budget on its own is recursively split in half by messages
+until each piece fits — important for companion-style threads that can span
+thousands of messages in a single day. Every message is included in exactly one
+chunk; no memories are silently dropped.
 
 If a chunk fails (e.g., the model rejects an oversized single conversation), the
 error is logged and remaining chunks continue. A partial result still produces a

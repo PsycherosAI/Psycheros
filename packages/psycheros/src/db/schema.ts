@@ -1292,4 +1292,27 @@ function verifyVectorTableSync(db: Database): void {
       `[DB] Rebuilt vec_vault_chunks: ${vaultRebuilt}/${vaultRows.length} rows restored`,
     );
   }
+
+  // Migration: Tag entity-loom imported conversations as source_type='import'
+  // Entity-loom prefixes all titles with [platform] (e.g. [chatgpt], [claude]).
+  // Imported conversations have source_type=NULL, which the app treats as 'web'.
+  // Without this tag, the daily summarizer tries to re-summarize them.
+  const hasImportTag = db
+    .prepare(
+      "SELECT 1 FROM conversations WHERE source_type = 'import' LIMIT 1",
+    )
+    .get();
+
+  if (!hasImportTag) {
+    const tagged = db
+      .prepare(
+        "UPDATE conversations SET source_type = 'import' WHERE (source_type IS NULL OR source_type = 'web') AND title LIKE '[%']",
+      )
+      .run();
+    if (tagged > 0) {
+      console.log(
+        `[DB] Tagged ${tagged} entity-loom imported conversation(s) with source_type='import'`,
+      );
+    }
+  }
 }

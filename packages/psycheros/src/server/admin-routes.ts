@@ -914,7 +914,7 @@ export async function handleAdminDataMigrationChats(
               psychDb.exec("BEGIN TRANSACTION");
               try {
                 psychDb.exec(
-                  "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                  "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at, source_type) VALUES (?, ?, ?, ?, 'import')",
                   [conv.id, conv.title, conv.created_at, conv.updated_at],
                 );
 
@@ -982,7 +982,7 @@ export async function handleAdminDataMigrationChats(
                   psychDb.exec("BEGIN TRANSACTION");
                   try {
                     psychDb.exec(
-                      "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                      "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at, source_type) VALUES (?, ?, ?, ?, 'import')",
                       [forkId, forkTitle, firstMsgTs, lastMsgTs],
                     );
 
@@ -1018,6 +1018,11 @@ export async function handleAdminDataMigrationChats(
                   // No fork — just merge new messages into existing conversation
                   psychDb.exec("BEGIN TRANSACTION");
                   try {
+                    // Tag as import if not already
+                    psychDb.exec(
+                      "UPDATE conversations SET source_type = 'import' WHERE id = ? AND (source_type IS NULL OR source_type = 'web')",
+                      [conv.id],
+                    );
                     let newCount = 0;
                     for (const msg of postForkMessages) {
                       psychDb.exec(

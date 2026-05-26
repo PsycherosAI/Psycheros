@@ -131,6 +131,10 @@ impl LaunchdSupervisor {
                 ec_data.display().to_string(),
             ));
         }
+        env_pairs.push((
+            "PSYCHEROS_MCP_COMMAND".into(),
+            cfg.deno_path.display().to_string(),
+        ));
 
         let env_block = env_pairs
             .iter()

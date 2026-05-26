@@ -149,6 +149,10 @@ impl TaskSchedulerSupervisor {
                 ec_data.display()
             )));
         }
+        tokens.push(quote_argv(&format!(
+            "PSYCHEROS_MCP_COMMAND={}",
+            cfg.deno_path.display()
+        )));
         tokens.join(" ")
     }
 

@@ -35,6 +35,14 @@ If restart doesn't clear it, open `Diagnostics` and check the log panel for
 Deno itself died or got SIGKILLed (memory pressure, etc.), the daemon's MCP
 client keeps reporting offline until the daemon restarts.
 
+**Windows:** if the log shows
+`'deno' is not recognized as an internal or
+external command`, the daemon can't
+find Deno to spawn entity-core. This can happen if the launcher didn't pass
+`PSYCHEROS_MCP_COMMAND` (fixed in a recent release). Workaround: reinstall via
+the launcher's `Uninstall` → `Install` flow, which re-registers the service with
+the correct environment variables.
+
 ### Daemon won't start at all
 
 Check `Diagnostics` → daemon state.

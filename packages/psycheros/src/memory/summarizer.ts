@@ -121,8 +121,45 @@ function estimateConversationTokens(
 }
 
 /**
+ * Recursively split a conversation's messages in half until each piece
+ * fits within the token budget. Preserves the original conversation ID
+ * and title so chat tagging still works in memory output.
+ */
+function splitConversationMessages(
+  conv: ConversationForSummary,
+  maxTokens: number,
+  depth = 0,
+): ConversationForSummary[] {
+  if (
+    estimateConversationTokens([conv]) <= maxTokens || conv.messages.length <= 2
+  ) {
+    return [conv];
+  }
+  if (depth > 10) {
+    console.warn(
+      `[Memory] [chat:${conv.id}] still exceeds budget after 10 splits, including as-is.`,
+    );
+    return [conv];
+  }
+  const mid = Math.ceil(conv.messages.length / 2);
+  return [
+    ...splitConversationMessages(
+      { ...conv, messages: conv.messages.slice(0, mid) },
+      maxTokens,
+      depth + 1,
+    ),
+    ...splitConversationMessages(
+      { ...conv, messages: conv.messages.slice(mid) },
+      maxTokens,
+      depth + 1,
+    ),
+  ];
+}
+
+/**
  * Split conversations into chunks that fit within a token budget.
- * Every conversation is included in exactly one chunk — nothing is dropped.
+ * Oversized conversations are recursively split by messages until
+ * each piece fits. Every message is included in exactly one chunk.
  */
 function chunkConversations(
   conversations: ConversationForSummary[],
@@ -138,17 +175,28 @@ function chunkConversations(
     const convTokens = estimateConversationTokens([conv]);
 
     if (convTokens > maxTokens) {
-      // Flush current chunk before the oversized conversation
       if (currentChunk.length > 0) {
         chunks.push(currentChunk);
         currentChunk = [];
         currentTokens = 0;
       }
+
+      const subConvs = splitConversationMessages(conv, maxTokens);
       console.warn(
-        `[Memory] Single conversation [chat:${conv.id}] exceeds chunk budget ` +
-          `(~${convTokens} tokens > ${maxTokens} budget). Including alone.`,
+        `[Memory] [chat:${conv.id}] exceeds chunk budget ` +
+          `(~${convTokens} tokens > ${maxTokens} budget). Split into ${subConvs.length} message group(s).`,
       );
-      chunks.push([conv]);
+
+      for (const sub of subConvs) {
+        const subTokens = estimateConversationTokens([sub]);
+        if (currentTokens + subTokens > maxTokens && currentChunk.length > 0) {
+          chunks.push(currentChunk);
+          currentChunk = [];
+          currentTokens = 0;
+        }
+        currentChunk.push(sub);
+        currentTokens += subTokens;
+      }
       continue;
     }
 
@@ -270,7 +318,7 @@ function collectConversationsForDate(
   }
 
   // Build conversation objects with titles, excluding non-chat sources
-  const EXCLUDED_SOURCE_TYPES = ["discord"];
+  const EXCLUDED_SOURCE_TYPES = ["discord", "import"];
   const conversations: ConversationForSummary[] = [];
   for (const [convId, msgs] of conversationMap) {
     const conv = db.getConversation(convId);

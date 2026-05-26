@@ -7,6 +7,14 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-05-26
+
+### Fixed
+
+- Daemon supervisors (launchd, Task Scheduler) now pass `PSYCHEROS_MCP_COMMAND`
+  with the bundled Deno path so entity-core spawns using the same Deno binary as
+  the daemon itself, instead of relying on PATH resolution.
+
 ## [0.2.5] - 2026-05-24
 
 ### Fixed

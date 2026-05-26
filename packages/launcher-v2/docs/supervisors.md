@@ -71,9 +71,11 @@ implement it.
 
 The launcher hand-rolls the plist XML (no plist crate dep) because the surface
 is small and the format is stable. EnvironmentVariables block sets
-`PSYCHEROS_DATA_DIR`, `PSYCHEROS_PORT`, `PSYCHEROS_ENTITY_CORE_DATA_DIR`, plus
-`HOME` and `PATH` (launchd starts processes with no shell context, so PATH must
-be set explicitly or `deno` won't be findable for the MCP subprocess spawn).
+`PSYCHEROS_DATA_DIR`, `PSYCHEROS_PORT`, `PSYCHEROS_ENTITY_CORE_PATH`,
+`PSYCHEROS_ENTITY_CORE_DATA_DIR`, `PSYCHEROS_MCP_COMMAND`, plus `HOME` and
+`PATH`. `PSYCHEROS_MCP_COMMAND` is set to the resolved Deno binary path so that
+entity-core (spawned by the daemon via MCP stdio transport) uses the same Deno
+as the daemon itself rather than relying on PATH resolution.
 
 ### Stop semantics
 

@@ -4,6 +4,20 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.6] - 2026-05-26
+
+### Fixed
+
+- Oversized single conversations in daily summarization (common in
+  companion-style threads) are now recursively split by messages until each
+  piece fits within the context budget, instead of being sent as a single
+  oversized chunk.
+- Entity-loom imported conversations are now excluded from daily summarization
+  (entity-loom already handles memory extraction during its pipeline). A
+  one-time DB migration retroactively tags existing imports by their
+  `[platform]` title prefix, and the chat import endpoint sets the tag for new
+  imports.
+
 ## [0.4.5] - 2026-05-26
 
 ### Fixed
