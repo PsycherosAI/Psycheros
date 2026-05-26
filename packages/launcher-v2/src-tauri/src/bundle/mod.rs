@@ -255,11 +255,16 @@ pub fn warm_deno_cache(
         // are fully installed and the daemon works fine at runtime. Detect
         // this specific pattern and treat it as a non-fatal warning.
         if stderr_tail.contains("failed to run scripts for packages") {
-            on_line("warning: lifecycle scripts failed (deno node_modules layout); \
-                     packages are installed, proceeding");
+            on_line(
+                "warning: lifecycle scripts failed (deno node_modules layout); \
+                 packages are installed, proceeding",
+            );
             return Ok(());
         }
-        return Err(BundleError::DenoCache { status, stderr_tail });
+        return Err(BundleError::DenoCache {
+            status,
+            stderr_tail,
+        });
     }
     Ok(())
 }
