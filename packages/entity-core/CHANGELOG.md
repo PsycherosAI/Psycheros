@@ -6,6 +6,19 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-05-26
+
+### Fixed
+
+- **EmbeddingCache v1→v2 migration failed on startup.** `CACHE_SCHEMA` combined
+  `CREATE TABLE` and `CREATE INDEX` into one `db.exec()` call. On a database
+  where `memory_embeddings` existed without the `parent_key` column (v1 schema),
+  the `CREATE TABLE IF NOT EXISTS` was a no-op but the
+  `CREATE INDEX ... ON memory_embeddings(parent_key)` failed immediately —
+  before `migrateSchema()` ever got a chance to add the column. The schema DDL
+  is now split into table creation and index creation, with the migration
+  running between them.
+
 ## [0.2.5] - 2026-05-26
 
 ### Fixed
@@ -149,6 +162,8 @@ All notable changes to entity-core are documented here. The format follows
 - Knowledge graph (people, places, relationships) backed by SQLite + sqlite-vec.
 - Snapshot system: pre-destructive-operation snapshots for recovery.
 
+[0.2.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.2.6
+[0.2.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.2.5
 [0.2.4]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.2.4
 [0.2.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.2.3
 [0.2.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.2.2

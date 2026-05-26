@@ -70,8 +70,14 @@ export interface CacheSearchResult {
 }
 
 // ---- Schema (v2 — chunk support) ----
+//
+// Split into table DDL and index DDL so the migration can run
+// between them. A v1 database has the table but not parent_key;
+// CREATE TABLE IF NOT EXISTS is a no-op for existing tables, so
+// the index on parent_key would fail before migrateSchema() gets
+// a chance to add the column.
 
-const CACHE_SCHEMA = `
+const CACHE_TABLE_DDL = `
   CREATE TABLE IF NOT EXISTS memory_embeddings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     memory_key TEXT NOT NULL UNIQUE,
@@ -85,7 +91,9 @@ const CACHE_SCHEMA = `
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+`;
 
+const CACHE_INDEX_DDL = `
   CREATE INDEX IF NOT EXISTS idx_memory_embeddings_memory_key
     ON memory_embeddings(memory_key);
 
@@ -125,8 +133,10 @@ export class EmbeddingCache {
 
     await ensureDir(join(this.dbPath, ".."));
 
-    // Create main metadata table (always succeeds)
-    this.db.exec(CACHE_SCHEMA);
+    // Create table (no-op if it already exists). Indexes are created
+    // AFTER the migration so the parent_key index doesn't fail on a
+    // v1 table that lacks the column.
+    this.db.exec(CACHE_TABLE_DDL);
 
     // Auto-download sqlite-vec extension into entity-core/lib/ if missing.
     const moduleDir = dirname(fromFileUrl(import.meta.url));
@@ -137,8 +147,12 @@ export class EmbeddingCache {
     this.loadVectorExtension();
     this.vectorAvailable = this.initializeVectorTable();
 
-    // Migrate v1 schema (no parent_key column) to v2
+    // Migrate v1 schema (no parent_key column) to v2 — must run
+    // before index creation so parent_key is guaranteed to exist.
     this.migrateSchema();
+
+    // Now safe to create indexes (parent_key is present)
+    this.db.exec(CACHE_INDEX_DDL);
 
     this.initialized = true;
   }
@@ -591,7 +605,8 @@ export class EmbeddingCache {
       "ALTER TABLE memory_embeddings RENAME TO memory_embeddings_old",
     );
 
-    this.db.exec(CACHE_SCHEMA);
+    this.db.exec(CACHE_TABLE_DDL);
+    this.db.exec(CACHE_INDEX_DDL);
 
     // Migrate data: existing rows become unchunked
     this.db.exec(`

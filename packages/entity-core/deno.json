@@ -1,6 +1,6 @@
 {
   "name": "@entity/core",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "exports": "./src/mod.ts",
   "imports": {
     "zod": "npm:zod@^3"
