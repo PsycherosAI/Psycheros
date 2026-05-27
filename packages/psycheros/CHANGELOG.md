@@ -4,6 +4,19 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.7] - 2026-05-27
+
+### Added
+
+- **Embedding maintenance tools.** Two new entity-core MCP tools
+  (`memory_embedding_purge` and `memory_embedding_rebuild`) for managing the
+  memory embedding cache. Purge removes orphaned entries left behind after
+  manually deleting memory files; rebuild clears and re-embeds all memory files
+  from scratch. Both are accessible from Settings > Entity Core > Maintenance in
+  the web UI.
+
+## [Unreleased]
+
 ## [0.4.6] - 2026-05-26
 
 ### Fixed
@@ -26,8 +39,6 @@ follows [Semantic Versioning](https://semver.org/).
   chunks that fit within the worker model's context window, instead of sending
   all content in a single request that exceeds the limit and crash-loops
   entity-core on startup catch-up.
-
-## [Unreleased]
 
 ## [0.4.4] - 2026-05-26
 
@@ -389,6 +400,8 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 [0.1.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.2
 [0.1.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.1
 [0.1.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.0
+[0.4.7]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.7
+[0.4.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.6
 [0.4.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.5
 [0.4.4]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.4
 [0.4.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.3

@@ -2509,6 +2509,104 @@ export class MCPClient {
       return { success: false, consolidations: [], message: String(error) };
     }
   }
+
+  async purgeEmbeddings(): Promise<{
+    success: boolean;
+    purged: number;
+    remaining: number;
+    message: string;
+  }> {
+    if (!this.client) {
+      return {
+        success: false,
+        purged: 0,
+        remaining: 0,
+        message: "MCP not connected",
+      };
+    }
+    try {
+      const result = await this.callToolWithTimeout(
+        "memory_embedding_purge",
+        {},
+      );
+      const textContent = extractTextContent(result);
+      if (textContent) {
+        const response = JSON.parse(textContent);
+        return {
+          success: true,
+          purged: response.purged ?? 0,
+          remaining: response.remaining ?? 0,
+          message: response.message ?? "Purge complete",
+        };
+      }
+      return {
+        success: false,
+        purged: 0,
+        remaining: 0,
+        message: "No response from MCP",
+      };
+    } catch (error) {
+      console.error("[MCP] Embedding purge failed:", error);
+      return {
+        success: false,
+        purged: 0,
+        remaining: 0,
+        message: String(error),
+      };
+    }
+  }
+
+  async rebuildEmbeddings(): Promise<{
+    success: boolean;
+    rebuilt: number;
+    failed: number;
+    total: number;
+    message: string;
+  }> {
+    if (!this.client) {
+      return {
+        success: false,
+        rebuilt: 0,
+        failed: 0,
+        total: 0,
+        message: "MCP not connected",
+      };
+    }
+    try {
+      const result = await this.callToolWithTimeout(
+        "memory_embedding_rebuild",
+        {},
+        600000,
+      );
+      const textContent = extractTextContent(result);
+      if (textContent) {
+        const response = JSON.parse(textContent);
+        return {
+          success: true,
+          rebuilt: response.rebuilt ?? 0,
+          failed: response.failed ?? 0,
+          total: response.total ?? 0,
+          message: response.message ?? "Rebuild complete",
+        };
+      }
+      return {
+        success: false,
+        rebuilt: 0,
+        failed: 0,
+        total: 0,
+        message: "No response from MCP",
+      };
+    } catch (error) {
+      console.error("[MCP] Embedding rebuild failed:", error);
+      return {
+        success: false,
+        rebuilt: 0,
+        failed: 0,
+        total: 0,
+        message: String(error),
+      };
+    }
+  }
 }
 
 /**

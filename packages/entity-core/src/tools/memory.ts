@@ -955,6 +955,133 @@ export function createMemoryDeleteHandler(
   };
 }
 
+// ---- Embedding maintenance tools ----
+
+export const MemoryEmbeddingPurgeSchema = z.object({});
+
+export interface MemoryEmbeddingPurgeOutput {
+  purged: number;
+  remaining: number;
+  message: string;
+}
+
+export function createMemoryEmbeddingPurgeHandler(
+  store: FileStore,
+  cache: EmbeddingCache,
+) {
+  return async (): Promise<MemoryEmbeddingPurgeOutput> => {
+    let purged = 0;
+
+    const granularities: Granularity[] = [
+      "daily",
+      "weekly",
+      "monthly",
+      "yearly",
+      "significant",
+    ];
+
+    for (const granularity of granularities) {
+      const memories = await store.listMemories(granularity);
+      const existingKeys = new Set(memories.map((m) =>
+        computeMemoryKey({
+          granularity: m.granularity,
+          date: m.date,
+          sourceInstance: m.sourceInstance || undefined,
+          slug: m.slug || undefined,
+        })
+      ));
+
+      const entries = cache.getEntriesByGranularity(granularity);
+      for (const entry of entries) {
+        if (!existingKeys.has(entry.parentKey)) {
+          cache.delete(entry.parentKey);
+          purged++;
+        }
+      }
+    }
+
+    const totalAfter = cache.getStats().totalCached;
+    return {
+      purged,
+      remaining: totalAfter,
+      message: purged > 0
+        ? `Purged ${purged} orphaned embedding(s). ${totalAfter} remaining.`
+        : "No orphaned embeddings found.",
+    };
+  };
+}
+
+export const MemoryEmbeddingRebuildSchema = z.object({});
+
+export interface MemoryEmbeddingRebuildOutput {
+  rebuilt: number;
+  failed: number;
+  total: number;
+  message: string;
+}
+
+export function createMemoryEmbeddingRebuildHandler(
+  store: FileStore,
+  cache: EmbeddingCache,
+) {
+  return async (): Promise<MemoryEmbeddingRebuildOutput> => {
+    const statsBefore = cache.getStats();
+    const total = statsBefore.totalCached;
+
+    // Clear all cached embeddings
+    cache.clearAll();
+
+    const embedder = getEmbedder();
+    let rebuilt = 0;
+    let failed = 0;
+
+    const granularities: Granularity[] = [
+      "daily",
+      "weekly",
+      "monthly",
+      "yearly",
+      "significant",
+    ];
+
+    for (const granularity of granularities) {
+      const memories = await store.listMemories(granularity);
+      for (const memory of memories) {
+        try {
+          const result = await cache.getOrCompute(
+            {
+              granularity: memory.granularity,
+              date: memory.date,
+              sourceInstance: memory.sourceInstance || undefined,
+              slug: memory.slug || undefined,
+              content: memory.content,
+            },
+            embedder,
+          );
+          if (result) {
+            rebuilt++;
+          } else {
+            failed++;
+          }
+        } catch (err) {
+          console.error(
+            `[Memory] Failed to rebuild embedding for ${granularity}/${memory.date}: ${err}`,
+          );
+          failed++;
+        }
+      }
+    }
+
+    return {
+      rebuilt,
+      failed,
+      total,
+      message: failed === 0
+        ? `Rebuilt ${rebuilt} embedding(s) from ${rebuilt} memory files.`
+        : `Rebuilt ${rebuilt} embedding(s), ${failed} failed.`,
+    };
+  };
+}
+
 export const memoryTools = {
   "memory/create": {
     description:
@@ -985,5 +1112,15 @@ export const memoryTools = {
     description:
       "Permanently delete a memory entry. I use this to remove memories that are no longer relevant or were created in error.",
     inputSchema: MemoryDeleteSchema,
+  },
+  "memory/embedding_purge": {
+    description:
+      "Remove orphaned memory embeddings for files that no longer exist. Cleans up ghost entries in the embedding cache left behind after manual file deletion.",
+    inputSchema: MemoryEmbeddingPurgeSchema,
+  },
+  "memory/embedding_rebuild": {
+    description:
+      "Clear all memory embeddings and rebuild them from existing memory files. I use this after bulk deletion or migration to ensure embeddings match current files.",
+    inputSchema: MemoryEmbeddingRebuildSchema,
   },
 };

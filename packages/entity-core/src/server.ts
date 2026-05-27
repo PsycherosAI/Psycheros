@@ -40,6 +40,8 @@ import {
   createMemoryConsolidateHandler,
   createMemoryCreateHandler,
   createMemoryDeleteHandler,
+  createMemoryEmbeddingPurgeHandler,
+  createMemoryEmbeddingRebuildHandler,
   createMemoryListHandler,
   createMemoryReadHandler,
   createMemorySearchHandler,
@@ -564,6 +566,50 @@ export function createServer(config: Partial<ServerConfig> = {}): McpServer {
       const handler = createMemoryDeleteHandler(store, embeddingCache);
       const result = await handler({ granularity, date, instanceId, slug });
 
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  // Register embedding maintenance tools
+  server.tool(
+    "memory_embedding_purge",
+    memoryTools["memory/embedding_purge"].description,
+    {},
+    async () => {
+      await store.initialize();
+      await embeddingCache.initialize();
+      const handler = createMemoryEmbeddingPurgeHandler(store, embeddingCache);
+      const result = await handler();
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.tool(
+    "memory_embedding_rebuild",
+    memoryTools["memory/embedding_rebuild"].description,
+    {},
+    async () => {
+      await store.initialize();
+      await embeddingCache.initialize();
+      const handler = createMemoryEmbeddingRebuildHandler(
+        store,
+        embeddingCache,
+      );
+      const result = await handler();
       return {
         content: [
           {

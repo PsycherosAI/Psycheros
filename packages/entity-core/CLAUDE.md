@@ -97,6 +97,18 @@ ISO-week boundary math is the most common breakage point.
 Significant memories sit alongside the hierarchy and are never folded into a
 higher tier. They're surfaced separately by RAG.
 
+## Embedding maintenance
+
+Two MCP tools manage the memory embedding cache in `graph.db` (separate from
+knowledge graph embeddings in `vec_graph_nodes`):
+
+- `memory_embedding_purge` — scans all cached memory embeddings and removes
+  entries whose memory file no longer exists. Use after manual file deletion to
+  prevent ghost search results.
+- `memory_embedding_rebuild` — clears the entire memory embedding cache and
+  re-embeds every memory file from scratch. Use after bulk deletion or
+  migration.
+
 ## Knowledge graph
 
 Schema, node and edge types, confidence scoring, hybrid RAG, and the

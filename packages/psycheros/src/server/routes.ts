@@ -88,6 +88,10 @@ import {
   renderCorePromptsSettings,
   renderECConsolidationComplete,
   renderECConsolidationRunning,
+  renderECEmbeddingPurgeComplete,
+  renderECEmbeddingPurgeRunning,
+  renderECEmbeddingRebuildComplete,
+  renderECEmbeddingRebuildRunning,
   renderEntityCoreGraph,
   renderEntityCoreHub,
   renderEntityCoreLLM,
@@ -8537,6 +8541,130 @@ export function handleEntityCoreConsolidationRun(ctx: RouteContext): Response {
     })
     .finally(() => {
       ecConsolidationRunning = false;
+    });
+
+  return response;
+}
+
+let ecPurgeRunning = false;
+
+export function handleEntityCoreEmbeddingPurge(ctx: RouteContext): Response {
+  if (!ctx.mcpClient) {
+    return new Response(
+      renderSaveError("Purge requires MCP connection to entity-core"),
+      {
+        status: 400,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      },
+    );
+  }
+
+  if (ecPurgeRunning) {
+    return new Response(renderSaveError("Purge is already running"), {
+      status: 409,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  ecPurgeRunning = true;
+
+  const html = renderECEmbeddingPurgeRunning();
+  const response = new Response(html, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+
+  const mcpClient = ctx.mcpClient;
+  mcpClient.purgeEmbeddings()
+    .then((result) => {
+      const html = renderECEmbeddingPurgeComplete({
+        purged: result.purged,
+        remaining: result.remaining,
+        message: result.message,
+      });
+      getBroadcaster().broadcastUpdate({
+        target: "#ec-purge-content",
+        html,
+        swap: "outerHTML",
+      }, null);
+    })
+    .catch((error) => {
+      console.error("[Routes] EC embedding purge failed:", error);
+      const html = renderECEmbeddingPurgeComplete({
+        purged: 0,
+        remaining: 0,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      getBroadcaster().broadcastUpdate({
+        target: "#ec-purge-content",
+        html,
+        swap: "outerHTML",
+      }, null);
+    })
+    .finally(() => {
+      ecPurgeRunning = false;
+    });
+
+  return response;
+}
+
+let ecRebuildRunning = false;
+
+export function handleEntityCoreEmbeddingRebuild(ctx: RouteContext): Response {
+  if (!ctx.mcpClient) {
+    return new Response(
+      renderSaveError("Rebuild requires MCP connection to entity-core"),
+      {
+        status: 400,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      },
+    );
+  }
+
+  if (ecRebuildRunning) {
+    return new Response(renderSaveError("Rebuild is already running"), {
+      status: 409,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  ecRebuildRunning = true;
+
+  const html = renderECEmbeddingRebuildRunning();
+  const response = new Response(html, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+
+  const mcpClient = ctx.mcpClient;
+  mcpClient.rebuildEmbeddings()
+    .then((result) => {
+      const html = renderECEmbeddingRebuildComplete({
+        rebuilt: result.rebuilt,
+        failed: result.failed,
+        total: result.total,
+        message: result.message,
+      });
+      getBroadcaster().broadcastUpdate({
+        target: "#ec-rebuild-content",
+        html,
+        swap: "outerHTML",
+      }, null);
+    })
+    .catch((error) => {
+      console.error("[Routes] EC embedding rebuild failed:", error);
+      const html = renderECEmbeddingRebuildComplete({
+        rebuilt: 0,
+        failed: 0,
+        total: 0,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      getBroadcaster().broadcastUpdate({
+        target: "#ec-rebuild-content",
+        html,
+        swap: "outerHTML",
+      }, null);
+    })
+    .finally(() => {
+      ecRebuildRunning = false;
     });
 
   return response;

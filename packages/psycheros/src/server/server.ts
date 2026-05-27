@@ -126,6 +126,8 @@ import {
   handleDeleteVault,
   handleEmbedMemories,
   handleEntityCoreConsolidationRun,
+  handleEntityCoreEmbeddingPurge,
+  handleEntityCoreEmbeddingRebuild,
   handleEntityCoreFragment,
   handleEntityCoreGraph,
   handleEntityCoreLLM,
@@ -1817,6 +1819,20 @@ export class Server {
     // POST /api/entity-core/consolidation/run - Run consolidation from Entity Core context
     if (method === "POST" && path === "/api/entity-core/consolidation/run") {
       return await handleEntityCoreConsolidationRun(ctx);
+    }
+
+    // POST /api/entity-core/embeddings/purge - Purge orphaned memory embeddings
+    if (
+      method === "POST" && path === "/api/entity-core/embeddings/purge"
+    ) {
+      return await handleEntityCoreEmbeddingPurge(ctx);
+    }
+
+    // POST /api/entity-core/embeddings/rebuild - Rebuild all memory embeddings
+    if (
+      method === "POST" && path === "/api/entity-core/embeddings/rebuild"
+    ) {
+      return await handleEntityCoreEmbeddingRebuild(ctx);
     }
 
     // POST /api/entity-core/sync - Manual sync (pull + push)

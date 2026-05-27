@@ -235,6 +235,13 @@ content past the 3000-char mark unsearchable. The old Psycheros chunker split
 files into ~512-token pieces and embedded each independently — entity-core does
 not currently do this.
 
+**Embedding maintenance:** Two MCP tools manage the memory embedding cache.
+`memory_embedding_purge` removes orphaned entries left behind after manual file
+deletion (prevents ghost search results). `memory_embedding_rebuild` clears and
+re-embeds all memory files from scratch. Both are available from Settings >
+Entity Core > Maintenance. Knowledge graph embeddings are separate and
+unaffected.
+
 ### Chat RAG
 
 Semantic search over conversation history.

@@ -474,6 +474,39 @@ export class EmbeddingCache {
   }
 
   /**
+   * Get all parent keys for a given granularity.
+   */
+  getEntriesByGranularity(granularity: string): { parentKey: string }[] {
+    if (!this.initialized) return [];
+
+    const stmt = this.db.prepare(
+      "SELECT DISTINCT parent_key FROM memory_embeddings WHERE granularity = ?",
+    );
+    const rows = stmt.all<{ parent_key: string }>(granularity);
+    stmt.finalize();
+
+    return rows.map((r) => ({ parentKey: r.parent_key }));
+  }
+
+  /**
+   * Clear all cached embeddings (metadata and vectors).
+   */
+  clearAll(): void {
+    if (!this.initialized) return;
+
+    // Delete all vector entries first (need rowids from metadata)
+    if (this.vectorAvailable) {
+      try {
+        this.db.exec("DELETE FROM vec_memory_embeddings");
+      } catch {
+        // Table might not exist or be empty
+      }
+    }
+
+    this.db.exec("DELETE FROM memory_embeddings");
+  }
+
+  /**
    * Get cache statistics.
    */
   getStats(): EmbeddingCacheStats {

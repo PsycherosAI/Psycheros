@@ -6,6 +6,17 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-27
+
+### Added
+
+- **memory_embedding_purge:** MCP tool that removes orphaned embedding entries
+  for deleted memory files from graph.db. Use after manual file deletion to
+  prevent ghost search results.
+- **memory_embedding_rebuild:** MCP tool that clears the entire memory embedding
+  cache and re-embeds every memory file from scratch. Knowledge graph embeddings
+  (`vec_graph_nodes`) are unaffected.
+
 ## [0.2.6] - 2026-05-26
 
 ### Fixed
@@ -162,6 +173,7 @@ All notable changes to entity-core are documented here. The format follows
 - Knowledge graph (people, places, relationships) backed by SQLite + sqlite-vec.
 - Snapshot system: pre-destructive-operation snapshots for recovery.
 
+[0.3.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.0
 [0.2.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.2.6
 [0.2.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.2.5
 [0.2.4]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.2.4

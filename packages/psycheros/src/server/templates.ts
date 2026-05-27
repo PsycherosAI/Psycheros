@@ -4026,6 +4026,42 @@ export function renderEntityCoreMaintenance(mcpAvailable: boolean): string {
     </div>
   </div>
 
+  <div class="ec-maintenance-section">
+    <h3 class="admin-section-title">Purge Orphaned Embeddings</h3>
+    <p class="admin-action-desc">
+      Remove embedding cache entries for memory files that no longer exist.
+      Use this after manually deleting memory files to prevent ghost results
+      in memory search.
+    </p>
+    <div id="ec-purge-content">
+      <button
+        class="btn btn--primary btn--sm"
+        id="ec-purge-btn"
+        hx-post="/api/entity-core/embeddings/purge"
+        hx-target="#ec-purge-content"
+        hx-swap="outerHTML"
+      >Purge Orphans</button>
+    </div>
+  </div>
+
+  <div class="ec-maintenance-section">
+    <h3 class="admin-section-title">Rebuild Memory Embeddings</h3>
+    <p class="admin-action-desc">
+      Clear all memory embeddings and rebuild them from existing memory files.
+      This ensures the embedding cache matches the actual files on disk.
+      May take several minutes with large memory stores.
+    </p>
+    <div id="ec-rebuild-content">
+      <button
+        class="btn btn--primary btn--sm"
+        id="ec-rebuild-btn"
+        hx-post="/api/entity-core/embeddings/rebuild"
+        hx-target="#ec-rebuild-content"
+        hx-swap="outerHTML"
+      >Rebuild All</button>
+    </div>
+  </div>
+
 </div>`;
 }
 
@@ -4084,6 +4120,83 @@ export function renderECConsolidationComplete(
       ? `<div class="consolidation-results-list">${itemsHtml}</div>`
       : ""
   }
+    <div class="consolidation-actions">
+      <button
+        class="btn btn--ghost btn--sm"
+        hx-get="/fragments/settings/entity-core/maintenance"
+        hx-target="#settings-content"
+        hx-swap="innerHTML"
+      >Refresh Status</button>
+    </div>
+  </div>
+</div>`;
+}
+
+export function renderECEmbeddingPurgeRunning(): string {
+  const oobTabs = renderEntityCoreTabActiveState("maintenance");
+  return `${oobTabs}
+<div id="ec-purge-content">
+  <div class="ec-maintenance-section">
+    <h3 class="admin-section-title">Purge Orphaned Embeddings</h3>
+    <div class="consolidation-running">
+      <span class="consolidation-spinner"></span>
+      Scanning for orphaned embeddings...
+    </div>
+    <div id="ec-purge-results"></div>
+  </div>
+</div>`;
+}
+
+export function renderECEmbeddingPurgeComplete(result: {
+  purged: number;
+  remaining: number;
+  message: string;
+}): string {
+  const oobTabs = renderEntityCoreTabActiveState("maintenance");
+  return `${oobTabs}
+<div id="ec-purge-content">
+  <div class="ec-maintenance-section">
+    <h3 class="admin-section-title">Purge Orphaned Embeddings</h3>
+    <div class="consolidation-summary">${escapeHtml(result.message)}</div>
+    <div class="consolidation-actions">
+      <button
+        class="btn btn--ghost btn--sm"
+        hx-get="/fragments/settings/entity-core/maintenance"
+        hx-target="#settings-content"
+        hx-swap="innerHTML"
+      >Refresh Status</button>
+    </div>
+  </div>
+</div>`;
+}
+
+export function renderECEmbeddingRebuildRunning(): string {
+  const oobTabs = renderEntityCoreTabActiveState("maintenance");
+  return `${oobTabs}
+<div id="ec-rebuild-content">
+  <div class="ec-maintenance-section">
+    <h3 class="admin-section-title">Rebuild Memory Embeddings</h3>
+    <div class="consolidation-running">
+      <span class="consolidation-spinner"></span>
+      Rebuilding embeddings... (this may take a while)
+    </div>
+    <div id="ec-rebuild-results"></div>
+  </div>
+</div>`;
+}
+
+export function renderECEmbeddingRebuildComplete(result: {
+  rebuilt: number;
+  failed: number;
+  total: number;
+  message: string;
+}): string {
+  const oobTabs = renderEntityCoreTabActiveState("maintenance");
+  return `${oobTabs}
+<div id="ec-rebuild-content">
+  <div class="ec-maintenance-section">
+    <h3 class="admin-section-title">Rebuild Memory Embeddings</h3>
+    <div class="consolidation-summary">${escapeHtml(result.message)}</div>
     <div class="consolidation-actions">
       <button
         class="btn btn--ghost btn--sm"
