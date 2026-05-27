@@ -167,6 +167,11 @@ export class MCPClient {
   private reconnectBaseDelayMs = 5_000; // doubles each attempt
   private isReconnecting = false;
   /**
+   * Number of MCP tool calls currently in flight. Used to suppress health-ping
+   * reconnects — if a tool call is pending, entity-core is alive but busy.
+   */
+  private activeToolCalls = 0;
+  /**
    * Scheduler used to durably enqueue identity-push jobs. Injected after
    * construction by the server (the scheduler is created later in the
    * startup sequence). When null I fall back to direct push attempts —
@@ -201,21 +206,26 @@ export class MCPClient {
   ): Promise<unknown> {
     if (!this.client) throw new Error("[MCP] Not connected");
     const ms = timeoutMs ?? this.toolCallTimeoutMs;
-    const result = await Promise.race([
-      this.client.callTool({ name, arguments: args }),
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () =>
-            reject(
-              new Error(
-                `[MCP] Tool call '${name}' timed out after ${ms}ms`,
+    this.activeToolCalls++;
+    try {
+      const result = await Promise.race([
+        this.client.callTool({ name, arguments: args }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `[MCP] Tool call '${name}' timed out after ${ms}ms`,
+                ),
               ),
-            ),
-          ms,
-        )
-      ),
-    ]);
-    return result;
+            ms,
+          )
+        ),
+      ]);
+      return result;
+    } finally {
+      this.activeToolCalls--;
+    }
   }
 
   /**
@@ -527,6 +537,16 @@ export class MCPClient {
           message: "Entity-core reconnected",
         });
       } else if (!ok && this.wasAlive) {
+        // Don't declare entity-core dead while a tool call is in flight —
+        // it's alive but busy processing the request and can't answer
+        // pings (single-threaded stdio JSON-RPC). The tool call's own
+        // timeout will handle the real hang.
+        if (this.activeToolCalls > 0) {
+          console.log(
+            "[MCP] Health ping failed but tool call in progress — skipping reconnect",
+          );
+          return;
+        }
         this.wasAlive = false;
         console.error("[MCP] Entity-core is not responding to pings");
         this.broadcastMcpStatus({

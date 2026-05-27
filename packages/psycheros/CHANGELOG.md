@@ -4,6 +4,19 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.9] - 2026-05-27
+
+### Fixed
+
+- **Health pings no longer kill entity-core during tool calls.** Entity-core is
+  single-threaded over stdio JSON-RPC — while processing `sync_pull` (which
+  reads hundreds of memory files on slow Windows machines), it can't respond to
+  health pings. The ping timeout would fire, Psycheros would kill and restart
+  entity-core, and the crash loop repeated before `sync_pull` ever finished. The
+  MCP client now tracks active tool calls and suppresses the reconnect trigger
+  while any call is pending. The tool call's own timeout still handles genuine
+  hangs.
+
 ## [0.4.8] - 2026-05-27
 
 ### Fixed
@@ -415,6 +428,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 [0.1.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.2
 [0.1.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.1
 [0.1.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.0
+[0.4.9]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.9
 [0.4.8]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.8
 [0.4.7]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.7
 [0.4.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.6
