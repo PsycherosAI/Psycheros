@@ -86,8 +86,8 @@ import {
   renderConversationItem,
   renderConversationList,
   renderCorePromptsSettings,
-  renderECConsolidationComplete,
-  renderECConsolidationRunning,
+  // renderECConsolidationComplete, // removed — consolidation runs automatically on startup
+  // renderECConsolidationRunning,
   renderECEmbeddingPurgeComplete,
   renderECEmbeddingPurgeRunning,
   renderECEmbeddingRebuildComplete,
@@ -8477,74 +8477,78 @@ export async function handleEntityCoreSnapshotPreview(
   });
 }
 
-/**
- * Handle POST /api/entity-core/consolidation/run — Run consolidation from Entity Core context.
- */
-let ecConsolidationRunning = false;
-
-export function handleEntityCoreConsolidationRun(ctx: RouteContext): Response {
-  if (!ctx.mcpClient) {
-    return new Response(
-      renderSaveError("Consolidation requires MCP connection to entity-core"),
-      {
-        status: 400,
-        headers: { "Content-Type": "text/html; charset=utf-8" },
-      },
-    );
-  }
-
-  if (ecConsolidationRunning) {
-    return new Response(renderSaveError("Consolidation is already running"), {
-      status: 409,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
-  }
-
-  ecConsolidationRunning = true;
-
-  const html = renderECConsolidationRunning();
-  const response = new Response(html, {
-    headers: { "Content-Type": "text/html; charset=utf-8" },
-  });
-
-  // Fire consolidation in background
-  const mcpClient = ctx.mcpClient;
-  mcpClient.consolidateMemories({ all: true })
-    .then((result) => {
-      const displayResults = result.consolidations.map((c) => ({
-        granularity: c.granularity,
-        success: c.success,
-        error: c.error,
-      }));
-
-      const html = renderECConsolidationComplete(displayResults);
-      getBroadcaster().broadcastUpdate({
-        target: "#ec-consolidation-content",
-        html,
-        swap: "outerHTML",
-      }, null);
-    })
-    .catch((error) => {
-      console.error("[Routes] EC consolidation failed:", error);
-      const html = renderECConsolidationComplete([
-        {
-          granularity: "consolidation",
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      ]);
-      getBroadcaster().broadcastUpdate({
-        target: "#ec-consolidation-content",
-        html,
-        swap: "outerHTML",
-      }, null);
-    })
-    .finally(() => {
-      ecConsolidationRunning = false;
-    });
-
-  return response;
-}
+// NOTE: Memory Consolidation removed from UI — it now runs automatically on
+// startup. Route handler preserved below in case manual triggering is ever
+// needed again.
+//
+// /**
+//  * Handle POST /api/entity-core/consolidation/run — Run consolidation from Entity Core context.
+//  */
+// let ecConsolidationRunning = false;
+//
+// export function handleEntityCoreConsolidationRun(ctx: RouteContext): Response {
+//   if (!ctx.mcpClient) {
+//     return new Response(
+//       renderSaveError("Consolidation requires MCP connection to entity-core"),
+//       {
+//         status: 400,
+//         headers: { "Content-Type": "text/html; charset=utf-8" },
+//       },
+//     );
+//   }
+//
+//   if (ecConsolidationRunning) {
+//     return new Response(renderSaveError("Consolidation is already running"), {
+//       status: 409,
+//       headers: { "Content-Type": "text/html; charset=utf-8" },
+//     });
+//   }
+//
+//   ecConsolidationRunning = true;
+//
+//   const html = renderECConsolidationRunning();
+//   const response = new Response(html, {
+//     headers: { "Content-Type": "text/html; charset=utf-8" },
+//   });
+//
+//   // Fire consolidation in background
+//   const mcpClient = ctx.mcpClient;
+//   mcpClient.consolidateMemories({ all: true })
+//     .then((result) => {
+//       const displayResults = result.consolidations.map((c) => ({
+//         granularity: c.granularity,
+//         success: c.success,
+//         error: c.error,
+//       }));
+//
+//       const html = renderECConsolidationComplete(displayResults);
+//       getBroadcaster().broadcastUpdate({
+//         target: "#ec-consolidation-content",
+//         html,
+//         swap: "outerHTML",
+//       }, null);
+//     })
+//     .catch((error) => {
+//       console.error("[Routes] EC consolidation failed:", error);
+//       const html = renderECConsolidationComplete([
+//         {
+//           granularity: "consolidation",
+//           success: false,
+//           error: error instanceof Error ? error.message : String(error),
+//         },
+//       ]);
+//       getBroadcaster().broadcastUpdate({
+//         target: "#ec-consolidation-content",
+//         html,
+//         swap: "outerHTML",
+//       }, null);
+//     })
+//     .finally(() => {
+//       ecConsolidationRunning = false;
+//     });
+//
+//   return response;
+// }
 
 let ecPurgeRunning = false;
 

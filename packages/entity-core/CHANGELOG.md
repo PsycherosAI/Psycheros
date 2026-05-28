@@ -6,6 +6,26 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-28
+
+### Fixed
+
+- **`memory_list` MCP tool now passes `offset`, `beforeDate`, and `afterDate`
+  parameters through to the handler.** These fields were defined in the input
+  schema but dropped on the floor at the server dispatch layer, making date-
+  filtered and paginated memory queries silently ignore all filtering.
+
+### Changed
+
+- **Memory embeddings now include a human-readable date prefix** (e.g. "Daily
+  memory from February 14, 2026. [content]") so that temporal queries like "what
+  happened last week" can match memories by date semantics. The enrichment
+  algorithm is versioned — schema bumped to v2, and entity-core auto-rebuilds
+  the embedding cache on startup when a version change is detected.
+- **Memory search `minScore` lowered from 0.3 to 0.25** to improve recall for
+  date-sensitive and indirect queries that previously fell just below the
+  threshold.
+
 ## [0.3.0] - 2026-05-27
 
 ### Added
@@ -173,6 +193,7 @@ All notable changes to entity-core are documented here. The format follows
 - Knowledge graph (people, places, relationships) backed by SQLite + sqlite-vec.
 - Snapshot system: pre-destructive-operation snapshots for recovery.
 
+[0.3.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.1
 [0.3.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.0
 [0.2.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.2.6
 [0.2.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.2.5

@@ -81,6 +81,8 @@ export class MessageRouter {
   private channelTiers: Map<string, ActiveTier> = new Map();
   /** Handle for the timestamp pruning interval */
   private pruneInterval: ReturnType<typeof setInterval> | null = null;
+  /** DM channel IDs currently being tracked (not in server config) */
+  private dmChannels: Set<string> = new Set();
 
   constructor(deps: RouterDeps) {
     this.deps = deps;
@@ -121,6 +123,7 @@ export class MessageRouter {
     this.processing.clear();
     this.messageTimestamps.clear();
     this.channelTiers.clear();
+    this.dmChannels.clear();
     console.log("[Discord] Message router stopped");
   }
 
@@ -139,6 +142,8 @@ export class MessageRouter {
     }
 
     for (const channelId of this.buffers.keys()) {
+      // Don't clean up DM channels — they're not in server config
+      if (this.dmChannels.has(channelId)) continue;
       if (!activeChannelIds.has(channelId)) {
         this.clearPeriodicTimer(channelId);
         const debounce = this.timers.get(channelId);
@@ -234,6 +239,10 @@ export class MessageRouter {
       );
       return;
     }
+
+    // Track DM channel so flushBuffer's config-removal safety gate
+    // doesn't silently drop it (DM channels are never in server config).
+    this.dmChannels.add(msg.channel_id);
 
     this.addToBuffer(
       msg.channel_id,
@@ -386,8 +395,12 @@ export class MessageRouter {
     mode: ChannelMode,
     tier?: ActiveTier,
   ): Promise<void> {
-    // Safety: skip if channel was removed from config between timer ticks
-    if (!this.getChannelConfigByChannelId(channelId)) {
+    // Safety: skip if channel was removed from config between timer ticks.
+    // DM channels are exempt — they're not part of the server config.
+    if (
+      !this.dmChannels.has(channelId) &&
+      !this.getChannelConfigByChannelId(channelId)
+    ) {
       this.clearPeriodicTimer(channelId);
       this.buffers.delete(channelId);
       return;
@@ -564,8 +577,12 @@ export class MessageRouter {
   }
 
   private async onPeriodicFlush(channelId: string): Promise<void> {
-    // Safety: skip if channel was removed from config between timer ticks
-    if (!this.getChannelConfigByChannelId(channelId)) {
+    // Safety: skip if channel was removed from config between timer ticks.
+    // DM channels are exempt — they're not part of the server config.
+    if (
+      !this.dmChannels.has(channelId) &&
+      !this.getChannelConfigByChannelId(channelId)
+    ) {
       this.clearPeriodicTimer(channelId);
       this.buffers.delete(channelId);
       return;

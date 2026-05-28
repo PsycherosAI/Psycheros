@@ -140,6 +140,18 @@ const OP = {
 // DiscordGatewayClient
 // =============================================================================
 
+/** Discord gateway close codes that should NOT trigger automatic reconnect. */
+const NON_RETRYABLE_CLOSE_CODES = new Set([
+  4003, // Authentication timed out
+  4004, // Authentication failed
+  4005, // Already authenticating
+  4010, // Invalid shard
+  4011, // Sharding required
+  4012, // Invalid API version
+  4013, // Invalid intent(s)
+  4014, // Disallowed intent(s)
+]);
+
 export class DiscordGatewayClient {
   private ws: WebSocket | null = null;
   private token: string;
@@ -151,6 +163,7 @@ export class DiscordGatewayClient {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
   private closed = false;
+  private skipNextClose = false;
   private handlers: Map<string, Set<GatewayEventHandler>> = new Map();
   private botUserId: string | null = null;
   private botUsername: string | null = null;
@@ -198,6 +211,18 @@ export class DiscordGatewayClient {
   }
 
   private connectWs(wsUrl: string): Promise<void> {
+    // Close any existing WebSocket to prevent stale event handlers from
+    // firing and scheduling duplicate reconnects.
+    this.skipNextClose = true;
+    if (this.ws) {
+      try {
+        this.ws.close(1000, "Replacing connection");
+      } catch {
+        // Ignore — old WS may already be closed
+      }
+      this.ws = null;
+    }
+
     return new Promise((resolve, reject) => {
       try {
         this.ws = new WebSocket(wsUrl);
@@ -208,7 +233,6 @@ export class DiscordGatewayClient {
 
       this.ws.onopen = () => {
         console.log("[Discord] WebSocket connected");
-        this.reconnectAttempts = 0;
       };
 
       this.ws.onmessage = (event: MessageEvent) => {
@@ -225,7 +249,22 @@ export class DiscordGatewayClient {
           `[Discord] WebSocket closed: code=${event.code}, reason=${event.reason}`,
         );
         this.cleanupHeartbeat();
-        if (!this.closed && event.code !== 4004) {
+        if (this.skipNextClose) {
+          this.skipNextClose = false;
+          return;
+        }
+        if (NON_RETRYABLE_CLOSE_CODES.has(event.code)) {
+          // Fatal close — clear session state so reconnects (if triggered
+          // externally) don't attempt stale RESUME with a dead token.
+          this.sessionId = null;
+          this.resumeUrl = null;
+          this.sequence = null;
+          console.error(
+            `[Discord] Fatal close code ${event.code} — will not auto-reconnect`,
+          );
+          return;
+        }
+        if (!this.closed) {
           this.scheduleReconnect();
         }
       };
@@ -233,9 +272,8 @@ export class DiscordGatewayClient {
       this.ws.onerror = (event: Event) => {
         console.error("[Discord] WebSocket error:", event);
         this.cleanupHeartbeat();
-        if (!this.closed) {
-          this.scheduleReconnect();
-        }
+        // Don't schedule reconnect here — onclose always fires after onerror
+        // and will handle the reconnect decision with the proper close code.
       };
     });
   }
@@ -338,6 +376,7 @@ export class DiscordGatewayClient {
             this.resumeUrl = ready.resume_gateway_url;
             this.botUserId = ready.user.id;
             this.botUsername = ready.user.username;
+            this.reconnectAttempts = 0;
             console.log(
               `[Discord] Ready: logged in as ${ready.user.username} (${ready.user.id})`,
             );
@@ -466,6 +505,9 @@ export class DiscordGatewayClient {
 
   private closeAndReconnect(): void {
     this.cleanupHeartbeat();
+    // Set skipNextClose before closing so that the onclose handler
+    // triggered by ws.close() doesn't double-schedule a reconnect.
+    this.skipNextClose = true;
     if (this.ws) {
       try {
         this.ws.close(4000, "Reconnecting");

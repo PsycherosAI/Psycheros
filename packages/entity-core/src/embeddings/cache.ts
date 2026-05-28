@@ -110,6 +110,11 @@ const VECTOR_TABLE_SQL = `
   )
 `;
 
+// Schema version for the embedding enrichment algorithm.
+// Bump this when the text enrichment logic changes (e.g., date prefix added).
+// The cache auto-detects a version mismatch and triggers a full rebuild.
+const EMBEDDING_SCHEMA_VERSION = 2;
+
 // ---- Cache class ----
 
 export class EmbeddingCache {
@@ -117,6 +122,7 @@ export class EmbeddingCache {
   private dbPath: string;
   private vectorAvailable = false;
   private initialized = false;
+  private rebuildNeeded = false;
 
   constructor(dataDir: string) {
     this.dbPath = join(dataDir, "graph.db");
@@ -155,6 +161,9 @@ export class EmbeddingCache {
     this.db.exec(CACHE_INDEX_DDL);
 
     this.initialized = true;
+
+    // Check if embedding schema version changed — flag rebuild if so
+    this.rebuildNeeded = this.checkSchemaVersion();
   }
 
   /**
@@ -411,7 +420,12 @@ export class EmbeddingCache {
     if (!this.initialized) return null;
 
     const parentKey = computeMemoryKey(entry);
-    const contentHash = await sha256Hex(entry.content);
+    const enrichedContent = enrichContentWithDate(
+      entry.granularity,
+      entry.date,
+      entry.content,
+    );
+    const contentHash = await sha256Hex(enrichedContent);
 
     // Check cache validity by parent key with full content hash
     const cached = this.getByParent(parentKey, contentHash);
@@ -423,8 +437,8 @@ export class EmbeddingCache {
     this.delete(parentKey);
 
     if (!shouldChunk(entry.content)) {
-      // SHORT PATH: single embedding (unchanged behavior)
-      const embedding = await embedder.embed(entry.content);
+      // SHORT PATH: single embedding
+      const embedding = await embedder.embed(enrichedContent);
       if (!embedding) return null;
 
       this.put(
@@ -446,7 +460,9 @@ export class EmbeddingCache {
     let firstEmbedding: number[] | null = null;
 
     for (const chunk of chunks) {
-      const embedding = await embedder.embed(chunk.content);
+      const embedding = await embedder.embed(
+        enrichContentWithDate(entry.granularity, entry.date, chunk.content),
+      );
       if (!embedding) continue;
 
       if (!firstEmbedding) firstEmbedding = embedding;
@@ -532,6 +548,51 @@ export class EmbeddingCache {
     }
 
     return { totalCached, totalChunks, byGranularity };
+  }
+
+  /**
+   * Check if the embedding schema version has changed, indicating
+   * that all cached embeddings need to be rebuilt.
+   */
+  needsRebuild(): boolean {
+    return this.rebuildNeeded;
+  }
+
+  private checkSchemaVersion(): boolean {
+    // Ensure metadata table exists
+    this.db.exec(
+      `CREATE TABLE IF NOT EXISTS embedding_metadata (key TEXT PRIMARY KEY, value TEXT)`,
+    );
+
+    const stmt = this.db.prepare(
+      "SELECT value FROM embedding_metadata WHERE key = 'schema_version'",
+    );
+    const row = stmt.get<{ value: string }>();
+    stmt.finalize();
+
+    if (!row) return true; // No version recorded — needs rebuild
+
+    const stored = parseInt(row.value, 10);
+    if (isNaN(stored) || stored !== EMBEDDING_SCHEMA_VERSION) return true;
+
+    return false;
+  }
+
+  /**
+   * Mark the current schema version as up-to-date.
+   * Called after a successful rebuild to prevent re-rebuilding on next startup.
+   */
+  markSchemaUpToDate(): void {
+    if (!this.initialized) return;
+
+    this.db.exec(
+      `CREATE TABLE IF NOT EXISTS embedding_metadata (key TEXT PRIMARY KEY, value TEXT)`,
+    );
+    this.db.exec(
+      "INSERT OR REPLACE INTO embedding_metadata (key, value) VALUES ('schema_version', ?)",
+      [String(EMBEDDING_SCHEMA_VERSION)],
+    );
+    this.rebuildNeeded = false;
   }
 
   /**
@@ -656,6 +717,88 @@ export class EmbeddingCache {
 }
 
 // ---- Utility functions ----
+
+/**
+ * Format a date string into a human-readable form for embedding enrichment.
+ * Spelled-out dates help embedding models capture temporal semantics
+ * (e.g., "February 14, 2026" is more semantically useful than "2026-02-14").
+ */
+function formatDateForEmbedding(granularity: string, date: string): string {
+  try {
+    const parsed = new Date(date + "T00:00:00");
+    if (isNaN(parsed.getTime())) return date;
+
+    const opts: Intl.DateTimeFormatOptions = {
+      year: "numeric",
+    };
+
+    switch (granularity) {
+      case "daily":
+      case "significant":
+        opts.month = "long";
+        opts.day = "numeric";
+        break;
+      case "weekly": {
+        // Parse ISO week date to get the Monday of that week
+        const weekMatch = date.match(/^(\d{4})-W(\d{2})$/);
+        if (weekMatch) {
+          const year = parseInt(weekMatch[1]);
+          const week = parseInt(weekMatch[2]);
+          // ISO week: day 1 = Monday
+          const jan4 = new Date(year, 0, 4);
+          const dayOfWeek = jan4.getDay() || 7;
+          const monday = new Date(jan4);
+          monday.setDate(jan4.getDate() - dayOfWeek + 1 + (week - 1) * 7);
+          opts.month = "long";
+          opts.day = "numeric";
+          return `Week of ${
+            new Intl.DateTimeFormat("en-US", opts).format(monday)
+          }`;
+        }
+        opts.month = "long";
+        opts.day = "numeric";
+        break;
+      }
+      case "monthly":
+        opts.month = "long";
+        break;
+      case "yearly":
+        return `${parsed.getFullYear()}`;
+      default:
+        opts.month = "long";
+        opts.day = "numeric";
+    }
+
+    return new Intl.DateTimeFormat("en-US", opts).format(parsed);
+  } catch {
+    return date;
+  }
+}
+
+/**
+ * Enrich memory content with a human-readable date prefix so that
+ * temporal information is captured in the embedding vector.
+ *
+ * Example: "Daily memory from February 14, 2026. [original content]"
+ */
+function enrichContentWithDate(
+  granularity: string,
+  date: string,
+  content: string,
+): string {
+  const label = granularity === "significant"
+    ? "Significant memory"
+    : granularity === "daily"
+    ? "Daily memory"
+    : granularity === "weekly"
+    ? "Weekly summary"
+    : granularity === "monthly"
+    ? "Monthly summary"
+    : "Yearly summary";
+
+  const formattedDate = formatDateForEmbedding(granularity, date);
+  return `${label} from ${formattedDate}. ${content}`;
+}
 
 /**
  * Compute the memory_key (filename stem) for a memory entry.

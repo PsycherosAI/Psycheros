@@ -27,7 +27,10 @@ export const generateImageTool: Tool = {
         "based on the user's request and available generators. I can include " +
         "anchor_images by ID as style/character references, user_image_path " +
         "if the user provided an image with their message, or input_image_path " +
-        "with a path to a previously generated image for reference-based iteration.",
+        "with a path to a previously generated image for reference-based iteration. " +
+        "Images I generate appear as actual images in the conversation automatically. " +
+        "I do NOT output [IMAGE:] markers or image code in my text — I simply describe " +
+        "or discuss the image naturally, and it will appear visually for the user.",
       parameters: {
         type: "object",
         properties: {
@@ -696,7 +699,9 @@ async function execute(
       }
     }
 
-    // Return a structured marker for the entity loop to detect
+    // Build the IMAGE marker for the entity loop to detect (SSE event +
+    // assistant message persistence). The marker is stripped from the tool result
+    // before it reaches the LLM and before DB persistence.
     const imagePath = `/generated-images/${filename}`;
     const markerData: Record<string, string> = {
       path: imagePath,
@@ -710,9 +715,17 @@ async function execute(
       markerData.shortDescription = shortDescription;
     }
     const marker = JSON.stringify(markerData);
+
+    // Plain text description for the entity to "see" what they generated.
+    // [image_generated] prefix enables fading. [short:] suffix stores the
+    // short description for the fading mechanism (hidden from the LLM).
+    let resultText = "[image_generated] Image generated successfully.";
+    if (description) resultText += ` ${description}`;
+    if (shortDescription) resultText += `[short:${shortDescription}]`;
+    resultText += ` [IMAGE:${marker}]`;
     return {
       toolCallId: ctx.toolCallId,
-      content: `Image generated successfully. [IMAGE:${marker}]`,
+      content: resultText,
     };
   } catch (error) {
     return {

@@ -4,6 +4,57 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.4.11] - 2026-05-28
+
+### Fixed
+
+- **Inbound Discord DMs are now processed correctly.** The router's
+  `flushBuffer` had a safety gate that skipped channels not found in the server
+  config (to avoid processing channels removed between timer ticks). DM channels
+  are never in the server config, so every inbound DM was silently dropped.
+  Fixed by tracking DM channels in a dedicated set and exempting them from the
+  config-removal check in `flushBuffer`, `onPeriodicFlush`, and `updateConfig`.
+- **Adding a second LLM profile no longer replaces the first.** The profile ID
+  was stored in a global variable (`window.__profileId`) set by a `<script>` tag
+  in HTMX-swapped content. When HTMX didn't re-execute the script, the stale ID
+  from a previous edit caused the server to update the existing profile instead
+  of creating a new one. The ID is now stored in a hidden `<input>` field, which
+  is always set correctly by the server-rendered HTML.
+- **Discord gateway reconnect cascade on auth failure.** The gateway client
+  retried on every close code including fatal ones (4004 auth failed, 4013/4014
+  invalid intents). Each reconnect immediately failed and triggered another,
+  creating a rapid reconnect loop. Non-retryable close codes are now tracked
+  explicitly; `onerror` no longer schedules reconnects (the subsequent `onclose`
+  handles the decision with the proper close code).
+- **LLM no longer parrots `[IMAGE:]` markers or image metadata.** The entity
+  loop now strips `[IMAGE:{...}]` markers and `[short:...]` metadata from
+  assistant messages and tool results before persisting to the DB and feeding
+  them back to the LLM. Previously these UI-only markers leaked into the
+  conversation context, causing the LLM to echo them in its responses.
+
+### Changed
+
+- **Memory Consolidation removed from Entity Core > Maintenance UI.** Memory
+  consolidation now runs automatically on startup, so the manual trigger has
+  been removed from the maintenance tab. The code is commented out (not deleted)
+  in case manual triggering is needed in the future.
+- **Default sampling parameters for new profiles:** temperature changed from 0.7
+  to 1, top-p changed from 1 to 0.95. These better match typical defaults for
+  GLM models via OpenRouter.
+- **Default model name for new profiles** changed from `glm-4.7` to
+  `z-ai/glm-4.7` to match the OpenRouter model path format.
+- **Natural pass guidance for DM conversations.** In direct-message contexts,
+  the entity loop now injects guidance that DMs have natural rhythms — if the
+  exchange has reached a natural endpoint, the entity can simply not call
+  `act_in_discord` rather than forcing a response. Documented in the
+  configuration reference.
+- **Image description and generation tool results now fade over time.**
+  `describe_image` and `generate_image` tool results are faded after the same
+  threshold as inline image descriptions, keeping context lean in long
+  conversations.
+
 ## [0.4.10] - 2026-05-27
 
 ### Fixed
@@ -439,6 +490,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 [0.1.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.2
 [0.1.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.1
 [0.1.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.0
+[0.4.11]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.11
 [0.4.10]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.10
 [0.4.9]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.9
 [0.4.8]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.8

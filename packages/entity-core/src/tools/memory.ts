@@ -234,7 +234,7 @@ export function createMemorySearchHandler(
     maxResults?: number;
   } = {},
 ) {
-  const { instanceBoost = 0.1, minScore = 0.3, maxResults = 10 } = config;
+  const { instanceBoost = 0.1, minScore = 0.25, maxResults = 10 } = config;
 
   // Scoring weights
   const VECTOR_WEIGHT = 0.8;

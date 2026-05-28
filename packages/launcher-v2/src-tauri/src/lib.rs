@@ -285,6 +285,7 @@ pub fn run() {
             commands::apply_source_update,
             commands::get_diagnostics,
             commands::open_path,
+            commands::open_url,
             commands::backup_data,
             commands::restore_data,
             commands::wipe_entity_data,

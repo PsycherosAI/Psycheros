@@ -45,10 +45,7 @@ pub enum BundleError {
         op: &'static str,
         status: ExitStatus,
     },
-    #[error(
-        "git not found on PATH. On macOS, run `xcode-select --install` to install \
-         the Command Line Tools (Apple ships git as part of that bundle)."
-    )]
+    #[error("git not found on PATH")]
     GitMissing,
     #[error("git emitted non-utf8 output (unexpected for rev-parse)")]
     GitNonUtf8,
@@ -273,9 +270,8 @@ pub fn warm_deno_cache(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Find the `git` binary on PATH. Returned errors carry a user-actionable
-/// "install Xcode Command Line Tools" message because that's the most
-/// common cause on a fresh macOS box.
+/// Find the `git` binary on PATH. Returns `GitMissing` if not found;
+/// the frontend renders a platform-specific remediation UI.
 fn locate_git() -> Result<std::path::PathBuf, BundleError> {
     let lookup = if cfg!(windows) { "where" } else { "which" };
     let out = hidden_command(lookup).arg("git").output()?;

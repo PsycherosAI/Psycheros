@@ -57,10 +57,17 @@ Check `Diagnostics` → daemon state.
 
 ### First-run bootstrap fails with "git not found"
 
-Click the `Install Xcode CLT` button in the error screen. macOS opens the
-Command Line Tools installer dialog. Click `Install`, wait ~5 minutes for
-download + install, then come back to the launcher and click `Try again`. The
-bootstrap re-runs and the clone step succeeds.
+A warning card appears with a platform-specific fix button:
+
+- **macOS**: Click `Install Command Line Tools`. macOS opens the Xcode CLT
+  installer dialog. Click `Install`, wait ~5 minutes, then come back and
+  click `Try again`.
+- **Windows**: Click `Download Git for Windows`. The Git for Windows download
+  page opens in your browser. Run the installer, then come back and click
+  `Try again`.
+- **Linux**: Click `Open install instructions`. The Git Linux download page
+  opens in your browser. Follow the instructions for your distribution, then
+  come back and click `Try again`.
 
 ### Update reports "couldn't find any tagged releases"
 

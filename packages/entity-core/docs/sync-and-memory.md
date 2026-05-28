@@ -111,6 +111,21 @@ sentences.
 | **Graph boost**       | 0.05   | Boosts memories linked to entity nodes matching the query         |
 | **Instance affinity** | 0.1    | +0.1 for memories from the same embodiment                        |
 
+Default `minScore` is 0.25 — results below this are excluded.
+
+### Date-Enriched Embeddings
+
+Memory content is enriched with a human-readable date prefix before embedding
+(e.g., `"Significant memory from February 14, 2026. [original content]"`). This
+allows the embedding model to capture temporal semantics, so queries about dates
+and events ("Valentine's Day", "our anniversary") can match memories even when
+the event name isn't explicitly mentioned in the prose.
+
+The enrichment is part of the embedding cache's content hash, so changing the
+enrichment logic invalidates all cached embeddings. A schema version in
+`graph.db` tracks the enrichment algorithm — when the version changes,
+entity-core automatically rebuilds all embeddings on startup.
+
 ### How It Works
 
 1. The query is embedded locally using the same model as Psycheros

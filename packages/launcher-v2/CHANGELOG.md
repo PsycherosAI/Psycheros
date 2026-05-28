@@ -7,6 +7,22 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-05-28
+
+### Fixed
+
+- **Git-missing remediation now works across all platforms.** The first-run
+  wizard previously showed a macOS-specific "Install Xcode CLT" button when git
+  was not found. Replaced with a friendly, platform-aware card: macOS gets the
+  CLT installer, Windows opens the Git for Windows download page, and Linux
+  opens the distribution-specific install instructions.
+
+### Added
+
+- **`open_url` command** for opening HTTP(S) URLs in the default browser.
+  Cross-platform (macOS `open`, Linux `xdg-open`, Windows `cmd /C start`). Used
+  by the git-missing remediation flow to direct users to download pages.
+
 ## [0.2.6] - 2026-05-26
 
 ### Fixed

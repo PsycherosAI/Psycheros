@@ -764,6 +764,12 @@ export class EntityTurn {
           }
         }
       }
+      if (ctx.isDM) {
+        parts.push(
+          `\nThis is a direct message — a one-to-one conversation. I should engage naturally, but like any conversation, it has rhythms. If we've said what there is to say, I can let the exchange wind down by not responding — the other person will understand. If I simply don't call act_in_discord, no message is sent, and that's a natural end, not an error.`,
+        );
+      }
+
       discordChannelContent = parts.join("\n");
 
       // Add tier-specific instructions for active mode
@@ -1205,9 +1211,15 @@ Discord interaction:
 
           // Persist to DB with error handling
           try {
+            // Strip [IMAGE:{...}] markers — they're UI-only, stored in the
+            // assistant message content instead
+            const persistedContent = result.content.replace(
+              /\[IMAGE:\{.*?\}\]/g,
+              "",
+            );
             this.db.addMessage(conversationId, {
               role: "tool",
-              content: result.content,
+              content: persistedContent,
               toolCallId: result.toolCallId,
             });
           } catch (dbError) {
@@ -1234,10 +1246,10 @@ Discord interaction:
         // Add assistant message with tool calls to the messages array
         const assistantTimestamp = formatMessageTimestamp(new Date());
         // Strip any <t>...</t> tags the LLM echoed to prevent accumulation
-        const cleanAssistantContent = (assistantContent || "").replace(
-          /<t>[^<]*<\/t>\s*/g,
-          "",
-        );
+        const cleanAssistantContent = (assistantContent || "")
+          .replace(/<t>[^<]*<\/t>\s*/g, "")
+          // Strip [IMAGE:{...}] markers — UI-only, not part of entity's text
+          .replace(/\[IMAGE:\{.*?\}\]/g, "");
         const assistantMsg: ChatMessage = {
           role: "assistant",
           content: `${assistantTimestamp} ${cleanAssistantContent}`,
@@ -1248,9 +1260,13 @@ Discord interaction:
         // Add tool results to messages for next LLM call
         for (const result of toolResults) {
           const toolTimestamp = formatMessageTimestamp(new Date());
+          // Strip [IMAGE:{...}] markers and [short:...] metadata from tool results
+          const cleanResult = result.content
+            .replace(/\[IMAGE:\{.*?\}\]/g, "")
+            .replace(/\[short:.+?\]/g, "");
           const toolMsg: ChatMessage = {
             role: "tool",
-            content: `${toolTimestamp} ${result.content}`,
+            content: `${toolTimestamp} ${cleanResult}`,
             tool_call_id: result.toolCallId,
           };
           messages.push(toolMsg);
@@ -1304,6 +1320,8 @@ Discord interaction:
     const imageTurns = new Map<number, number>();
     // Track which look_closer results are at which turn index
     const lookCloserTurns = new Map<number, number>();
+    // Track generate_image and describe_image tool results for fading
+    const imageDescToolTurns = new Map<number, number>();
 
     // First pass: identify image markers and look_closer results with their turn positions
     for (let i = 0; i < history.length; i++) {
@@ -1318,6 +1336,13 @@ Discord interaction:
       }
       if (msg.role === "tool" && msg.content.startsWith("[look_closer]")) {
         lookCloserTurns.set(i, turnCount);
+      }
+      if (
+        msg.role === "tool" &&
+        (msg.content.startsWith("[image_generated]") ||
+          msg.content.startsWith("[describe_image]"))
+      ) {
+        imageDescToolTurns.set(i, turnCount);
       }
     }
 
@@ -1348,6 +1373,20 @@ Discord interaction:
               pathMatch[1]
             }: [description faded — use look_closer again for details]`,
           );
+        }
+      }
+    }
+
+    // Fade generate_image and describe_image tool results
+    for (const [msgIdx, resultTurn] of imageDescToolTurns) {
+      if (currentTurn - resultTurn > IMAGE_DESCRIPTION_FADE_TURNS) {
+        const msg = history[msgIdx];
+        const prefixMatch = msg.content.match(
+          /^\[(image_generated|describe_image)\]\s*/,
+        );
+        const shortMatch = msg.content.match(/\[short:(.+?)\]/);
+        if (prefixMatch && shortMatch) {
+          fadeMap.set(msg.id, `${prefixMatch[0]}${shortMatch[1]}`);
         }
       }
     }
@@ -1390,6 +1429,12 @@ Discord interaction:
       // Strip any <t>...</t> tags the LLM may have echoed in its output
       // to prevent timestamp accumulation across turns
       let cleanContent = msg.content.replace(/<t>[^<]*<\/t>\s*/g, "");
+      // Strip [IMAGE:{...}] markers from assistant messages — UI-only
+      cleanContent = cleanContent.replace(/\[IMAGE:\{.*?\}\]/g, "");
+      // Strip [short:...] metadata from tool results — hidden from the LLM
+      if (msg.role === "tool") {
+        cleanContent = cleanContent.replace(/\[short:.+?\]/g, "");
+      }
       // Apply image description fading
       const faded = fadeMap.get(msg.id);
       if (faded) {

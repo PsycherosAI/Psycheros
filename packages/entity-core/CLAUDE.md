@@ -99,6 +99,12 @@ higher tier. They're surfaced separately by RAG.
 
 ## Embedding maintenance
 
+Memory content is enriched with a human-readable date prefix before embedding
+(e.g., `"Significant memory from February 14, 2026. [original content]"`), so
+temporal queries can match memories by date. The enrichment algorithm is
+versioned — when the version changes, entity-core auto-rebuilds the entire
+embedding cache on startup.
+
 Two MCP tools manage the memory embedding cache in `graph.db` (separate from
 knowledge graph embeddings in `vec_graph_nodes`):
 

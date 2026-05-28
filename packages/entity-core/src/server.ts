@@ -454,11 +454,20 @@ export function createServer(config: Partial<ServerConfig> = {}): McpServer {
     {
       granularity: memoryTools["memory/list"].inputSchema.shape.granularity,
       limit: memoryTools["memory/list"].inputSchema.shape.limit,
+      offset: memoryTools["memory/list"].inputSchema.shape.offset,
+      beforeDate: memoryTools["memory/list"].inputSchema.shape.beforeDate,
+      afterDate: memoryTools["memory/list"].inputSchema.shape.afterDate,
     },
-    async ({ granularity, limit }) => {
+    async ({ granularity, limit, offset, beforeDate, afterDate }) => {
       await store.initialize();
       const handler = createMemoryListHandler(store);
-      const result = await handler({ granularity, limit });
+      const result = await handler({
+        granularity,
+        limit,
+        offset,
+        beforeDate,
+        afterDate,
+      });
       return {
         content: [
           {
@@ -1332,10 +1341,57 @@ export async function startServer(
 ): Promise<void> {
   const server = createServer(config);
   const transport = new StdioServerTransport();
+
+  // Auto-rebuild embeddings if schema version changed (e.g., date enrichment
+  // added). This runs before connecting so the entity-core process handles it
+  // on startup rather than silently serving stale vectors.
+  const fullConfig: ServerConfig = { ...DEFAULT_SERVER_CONFIG, ...config };
+  await autoRebuildEmbeddings(fullConfig.dataDir);
+
   await server.connect(transport);
 
   console.error("Entity Core MCP server started");
   console.error(
     "I am ready to sync my identity and memories with my embodiments.",
   );
+}
+
+/**
+ * Check if cached embeddings need rebuilding (schema version mismatch)
+ * and run a full rebuild if so. No-op when embeddings are up-to-date.
+ */
+async function autoRebuildEmbeddings(dataDir: string): Promise<void> {
+  const cache = new EmbeddingCache(dataDir);
+  await cache.initialize();
+
+  if (!cache.needsRebuild()) {
+    cache.close();
+    return;
+  }
+
+  const stats = cache.getStats();
+  if (stats.totalCached === 0) {
+    // Nothing cached — nothing to rebuild, just mark version
+    cache.markSchemaUpToDate();
+    cache.close();
+    return;
+  }
+
+  console.error(
+    `[Embeddings] Schema version changed — rebuilding ${stats.totalCached} memory embeddings...`,
+  );
+
+  const store = new FileStore(dataDir);
+  await store.initialize();
+
+  const handler = createMemoryEmbeddingRebuildHandler(store, cache);
+  const result = await handler();
+
+  console.error(
+    `[Embeddings] Rebuild complete: ${result.rebuilt} rebuilt, ${result.failed} failed`,
+  );
+
+  // Mark schema version as current so we don't rebuild on next startup
+  cache.markSchemaUpToDate();
+  cache.close();
 }

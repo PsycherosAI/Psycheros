@@ -85,6 +85,19 @@ Channels can be toggled on/off at runtime via the Discord Hub. Removing a
 channel immediately tears down its accumulation buffer, debounce timer, and
 periodic digest timer — no gateway restart needed.
 
+### Direct Messages
+
+DMs are always-on (no mode/tier system) and bypass the accumulation buffer —
+each incoming DM triggers an entity turn immediately. Only whitelisted users
+(configured in the Discord Hub) can DM the entity.
+
+The entity receives pass guidance in DMs: it's instructed that silence is a
+natural end to a conversation, not an error. It can choose not to respond by
+simply not calling `act_in_discord`, the same as it does in active-mode
+channels. This lets conversations wind down naturally — for example, two
+entities DMing each other will reach a natural stopping point rather than
+looping indefinitely.
+
 ## Available Tools
 
 All tools are enabled by default on a fresh install. No configuration is needed.

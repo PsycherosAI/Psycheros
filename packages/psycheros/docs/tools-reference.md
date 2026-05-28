@@ -577,26 +577,31 @@ request. This enables workflows like "change the background", "make it darker",
 **Image Persistence:** Generated images are saved to
 `.psycheros/generated-images/` and displayed inline in chat. Images persist
 across conversation switches via `[IMAGE:...]` markers appended to the assistant
-message content in the database. Generated images are automatically captioned
-with both a longform and shortform description. Both are stored in the marker
-JSON; the shortform replaces the longform in LLM context after 5 conversation
-turns to save tokens.
+message content in the database. These markers are used only for UI rendering
+and DB persistence — they are stripped from LLM context to prevent the model
+from learning to parrot the marker syntax.
 
-**Context Fading:** Image descriptions (both `[IMAGE:...]` and
-`[USER_IMAGE:...]`) fade from longform to shortform after 5 conversation turns
-in the LLM context. The DB always retains the full description. The entity can
-use the `look_closer` tool to re-examine any image for full details.
-`look_closer` results also fade after 5 turns. Additionally, tool call arguments
-for image tools (`generate_image`, `describe_image`, `look_closer`) are
-truncated in context — string values over 50 characters are cut short. Non-image
-tools are unaffected. This reduces token usage from verbose prompts and
-descriptions stored in tool call history.
+**Context Fading:** Image descriptions fade from longform to shortform after 5
+conversation turns in the LLM context. The DB always retains the full
+description. Fading applies to:
+
+- `[IMAGE:...]` markers in assistant/user messages (long description → short)
+- `generate_image` tool results (long auto-caption → short)
+- `describe_image` tool results (long description → short)
+- `look_closer` tool results (full description → "[faded — use look_closer
+  again]")
+
+Additionally, tool call arguments for image tools (`generate_image`,
+`describe_image`, `look_closer`) are truncated in context — string values over
+50 characters are cut short. Non-image tools are unaffected.
 
 **Data flow:** Entity calls `generate_image` → server reads generator config →
 dispatches to provider (OpenRouter or Gemini API) → saves image to disk →
 auto-captions via configured captioning provider (dual short/long) → returns
-`[IMAGE:...]` marker with both descriptions → entity loop yields
-`image_generated` SSE event → frontend renders inline image.
+plain text description with `[IMAGE:...]` marker for loop detection → entity
+loop strips marker before sending to LLM, yields `image_generated` SSE event,
+appends marker to assistant message for UI persistence → frontend renders inline
+image.
 
 **Error handling:** The tool returns clear messages for provider errors, missing
 generators, disabled generators, and image read failures.
@@ -623,8 +628,10 @@ All auto-captioning produces both a **longform** (detailed, thorough) and
 **shortform** (single sentence, under 15 words) description. Both are stored in
 the message content in the database. When building LLM context, the
 `buildMessages()` method in the entity loop applies fading: after 5 conversation
-turns, longform is replaced with shortform. This significantly reduces token
-usage in long conversations with many images.
+turns, longform is replaced with shortform. This applies to `[IMAGE:...]` and
+`[USER_IMAGE:...]` markers in user/assistant messages, as well as
+`generate_image` and `describe_image` tool results. This significantly reduces
+token usage in long conversations with many images.
 
 The `IMAGE_DESCRIPTION_FADE_TURNS` constant (default: 5) controls the grace
 period.
@@ -636,15 +643,19 @@ period.
   included: `[USER_IMAGE: path | Caption: long | Short: short]`.
 - **Generated images**: After the `generate_image` tool saves an image, it is
   automatically captioned. Both `description` (long) and `shortDescription`
-  (short) are included in the `[IMAGE:...]` marker JSON.
+  (short) are included in the `[IMAGE:...]` marker JSON for UI persistence and
+  fading. The tool result returns plain text with the long caption; the short
+  caption is stored in a `[short:...]` suffix for the fading mechanism.
 - **Failure handling**: Captioning failures are non-blocking. Chat attachments
   fall back to path-only (`[USER_IMAGE: path]`). Generated images still display
   without a description.
 
 ### describe_image Tool
 
-The entity can explicitly describe any image by local path or URL. Returns the
-full longform description.
+The entity can explicitly describe any image by local path or URL. Returns both
+a longform and shortform description (dual caption). The tool result is prefixed
+with `[describe_image]` for fading identification and includes a `[short:...]`
+metadata suffix. After 5 turns, the longform fades to shortform in LLM context.
 
 | Tool             | Description                                                     |
 | ---------------- | --------------------------------------------------------------- |
@@ -677,13 +688,13 @@ providers with independent model selection.
 
 ### Related Source Files
 
-| File                            | Purpose                                                                                 |
-| ------------------------------- | --------------------------------------------------------------------------------------- |
-| `src/tools/describe-image.ts`   | `describe_image` tool, `captionImage()`, `captionImageDual()`, `fetchAndCaptionUrl()`   |
-| `src/tools/look-closer.ts`      | `look_closer` tool                                                                      |
-| `src/server/routes.ts`          | Auto-caption flow for chat attachments                                                  |
-| `src/entity/loop.ts`            | Context fading logic (`buildFadeMap()`, `fadeImageMarker()`, `fadeToolCallArguments()`) |
-| `src/llm/image-gen-settings.ts` | `CaptioningSettings` type, part of `ImageGenSettings`                                   |
+| File                            | Purpose                                                                                                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `src/tools/describe-image.ts`   | `describe_image` tool, `captionImage()`, `captionImageDual()`, `fetchAndCaptionUrl()`, `fetchAndCaptionUrlDual()` |
+| `src/tools/look-closer.ts`      | `look_closer` tool                                                                                                |
+| `src/server/routes.ts`          | Auto-caption flow for chat attachments                                                                            |
+| `src/entity/loop.ts`            | Context fading logic (`buildFadeMap()`, `fadeImageMarker()`, `fadeToolCallArguments()`)                           |
+| `src/llm/image-gen-settings.ts` | `CaptioningSettings` type, part of `ImageGenSettings`                                                             |
 
 ## Identity File Structure (Core Prompts)
 

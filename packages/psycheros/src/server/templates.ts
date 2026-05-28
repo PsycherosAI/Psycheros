@@ -1706,7 +1706,7 @@ export function renderAssistantMessage(
     // causing JSON.parse to fail on page reload.
     let preprocessed = msg.content;
     preprocessed = preprocessed.replace(
-      /\[IMAGE:\{[\s\S]*\}\]/g,
+      /\[IMAGE:\{.*?\}\]/g,
       (match) => {
         try {
           const jsonStr = match.slice(7, -1); // Strip "[IMAGE:" and "]"
@@ -3882,40 +3882,44 @@ export function renderEntityCoreGraph(
 export function renderEntityCoreMaintenance(mcpAvailable: boolean): string {
   const oobTabs = renderEntityCoreTabActiveState("maintenance");
 
-  const status: ConsolidationStatus = {
-    weekly: mcpAvailable,
-    monthly: mcpAvailable,
-    yearly: mcpAvailable,
-  };
-
-  const anyNeeded = status.weekly || status.monthly || status.yearly;
-
-  const consolidationRows = ([
-    { label: "Weekly", needed: status.weekly },
-    { label: "Monthly", needed: status.monthly },
-    { label: "Yearly", needed: status.yearly },
-  ] as const).map(({ label, needed }) => `
-    <div class="consolidation-row">
-      <span class="consolidation-row-label">${label}</span>
-      <span class="consolidation-row-status ${
-    needed ? "consolidation-needed" : "consolidation-up-to-date"
-  }">${needed ? "Needs catch-up" : "Up to date"}</span>
-    </div>
-  `).join("");
-
-  let consolidationActionHtml = "";
-  if (anyNeeded) {
-    consolidationActionHtml = `<button
-      class="btn btn--primary btn--sm"
-      id="ec-run-consolidation-btn"
-      hx-post="/api/entity-core/consolidation/run"
-      hx-target="#ec-consolidation-content"
-      hx-swap="outerHTML"
-    >Run Catch-up</button>`;
-  } else {
-    consolidationActionHtml =
-      `<div class="consolidation-all-clear">All consolidation levels are up to date.</div>`;
-  }
+  // NOTE: Memory Consolidation removed from UI — it now runs automatically on
+  // startup. The code is preserved below in case manual triggering is ever
+  // needed again.
+  //
+  // const status: ConsolidationStatus = {
+  //   weekly: mcpAvailable,
+  //   monthly: mcpAvailable,
+  //   yearly: mcpAvailable,
+  // };
+  //
+  // const anyNeeded = status.weekly || status.monthly || status.yearly;
+  //
+  // const consolidationRows = ([
+  //   { label: "Weekly", needed: status.weekly },
+  //   { label: "Monthly", needed: status.monthly },
+  //   { label: "Yearly", needed: status.yearly },
+  // ] as const).map(({ label, needed }) => `
+  //   <div class="consolidation-row">
+  //     <span class="consolidation-row-label">${label}</span>
+  //     <span class="consolidation-row-status ${
+  //     needed ? "consolidation-needed" : "consolidation-up-to-date"
+  //   }">${needed ? "Needs catch-up" : "Up to date"}</span>
+  //   </div>
+  // `).join("");
+  //
+  // let consolidationActionHtml = "";
+  // if (anyNeeded) {
+  //   consolidationActionHtml = `<button
+  //     class="btn btn--primary btn--sm"
+  //     id="ec-run-consolidation-btn"
+  //     hx-post="/api/entity-core/consolidation/run"
+  //     hx-target="#ec-consolidation-content"
+  //     hx-swap="outerHTML"
+  //   >Run Catch-up</button>`;
+  // } else {
+  //   consolidationActionHtml =
+  //     `<div class="consolidation-all-clear">All consolidation levels are up to date.</div>`;
+  // }
 
   const mcpRequiredHtml = mcpAvailable ? "" : `
   <div class="ec-disconnected">
@@ -3928,6 +3932,7 @@ export function renderEntityCoreMaintenance(mcpAvailable: boolean): string {
 
   ${mcpRequiredHtml}
 
+  <!-- Memory Consolidation section removed — runs automatically on startup.
   <div class="ec-maintenance-section">
     <h3 class="admin-section-title">Memory Consolidation</h3>
     <p class="admin-action-desc">
@@ -3937,14 +3942,15 @@ export function renderEntityCoreMaintenance(mcpAvailable: boolean): string {
     <div id="ec-consolidation-content">
       <div class="consolidation-section">
         <div class="consolidation-status-list">
-          ${consolidationRows}
+          CONSORIDATION_ROWS
         </div>
         <div class="consolidation-actions">
-          ${consolidationActionHtml}
+          CONSOLIDATION_ACTION_HTML
         </div>
       </div>
     </div>
   </div>
+  -->
 
   <div class="ec-maintenance-section">
     <h3 class="admin-section-title">Batch Populate Knowledge Graph</h3>
@@ -4065,72 +4071,76 @@ export function renderEntityCoreMaintenance(mcpAvailable: boolean): string {
 </div>`;
 }
 
-/**
- * Render consolidation running state for Entity Core context.
- */
-export function renderECConsolidationRunning(): string {
-  const oobTabs = renderEntityCoreTabActiveState("maintenance");
-  return `${oobTabs}
-<div id="ec-consolidation-content">
-  <div class="consolidation-section">
-    <h3 class="admin-section-title">Memory Consolidation</h3>
-    <div class="consolidation-running">
-      <span class="consolidation-spinner"></span>
-      Running catch-up consolidation...
-    </div>
-    <div id="ec-consolidation-results"></div>
-  </div>
-</div>`;
-}
-
-/**
- * Render consolidation complete state for Entity Core context.
- */
-export function renderECConsolidationComplete(
-  results: { granularity: string; success: boolean; error?: string }[],
-): string {
-  const oobTabs = renderEntityCoreTabActiveState("maintenance");
-
-  const successCount = results.filter((r) => r.success).length;
-  const failCount = results.filter((r) => !r.success).length;
-
-  const summaryParts: string[] = [];
-  if (successCount > 0) summaryParts.push(`${successCount} succeeded`);
-  if (failCount > 0) summaryParts.push(`${failCount} failed`);
-
-  const itemsHtml = results.map((r) => {
-    const cls = r.success
-      ? "consolidation-result-success"
-      : "consolidation-result-failure";
-    const text = r.success
-      ? `${r.granularity}: created`
-      : `${r.granularity}: ${escapeHtml(r.error || "failed")}`;
-    return `<div class="consolidation-result-item ${cls}">${
-      escapeHtml(text)
-    }</div>`;
-  }).join("");
-
-  return `${oobTabs}
-<div id="ec-consolidation-content">
-  <div class="consolidation-section">
-    <h3 class="admin-section-title">Memory Consolidation</h3>
-    <div class="consolidation-summary">${summaryParts.join(", ")}</div>
-    ${
-    itemsHtml
-      ? `<div class="consolidation-results-list">${itemsHtml}</div>`
-      : ""
-  }
-    <div class="consolidation-actions">
-      <button
-        class="btn btn--ghost btn--sm"
-        hx-get="/fragments/settings/entity-core/maintenance"
-        hx-target="#settings-content"
-        hx-swap="innerHTML"
-      >Refresh Status</button>
-    </div>
-  </div>
-</div>`;
-}
+// NOTE: Memory Consolidation removed from UI — it now runs automatically on
+// startup. Helper functions preserved below in case manual triggering is ever
+// needed again.
+//
+// /**
+//  * Render consolidation running state for Entity Core context.
+//  */
+// export function renderECConsolidationRunning(): string {
+//   const oobTabs = renderEntityCoreTabActiveState("maintenance");
+//   return `${oobTabs}
+// <div id="ec-consolidation-content">
+//   <div class="consolidation-section">
+//     <h3 class="admin-section-title">Memory Consolidation</h3>
+//     <div class="consolidation-running">
+//       <span class="consolidation-spinner"></span>
+//       Running catch-up consolidation...
+//     </div>
+//     <div id="ec-consolidation-results"></div>
+//   </div>
+// </div>`;
+// }
+//
+// /**
+//  * Render consolidation complete state for Entity Core context.
+//  */
+// export function renderECConsolidationComplete(
+//   results: { granularity: string; success: boolean; error?: string }[],
+// ): string {
+//   const oobTabs = renderEntityCoreTabActiveState("maintenance");
+//
+//   const successCount = results.filter((r) => r.success).length;
+//   const failCount = results.filter((r) => !r.success).length;
+//
+//   const summaryParts: string[] = [];
+//   if (successCount > 0) summaryParts.push(`${successCount} succeeded`);
+//   if (failCount > 0) summaryParts.push(`${failCount} failed`);
+//
+//   const itemsHtml = results.map((r) => {
+//     const cls = r.success
+//       ? "consolidation-result-success"
+//       : "consolidation-result-failure";
+//     const text = r.success
+//       ? `${r.granularity}: created`
+//       : `${r.granularity}: ${escapeHtml(r.error || "failed")}`;
+//     return `<div class="consolidation-result-item ${cls}">${
+//       escapeHtml(text)
+//     }</div>`;
+//   }).join("");
+//
+//   return `${oobTabs}
+// <div id="ec-consolidation-content">
+//   <div class="consolidation-section">
+//     <h3 class="admin-section-title">Memory Consolidation</h3>
+//     <div class="consolidation-summary">${summaryParts.join(", ")}</div>
+//     ${
+//     itemsHtml
+//       ? `<div class="consolidation-results-list">${itemsHtml}</div>`
+//       : ""
+//   }
+//     <div class="consolidation-actions">
+//       <button
+//         class="btn btn--ghost btn--sm"
+//         hx-get="/fragments/settings/entity-core/maintenance"
+//         hx-target="#settings-content"
+//         hx-swap="innerHTML"
+//       >Refresh Status</button>
+//     </div>
+//   </div>
+// </div>`;
+// }
 
 export function renderECEmbeddingPurgeRunning(): string {
   const oobTabs = renderEntityCoreTabActiveState("maintenance");
@@ -4467,6 +4477,8 @@ export function renderLLMProfileEdit(
   </div>
   <div class="settings-content" id="settings-content">
 
+    <input type="hidden" id="llm-profile-id" value="${escapeHtml(profileId)}">
+
     <!-- Profile Identity -->
     <section class="theme-section">
       <h3 class="theme-section-title">Profile</h3>
@@ -4517,7 +4529,7 @@ export function renderLLMProfileEdit(
         <div class="llm-field">
           <label for="llm-model">Model</label>
           <input type="text" id="llm-model" class="input-field llm-input" value="${
-    isNew ? "glm-4.7" : escapeHtml(profile!.model)
+    isNew ? "z-ai/glm-4.7" : escapeHtml(profile!.model)
   }" placeholder="model-name">
         </div>
       </div>
@@ -4545,18 +4557,18 @@ export function renderLLMProfileEdit(
         <div class="slider-group">
           <label for="llm-temperature">Temperature</label>
           <input type="range" id="llm-temperature" min="0" max="2" step="0.01" value="${
-    isNew ? "0.7" : profile!.temperature
+    isNew ? "1" : profile!.temperature
   }" oninput="document.getElementById('llm-temperature-val').textContent = this.value">
           <span id="llm-temperature-val">${
-    isNew ? "0.7" : profile!.temperature
+    isNew ? "1" : profile!.temperature
   }</span>
         </div>
         <div class="slider-group">
           <label for="llm-top-p">Top P</label>
           <input type="range" id="llm-top-p" min="0" max="1" step="0.01" value="${
-    isNew ? "1" : profile!.topP
+    isNew ? "0.95" : profile!.topP
   }" oninput="document.getElementById('llm-top-p-val').textContent = this.value">
-          <span id="llm-top-p-val">${isNew ? "1" : profile!.topP}</span>
+          <span id="llm-top-p-val">${isNew ? "0.95" : profile!.topP}</span>
         </div>
         <div class="llm-field-row">
           <div class="llm-field inline">
@@ -4655,7 +4667,6 @@ export function renderLLMProfileEdit(
 </div>
 
 <script>
-window.__profileId = ${JSON.stringify(profileId)};
 window.__isNew = ${JSON.stringify(isNew)};
 window.__activeProfileId = ${JSON.stringify(activeProfileId)};
 
@@ -4697,7 +4708,7 @@ function onProviderChange() {
 
 function gatherProfile() {
   return {
-    id: window.__profileId || crypto.randomUUID(),
+    id: document.getElementById('llm-profile-id').value || crypto.randomUUID(),
     name: document.getElementById('llm-name').value.trim() || 'Unnamed Profile',
     provider: document.getElementById('llm-provider').value,
     baseUrl: document.getElementById('llm-base-url').value.trim(),

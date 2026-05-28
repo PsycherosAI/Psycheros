@@ -125,7 +125,7 @@ import {
   handleDeleteSignificantMemory,
   handleDeleteVault,
   handleEmbedMemories,
-  handleEntityCoreConsolidationRun,
+  // handleEntityCoreConsolidationRun, // removed — consolidation runs automatically on startup
   handleEntityCoreEmbeddingPurge,
   handleEntityCoreEmbeddingRebuild,
   handleEntityCoreFragment,
@@ -1816,10 +1816,10 @@ export class Server {
       return await handleSaveMemoryInstructions(ctx, request);
     }
 
-    // POST /api/entity-core/consolidation/run - Run consolidation from Entity Core context
-    if (method === "POST" && path === "/api/entity-core/consolidation/run") {
-      return await handleEntityCoreConsolidationRun(ctx);
-    }
+    // POST /api/entity-core/consolidation/run - removed: consolidation runs automatically on startup
+    // if (method === "POST" && path === "/api/entity-core/consolidation/run") {
+    //   return await handleEntityCoreConsolidationRun(ctx);
+    // }
 
     // POST /api/entity-core/embeddings/purge - Purge orphaned memory embeddings
     if (

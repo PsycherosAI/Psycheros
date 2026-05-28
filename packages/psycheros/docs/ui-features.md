@@ -614,7 +614,9 @@ Timestamps render in the browser's local timezone (not the server's).
 
 ### Actions
 
-Manual operations panel for running one-off maintenance tasks. Currently hosts:
+Manual operations panel for running one-off maintenance tasks. Currently hosts
+batch knowledge graph population and embedding operations. (Memory consolidation
+was previously available here but now runs automatically on startup.)
 
 - **Batch Populate Knowledge Graph**: Runs
   `entity-core/scripts/batch-populate-graph.ts` to backfill the knowledge graph

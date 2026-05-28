@@ -1212,6 +1212,27 @@ pub fn open_path(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Open a URL in the user's default browser. Like `open_path` but for
+/// HTTP(S) URLs — on Windows we must use `cmd /C start` because `explorer`
+/// only handles filesystem paths.
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    if cfg!(target_os = "windows") {
+        // hidden_command prevents the console flash on release builds.
+        crate::proc::hidden_command("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map_err(|e| format!("spawn cmd: {e}"))?;
+    } else {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        std::process::Command::new(opener)
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("spawn {opener}: {e}"))?;
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Mode + channel — runtime switching
 // ---------------------------------------------------------------------------

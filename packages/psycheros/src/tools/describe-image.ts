@@ -453,10 +453,10 @@ async function executeDescribeImage(
   }
 
   try {
-    let description: string;
+    let caption: DualCaption;
 
     if (url) {
-      description = await fetchAndCaptionUrl(url, captioningSettings);
+      caption = await fetchAndCaptionUrlDual(url, captioningSettings);
     } else if (path) {
       // path is relative to .psycheros/
       // If the path has no extension, look up the actual file in the directory
@@ -482,7 +482,7 @@ async function executeDescribeImage(
       const fileData = await Deno.readFile(resolvedPath);
       const base64 = uint8ToBase64(fileData);
       const mediaType = getMediaType(resolvedPath);
-      description = await captionImage(base64, mediaType, captioningSettings);
+      caption = await captionImageDual(base64, mediaType, captioningSettings);
     } else {
       return {
         toolCallId: ctx.toolCallId,
@@ -493,7 +493,8 @@ async function executeDescribeImage(
 
     return {
       toolCallId: ctx.toolCallId,
-      content: `Image description: ${description}`,
+      content:
+        `[describe_image] Image description: ${caption.long}[short:${caption.short}]`,
     };
   } catch (error) {
     return {

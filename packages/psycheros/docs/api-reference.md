@@ -102,11 +102,10 @@ The `deviceType` field is used by the Situational Awareness system.
 
 ### Entity Core
 
-| Method | Path                                      | Description                                                  |
-| ------ | ----------------------------------------- | ------------------------------------------------------------ |
-| `POST` | `/api/entity-core/consolidation/run`      | Run catch-up memory consolidation (delegates to entity-core) |
-| `POST` | `/api/entity-core/sync`                   | Manually trigger identity pull then push sync                |
-| `POST` | `/api/entity-core/actions/embed-memories` | Run embed-existing-memories script in entity-core            |
+| Method | Path                                      | Description                                       |
+| ------ | ----------------------------------------- | ------------------------------------------------- |
+| `POST` | `/api/entity-core/sync`                   | Manually trigger identity pull then push sync     |
+| `POST` | `/api/entity-core/actions/embed-memories` | Run embed-existing-memories script in entity-core |
 
 ### Snapshots
 
@@ -407,7 +406,7 @@ The custom tools upload endpoint accepts a `multipart/form-data` request with a
 | `GET`  | `/fragments/settings/entity-core/overview`        | Entity Core overview tab (ping-based connection status, graph stats, extraction pipeline health, sync)                                                                                                                                    |
 | `GET`  | `/fragments/settings/entity-core/llm`             | Entity Core LLM settings tab                                                                                                                                                                                                              |
 | `GET`  | `/fragments/settings/entity-core/graph`           | Knowledge Graph visualization tab                                                                                                                                                                                                         |
-| `GET`  | `/fragments/settings/entity-core/maintenance`     | Entity Core maintenance tab (consolidation, batch populate, embed)                                                                                                                                                                        |
+| `GET`  | `/fragments/settings/entity-core/maintenance`     | Entity Core maintenance tab (batch populate, embed)                                                                                                                                                                                       |
 | `GET`  | `/fragments/settings/entity-core/snapshots`       | Snapshot browser tab                                                                                                                                                                                                                      |
 | `GET`  | `/fragments/entity-core/snapshots/:id`            | Snapshot preview fragment                                                                                                                                                                                                                 |
 | `GET`  | `/fragments/settings/memories`                    | Memories tabbed view fragment                                                                                                                                                                                                             |

@@ -314,39 +314,97 @@ export async function runFirstRun() {
       const message = String(err?.message ?? err);
       showError(els.bootstrapError(), message);
 
-      // Build a Retry + (optional) remediation row. The git-missing
-      // path is recoverable on macOS by running xcode-select --install
-      // (Apple ships git as part of the Command Line Tools).
-      const actions = [];
+      // Build a Retry + (optional) remediation row.
       if (/git not found on PATH/i.test(message)) {
-        const installClt = document.createElement("button");
-        installClt.className = "primary";
-        installClt.textContent = "Install Xcode CLT";
-        installClt.addEventListener("click", async () => {
-          installClt.disabled = true;
-          const { err: cltErr } = await safeInvoke("install_xcode_clt");
-          if (cltErr) {
-            showError(els.bootstrapError(), `${message}\n\n${cltErr}`);
-          } else {
-            // The OS-level installer dialog now controls the flow.
-            // Swap the button label so the user knows the next step
-            // is "wait for that install, then retry."
-            installClt.textContent = "Installing…";
-            showError(
-              els.bootstrapError(),
-              message +
-                "\n\nThe Command Line Tools installer dialog has opened. " +
-                "Click Install in that dialog; once it's done (~5 min), " +
-                "come back here and click Try again.",
-            );
-          }
-          installClt.disabled = false;
-        });
-        actions.push(installClt);
+        // Replace the raw error text with a friendly, styled card.
+        clearError(els.bootstrapError());
+
+        const platform = navigator.userAgent.includes("Mac") ? "macos"
+          : navigator.userAgent.includes("Win") ? "windows"
+          : "linux";
+
+        const card = document.createElement("div");
+        card.className = "warning-entry";
+        const title = document.createElement("div");
+        title.className = "warning-entry__title";
+        title.textContent = "I need Git to get set up";
+        const body = document.createElement("div");
+        body.className = "warning-entry__body";
+        body.textContent =
+          "Git is a free tool that I use to download my source code and " +
+          "keep myself updated. It's one of the most widely-used developer " +
+          "tools in the world, and it's perfectly safe to install. " +
+          "Once you have it, I'll be able to finish setting up — " +
+          "and future updates will work smoothly too.";
+
+        const btnRow = document.createElement("div");
+        btnRow.className = "warning-entry__actions";
+
+        const fixBtn = document.createElement("button");
+        fixBtn.className = "primary";
+
+        if (platform === "macos") {
+          fixBtn.textContent = "Install Command Line Tools";
+          fixBtn.addEventListener("click", async () => {
+            fixBtn.disabled = true;
+            const { err: cltErr } = await safeInvoke("install_xcode_clt");
+            if (cltErr) {
+              showError(els.bootstrapError(), cltErr);
+            } else {
+              body.textContent =
+                "The installer dialog has opened. Click Install in that " +
+                "dialog — once it's done (usually a few minutes), come " +
+                "back here and click Try again.";
+              fixBtn.textContent = "Installing…";
+            }
+            fixBtn.disabled = false;
+          });
+        } else if (platform === "windows") {
+          fixBtn.textContent = "Download Git for Windows";
+          fixBtn.addEventListener("click", async () => {
+            fixBtn.disabled = true;
+            await safeInvoke("open_url", {
+              url: "https://git-scm.com/download/win",
+            });
+            body.textContent +=
+              "\n\nOnce the download finishes, run the installer, then " +
+              "come back here and click Try again.";
+            fixBtn.textContent = "Opened in browser";
+          });
+        } else {
+          fixBtn.textContent = "Open install instructions";
+          fixBtn.addEventListener("click", async () => {
+            fixBtn.disabled = true;
+            await safeInvoke("open_url", {
+              url: "https://git-scm.com/download/linux",
+            });
+            body.textContent +=
+              "\n\nFollow the instructions for your Linux distribution, " +
+              "then come back here and click Try again.";
+            fixBtn.textContent = "Opened in browser";
+          });
+        }
+        btnRow.appendChild(fixBtn);
+
+        card.append(title, body, btnRow);
+        els.bootstrapActions().replaceChildren(card);
+
+        // Retry goes inside the card's action row alongside the fix button.
+        const retry = document.createElement("button");
+        retry.textContent = "Try again";
+        const clicked = new Promise(
+          (r) => retry.addEventListener("click", r),
+        );
+        btnRow.prepend(retry);
+
+        await clicked;
+        els.bootstrapActions().replaceChildren();
+        continue; // re-enter the while(true) loop
       }
 
+      const actions = [];
       const retry = document.createElement("button");
-      retry.className = actions.length ? "" : "primary";
+      retry.className = "primary";
       retry.textContent = "Try again";
       const clicked = new Promise((r) => retry.addEventListener("click", r));
       actions.push(retry);
