@@ -1,5 +1,5 @@
-_Who the user is — fundamental facts and self-concept. Things here are stable
-and long-lasting._
+_Who {{userName}} is — fundamental facts and self-concept. Things here are
+stable and long-lasting._
 
 ## How they describe themselves
 

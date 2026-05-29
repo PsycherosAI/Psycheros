@@ -10,20 +10,28 @@ import { join } from "@std/path";
 const IDENTITY_SUBDIRS = ["self", "user", "relationship", "custom"] as const;
 
 /**
- * Load the entity's display name from general-settings.json, falling back to
- * "Assistant" (the launcher's default) when the file is missing or malformed.
- * Used to substitute {{entityName}} placeholders when seeding identity
- * templates on first run.
+ * Load general settings (entityName, userName) from general-settings.json,
+ * falling back to defaults when the file is missing or malformed.
+ * Used to substitute {{entityName}} and {{userName}} placeholders when seeding
+ * identity templates on first run.
  */
-async function loadEntityName(dataRoot: string): Promise<string> {
+async function loadGeneralSettings(
+  dataRoot: string,
+): Promise<{ entityName: string; userName: string }> {
   try {
     const text = await Deno.readTextFile(
       join(dataRoot, ".psycheros", "general-settings.json"),
     );
-    const settings = JSON.parse(text) as { entityName?: string };
-    return settings.entityName?.trim() || "Assistant";
+    const settings = JSON.parse(text) as {
+      entityName?: string;
+      userName?: string;
+    };
+    return {
+      entityName: settings.entityName?.trim() || "Assistant",
+      userName: settings.userName?.trim() || "You",
+    };
   } catch {
-    return "Assistant";
+    return { entityName: "Assistant", userName: "You" };
   }
 }
 
@@ -119,7 +127,7 @@ export async function initializeFromTemplates(
 ): Promise<void> {
   const templatesDir = join(projectRoot, "templates", "identity");
   const identityDir = join(dataRoot, "identity");
-  const substitutions = { entityName: await loadEntityName(dataRoot) };
+  const substitutions = await loadGeneralSettings(dataRoot);
 
   let totalCopied = 0;
 

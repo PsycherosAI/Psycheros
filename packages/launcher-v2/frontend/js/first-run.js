@@ -319,8 +319,10 @@ export async function runFirstRun() {
         // Replace the raw error text with a friendly, styled card.
         clearError(els.bootstrapError());
 
-        const platform = navigator.userAgent.includes("Mac") ? "macos"
-          : navigator.userAgent.includes("Win") ? "windows"
+        const platform = navigator.userAgent.includes("Mac")
+          ? "macos"
+          : navigator.userAgent.includes("Win")
+          ? "windows"
           : "linux";
 
         const card = document.createElement("div");

@@ -670,8 +670,9 @@ prompt. It is:
 - **Wrapped** in XML tags at context-build time (default: `<base_instructions>`,
   customizable via prompt label)
 - **Editable** via Settings -> Core Prompts -> Self in the web UI
-- **Templated** -- uses `{{timestamp}}` which is replaced with the current ISO
-  timestamp each turn
+- **Templated** -- uses `{{timestamp}}` and `{{chatId}}` which are replaced at
+  runtime; `{{entityName}}` and `{{userName}}` are replaced at init time when
+  templates are first seeded
 
 On fresh installs, this file is seeded from
 `templates/identity/self/base_instructions.md`. The file is excluded from the

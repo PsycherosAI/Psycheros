@@ -6,6 +6,21 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.12] - 2026-05-29
+
+### Changed
+
+- Identity templates now auto-substitute `{{userName}}` from general settings at
+  init time, alongside the existing `{{entityName}}`. User-facing template prose
+  references the configured user name instead of generic "the user".
+- Self-identity templates restructured with section headings for better
+  organization (Identity, Appearance, Tone, Mannerisms, Humor, Wants, Goals,
+  Personhood).
+- `my_mechanics.md` streamlined — removes redundant technical detail, reframes
+  the entity's stateless-LLM explanation as one organ in a distributed system.
+- `base_instructions.md` simplified by removing `{{timestamp}}` and `{{chatId}}`
+  (these are provided elsewhere in the system prompt).
+
 ## [0.4.11] - 2026-05-28
 
 ### Fixed
@@ -490,6 +505,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 [0.1.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.2
 [0.1.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.1
 [0.1.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.0
+[0.4.12]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.12
 [0.4.11]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.11
 [0.4.10]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.10
 [0.4.9]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.9

@@ -262,11 +262,11 @@ instead of a frozen chat window.
   Route every spawn through `proc::hidden_command` — it applies
   `CREATE_NO_WINDOW` on Windows and is a pass-through elsewhere. **Don't** route
   `open_path` (the "Reveal in Explorer" affordance) through it — the user
-  _wants_ that window. `open_url` (open in browser) does use `hidden_command`
-  on Windows — `cmd /C start` is a console-subsystem tool and would flash
-  otherwise. The bug is invisible in `cargo tauri dev` because debug
-  builds default to `windows_subsystem = "console"` and subprocesses inherit the
-  dev launcher's console; only release MSI installs surface it.
+  _wants_ that window. `open_url` (open in browser) does use `hidden_command` on
+  Windows — `cmd /C start` is a console-subsystem tool and would flash
+  otherwise. The bug is invisible in `cargo tauri dev` because debug builds
+  default to `windows_subsystem = "console"` and subprocesses inherit the dev
+  launcher's console; only release MSI installs surface it.
 - **Don't add the daemon-runner as an `externalBin`.** It's a `[[bin]]` target
   in the same crate, so `cargo tauri build` auto-includes the compiled
   `target/release/psycheros-daemon-runner.exe` in the MSI alongside the main

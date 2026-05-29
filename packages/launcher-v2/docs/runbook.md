@@ -60,8 +60,8 @@ Check `Diagnostics` → daemon state.
 A warning card appears with a platform-specific fix button:
 
 - **macOS**: Click `Install Command Line Tools`. macOS opens the Xcode CLT
-  installer dialog. Click `Install`, wait ~5 minutes, then come back and
-  click `Try again`.
+  installer dialog. Click `Install`, wait ~5 minutes, then come back and click
+  `Try again`.
 - **Windows**: Click `Download Git for Windows`. The Git for Windows download
   page opens in your browser. Run the installer, then come back and click
   `Try again`.
