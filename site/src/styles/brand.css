@@ -151,6 +151,62 @@
 }
 
 /* ------------------------------------------------------------------------- */
+/* Heading hierarchy — visual sectioning                                     */
+/*                                                                           */
+/* h2  Major sections (Overview, Core Prompts, Memories…) — big, bright,     */
+/*     with an accent-colored underline to create clear visual breaks.        */
+/* h3  Subsections (Self, User, Daily…) — white, medium, no underline.       */
+/* h4  Sub-subsections (Base Instructions, My Identity…) — muted, compact.   */
+/* h5+  Deeply nested items (Discord steps) — smaller still, subtle.         */
+/* ------------------------------------------------------------------------- */
+
+.sl-markdown-content h2 {
+  color: var(--psy-accent-hover);
+  font-size: 1.65rem;
+  font-weight: 700;
+  margin-top: 3.5rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 2px solid var(--psy-accent-muted);
+}
+
+.sl-markdown-content h2:first-of-type {
+  margin-top: 0;
+}
+
+.sl-markdown-content h3 {
+  color: var(--psy-fg-strong);
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+}
+
+.sl-markdown-content h4 {
+  color: var(--psy-fg-muted);
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.sl-markdown-content h5 {
+  color: var(--psy-fg-muted);
+  font-size: 1rem;
+  font-weight: 500;
+  margin-top: 1.25rem;
+  margin-bottom: 0.4rem;
+}
+
+.sl-markdown-content h6 {
+  color: var(--psy-fg-subtle);
+  font-size: 0.95rem;
+  font-weight: 500;
+  margin-top: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+/* ------------------------------------------------------------------------- */
 /* Top-nav gradient hairline — subtle brand cue                              */
 /* Scoped to `.page > header` so the search-dialog's internal header (also   */
 /* classed `header`) doesn't get the same treatment.                         */
