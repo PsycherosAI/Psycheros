@@ -6,6 +6,16 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-28
+
+### Fixed
+
+- **Weekly memory date enrichment now produces human-readable dates.** ISO week
+  dates (e.g. `2026-W09`) were not parseable by the JavaScript `Date`
+  constructor, causing the weekly branch to return the raw date string instead
+  of "Week of February 23, 2026". The weekly parsing now runs before the general
+  `Date` constructor check.
+
 ## [0.3.1] - 2026-05-28
 
 ### Fixed
@@ -193,6 +203,7 @@ All notable changes to entity-core are documented here. The format follows
 - Knowledge graph (people, places, relationships) backed by SQLite + sqlite-vec.
 - Snapshot system: pre-destructive-operation snapshots for recovery.
 
+[0.3.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.2
 [0.3.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.1
 [0.3.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.0
 [0.2.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.2.6

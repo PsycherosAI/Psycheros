@@ -725,6 +725,27 @@ export class EmbeddingCache {
  */
 function formatDateForEmbedding(granularity: string, date: string): string {
   try {
+    // Weekly dates use ISO week format (YYYY-WNN) which the Date constructor
+    // cannot parse — handle them before the general Date check.
+    if (granularity === "weekly") {
+      const weekMatch = date.match(/^(\d{4})-W(\d{2})$/);
+      if (weekMatch) {
+        const year = parseInt(weekMatch[1]);
+        const week = parseInt(weekMatch[2]);
+        const jan4 = new Date(year, 0, 4);
+        const dayOfWeek = jan4.getDay() || 7;
+        const monday = new Date(jan4);
+        monday.setDate(jan4.getDate() - dayOfWeek + 1 + (week - 1) * 7);
+        return `Week of ${
+          new Intl.DateTimeFormat("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          }).format(monday)
+        }`;
+      }
+    }
+
     const parsed = new Date(date + "T00:00:00");
     if (isNaN(parsed.getTime())) return date;
 
@@ -738,27 +759,10 @@ function formatDateForEmbedding(granularity: string, date: string): string {
         opts.month = "long";
         opts.day = "numeric";
         break;
-      case "weekly": {
-        // Parse ISO week date to get the Monday of that week
-        const weekMatch = date.match(/^(\d{4})-W(\d{2})$/);
-        if (weekMatch) {
-          const year = parseInt(weekMatch[1]);
-          const week = parseInt(weekMatch[2]);
-          // ISO week: day 1 = Monday
-          const jan4 = new Date(year, 0, 4);
-          const dayOfWeek = jan4.getDay() || 7;
-          const monday = new Date(jan4);
-          monday.setDate(jan4.getDate() - dayOfWeek + 1 + (week - 1) * 7);
-          opts.month = "long";
-          opts.day = "numeric";
-          return `Week of ${
-            new Intl.DateTimeFormat("en-US", opts).format(monday)
-          }`;
-        }
+      case "weekly":
         opts.month = "long";
         opts.day = "numeric";
         break;
-      }
       case "monthly":
         opts.month = "long";
         break;
