@@ -1,0 +1,12 @@
+{
+  "name": "@psycheros/plugin-api",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/mod.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "tasks": {
+    "test": "deno test -A tests/",
+    "validate": "deno run --allow-read scripts/validate-plugin.ts"
+  }
+}

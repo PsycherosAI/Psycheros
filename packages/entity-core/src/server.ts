@@ -66,6 +66,10 @@ import type { ServerConfig } from "./types.ts";
 import { DEFAULT_SERVER_CONFIG } from "./types.ts";
 import { cleanupOldSnapshots } from "./snapshot/mod.ts";
 import { EmbeddingCache } from "./embeddings/mod.ts";
+import {
+  createEntityCorePluginManager,
+  type EntityCorePluginManager,
+} from "./plugins/mod.ts";
 
 /**
  * Create and configure the MCP server.
@@ -83,6 +87,7 @@ export function createServer(config: Partial<ServerConfig> = {}): McpServer {
 
   // Initialize embedding cache (shares graph.db for sqlite-vec)
   const embeddingCache = new EmbeddingCache(fullConfig.dataDir);
+  const pluginManager = fullConfig.pluginManager;
 
   // Create MCP server
   const server = new McpServer({
@@ -103,7 +108,13 @@ export function createServer(config: Partial<ServerConfig> = {}): McpServer {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(result, null, 2),
+            text: JSON.stringify(
+              pluginManager
+                ? await pluginManager.decorate("identity_get_all", result)
+                : result,
+              null,
+              2,
+            ),
           },
         ],
       };
@@ -127,7 +138,13 @@ export function createServer(config: Partial<ServerConfig> = {}): McpServer {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(result, null, 2),
+            text: JSON.stringify(
+              pluginManager
+                ? await pluginManager.decorate("identity_write", result)
+                : result,
+              null,
+              2,
+            ),
           },
         ],
       };
@@ -151,7 +168,13 @@ export function createServer(config: Partial<ServerConfig> = {}): McpServer {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(result, null, 2),
+            text: JSON.stringify(
+              pluginManager
+                ? await pluginManager.decorate("identity_append", result)
+                : result,
+              null,
+              2,
+            ),
           },
         ],
       };
@@ -441,7 +464,13 @@ export function createServer(config: Partial<ServerConfig> = {}): McpServer {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(result, null, 2),
+            text: JSON.stringify(
+              pluginManager
+                ? await pluginManager.decorate("memory_search", result)
+                : result,
+              null,
+              2,
+            ),
           },
         ],
       };
@@ -1330,6 +1359,20 @@ export function createServer(config: Partial<ServerConfig> = {}): McpServer {
     },
   );
 
+  server.tool(
+    "plugin_status",
+    "I use this to inspect the trusted local extensions available to my core.",
+    {},
+    () => ({
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify(pluginManager?.getStatuses() ?? [], null, 2),
+      }],
+    }),
+  );
+
+  pluginManager?.registerTools(server);
+
   return server;
 }
 
@@ -1339,14 +1382,38 @@ export function createServer(config: Partial<ServerConfig> = {}): McpServer {
 export async function startServer(
   config: Partial<ServerConfig> = {},
 ): Promise<void> {
-  const server = createServer(config);
-  const transport = new StdioServerTransport();
-
   // Auto-rebuild embeddings if schema version changed (e.g., date enrichment
   // added). This runs before connecting so the entity-core process handles it
   // on startup rather than silently serving stale vectors.
   const fullConfig: ServerConfig = { ...DEFAULT_SERVER_CONFIG, ...config };
   await autoRebuildEmbeddings(fullConfig.dataDir);
+
+  let pluginManager: EntityCorePluginManager | undefined =
+    fullConfig.pluginManager;
+  if (!pluginManager) {
+    const store = fullConfig.store ?? new FileStore(fullConfig.dataDir);
+    const graphStore = fullConfig.graphStore ??
+      new GraphStore(fullConfig.dataDir);
+    const embeddingCache = new EmbeddingCache(fullConfig.dataDir);
+    pluginManager = createEntityCorePluginManager(
+      Deno.env.get("PSYCHEROS_PLUGIN_DIR") ??
+        `${fullConfig.dataDir}/../.psycheros/plugins`,
+      {
+        dataDir: fullConfig.dataDir,
+        store,
+        graphStore,
+        embeddingCache,
+        log: (...args) => console.error("[Plugins]", ...args),
+      },
+    );
+    await pluginManager.load();
+  }
+
+  const server = createServer({ ...config, pluginManager });
+  const transport = new StdioServerTransport();
+  transport.onclose = () => {
+    void pluginManager?.stop();
+  };
 
   await server.connect(transport);
 

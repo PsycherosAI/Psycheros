@@ -39,6 +39,7 @@ import type { Tool } from "../tools/mod.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { pulseIconSvg } from "../pulse/templates.ts";
 import type { ExtractionHealth } from "../mcp-client/mod.ts";
+import type { PluginStatus } from "../../../plugin-api/src/mod.ts";
 
 // =============================================================================
 // Utilities
@@ -250,7 +251,7 @@ function getAccentColorOverride(): string {
  * Render the full app shell HTML.
  * This is served on initial page load.
  */
-export function renderAppShell(): string {
+export function renderAppShell(pluginHeadHtml = ""): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -270,6 +271,7 @@ export function renderAppShell(): string {
   <script src="/lib/htmx-sse.js"></script>
   <script src="/lib/marked.min.js"></script>
   <script src="/lib/dompurify.min.js"></script>
+  ${pluginHeadHtml}
 </head>
 <body>
   <div class="bg-layer"></div>
@@ -693,6 +695,24 @@ export function renderSettingsHub(): string {
         </svg>
       </a>
       <a class="settings-hub-card"
+        hx-get="/fragments/settings/plugins"
+        hx-target="#chat"
+        hx-swap="innerHTML">
+        <div class="settings-hub-card-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3v4M16 3v4M5 7h14v5a7 7 0 0 1-14 0V7z"/>
+            <path d="M12 19v3"/>
+          </svg>
+        </div>
+        <div class="settings-hub-card-body">
+          <span class="settings-hub-card-title">Plugins</span>
+          <span class="settings-hub-card-desc">Review trusted local extensions and their runtime status</span>
+        </div>
+        <svg class="settings-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </a>
+      <a class="settings-hub-card"
         hx-get="/fragments/settings/llm"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -734,6 +754,60 @@ export function renderSettingsHub(): string {
     </div>
   </div>
 </div>`;
+}
+
+export function renderPluginsSettings(statuses: PluginStatus[]): string {
+  const rows = statuses.length === 0
+    ? `<p class="settings-note">I do not have any local plugins installed.</p>`
+    : statuses.map((status) => {
+      const state = status.degraded
+        ? "Degraded"
+        : status.active
+        ? "Active"
+        : status.enabled
+        ? "Inactive"
+        : "Disabled";
+      const capabilities = Object.entries(status.capabilities)
+        .filter(([, count]) => count > 0)
+        .map(([name, count]) => `${name}: ${count}`)
+        .join(", ") || "No registered capabilities";
+      return `<section class="theme-section">
+        <h3 class="theme-section-title">${escapeHtml(status.name)} <code>${
+        escapeHtml(status.version)
+      }</code></h3>
+        <p class="theme-section-desc">${escapeHtml(state)}. ${
+        escapeHtml(capabilities)
+      }.</p>
+        <p class="settings-note">Psycheros entrypoint: ${
+        status.entrypoints.psycheros ? "yes" : "no"
+      } · Entity-core entrypoint: ${
+        status.entrypoints.entityCore ? "yes" : "no"
+      }</p>
+        ${
+        status.lastError
+          ? `<p class="settings-note">Last error: ${
+            escapeHtml(status.lastError)
+          }</p>`
+          : ""
+      }
+      </section>`;
+    }).join("");
+
+  return `<div class="settings-view">
+    <div class="settings-header">
+      <div class="settings-header-row">
+        ${renderSettingsBackButton()}
+        <div>
+          <h1 class="settings-title">Plugins</h1>
+          <p class="settings-desc">Trusted local extensions loaded from my persistent data directory</p>
+        </div>
+      </div>
+    </div>
+    <div class="settings-content" id="settings-content">
+      <p class="settings-note">Plugins run as trusted local code. They can access my filesystem, network, services, and local secrets. Portable exports do not include my plugin-secrets directory. Changes take effect after I restart.</p>
+      ${rows}
+    </div>
+  </div>`;
 }
 
 export interface GeneralSettings {

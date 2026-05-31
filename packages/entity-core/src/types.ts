@@ -221,6 +221,8 @@ export interface ServerConfig {
    * keep using a stale (closed) connection.
    */
   consolidationRunner?: import("./consolidation/runner.ts").ConsolidationRunner;
+  /** Trusted local plugins prepared before the MCP transport connects */
+  pluginManager?: import("./plugins/mod.ts").EntityCorePluginManager;
   /** Minimum score threshold for RAG retrieval */
   ragMinScore?: number;
   /** Maximum chunks to retrieve */

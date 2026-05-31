@@ -752,8 +752,10 @@ export function renderAdminEntityData(): string {
     <h3 class="admin-section-title">Export Entity Data</h3>
     <p class="admin-action-desc">
       Exports all entity data (identity, memories, knowledge graph, conversations,
-      lorebooks, vault documents, images) as a zip file. Entity-core data is
-      fetched via MCP; Psycheros data is exported directly.
+      lorebooks, vault documents, images, and trusted local plugins) as a zip
+      file. Entity-core data is fetched via MCP; Psycheros data is exported
+      directly. Plugin code can access my filesystem, network, services, and
+      local secrets available after restart.
     </p>
     <div class="admin-action-form">
       <button id="admin-export-btn" class="admin-action-btn" onclick="window.adminExportEntity()">
@@ -773,7 +775,8 @@ export function renderAdminEntityData(): string {
       Performs a <strong>full overwrite</strong> of all entity data from a Psycheros
       entity zip file. A snapshot is taken before overwriting entity-core data.
       After import, stale RAG indexes are cleared and will be rebuilt on next access.
-      The import requires MCP to be connected for entity-core data.
+      The import requires MCP to be connected for entity-core data. Restored
+      plugins are executable local code and take effect after I restart.
     </p>
     <div class="admin-action-form">
       <div class="admin-action-fields">
