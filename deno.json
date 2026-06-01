@@ -3,11 +3,12 @@
     "./packages/psycheros",
     "./packages/entity-core",
     "./packages/entity-loom",
-    "./packages/launcher"
+    "./packages/launcher",
+    "./packages/plugin-api"
   ],
   "nodeModulesDir": "auto",
   "tasks": {
-    "test": "deno test -A packages/psycheros/tests/ packages/entity-core/tests/",
+    "test": "deno test -A packages/psycheros/tests/ packages/entity-core/tests/ packages/plugin-api/tests/",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check"
   },

@@ -956,8 +956,8 @@
             <strong>Back up</strong>
             <span class="data-action__detail">
               Exports a snapshot of my entity data (memories, vault, identity,
-              settings, generated images) as a zip in your Downloads folder.
-              Daemon must be running.
+              settings, generated images, and trusted local plugins) as a zip in
+              your Downloads folder. Daemon must be running.
             </span>
           </div>
           <button type="button" id="data-backup" class="primary">
@@ -971,7 +971,8 @@
             <span class="data-action__detail">
               Reads a previously-exported zip and replaces my current data with
               what's inside it. Daemon must be running; I'll restart
-              automatically when the import finishes.
+              automatically when the import finishes. Restored plugins are
+              executable local code and may contain secrets.
             </span>
           </div>
           <button type="button" id="data-restore">

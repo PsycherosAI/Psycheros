@@ -87,6 +87,8 @@ import {
 } from "../discord/mod.ts";
 import { join } from "@std/path";
 import { MAX_REQUEST_BODY_SIZE, MAX_UPLOAD_BODY_SIZE } from "../constants.ts";
+import { createPluginManager, type PluginManager } from "../plugins/mod.ts";
+import type { PluginStatus } from "../../../plugin-api/src/mod.ts";
 import {
   handleBatchDeleteConversations,
   handleButtplugStatus,
@@ -363,6 +365,7 @@ export class Server {
   private toolSettings: ToolsSettings;
   private entityCoreLLMSettings: EntityCoreLLMSettings;
   private customTools: Record<string, import("../tools/types.ts").Tool>;
+  private pluginManager: PluginManager;
   private pulseEngine: PulseEngine | null = null;
   private scheduler: Scheduler | null = null;
   private deviceCache: DeviceStatusCache;
@@ -427,6 +430,10 @@ export class Server {
 
     // Initialize custom tools (will be loaded in init())
     this.customTools = {};
+    this.pluginManager = createPluginManager(
+      join(config.dataRoot, ".psycheros", "plugins"),
+      () => this.llm,
+    );
 
     // Initialize tool registry with only allowed tools
     this.tools = createDefaultRegistry(config.allowedTools ?? []);
@@ -494,6 +501,7 @@ export class Server {
     );
     this.toolSettings = await loadToolsSettings(this.config.dataRoot);
     this.customTools = await loadCustomTools(this.config.dataRoot);
+    await this.pluginManager.load();
     this.reloadLLMClient();
     this.reloadToolRegistry();
 
@@ -867,6 +875,7 @@ export class Server {
         deviceStatusCache: this.deviceCache,
         contextLength: activeProfile?.contextLength,
         maxTokens: activeProfile?.maxTokens,
+        pluginManager: this.pluginManager,
       },
     );
 
@@ -1078,6 +1087,7 @@ export class Server {
     const allTools: Record<string, import("../tools/types.ts").Tool> = {
       ...AVAILABLE_TOOLS,
       ...this.customTools,
+      ...this.pluginManager.getTools(),
     };
     const allNames = Object.keys(allTools);
 
@@ -1421,6 +1431,7 @@ export class Server {
         contextLength: () => this.getActiveLLMProfile()?.contextLength,
         maxTokens: () => this.getActiveLLMProfile()?.maxTokens,
         deviceStatusCache: () => this.deviceCache,
+        pluginManager: this.pluginManager,
       },
     );
     this.pulseEngine.start();
@@ -1478,11 +1489,51 @@ export class Server {
   }
 
   /**
+   * Merge activation state from my embodiment and my canonical core.
+   */
+  private async getPluginStatuses(): Promise<PluginStatus[]> {
+    const statuses = new Map(
+      this.pluginManager.getStatuses().map((status) => [status.id, status]),
+    );
+    const coreStatuses = await this.mcpClient?.getPluginStatuses() ?? [];
+
+    for (const coreStatus of coreStatuses) {
+      const localStatus = statuses.get(coreStatus.id);
+      if (!localStatus) {
+        statuses.set(coreStatus.id, coreStatus);
+        continue;
+      }
+      statuses.set(coreStatus.id, {
+        ...localStatus,
+        active: localStatus.active || coreStatus.active,
+        degraded: localStatus.degraded || coreStatus.degraded,
+        lastError: localStatus.lastError ?? coreStatus.lastError,
+        capabilities: {
+          tools: localStatus.capabilities.tools +
+            coreStatus.capabilities.tools,
+          promptHooks: localStatus.capabilities.promptHooks +
+            coreStatus.capabilities.promptHooks,
+          routes: localStatus.capabilities.routes +
+            coreStatus.capabilities.routes,
+          resultDecorators: localStatus.capabilities.resultDecorators +
+            coreStatus.capabilities.resultDecorators,
+          browserScripts: localStatus.capabilities.browserScripts +
+            coreStatus.capabilities.browserScripts,
+          browserStyles: localStatus.capabilities.browserStyles +
+            coreStatus.capabilities.browserStyles,
+        },
+      });
+    }
+
+    return [...statuses.values()].sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  /**
    * Stop the server gracefully.
    *
    * Aborts the server, clears the keepalive timer, and closes the database connection.
    */
-  stop(): void {
+  async stop(): Promise<void> {
     console.log("Stopping Psycheros server...");
 
     // Stop Discord Gateway
@@ -1500,6 +1551,7 @@ export class Server {
 
     // Stop device status cache refresh
     this.deviceCache.stop();
+    await this.pluginManager.stop();
 
     // Clear keepalive timer
     if (this.keepaliveInterval !== null) {
@@ -1565,6 +1617,7 @@ export class Server {
         this.updateEntityCoreLLMSettings(settings),
       getDeviceStatusCache: () => this.deviceCache,
       customTools: this.customTools,
+      pluginManager: this.pluginManager,
     };
   }
 
@@ -1666,6 +1719,19 @@ export class Server {
     // GET /api/events - Persistent SSE event stream
     if (method === "GET" && path === "/api/events") {
       return handleEvents(ctx, request);
+    }
+
+    if (method === "GET" && path === "/api/plugins") {
+      return Response.json(await this.getPluginStatuses());
+    }
+
+    const pluginApiMatch = path.match(/^\/api\/plugins\/([^/]+)(\/.*)?$/);
+    if (pluginApiMatch) {
+      return await this.pluginManager.handleApiRoute(
+        pluginApiMatch[1],
+        pluginApiMatch[2] ?? "/",
+        request,
+      );
     }
 
     // GET /api/conversations - List conversations (JSON)
@@ -3053,6 +3119,14 @@ export class Server {
       return handleToolsSettingsFragment(ctx);
     }
 
+    if (path === "/fragments/settings/plugins") {
+      const { renderPluginsSettings } = await import("./templates.ts");
+      return new Response(
+        renderPluginsSettings(await this.getPluginStatuses()),
+        { headers: { "Content-Type": "text/html; charset=utf-8" } },
+      );
+    }
+
     // ========================================
     // Pulse Fragment Routes
     // ========================================
@@ -3123,6 +3197,14 @@ export class Server {
     if (path.startsWith("/backgrounds/")) {
       const filename = path.replace("/backgrounds/", "");
       return await handleServeBackground(ctx, filename);
+    }
+
+    const pluginAssetMatch = path.match(/^\/plugins\/([^/]+)\/(.+)$/);
+    if (pluginAssetMatch) {
+      return await this.pluginManager.serveAsset(
+        pluginAssetMatch[1],
+        pluginAssetMatch[2],
+      );
     }
 
     // Serve static files from web/ directory
