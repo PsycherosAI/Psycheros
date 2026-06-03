@@ -245,10 +245,10 @@ The `control_device` tool is auto-enabled when any device has `enabled: true`.
 
 ### BLE Device Bridge Settings
 
-| Method | Path                   | Description                                         |
-| ------ | ---------------------- | --------------------------------------------------- |
-| `GET`  | `/api/ble-settings`    | Get current BLE device bridge settings              |
-| `POST` | `/api/ble-settings`    | Save BLE settings and hot-reload tool registry      |
+| Method | Path                | Description                                    |
+| ------ | ------------------- | ---------------------------------------------- |
+| `GET`  | `/api/ble-settings` | Get current BLE device bridge settings         |
+| `POST` | `/api/ble-settings` | Save BLE settings and hot-reload tool registry |
 
 Settings stored in `.psycheros/ble-settings.json`. Shape:
 `{ "devices": Array<{ id: string, name: string, type: string, enabled: boolean }> }`.
@@ -256,13 +256,13 @@ The `ble_device` tool is auto-enabled when any device has `enabled: true`.
 
 **WebSocket endpoint:**
 
-| Method | Path                   | Description                                         |
-| ------ | ---------------------- | --------------------------------------------------- |
-| `GET`  | `/api/device-bridge`   | WebSocket upgrade for BLE device bridge gateway     |
+| Method | Path                 | Description                                     |
+| ------ | -------------------- | ----------------------------------------------- |
+| `GET`  | `/api/device-bridge` | WebSocket upgrade for BLE device bridge gateway |
 
 The WebSocket uses a JSON message protocol. The gateway client (browser or
-Android app) registers connected BLE devices, relays commands from the server
-to the devices, and sends responses and inbound data back. Messages:
+Android app) registers connected BLE devices, relays commands from the server to
+the devices, and sends responses and inbound data back. Messages:
 
 - Client → Server: `{ type: "register", devices: [{ id, name, type }] }`
 - Client → Server: `{ type: "response", requestId, success, data?, error? }`
@@ -498,8 +498,8 @@ The custom tools upload endpoint accepts a `multipart/form-data` request with a
 | `src/llm/home-settings.ts`      | Home automation settings type, persistence                                                                  |
 | `src/tools/control-device.ts`   | Home automation tool (Shelly Plug local HTTP API)                                                           |
 | `src/llm/ble-settings.ts`       | BLE device bridge settings type, persistence                                                                |
-| `src/server/device-bridge.ts`   | DeviceBridge singleton — WebSocket routing, command/response, inbound buffer                               |
-| `src/tools/ble-device.ts`       | BLE device bridge tool (`ble_device` — send, query, list)                                                  |
+| `src/server/device-bridge.ts`   | DeviceBridge singleton — WebSocket routing, command/response, inbound buffer                                |
+| `src/tools/ble-device.ts`       | BLE device bridge tool (`ble_device` — send, query, list)                                                   |
 | `src/llm/lovense-settings.ts`   | Lovense settings type, persistence, LAN/Game Mode config                                                    |
 | `src/llm/buttplug-settings.ts`  | Universal toy control settings type, persistence, WebSocket URL config                                      |
 | `src/tools/control-lovense.ts`  | Lovense device control tool (state-based patterns, speed, presets)                                          |

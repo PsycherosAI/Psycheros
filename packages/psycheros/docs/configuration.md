@@ -109,28 +109,28 @@ the env var. The env var serves as a fallback when no settings file exists.
 Tools can also be toggled on/off at runtime via Settings > Tools in the web UI.
 Changes hot-reload the tool registry without a restart.
 
-| Tool                        | Description                                                                                            |
-| --------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `shell`                     | Execute shell commands (off by default)                                                                |
-| `update_title`              | Update conversation titles                                                                             |
-| `get_metrics`               | Retrieve streaming performance metrics                                                                 |
-| `create_significant_memory` | Create permanent memory (stored in entity-core via MCP)                                                |
-| ~~`sync_mcp`~~              | ~~Sync with entity-core~~ (deprecated — hidden from UI and LLM)                                        |
-| `maintain_identity`         | Full identity file maintenance (append, prepend, update_section, rewrite_section)                      |
-| `list_identity_snapshots`   | View available backups                                                                                 |
-| `custom_identity_file`      | Create and modify custom identity files (create, append, prepend, update_section, rewrite_section)     |
-| `vault`                     | Manage vault documents (write, read, append, rewrite, list, search)                                    |
-| `web_search`                | Search the web via Tavily or Brave (auto-enabled when web search provider is set)                      |
-| `pulse`                     | Manage Pulses (create, trigger, delete)                                                                |
-| `send_discord_dm`           | Send a Discord DM to the user (auto-enabled when bot token is configured)                              |
-| `act_in_discord`            | Send messages and reactions in Discord channels (auto-enabled when gateway is active)                  |
-| `control_device`            | Control a smart home device — on/off/status (off by default; auto-enabled when devices are configured) |
-| `control_lovense`           | Control Lovense devices (off by default; auto-enabled when Lovense is configured)                      |
-| `control_toy`               | Control devices via universal protocol (off by default; auto-enabled when Buttplug is configured)      |
+| Tool                        | Description                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `shell`                     | Execute shell commands (off by default)                                                                       |
+| `update_title`              | Update conversation titles                                                                                    |
+| `get_metrics`               | Retrieve streaming performance metrics                                                                        |
+| `create_significant_memory` | Create permanent memory (stored in entity-core via MCP)                                                       |
+| ~~`sync_mcp`~~              | ~~Sync with entity-core~~ (deprecated — hidden from UI and LLM)                                               |
+| `maintain_identity`         | Full identity file maintenance (append, prepend, update_section, rewrite_section)                             |
+| `list_identity_snapshots`   | View available backups                                                                                        |
+| `custom_identity_file`      | Create and modify custom identity files (create, append, prepend, update_section, rewrite_section)            |
+| `vault`                     | Manage vault documents (write, read, append, rewrite, list, search)                                           |
+| `web_search`                | Search the web via Tavily or Brave (auto-enabled when web search provider is set)                             |
+| `pulse`                     | Manage Pulses (create, trigger, delete)                                                                       |
+| `send_discord_dm`           | Send a Discord DM to the user (auto-enabled when bot token is configured)                                     |
+| `act_in_discord`            | Send messages and reactions in Discord channels (auto-enabled when gateway is active)                         |
+| `control_device`            | Control a smart home device — on/off/status (off by default; auto-enabled when devices are configured)        |
+| `control_lovense`           | Control Lovense devices (off by default; auto-enabled when Lovense is configured)                             |
+| `control_toy`               | Control devices via universal protocol (off by default; auto-enabled when Buttplug is configured)             |
 | `ble_device`                | Send commands to BLE devices via device bridge (off by default; auto-enabled when BLE devices are configured) |
-| `generate_image`            | Generate an image or iterate on a previous one (auto-enabled when a generator is configured)           |
-| `describe_image`            | Describe an image by local path or URL (auto-enabled when captioning provider is configured)           |
-| `look_closer`               | Re-examine an image for detailed description (auto-enabled when captioning provider is configured)     |
+| `generate_image`            | Generate an image or iterate on a previous one (auto-enabled when a generator is configured)                  |
+| `describe_image`            | Describe an image by local path or URL (auto-enabled when captioning provider is configured)                  |
+| `look_closer`               | Re-examine an image for detailed description (auto-enabled when captioning provider is configured)            |
 
 **Example configurations:**
 

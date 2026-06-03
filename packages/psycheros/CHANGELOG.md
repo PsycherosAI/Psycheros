@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-06-03
+
 ### Added
 
 - BLE Device Bridge: bidirectional WebSocket endpoint and built-in `ble_device`
@@ -13,6 +15,10 @@ follows [Semantic Versioning](https://semver.org/).
   through a browser or future Android app gateway. Supports multi-device
   routing, command/response correlation, and an inbound data buffer. Configured
   via External Connections > BLE Devices.
+
+### Fixed
+
+- Reverted Deno 2.8.0→2.7.14 to fix sqlite-vec breakage on Windows.
 
 ## [0.5.1] - 2026-06-02
 

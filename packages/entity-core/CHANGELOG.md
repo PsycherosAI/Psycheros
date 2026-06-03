@@ -6,6 +6,12 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-06-03
+
+### Fixed
+
+- Deno version reference reverted to 2.7.14 to match runtime.
+
 ## [0.3.4] - 2026-06-02
 
 ### Fixed
