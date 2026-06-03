@@ -5,13 +5,19 @@ format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/). It is pre-1.0 until
 cross-platform supervisors ship.
 
+## [Unreleased]
+
+## [0.2.9] - 2026-06-03
+
+### Fixed
+
+- Rust formatting in URL opener (pre-existing `cargo fmt` disagreement).
+
 ## [0.2.8] - 2026-06-02
 
 ### Changed
 
 - Install scripts updated for Deno 2.7.14.
-
-## [Unreleased]
 
 ## [0.2.7] - 2026-05-28
 

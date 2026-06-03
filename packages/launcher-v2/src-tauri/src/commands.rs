@@ -1224,7 +1224,11 @@ pub fn open_url(url: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("spawn cmd: {e}"))?;
     } else {
-        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
         std::process::Command::new(opener)
             .arg(&url)
             .spawn()
