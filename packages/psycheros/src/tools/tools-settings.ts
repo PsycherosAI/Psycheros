@@ -47,6 +47,7 @@ export const DEFAULT_DISABLED_TOOLS: ReadonlySet<string> = new Set([
   "control_device",
   "control_lovense",
   "control_toy",
+  "ble_device",
   "act_in_discord",
 ]);
 
@@ -117,6 +118,12 @@ export const TOOL_CATEGORIES: ToolCategory[] = [
     name: "Intimacy",
     description: "Control Lovense devices and universal protocol toys",
     toolNames: ["control_lovense", "control_toy"],
+  },
+  {
+    id: "device-bridge",
+    name: "Device Bridge",
+    description: "BLE device communication and control",
+    toolNames: ["ble_device"],
   },
   {
     id: "vision",

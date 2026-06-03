@@ -7,7 +7,7 @@
 # gets copied verbatim into `src-tauri/binaries/deno-<triple>` and — once a
 # release pipeline exists for launcher-v2 — ships to end users inside the
 # Tauri app bundle. There is no second pinning layer downstream. Confirm
-# `deno --version` matches /.deno-version (currently 2.8.0) before running
+# `deno --version` matches /.deno-version (currently 2.7.14) before running
 # this for a build that will be distributed. Dev builds tolerate drift; user
 # builds should not.
 set -euo pipefail

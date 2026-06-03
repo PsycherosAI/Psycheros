@@ -6,6 +6,14 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- BLE Device Bridge: bidirectional WebSocket endpoint and built-in `ble_device`
+  tool for communicating with BLE peripherals (smartwatches, sensors, etc.)
+  through a browser or future Android app gateway. Supports multi-device
+  routing, command/response correlation, and an inbound data buffer. Configured
+  via External Connections > BLE Devices.
+
 ## [0.5.1] - 2026-06-02
 
 ### Fixed
@@ -19,7 +27,7 @@ follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- Upgraded Deno runtime to 2.8.0 (fixes V8 CodeRange OOM on macOS Tahoe).
+- Upgraded Deno runtime to 2.7.14 (stable).
 
 ## [0.5.0] - 2026-06-01
 

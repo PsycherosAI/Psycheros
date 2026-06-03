@@ -137,3 +137,11 @@ export {
   loadButtplugSettings,
   saveButtplugSettings,
 } from "./buttplug-settings.ts";
+
+// Re-export BLE device bridge settings
+export type { BLEDevice, BLESettings } from "./ble-settings.ts";
+export {
+  getDefaultBLESettings,
+  loadBLESettings,
+  saveBLESettings,
+} from "./ble-settings.ts";

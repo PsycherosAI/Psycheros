@@ -1011,13 +1011,14 @@ Situational Awareness in the sidebar.
   type is sent with each `/api/chat` request and included in the SA block as a
   simple `desktop` or `mobile` indicator.
 
-- **Connected Devices** — Shows which Lovense toys, Intiface devices, and home
-  smart devices are currently connected. A server-side `DeviceStatusCache`
-  probes Lovense Connect and Intiface Central every 30 seconds in the
-  background; home devices are read from settings (static config). The entity
-  sees connected devices without needing to call a discover tool. The section is
-  omitted from the SA block entirely when no devices are connected or
-  configured.
+- **Connected Devices** — Shows which Lovense toys, Intiface devices, home
+  smart devices, and BLE devices are currently connected. A server-side
+  `DeviceStatusCache` probes Lovense Connect and Intiface Central every 30
+  seconds in the background; home devices are read from settings (static
+  config); BLE devices are read from the DeviceBridge singleton (live WebSocket
+  connections). The entity sees connected devices without needing to call a
+  discover tool. The section is omitted from the SA block entirely when no
+  devices are connected or configured.
 
 - **Device Preferences** — Custom instructions configured per integration
   (Lovense or Intiface) in External Connections → Intimacy. Each section has a
@@ -1086,7 +1087,8 @@ of genuine user messages.
 **Source files:** `src/entity/loop.ts` (SA block builder, `escapeXml`,
 `formatConnectedDevices`, `ProcessOptions.deviceType`), `src/entity/context.ts`
 (injection into `buildSystemMessage`), `src/server/device-cache.ts`
-(`DeviceStatusCache` — periodic Lovense/Intiface probing, home device config),
+(`DeviceStatusCache` — periodic Lovense/Intiface probing, home device config,
+BLE device status),
 `src/db/client.ts` (`getLatestUserInteraction`), `src/server/routes.ts`
 (handlers), `src/server/templates.ts` (`renderSASettings`),
 `web/js/psycheros.js` (`deviceType` in request body, Context Inspector

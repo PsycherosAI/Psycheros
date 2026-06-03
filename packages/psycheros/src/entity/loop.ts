@@ -257,6 +257,8 @@ export interface EntityConfig {
   lovenseSettings?: import("../llm/lovense-settings.ts").LovenseSettings;
   /** Optional Buttplug device control settings */
   buttplugSettings?: import("../llm/buttplug-settings.ts").ButtplugSettings;
+  /** Optional BLE device bridge settings */
+  bleSettings?: import("../llm/ble-settings.ts").BLESettings;
   /** Device status cache for connected devices SA signal */
   deviceStatusCache?: import("../server/device-cache.ts").DeviceStatusCache;
   /** Model context window size in tokens (from active LLM profile) */

@@ -523,6 +523,62 @@ stays the same.
 | `src/tools/control-device.ts` | `control_device` tool implementation with Shelly Plug handler |
 | `src/llm/home-settings.ts`    | Settings type, load/save                                      |
 
+## BLE Device Bridge Tool
+
+The entity can send commands to BLE devices connected through the device
+bridge. A browser tab or future Android app acts as the BLE gateway,
+connecting devices via Web Bluetooth and relaying commands through a
+WebSocket. The tool supports sending commands, querying recent inbound
+data, and listing connected devices.
+
+| Tool         | Description                                                          |
+| ------------ | -------------------------------------------------------------------- |
+| `ble_device` | Send commands to and read data from BLE devices through the bridge   |
+
+**Parameters:** `action` (required, one of `"send"`, `"query"`, `"list"`),
+`device` (name or ID, required for send/query), `command` (command string,
+required for send), `params` (optional object passed through to device).
+
+**Setup:** Configure via Settings > External Connections > BLE Devices. Add
+devices with a stable ID, name, and type (e.g. "banglejs", "generic-ble").
+Settings are persisted to `.psycheros/ble-settings.json` (gitignored). The
+tool is auto-enabled when at least one device is enabled.
+
+A bridge client must be connected (browser tab open with a paired device via
+Web Bluetooth, or future Android app) for the tool to actually reach devices.
+The browser-side gateway connects via WebSocket to `/api/device-bridge` and
+uses the Nordic UART Service (NUS) for BLE communication.
+
+**Device settings shape:**
+
+```json
+{
+  "devices": [
+    {
+      "id": "banglejs-1",
+      "name": "My Bangle.js",
+      "type": "banglejs",
+      "enabled": true
+    }
+  ]
+}
+```
+
+**Data flow:** Entity calls `ble_device(action: "send", device: "My Bangle.js",
+command: "vibrate")` → server looks up device by name → finds device ID →
+routes command through DeviceBridge to the correct WebSocket client → client
+forwards to BLE device via NUS → response flows back. For inbound data (sensor
+readings, notifications), the BLE device pushes data through the gateway to
+the server's inbound buffer, queryable via `ble_device(action: "query")`.
+
+### Related Source Files
+
+| File                          | Purpose                                                       |
+| ----------------------------- | ------------------------------------------------------------- |
+| `src/tools/ble-device.ts`     | `ble_device` tool implementation                              |
+| `src/server/device-bridge.ts` | DeviceBridge singleton — WebSocket routing, command/response  |
+| `src/llm/ble-settings.ts`     | BLE settings type, load/save                                  |
+
 ## Image Generation Tool
 
 The entity can generate images using configured provider slots (OpenRouter or

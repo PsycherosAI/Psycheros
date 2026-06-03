@@ -127,6 +127,7 @@ Changes hot-reload the tool registry without a restart.
 | `control_device`            | Control a smart home device — on/off/status (off by default; auto-enabled when devices are configured) |
 | `control_lovense`           | Control Lovense devices (off by default; auto-enabled when Lovense is configured)                      |
 | `control_toy`               | Control devices via universal protocol (off by default; auto-enabled when Buttplug is configured)      |
+| `ble_device`                | Send commands to BLE devices via device bridge (off by default; auto-enabled when BLE devices are configured) |
 | `generate_image`            | Generate an image or iterate on a previous one (auto-enabled when a generator is configured)           |
 | `describe_image`            | Describe an image by local path or URL (auto-enabled when captioning provider is configured)           |
 | `look_closer`               | Re-examine an image for detailed description (auto-enabled when captioning provider is configured)     |

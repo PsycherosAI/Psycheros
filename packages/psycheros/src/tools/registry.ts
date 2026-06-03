@@ -37,6 +37,8 @@ import { controlDeviceTool } from "./control-device.ts";
 import { controlLovenseTool } from "./control-lovense.ts";
 // Buttplug device control tool
 import { controlButtplugTool } from "./control-buttplug.ts";
+// BLE device bridge tool
+import { bleDeviceTool } from "./ble-device.ts";
 // Image generation tool
 import { generateImageTool } from "./generate-image.ts";
 // Image captioning tool
@@ -87,6 +89,8 @@ export const AVAILABLE_TOOLS: Record<string, Tool> = {
   control_lovense: controlLovenseTool,
   // Universal toy control tool
   control_toy: controlButtplugTool,
+  // BLE device bridge tool
+  ble_device: bleDeviceTool,
   // Image generation tool
   generate_image: generateImageTool,
   describe_image: describeImageTool,

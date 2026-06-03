@@ -4847,6 +4847,15 @@ export function renderConnectionsSettings(
         </svg>
         Intimacy
       </button>
+      <button class="connections-nav-tab" data-tab="ble" onclick="switchConnectionsTab('ble')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6.5 6.5l11 11"/>
+          <path d="M6.5 17.5l11-11"/>
+          <path d="M12 2v7"/>
+          <path d="M12 15v7"/>
+        </svg>
+        BLE Devices
+      </button>
     </nav>
 
     <div id="connections-tab-channels" class="connections-tab-panel">${channelsContent}</div>
@@ -4939,6 +4948,29 @@ export function renderConnectionsSettings(
         <p class="intimacy-section-desc">Control any supported device via the universal Buttplug protocol</p>
       </div>
       ${renderButtplugTab(bpSettings)}
+    </div>
+
+    <div id="connections-tab-ble" class="connections-tab-panel" style="display:none;">
+      <section class="theme-section">
+        <h3 class="theme-section-title">Device Bridge</h3>
+        <p class="theme-section-desc">
+          Connect BLE devices (smartwatches, sensors, etc.) so I can reach
+          through them physically. The device must support the Nordic UART
+          Service (NUS). Keep this tab open while connected — BLE requires the
+          browser to stay active.
+        </p>
+        <div id="device-bridge-status" style="margin-top:8px;color:var(--c-fg-muted);">
+          No device connected
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px;">
+          <button class="btn btn-primary" onclick="connectDeviceBridge()">
+            Connect BLE Device
+          </button>
+          <button class="btn" onclick="disconnectDeviceBridge()">
+            Disconnect
+          </button>
+        </div>
+      </section>
     </div>
 
   </div>

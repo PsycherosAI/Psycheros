@@ -18,6 +18,7 @@ import type {
 } from "../llm/mod.ts";
 import type { WebSearchSettings } from "../llm/mod.ts";
 import type {
+  BLESettings,
   ButtplugSettings,
   DiscordGatewayConfig,
   DiscordSettings,
@@ -138,6 +139,7 @@ import {
 import { generateUIUpdates, renderAsOobSwaps } from "./ui-updates.ts";
 import { MAX_SSE_MESSAGE_SIZE, SSE_TRUNCATION_SUFFIX } from "../constants.ts";
 import { getBroadcaster } from "./broadcaster.ts";
+import { getDeviceBridge } from "./device-bridge.ts";
 import {
   deleteSubscription as deletePushSubscription,
   loadOrGenerateKeys,
@@ -244,6 +246,10 @@ export interface RouteContext {
   getButtplugSettings: () => ButtplugSettings;
   /** Update Buttplug settings and hot-reload tool registry */
   updateButtplugSettings: (settings: ButtplugSettings) => Promise<void>;
+  /** Get current BLE device bridge settings */
+  getBLESettings: () => BLESettings;
+  /** Update BLE device bridge settings and hot-reload tool registry */
+  updateBLESettings: (settings: BLESettings) => Promise<void>;
   /** Get current image gen settings */
   getImageGenSettings: () => ImageGenSettings;
   /** Update image gen settings and hot-reload tool registry */
@@ -1837,6 +1843,76 @@ export function handleEvents(_ctx: RouteContext, request: Request): Response {
   });
 
   return new Response(stream, { headers: SSE_HEADERS });
+}
+
+// =============================================================================
+// Device Bridge — WebSocket Endpoint
+// =============================================================================
+
+/**
+ * Handle GET /api/device-bridge — WebSocket upgrade for BLE device bridge.
+ *
+ * Creates a persistent WebSocket connection that the browser-side (or future
+ * Android app) BLE gateway uses to relay commands to and from BLE devices.
+ *
+ * Protocol (JSON messages):
+ *   Client → Server: { type: "register", devices: [{ id, name, type }] }
+ *                   { type: "response", requestId, success, data?, error? }
+ *                   { type: "device_data", deviceId, dataType, data }
+ *   Server → Client: { type: "command", requestId, deviceId, command, params? }
+ */
+export function handleDeviceBridge(
+  _ctx: RouteContext,
+  request: Request,
+): Response {
+  const { response, socket } = Deno.upgradeWebSocket(request);
+
+  const bridge = getDeviceBridge();
+
+  socket.onopen = () => {
+    // addClient sets up onmessage/onclose/onerror handlers internally
+    bridge.addClient(socket);
+  };
+
+  return response;
+}
+
+// =============================================================================
+// BLE Settings Routes
+// =============================================================================
+
+/**
+ * Handle GET /api/ble-settings — Return current BLE device bridge settings.
+ */
+export function handleGetBLESettings(ctx: RouteContext): Response {
+  const settings = ctx.getBLESettings();
+  return new Response(JSON.stringify(settings), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/**
+ * Handle POST /api/ble-settings — Update BLE device bridge settings.
+ */
+export async function handleSaveBLESettings(
+  ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
+  try {
+    const settings = await request.json() as BLESettings;
+    await ctx.updateBLESettings(settings);
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
 }
 
 // =============================================================================

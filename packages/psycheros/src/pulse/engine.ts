@@ -122,6 +122,7 @@ export interface PulseEngineConfig {
   imageGenSettings?: () => ImageGenSettings | undefined;
   lovenseSettings?: () => LovenseSettings | undefined;
   buttplugSettings?: () => ButtplugSettings | undefined;
+  bleSettings?: () => import("../llm/ble-settings.ts").BLESettings | undefined;
   deviceStatusCache?: () =>
     | import("../server/device-cache.ts").DeviceStatusCache
     | undefined;

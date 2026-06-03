@@ -9,7 +9,7 @@ cross-platform supervisors ship.
 
 ### Changed
 
-- Install scripts updated for Deno 2.8.0.
+- Install scripts updated for Deno 2.7.14.
 
 ## [Unreleased]
 

@@ -136,7 +136,7 @@ export class ConsolidationRunner {
   private readonly store: FileStore;
   private readonly graphStore: GraphStore;
   private readonly tickIntervalMs: number;
-  private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private tickTimer: number | null = null;
   private tickInProgress = false;
   private stopping = false;
 

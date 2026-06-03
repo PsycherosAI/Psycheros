@@ -19,7 +19,7 @@
 # Deno version: keep in sync with /.deno-version at repo root. The Dockerfile
 # FROM directive can't read a file at parse time without a build-arg dance,
 # so this literal is the second copy. When bumping, update both.
-FROM denoland/deno:2.8.0
+FROM denoland/deno:2.7.14
 
 # Install dumb-init for proper PID 1 signal handling, plus an SSH server and a
 # small set of diagnostic tools used when an operator (or an external Claude

@@ -9,6 +9,7 @@
 
 import { DBClient } from "../db/mod.ts";
 import {
+  type BLESettings,
   type ButtplugSettings,
   createClientFromProfile,
   createDefaultClient,
@@ -16,6 +17,7 @@ import {
   type DiscordSettings,
   type EntityCoreLLMSettings,
   getActiveProfile,
+  getDefaultBLESettings,
   getDefaultButtplugSettings,
   getDefaultDiscordGatewayConfig,
   getDefaultImageGenSettings,
@@ -26,6 +28,7 @@ import {
   type LLMConnectionProfile,
   type LLMProfileSettings,
   type LLMSettings,
+  loadBLESettings,
   loadButtplugSettings,
   loadDiscordGatewayConfig,
   loadDiscordSettings,
@@ -37,6 +40,7 @@ import {
   loadWebSearchSettings,
   type LovenseSettings,
   profileToLLMSettings,
+  saveBLESettings,
   saveButtplugSettings,
   saveDiscordGatewayConfig,
   saveDiscordSettings,
@@ -232,6 +236,9 @@ import {
   handleUploadAnchorImage,
   handleUploadBackground,
   handleUploadChatAttachment,
+  handleDeviceBridge,
+  handleGetBLESettings,
+  handleSaveBLESettings,
   handleUploadCustomTool,
   handleUploadIdentityFile,
   handleUploadVault,
@@ -264,6 +271,7 @@ import {
   handleWebhookTrigger,
 } from "../pulse/routes.ts";
 import { getBroadcaster } from "./broadcaster.ts";
+import { getDeviceBridge } from "./device-bridge.ts";
 import {
   handleAdminActionsFragment,
   handleAdminAddInstanceSuffix,
@@ -349,7 +357,7 @@ export class Server {
   private ragConfig: RAGConfig;
   private abortController: AbortController;
   private config: ServerConfig;
-  private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
+  private keepaliveInterval: number | null = null;
   private mcpClient: MCPClient | null = null;
   private lorebookManager: LorebookManager;
   private vaultManager: VaultManager;
@@ -359,6 +367,7 @@ export class Server {
   private homeSettings: HomeSettings;
   private lovenseSettings: LovenseSettings;
   private buttplugSettings: ButtplugSettings;
+  private bleSettings: BLESettings;
   private imageGenSettings: ImageGenSettings;
   private toolSettings: ToolsSettings;
   private entityCoreLLMSettings: EntityCoreLLMSettings;
@@ -415,6 +424,9 @@ export class Server {
 
     // Initialize Buttplug settings (will be reloaded from settings in init())
     this.buttplugSettings = getDefaultButtplugSettings();
+
+    // Initialize BLE settings (will be reloaded from settings in init())
+    this.bleSettings = getDefaultBLESettings();
 
     // Initialize Image Gen settings (will be reloaded from settings in init())
     this.imageGenSettings = getDefaultImageGenSettings();
@@ -488,6 +500,7 @@ export class Server {
     this.homeSettings = await loadHomeSettings(this.config.dataRoot);
     this.lovenseSettings = await loadLovenseSettings(this.config.dataRoot);
     this.buttplugSettings = await loadButtplugSettings(this.config.dataRoot);
+    this.bleSettings = await loadBLESettings(this.config.dataRoot);
     this.imageGenSettings = await loadImageGenSettings(this.config.dataRoot);
     this.entityCoreLLMSettings = await loadEntityCoreLLMSettings(
       this.config.dataRoot,
@@ -864,6 +877,7 @@ export class Server {
         imageGenSettings: this.imageGenSettings,
         lovenseSettings: this.lovenseSettings,
         buttplugSettings: this.buttplugSettings,
+        bleSettings: this.bleSettings,
         deviceStatusCache: this.deviceCache,
         contextLength: activeProfile?.contextLength,
         maxTokens: activeProfile?.maxTokens,
@@ -972,6 +986,22 @@ export class Server {
   async updateButtplugSettings(settings: ButtplugSettings): Promise<void> {
     this.buttplugSettings = settings;
     await saveButtplugSettings(this.config.dataRoot, settings);
+    this.reloadToolRegistry();
+  }
+
+  /**
+   * Get the current BLE device bridge settings.
+   */
+  getBLESettings(): BLESettings {
+    return this.bleSettings;
+  }
+
+  /**
+   * Update BLE device bridge settings, persist to disk, and reload tool registry.
+   */
+  async updateBLESettings(settings: BLESettings): Promise<void> {
+    this.bleSettings = settings;
+    await saveBLESettings(this.config.dataRoot, settings);
     this.reloadToolRegistry();
   }
 
@@ -1105,6 +1135,9 @@ export class Server {
     }
     if (this.buttplugSettings.enabled) {
       autoEnabled.push("control_toy");
+    }
+    if (this.bleSettings.devices.some((d) => d.enabled)) {
+      autoEnabled.push("ble_device");
     }
     if (this.imageGenSettings.generators.some((g) => g.enabled)) {
       autoEnabled.push("generate_image");
@@ -1417,6 +1450,7 @@ export class Server {
         homeSettings: () => this.homeSettings,
         lovenseSettings: () => this.lovenseSettings,
         buttplugSettings: () => this.buttplugSettings,
+        bleSettings: () => this.bleSettings,
         imageGenSettings: () => this.imageGenSettings,
         contextLength: () => this.getActiveLLMProfile()?.contextLength,
         maxTokens: () => this.getActiveLLMProfile()?.maxTokens,
@@ -1501,6 +1535,9 @@ export class Server {
     // Stop device status cache refresh
     this.deviceCache.stop();
 
+    // Close device bridge WebSocket connections
+    getDeviceBridge().closeAll();
+
     // Clear keepalive timer
     if (this.keepaliveInterval !== null) {
       clearInterval(this.keepaliveInterval);
@@ -1555,6 +1592,8 @@ export class Server {
       getButtplugSettings: () => this.buttplugSettings,
       updateButtplugSettings: (settings) =>
         this.updateButtplugSettings(settings),
+      getBLESettings: () => this.bleSettings,
+      updateBLESettings: (settings) => this.updateBLESettings(settings),
       getImageGenSettings: () => this.imageGenSettings,
       updateImageGenSettings: (settings) =>
         this.updateImageGenSettings(settings),
@@ -1666,6 +1705,21 @@ export class Server {
     // GET /api/events - Persistent SSE event stream
     if (method === "GET" && path === "/api/events") {
       return handleEvents(ctx, request);
+    }
+
+    // GET /api/device-bridge - WebSocket endpoint for BLE device bridge
+    if (method === "GET" && path === "/api/device-bridge") {
+      return handleDeviceBridge(ctx, request);
+    }
+
+    // GET /api/ble-settings - BLE device bridge settings
+    if (method === "GET" && path === "/api/ble-settings") {
+      return handleGetBLESettings(ctx);
+    }
+
+    // POST /api/ble-settings - Save BLE device bridge settings
+    if (method === "POST" && path === "/api/ble-settings") {
+      return await handleSaveBLESettings(ctx, request);
     }
 
     // GET /api/conversations - List conversations (JSON)

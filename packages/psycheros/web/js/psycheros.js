@@ -3787,6 +3787,177 @@ async function loadGraphView() {
 }
 
 // =============================================================================
+// Device Bridge — BLE connection manager
+// =============================================================================
+
+const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const NUS_TX_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // write to device
+const NUS_RX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // receive from device
+
+let deviceBridgeBLE = null; // { device, server, txChar, rxChar }
+let deviceBridgeWS = null;  // WebSocket
+
+function renderDeviceBridgeStatus() {
+  const el = document.getElementById('device-bridge-status');
+  if (!el) return;
+
+  const bleConnected = deviceBridgeBLE && deviceBridgeBLE.device.gatt.connected;
+  const wsConnected = deviceBridgeWS && deviceBridgeWS.readyState === WebSocket.OPEN;
+
+  const bleDot = bleConnected
+    ? '<span style="color:#4caf50;">●</span>'
+    : '<span style="color:#999;">●</span>';
+  const wsDot = wsConnected
+    ? '<span style="color:#4caf50;">●</span>'
+    : '<span style="color:#999;">●</span>';
+
+  el.innerHTML = `
+    <div style="display:flex;gap:16px;align-items:center;margin-top:8px;">
+      <span>${bleDot} Bluetooth ${bleConnected ? 'Connected' : 'Disconnected'}</span>
+      <span>${wsDot} Bridge ${wsConnected ? 'Connected' : 'Disconnected'}</span>
+    </div>
+    ${bleConnected ? `<div style="color:var(--c-fg-muted, var(--text-dim));margin-top:4px;">${deviceBridgeBLE.device.name}</div>` : ''}
+  `;
+}
+
+async function connectDeviceBridge() {
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [NUS_SERVICE_UUID] }],
+    });
+
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(NUS_SERVICE_UUID);
+    const txChar = await service.getCharacteristic(NUS_TX_CHAR_UUID);
+    const rxChar = await service.getCharacteristic(NUS_RX_CHAR_UUID);
+
+    deviceBridgeBLE = { device, server, txChar, rxChar };
+
+    // Listen for inbound data from the BLE device
+    await rxChar.startNotifications();
+    rxChar.addEventListener('characteristicvaluechanged', (event) => {
+      const value = event.target.value;
+      const decoder = new TextDecoder();
+      const text = decoder.decode(value);
+
+      // Forward to server via WebSocket
+      if (deviceBridgeWS && deviceBridgeWS.readyState === WebSocket.OPEN) {
+        deviceBridgeWS.send(JSON.stringify({
+          type: 'device_data',
+          deviceId: device.id,
+          dataType: 'uart',
+          data: text,
+        }));
+      }
+    });
+
+    // Listen for disconnect
+    device.addEventListener('gattserverdisconnected', () => {
+      deviceBridgeBLE = null;
+      renderDeviceBridgeStatus();
+    });
+
+    renderDeviceBridgeStatus();
+
+    // Connect to the device bridge WebSocket if not already connected
+    if (!deviceBridgeWS || deviceBridgeWS.readyState !== WebSocket.OPEN) {
+      connectDeviceBridgeWS();
+    }
+  } catch (err) {
+    console.error('[DeviceBridge] BLE connect failed:', err);
+    renderDeviceBridgeStatus();
+  }
+}
+
+function disconnectDeviceBridge() {
+  if (deviceBridgeBLE) {
+    deviceBridgeBLE.device.gatt.disconnect();
+    deviceBridgeBLE = null;
+  }
+  if (deviceBridgeWS) {
+    deviceBridgeWS.close();
+    deviceBridgeWS = null;
+  }
+  renderDeviceBridgeStatus();
+}
+
+function connectDeviceBridgeWS() {
+  if (deviceBridgeWS) {
+    deviceBridgeWS.close();
+  }
+
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  deviceBridgeWS = new WebSocket(`${protocol}//${location.host}/api/device-bridge`);
+
+  deviceBridgeWS.onopen = () => {
+    // Register our connected BLE device with the bridge
+    if (deviceBridgeBLE) {
+      deviceBridgeWS.send(JSON.stringify({
+        type: 'register',
+        devices: [{
+          id: deviceBridgeBLE.device.id,
+          name: deviceBridgeBLE.device.name || 'Unknown BLE Device',
+          type: 'ble',
+        }],
+      }));
+    }
+    renderDeviceBridgeStatus();
+  };
+
+  deviceBridgeWS.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+
+      if (msg.type === 'command' && deviceBridgeBLE && deviceBridgeBLE.txChar) {
+        // Forward command to BLE device via Nordic UART
+        const cmd = msg.command;
+        const params = msg.params ? ' ' + JSON.stringify(msg.params) : '';
+        const encoder = new TextEncoder();
+        deviceBridgeBLE.txChar.writeValue(encoder.encode(cmd + params + '\n'));
+
+        // Send success response back
+        deviceBridgeWS.send(JSON.stringify({
+          type: 'response',
+          requestId: msg.requestId,
+          success: true,
+        }));
+
+        console.log('[DeviceBridge] Sent command:', cmd);
+      }
+    } catch (err) {
+      console.error('[DeviceBridge] Message handling failed:', err);
+      // Try to send error response if we have a requestId
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.requestId) {
+          deviceBridgeWS.send(JSON.stringify({
+            type: 'response',
+            requestId: msg.requestId,
+            success: false,
+            error: err.message || String(err),
+          }));
+        }
+      } catch {
+        // Give up
+      }
+    }
+  };
+
+  deviceBridgeWS.onerror = () => {
+    renderDeviceBridgeStatus();
+  };
+
+  deviceBridgeWS.onclose = () => {
+    renderDeviceBridgeStatus();
+  };
+
+  renderDeviceBridgeStatus();
+}
+
+globalThis.connectDeviceBridge = connectDeviceBridge;
+globalThis.disconnectDeviceBridge = disconnectDeviceBridge;
+
+// =============================================================================
 // Global Export
 // =============================================================================
 

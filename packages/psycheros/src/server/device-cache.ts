@@ -12,6 +12,7 @@
 import type { HomeSettings } from "../llm/home-settings.ts";
 import type { LovenseSettings } from "../llm/lovense-settings.ts";
 import type { ButtplugSettings } from "../llm/buttplug-settings.ts";
+import { getDeviceBridge } from "./device-bridge.ts";
 
 // =============================================================================
 // Types
@@ -47,11 +48,19 @@ export interface HomeDeviceInfo {
   type: string;
 }
 
+/** A connected BLE device (from the device bridge). */
+export interface BLEDeviceInfo {
+  id: string;
+  name: string;
+  type: string;
+}
+
 /** Combined snapshot for SA consumption. */
 export interface DeviceCacheSnapshot {
   lovense: LovenseDeviceStatus;
   intiface: IntifaceDeviceStatus;
   homeDevices: HomeDeviceInfo[];
+  bleDevices: BLEDeviceInfo[];
 }
 
 // =============================================================================
@@ -94,10 +103,15 @@ export class DeviceStatusCache {
       ?.filter((d) => d.enabled)
       .map((d) => ({ name: d.name, type: d.type })) ?? [];
 
+    // BLE devices: read from device bridge (live connections)
+    const bridge = getDeviceBridge();
+    const bleDevices: BLEDeviceInfo[] = bridge.connectedDeviceList;
+
     return {
       lovense: this.lovenseStatus,
       intiface: this.intifaceStatus,
       homeDevices,
+      bleDevices,
     };
   }
 
