@@ -7,6 +7,14 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-06-03
+
+### Fixed
+
+- **Compile fix: `bundled_deno_path()` returns `PathBuf` directly**, not
+  `Result`. Previous code used `if let Ok(...)` which caused a type mismatch on
+  macOS builds.
+
 ## [0.2.14] - 2026-06-03
 
 ### Fixed

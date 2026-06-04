@@ -303,10 +303,9 @@ pub fn repair_plug_cache_signatures() {
     {
         // Re-sign the Deno binary itself — its original Apple Developer Team
         // ID won't match the plugins' Team ID on Tahoe.
-        if let Ok(deno_path) = crate::paths::bundled_deno_path() {
-            if deno_path.exists() {
-                adhoc_resign(&deno_path);
-            }
+        let deno_path = crate::paths::bundled_deno_path();
+        if deno_path.exists() {
+            adhoc_resign(&deno_path);
         }
 
         let plug_dir = dirs::cache_dir()
