@@ -7,6 +7,16 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-06-03
+
+### Fixed
+
+- **macOS Tahoe codesign repair now runs on every daemon start**, not just
+  first-run. Existing installations whose launcher binary updated without
+  re-running first-run now get the Team ID fix automatically. Also re-signs the
+  Deno binary itself (not just plugins), and triggers repair when the Tahoe
+  compatibility toggle is flipped.
+
 ## [0.2.13] - 2026-06-03
 
 ### Fixed
@@ -14,11 +24,11 @@ cross-platform supervisors ship.
 - **macOS Tahoe native-plugin code-signature mismatch.** Tahoe enforces Team ID
   matching on `dlopen()`: the official Deno binary is signed with one Team ID
   and prebuilt native plugins (`@db/sqlite` via `@denosaurs/plug`) are signed
-  with another, causing `Failed to load SQLite3 Dynamic Library`. The first-run
-  flow now ad-hoc re-signs both the staged Deno binary and all cached `.dylib`
-  files after `warm_deno_cache`, aligning their signatures so `dlopen()`
-  succeeds. Safe for all macOS versions — ad-hoc signing is a no-op on pre-Tahoe
-  systems.
+  with another, causing `Failed to load SQLite3 Dynamic Library`. The launcher
+  now ad-hoc re-signs both the staged Deno binary and all cached `.dylib` files
+  on every daemon start (not just first-run), aligning their signatures so
+  `dlopen()` succeeds. Safe for all macOS versions — ad-hoc signing is a no-op
+  on pre-Tahoe systems.
 
 ## [0.2.12] - 2026-06-03
 

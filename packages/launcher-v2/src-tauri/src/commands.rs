@@ -175,6 +175,13 @@ fn uninstall_launcher_agent_best_effort() {}
 /// daemon). Bound to the "Start daemon" button on the Stopped card.
 #[tauri::command]
 pub fn start_daemon() -> Result<DaemonStatus, String> {
+    // Re-sign native plugins + Deno binary for macOS Tahoe compatibility
+    // on every start, not just first-run. Existing installations whose
+    // launcher binary updated skip first-run entirely, so this is the
+    // self-heal path for Tahoe users who already had the daemon installed
+    // before the codesign fix shipped.
+    bundle::repair_plug_cache_signatures();
+
     default_supervisor()
         .start_daemon()
         .map_err(|e| e.to_string())?;
@@ -1334,7 +1341,10 @@ pub fn set_tahoe_compat(enabled: bool) -> Result<(), String> {
     cfg.tahoe_compat = enabled;
     config::save(&cfg).map_err(|e| format!("save config: {e}"))?;
 
-    // 2. Rewrite the plist + restart (no-ops when not installed / not loaded).
+    // 2. Re-sign native plugins + Deno binary (Tahoe Team ID fix).
+    bundle::repair_plug_cache_signatures();
+
+    // 3. Rewrite the plist + restart (no-ops when not installed / not loaded).
     let daemon_cfg = build_daemon_config()?;
     let mode = cfg.effective_mode();
     let sup = default_supervisor();

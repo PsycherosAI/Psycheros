@@ -280,14 +280,16 @@ instead of a frozen chat window.
   binary is signed with Deno's Apple Developer Team ID; prebuilt native plugins
   from `@denosaurs/plug` (e.g. `@db/sqlite`) are signed with a different Team
   ID. On Tahoe, `dlopen()` rejects the load:
-  `code signature
-  not valid for use in process: mapping process and mapped file (non-platform)
-  have different Team IDs`.
-  The first-run flow handles this by ad-hoc re-signing both the staged Deno
-  binary (`bundle::stage_bundled_binary`) and all cached `.dylib` files
-  (`bundle::repair_plug_cache_signatures`) after `warm_deno_cache`.
-  `codesign -f -s -` strips the original Team ID and replaces it with an ad-hoc
-  signature (cdhash only, no Team ID) so both sides match. Safe on all macOS
+  `code signature not valid for use in
+  process: mapping process and mapped file (non-platform) have different Team
+  IDs`.
+  The launcher self-heals on every daemon start by ad-hoc re-signing both the
+  staged Deno binary and all cached `.dylib` files
+  (`bundle::repair_plug_cache_signatures`). `codesign -f -s -` strips the
+  original Team ID and replaces it with an ad-hoc signature (cdhash only, no
+  Team ID) so both sides match. Running on every start (not just first-run)
+  ensures existing installations pick up the fix when they update the launcher
+  binary — first-run doesn't re-execute for existing installs. Safe on all macOS
   versions — pre-Tahoe systems never enforced this check.
 
 ## Cross-platform considerations

@@ -2763,7 +2763,7 @@ dependencies = [
 
 [[package]]
 name = "psycheros-launcher"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "dirs 5.0.1",
  "semver",

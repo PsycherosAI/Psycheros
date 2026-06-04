@@ -280,7 +280,7 @@ pub fn warm_deno_cache(
 /// ad-hoc (no Team ID) aligns them so `dlopen()` succeeds.
 ///
 /// Silently no-ops on non-macOS and when `codesign` is absent.
-fn adhoc_resign(path: &Path) {
+pub fn adhoc_resign(path: &Path) {
     #[cfg(target_os = "macos")]
     {
         let _ = std::process::Command::new("codesign")
@@ -292,14 +292,23 @@ fn adhoc_resign(path: &Path) {
     let _ = path;
 }
 
-/// Walk the Deno native-plugin cache (`$DENO_DIR/plug/`) and ad-hoc re-sign
-/// every `.dylib` found. Called after `warm_deno_cache` so Tahoe users
-/// don't need to touch Terminal.
+/// Re-sign the staged Deno binary + all cached native-plugin `.dylib`s for
+/// macOS Tahoe compatibility. Called after `warm_deno_cache` (first-run / update)
+/// and on every daemon start so existing installations get the fix without
+/// re-running first-run.
 ///
-/// Silently no-ops when the plug directory doesn't exist or on non-macOS.
+/// Silently no-ops when paths don't exist or on non-macOS.
 pub fn repair_plug_cache_signatures() {
     #[cfg(target_os = "macos")]
     {
+        // Re-sign the Deno binary itself — its original Apple Developer Team
+        // ID won't match the plugins' Team ID on Tahoe.
+        if let Ok(deno_path) = crate::paths::bundled_deno_path() {
+            if deno_path.exists() {
+                adhoc_resign(&deno_path);
+            }
+        }
+
         let plug_dir = dirs::cache_dir()
             .map(|d| d.join("deno").join("plug"))
             .filter(|d| d.is_dir());
