@@ -315,7 +315,7 @@ pub fn repair_plug_cache_signatures() {
 
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "dylib") {
+            if path.extension().is_some_and(|ext| ext == "dylib") {
                 adhoc_resign(&path);
             }
         }
