@@ -82,12 +82,13 @@ function usesMaxCompletionTokens(model: string): boolean {
 /**
  * Detect whether a model supports the `temperature` parameter.
  *
- * OpenAI o-series reasoning models reject temperature with HTTP 400.
+ * OpenAI o-series and GPT-5.x models reject temperature with HTTP 400.
  * DeepSeek reasoner ignores it silently but I strip it for cleanliness.
  */
 function modelSupportsTemperature(model: string): boolean {
   const lower = model.toLowerCase();
   if (/^o[134]/.test(lower)) return false;
+  if (/^gpt-5/.test(lower)) return false;
   if (/deepseek-r/.test(lower)) return false;
   return true;
 }

@@ -6,6 +6,31 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-09
+
+### Added
+
+- Wearable data pipeline for entity-plexus sensor ingestion with live connection
+  management and data caching.
+- BLE device management UI with live status polling, XML validation, and device
+  command interface.
+- Event rules engine with webhook UI — define event-triggered actions in SA
+  settings.
+- `/api/ingest` routes for Authelia-gated wearable data access.
+- Configurable wearable stream injection into SA context.
+- Restore Conversations feature in Entity Data tab for browsing and recovering
+  archived conversations.
+
+### Fixed
+
+- Tool results now persist to the database before SSE yield, preventing orphaned
+  tool calls when the connection drops mid-stream.
+- GPT-5.x models (including 5.5) now correctly strip all sampling parameters
+  (temperature, top_p, frequency/presence penalty) before sending requests.
+- Custom tool import/delete UI now correctly persists state across page loads.
+- Inline wearable scripts moved to `psycheros.js` for proper caching and
+  maintainability.
+
 ## [0.5.4] - 2026-06-04
 
 ### Added
@@ -570,6 +595,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 [0.1.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.2
 [0.1.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.1
 [0.1.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.0
+[0.6.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.6.0
 [0.5.4]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.5.4
 [0.5.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.5.3
 [0.5.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.5.2

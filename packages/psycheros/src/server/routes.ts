@@ -36,6 +36,7 @@ import {
   getDefaultDiscordSettings,
   getDefaultImageGenSettings,
   getDefaultWebSearchSettings,
+  loadBLESettings,
   maskDiscordSettings,
   maskImageGenSettings,
   maskProfileSettings,
@@ -47,7 +48,7 @@ import {
   loadMemorySettings,
   saveMemorySettings,
 } from "../memory/memory-settings.ts";
-import { join } from "@std/path";
+import { join, toFileUrl } from "@std/path";
 import { captionImageDual } from "../tools/describe-image.ts";
 import {
   getMediaType as getImageMediaType,
@@ -55,6 +56,7 @@ import {
 } from "../tools/generate-image.ts";
 import type { ToolRegistry } from "../tools/mod.ts";
 import type { ToolsSettings } from "../tools/mod.ts";
+import type { Tool } from "../tools/types.ts";
 import {
   AVAILABLE_TOOLS,
   loadCustomTools,
@@ -140,6 +142,13 @@ import { generateUIUpdates, renderAsOobSwaps } from "./ui-updates.ts";
 import { MAX_SSE_MESSAGE_SIZE, SSE_TRUNCATION_SUFFIX } from "../constants.ts";
 import { getBroadcaster } from "./broadcaster.ts";
 import { getDeviceBridge } from "./device-bridge.ts";
+import {
+  getWearableConnectionManager,
+  getWearableDataCache,
+} from "../wearable/mod.ts";
+import type { WearableMessage } from "../wearable/mod.ts";
+import type { EventRule } from "../wearable/event-rules.ts";
+import { loadEventRules, saveEventRules } from "../wearable/event-rules.ts";
 import {
   deleteSubscription as deletePushSubscription,
   loadOrGenerateKeys,
@@ -266,8 +275,14 @@ export interface RouteContext {
   ) => Promise<void>;
   /** Get the device status cache for the SA system */
   getDeviceStatusCache: () => import("./device-cache.ts").DeviceStatusCache;
+  /** Get the event rules engine (if available) */
+  getEventRulesEngine?: () =>
+    import("../wearable/event-rules-engine.ts").EventRulesEngine;
   /** Custom tools loaded from custom-tools/ directory */
   customTools: Record<string, import("../tools/types.ts").Tool>;
+  updateCustomTools: (
+    tools: Record<string, import("../tools/types.ts").Tool>,
+  ) => void;
 }
 
 /**
@@ -1239,6 +1254,7 @@ export async function handleChat(
             lovenseSettings: ctx.getLovenseSettings(),
             buttplugSettings: ctx.getButtplugSettings(),
             imageGenSettings: ctx.getImageGenSettings(),
+            bleSettings: ctx.getBLESettings(),
             deviceStatusCache: ctx.getDeviceStatusCache(),
             contextLength: activeProfile?.contextLength,
             maxTokens: activeProfile?.maxTokens,
@@ -1430,6 +1446,7 @@ export async function handleChatRetry(
             lovenseSettings: ctx.getLovenseSettings(),
             buttplugSettings: ctx.getButtplugSettings(),
             imageGenSettings: ctx.getImageGenSettings(),
+            bleSettings: ctx.getBLESettings(),
             deviceStatusCache: ctx.getDeviceStatusCache(),
             contextLength: retryProfile?.contextLength,
             maxTokens: retryProfile?.maxTokens,
@@ -1931,13 +1948,28 @@ export async function handleDeviceCommand(
     );
   }
 
-  // Check if the device is connected
+  // Check if the device is connected through DeviceBridge or wearable manager
   if (!bridge.isDeviceConnected(deviceId)) {
+    // Try wearable connection manager (entity-plexus)
+    const wearableMgr = getWearableConnectionManager();
+    if (wearableMgr.isDeviceConnected(deviceId)) {
+      const sent = wearableMgr.sendCommand(deviceId, command);
+      if (sent) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            note: "Command sent via wearable connection (fire-and-forget)",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: false,
         error:
-          `Device "${deviceId}" is not connected through any bridge client`,
+          `Device "${deviceId}" is not connected through any bridge client or wearable app`,
       }),
       { status: 503, headers: { "Content-Type": "application/json" } },
     );
@@ -1963,6 +1995,107 @@ export async function handleDeviceCommand(
 }
 
 // =============================================================================
+// Wearable Data Routes
+// =============================================================================
+
+/**
+ * Handle GET /api/device/stream — WebSocket upgrade for entity-plexus
+ * wearable data streaming.
+ *
+ * Authentication: accepts Bearer token if present (pass-through for
+ * Phase 1; JWKS validation to be added later). Also accepts connections
+ * with no auth header (localhost / dev mode).
+ *
+ * Protocol:
+ *   App -> Server: {"device_id":"banglejs-1","readings":[...]}
+ *   Server -> App: {"type":"command","device_id":"banglejs-1","command":"V(200)"}
+ */
+export function handleWearableStream(
+  _ctx: RouteContext,
+  request: Request,
+): Response {
+  console.log("[Wearable] WebSocket upgrade request received");
+
+  // Phase 1 auth: accept any Bearer token or no auth
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader && !authHeader.startsWith("Bearer ")) {
+    console.log("[Wearable] Rejected: malformed auth header");
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  const { response, socket } = Deno.upgradeWebSocket(request);
+  const manager = getWearableConnectionManager();
+
+  // Optional: extract device_id from query params for early registration
+  const url = new URL(request.url);
+  const initialDeviceId = url.searchParams.get("device_id") || undefined;
+  console.log(
+    `[Wearable] Upgrade accepted, device_id param: ${
+      initialDeviceId ?? "(none)"
+    }`,
+  );
+
+  socket.onopen = () => {
+    console.log("[Wearable] Socket opened, adding client to manager");
+    manager.addClient(socket, initialDeviceId);
+  };
+
+  return response;
+}
+
+/**
+ * Handle POST /api/device/data — HTTP fallback for entity-plexus
+ * wearable sensor data when WebSocket is unavailable.
+ *
+ * Same JSON body as the WebSocket protocol. Same auth model.
+ */
+export async function handleWearableData(
+  _ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
+  // Phase 1 auth
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader && !authHeader.startsWith("Bearer ")) {
+    return new Response(
+      JSON.stringify({ success: false, error: "Unauthorized" }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  let body: WearableMessage;
+  try {
+    body = await request.json() as WearableMessage;
+  } catch {
+    return new Response(
+      JSON.stringify({ success: false, error: "Invalid JSON body" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  if (!body.device_id || !Array.isArray(body.readings)) {
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: "Missing 'device_id' or 'readings' array",
+      }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  const cache = getWearableDataCache();
+  cache.ingest(body.device_id, body.readings);
+
+  // Auto-discover stream types from readings
+  const streamIds = [...new Set(body.readings.map((r) => r.type))];
+  getWearableConnectionManager().registerStreams(body.device_id, streamIds);
+
+  return new Response(
+    JSON.stringify({ success: true }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+// =============================================================================
 // BLE Settings Routes
 // =============================================================================
 
@@ -1977,7 +2110,19 @@ export function handleGetBLESettings(ctx: RouteContext): Response {
 }
 
 /**
+ * Handle GET /api/ble-status — Return currently connected BLE device IDs.
+ * Used by the UI for live connection status polling.
+ */
+export function handleGetBLEStatus(_ctx: RouteContext): Response {
+  const connectedIds = getWearableConnectionManager().connectedDeviceIds;
+  return new Response(JSON.stringify({ connectedIds }), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/**
  * Handle POST /api/ble-settings — Update BLE device bridge settings.
+ * Validates XML tag names in stream configs.
  */
 export async function handleSaveBLESettings(
   ctx: RouteContext,
@@ -1985,6 +2130,23 @@ export async function handleSaveBLESettings(
 ): Promise<Response> {
   try {
     const settings = await request.json() as BLESettings;
+    // Validate XML tag names in stream configs
+    const xmlNameRe = /^[a-zA-Z_][a-zA-Z0-9_.-]*$/;
+    for (const device of settings.devices ?? []) {
+      if (!device.streams) continue;
+      for (const [streamId, config] of Object.entries(device.streams)) {
+        if (config.xmlTag && !xmlNameRe.test(config.xmlTag)) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error:
+                `Invalid XML tag "${config.xmlTag}" for stream ${streamId}: must start with a letter or underscore, followed by letters, digits, hyphens, underscores, or periods.`,
+            }),
+            { status: 400, headers: { "Content-Type": "application/json" } },
+          );
+        }
+      }
+    }
     await ctx.updateBLESettings(settings);
     return new Response(JSON.stringify({ success: true }), {
       headers: { "Content-Type": "application/json" },
@@ -5881,6 +6043,7 @@ export function handleConnectionsSettingsFragment(ctx: RouteContext): Response {
     maskWebSearchSettings(ctx.getWebSearchSettings()),
     ctx.getLovenseSettings(),
     ctx.getButtplugSettings(),
+    ctx.getBLESettings(),
   );
   return new Response(html, {
     headers: {
@@ -7399,6 +7562,78 @@ export function handleToolsSettingsFragment(ctx: RouteContext): Response {
 }
 
 /**
+ * Handle GET /api/custom-tools/list - Return just the custom tools list HTML
+ * for in-place refresh after upload/delete.
+ */
+export function handleCustomToolsListFragment(ctx: RouteContext): Response {
+  const settings = ctx.getToolSettings();
+  const overrides = settings.toolOverrides;
+  const customTools = ctx.customTools;
+  const customNames = Object.keys(customTools);
+
+  let html: string;
+  if (customNames.length > 0) {
+    const items = customNames.map((name) => {
+      const tool = customTools[name];
+      const hasOverride = name in overrides;
+      const enabled = hasOverride ? overrides[name] : true;
+      const checked = enabled ? "checked" : "";
+      const desc = escapeHtml(
+        tool.definition.function.description.substring(0, 120),
+      );
+      return `<div class="custom-tool-row" style="display:flex;align-items:flex-start;gap:var(--sp-2);">
+  <div style="flex:1;min-width:0;">
+    <label class="tool-item">
+      <input type="checkbox" id="tool-${escapeHtml(name)}" name="${
+        escapeHtml(name)
+      }" data-tool-name="${escapeHtml(name)}" ${checked}>
+      <span class="tool-item-name">${escapeHtml(name)}</span>
+      <span class="tool-item-desc">${desc}</span>
+    </label>
+  </div>
+  <button class="btn btn--xs" onclick="deleteCustomTool('${
+        escapeHtml(name)
+      }')" title="Delete tool" style="margin-top:4px;flex-shrink:0;background:var(--c-bg-hover,#333);border:1px solid var(--c-border,#555);color:var(--c-danger,#e74c3c);">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+    </svg>
+  </button>
+</div>`;
+    }).join("\n");
+
+    html = `<section class="tools-category" id="cat-custom">
+  <div class="tools-category-header">
+    <div>
+      <h3 class="tools-category-title">Custom Tools</h3>
+      <p class="tools-category-desc">User-written tools loaded from custom-tools/</p>
+    </div>
+    <div class="tools-category-actions">
+      <button class="btn btn--ghost btn--xs" onclick="toggleCategoryTools('custom', true)">Enable All</button>
+      <button class="btn btn--ghost btn--xs" onclick="toggleCategoryTools('custom', false)">Disable All</button>
+    </div>
+  </div>
+  <div class="tools-list">
+    ${items}
+  </div>
+</section>`;
+  } else {
+    html = `<section class="tools-category" id="cat-custom">
+  <div class="tools-category-header">
+    <div>
+      <h3 class="tools-category-title">Custom Tools</h3>
+      <p class="tools-category-desc">No custom tools loaded yet.</p>
+    </div>
+  </div>
+</section>`;
+  }
+
+  return new Response(html, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+/**
  * Handle POST /api/custom-tools/upload - Upload a custom tool .js file.
  */
 export async function handleUploadCustomTool(
@@ -7440,7 +7675,7 @@ export async function handleUploadCustomTool(
 
     // Reload custom tools to pick up the new file
     const newTools = await loadCustomTools(ctx.dataRoot);
-    ctx.customTools = newTools;
+    ctx.updateCustomTools(newTools);
 
     // Detect the tool name from the newly loaded tools
     const toolName = Object.keys(newTools).length > 0
@@ -7455,12 +7690,80 @@ export async function handleUploadCustomTool(
   }
 }
 
+/**
+ * Handle DELETE /api/custom-tools/:name — Delete a custom tool .js file.
+ */
+export async function handleDeleteCustomTool(
+  ctx: RouteContext,
+  toolName: string,
+): Promise<Response> {
+  const decodedName = decodeURIComponent(toolName);
+
+  // Validate: only allow simple filenames, no path traversal
+  if (!/^[\w.-]+$/.test(decodedName)) {
+    return jsonResp({ success: false, error: "Invalid tool name" }, 400);
+  }
+
+  // Resolve tool name to actual filename by scanning the custom-tools directory.
+  // The filename may differ from the exported tool name, so check each file's exports.
+  const customDir = `${ctx.dataRoot}/custom-tools`;
+  let targetFile: string | null = null;
+
+  try {
+    for (const entry of Deno.readDirSync(customDir)) {
+      if (!entry.isFile || !entry.name.endsWith(".js")) continue;
+      // Quick name check first to avoid importing unnecessarily
+      if (entry.name === decodedName || entry.name === decodedName + ".js") {
+        targetFile = join(customDir, entry.name);
+        break;
+      }
+    }
+    // If no filename match, check exports of all .js files
+    if (!targetFile) {
+      for (const entry of Deno.readDirSync(customDir)) {
+        if (!entry.isFile || !entry.name.endsWith(".js")) continue;
+        try {
+          const module = await import(
+            toFileUrl(join(customDir, entry.name)).href
+          );
+          const tool = module.default as Tool | undefined;
+          if (tool?.definition?.function?.name === decodedName) {
+            targetFile = join(customDir, entry.name);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+    }
+  } catch {
+    // directory doesn't exist
+  }
+
+  if (!targetFile) {
+    return jsonResp({ success: false, error: "Tool not found" }, 404);
+  }
+
+  try {
+    await Deno.remove(targetFile);
+    const newTools = await loadCustomTools(ctx.dataRoot);
+    ctx.updateCustomTools(newTools);
+    return jsonResp({ success: true });
+  } catch (error) {
+    console.error("[Routes] handleDeleteCustomTool error:", error);
+    const msg = error instanceof Error ? error.message : "Delete failed";
+    return jsonResp({ success: false, error: msg }, 500);
+  }
+}
+
 // =============================================================================
 // Situational Awareness Settings API Routes
 // =============================================================================
 
 interface SASettings {
   enabled: boolean;
+  /** Stream toggle overrides keyed by deviceId → streamId → { enabled } */
+  streamToggles?: Record<string, Record<string, { enabled: boolean }>>;
 }
 
 const SA_SETTINGS_PATH = ".psycheros/sa-settings.json";
@@ -7512,6 +7815,23 @@ export async function handleSaveSASettings(
       JSON.stringify(updated, null, 2) + "\n",
     );
 
+    // Apply stream toggles to BLE settings if provided
+    if (body.streamToggles && Object.keys(body.streamToggles).length > 0) {
+      const bleSettings = await loadBLESettings(ctx.dataRoot);
+      for (
+        const [deviceId, streams] of Object.entries(body.streamToggles)
+      ) {
+        const device = bleSettings.devices.find((d) => d.id === deviceId);
+        if (!device?.streams) continue;
+        for (const [streamId, toggle] of Object.entries(streams)) {
+          if (device.streams[streamId]) {
+            device.streams[streamId].enabled = toggle.enabled;
+          }
+        }
+      }
+      await ctx.updateBLESettings(bleSettings);
+    }
+
     return new Response(JSON.stringify({ success: true }), {
       headers: {
         "Content-Type": "application/json",
@@ -7540,7 +7860,15 @@ export async function handleSASettingsFragment(
   ctx: RouteContext,
 ): Promise<Response> {
   const settings = await loadSASettings(ctx.dataRoot);
-  const html = renderSASettings(settings);
+  const bleSettings = await loadBLESettings(ctx.dataRoot);
+  const eventRulesConfig = await loadEventRules(ctx.dataRoot);
+  const pulseRows = ctx.db.listPulses();
+  const html = renderSASettings(
+    settings,
+    bleSettings,
+    eventRulesConfig.rules,
+    pulseRows,
+  );
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -9483,4 +9811,188 @@ export async function handleUpdateDmWhitelistNotes(
       },
     },
   );
+}
+
+// =============================================================================
+// Event Rules Routes
+// =============================================================================
+
+/** GET /api/event-rules — List all event rules. */
+export function handleGetEventRules(ctx: RouteContext): Response {
+  const engine = ctx.getEventRulesEngine?.();
+  if (!engine) {
+    return new Response(
+      JSON.stringify({ error: "Event rules engine not available" }),
+      { status: 503, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  return new Response(
+    JSON.stringify({ rules: engine.getRules() }),
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    },
+  );
+}
+
+/** POST /api/event-rules — Create a new event rule. */
+export async function handleCreateEventRule(
+  ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
+  try {
+    const body = await request.json() as Partial<EventRule>;
+    const engine = ctx.getEventRulesEngine?.();
+    if (!engine) {
+      return new Response(
+        JSON.stringify({ error: "Event rules engine not available" }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    if (!body.condition || !body.action?.pulseId) {
+      return new Response(
+        JSON.stringify({
+          error: "Rule must have a condition and pulse action",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    const config = await loadEventRules(ctx.dataRoot);
+    const rule: EventRule = {
+      id: crypto.randomUUID(),
+      name: body.name ?? "Untitled Rule",
+      enabled: body.enabled ?? true,
+      condition: body.condition,
+      action: body.action,
+      cooldownMinutes: body.cooldownMinutes ?? 5,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    config.rules.push(rule);
+    await saveEventRules(ctx.dataRoot, config);
+    await engine.reload();
+
+    return new Response(
+      JSON.stringify({ success: true, rule }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  } catch (error) {
+    console.error("[Routes] Failed to create event rule:", error);
+    return new Response(
+      JSON.stringify({ error: "Failed to create rule" }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
+}
+
+/** PUT /api/event-rules/:id — Update an existing event rule. */
+export async function handleUpdateEventRule(
+  ctx: RouteContext,
+  request: Request,
+  id: string,
+): Promise<Response> {
+  try {
+    const body = await request.json() as Partial<EventRule>;
+    const engine = ctx.getEventRulesEngine?.();
+    if (!engine) {
+      return new Response(
+        JSON.stringify({ error: "Event rules engine not available" }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    const config = await loadEventRules(ctx.dataRoot);
+    const index = config.rules.findIndex((r) => r.id === id);
+    if (index === -1) {
+      return new Response(
+        JSON.stringify({ error: "Rule not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    const existing = config.rules[index];
+    config.rules[index] = {
+      ...existing,
+      name: body.name ?? existing.name,
+      enabled: body.enabled !== undefined ? body.enabled : existing.enabled,
+      condition: body.condition ?? existing.condition,
+      action: body.action ?? existing.action,
+      cooldownMinutes: body.cooldownMinutes ?? existing.cooldownMinutes,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await saveEventRules(ctx.dataRoot, config);
+    await engine.reload();
+
+    return new Response(
+      JSON.stringify({ success: true, rule: config.rules[index] }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  } catch (error) {
+    console.error("[Routes] Failed to update event rule:", error);
+    return new Response(
+      JSON.stringify({ error: "Failed to update rule" }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
+}
+
+/** DELETE /api/event-rules/:id — Delete an event rule. */
+export async function handleDeleteEventRule(
+  ctx: RouteContext,
+  id: string,
+): Promise<Response> {
+  try {
+    const engine = ctx.getEventRulesEngine?.();
+    if (!engine) {
+      return new Response(
+        JSON.stringify({ error: "Event rules engine not available" }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    const config = await loadEventRules(ctx.dataRoot);
+    const index = config.rules.findIndex((r) => r.id === id);
+    if (index === -1) {
+      return new Response(
+        JSON.stringify({ error: "Rule not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    config.rules.splice(index, 1);
+    await saveEventRules(ctx.dataRoot, config);
+    await engine.reload();
+
+    return new Response(
+      JSON.stringify({ success: true }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  } catch (error) {
+    console.error("[Routes] Failed to delete event rule:", error);
+    return new Response(
+      JSON.stringify({ error: "Failed to delete rule" }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
 }

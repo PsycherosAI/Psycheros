@@ -15,9 +15,11 @@
  *    the content has already been streamed to the client. We log the error and
  *    continue so the user sees the response. Data may be lost on server restart.
  *
- * 3. **Tool result persistence** - IMPORTANT but non-fatal. Tool results have
- *    already been yielded to the client and added to the LLM context. We log
- *    the error and continue. The LLM will still see and process the results.
+ * 3. **Tool result persistence** - IMPORTANT. Tool results are persisted to DB
+ *    BEFORE being yielded to the SSE client. This ensures that if the SSE
+ *    connection drops during the yield (generator suspension point), the DB
+ *    already has the result and the LLM won't re-issue the tool call on the
+ *    next turn. If the DB write itself fails, we log the error and continue.
  *
  * This strategy prioritizes user experience (not breaking mid-stream) over
  * data integrity, with the assumption that DB failures are rare and transient.
@@ -57,6 +59,8 @@ import { buildGraphContext, formatChatHistoryForContext } from "../rag/mod.ts";
 import { generateUIUpdates } from "../server/ui-updates.ts";
 import { acquireLock } from "../utils/conversation-lock.ts";
 import { createCollector, finalize, setFinishReason } from "../metrics/mod.ts";
+import { getWearableDataCache } from "../wearable/cache.ts";
+import { formatWearableData } from "./sa-formatters.ts";
 
 /**
  * Escape special XML characters in a string.
@@ -150,6 +154,7 @@ function formatConnectedDevices(
   return result;
 }
 
+/**
 /**
  * Format a timestamp for message content.
  * Uses PSYCHEROS_DISPLAY_TZ for user-facing timezone, falls back to TZ, defaults to UTC.
@@ -677,9 +682,12 @@ export class EntityTurn {
     const lastInteraction = this.db.getLatestUserInteraction();
 
     // Get connected devices snapshot from cache (zero latency)
-    const deviceSection = this.config.deviceStatusCache
+    const snapshot = this.config.deviceStatusCache
+      ? this.config.deviceStatusCache.getSnapshot()
+      : undefined;
+    const deviceSection = snapshot
       ? formatConnectedDevices(
-        this.config.deviceStatusCache.getSnapshot(),
+        snapshot,
         this.config.lovenseSettings,
         this.config.buttplugSettings,
       )
@@ -718,6 +726,17 @@ export class EntityTurn {
       }
       if (deviceSection) {
         parts.push(deviceSection);
+      }
+      // Wearable data (sensor streams from connected devices)
+      if (snapshot) {
+        const wearableSection = formatWearableData(
+          snapshot,
+          this.config.bleSettings,
+          getWearableDataCache(),
+        );
+        if (wearableSection) {
+          parts.push(wearableSection);
+        }
       }
       parts.push("</situational_awareness>");
       saContent = parts.join("\n");
@@ -819,7 +838,43 @@ Discord interaction:
     );
 
     // Get conversation history from DB
-    const history = this.db.getMessages(conversationId);
+    let history = this.db.getMessages(conversationId);
+
+    // Repair orphaned tool calls from interrupted turns.
+    // An orphaned tool call is an assistant message with tool_calls that has no
+    // following tool result message. This can happen when the SSE connection
+    // drops mid-yield (before the primary fix) or due to an unexpected crash.
+    // Without repair, the LLM sees its own tool call with no result and
+    // re-issues it on every turn, creating an infinite loop.
+    let repaired = false;
+    for (let i = 0; i < history.length; i++) {
+      const msg = history[i];
+      if (msg.role !== "assistant" || !msg.toolCalls?.length) continue;
+
+      for (const tc of msg.toolCalls) {
+        const tcId = tc.id;
+        const hasResult = history.some(
+          (m) => m.role === "tool" && m.toolCallId === tcId,
+        );
+
+        if (!hasResult) {
+          console.warn(
+            `[EntityTurn] Repairing orphaned tool call ${tcId} (${tc.function.name}) at history index ${i}`,
+          );
+          this.db.addMessage(conversationId, {
+            role: "tool",
+            content:
+              `[System: Tool execution was interrupted by a connection error. The tool may or may not have completed. I should not retry automatically — I should check if the user needs anything.]`,
+            toolCallId: tcId,
+          });
+          repaired = true;
+        }
+      }
+    }
+
+    if (repaired) {
+      history = this.db.getMessages(conversationId);
+    }
 
     // For Pulse messages, prefix the content so the entity perceives it as system-initiated
     const displayContent = options?.pulseId && options?.pulseName
@@ -1172,21 +1227,34 @@ Discord interaction:
         const affectedUIRegions = new Set<string>();
 
         for (const result of toolResults) {
-          // Yield the tool result
-          yield { type: "tool_result", result };
+          // Persist to DB FIRST — must happen before any yield, because a yield
+          // is a suspension point where the generator can be cancelled if the SSE
+          // client disconnects. If we yield first and the client is gone, the DB
+          // insert never runs, leaving an orphaned tool call with no result.
+          try {
+            // Strip [IMAGE:{...}] markers — they're UI-only, stored in the
+            // assistant message content instead
+            const persistedContent = result.content.replace(
+              /\[IMAGE:\{.*?\}\]/g,
+              "",
+            );
+            this.db.addMessage(conversationId, {
+              role: "tool",
+              content: persistedContent,
+              toolCallId: result.toolCallId,
+            });
+          } catch (dbError) {
+            console.error(
+              "EntityTurn: Failed to persist tool result:",
+              dbError instanceof Error ? dbError.message : String(dbError),
+            );
+          }
 
           // Detect [IMAGE:...] markers in tool results for inline image display
           const imageMatch = result.content.match(/\[IMAGE:(\{.*\})\]/);
           if (imageMatch) {
             try {
               const img = JSON.parse(imageMatch[1]);
-              yield {
-                type: "image_generated",
-                imagePath: img.path,
-                prompt: img.prompt,
-                generatorName: img.generator,
-                description: img.description,
-              };
               // Append image marker to persisted content so it survives page reload
               if (messageId) {
                 const imgMarker = `\n\n[IMAGE:${imageMatch[1]}]`;
@@ -1203,6 +1271,21 @@ Discord interaction:
             }
           }
 
+          // Add tool result to messages array for next LLM call — must also
+          // happen before yields for the same reason as the DB insert above.
+          {
+            const toolTimestamp = formatMessageTimestamp(new Date());
+            const cleanResult = result.content
+              .replace(/\[IMAGE:\{.*?\}\]/g, "")
+              .replace(/\[short:.+?\]/g, "");
+            const toolMsg: ChatMessage = {
+              role: "tool",
+              content: `${toolTimestamp} ${cleanResult}`,
+              tool_call_id: result.toolCallId,
+            };
+            messages.push(toolMsg);
+          }
+
           // Collect affected UI regions from the result
           // (State change functions return these, making the pattern unified)
           if (result.affectedRegions) {
@@ -1211,25 +1294,23 @@ Discord interaction:
             }
           }
 
-          // Persist to DB with error handling
-          try {
-            // Strip [IMAGE:{...}] markers — they're UI-only, stored in the
-            // assistant message content instead
-            const persistedContent = result.content.replace(
-              /\[IMAGE:\{.*?\}\]/g,
-              "",
-            );
-            this.db.addMessage(conversationId, {
-              role: "tool",
-              content: persistedContent,
-              toolCallId: result.toolCallId,
-            });
-          } catch (dbError) {
-            // Non-fatal: result already yielded and in LLM context (see Error Handling Strategy)
-            console.error(
-              "EntityTurn: Failed to persist tool result:",
-              dbError instanceof Error ? dbError.message : String(dbError),
-            );
+          // NOW safe to yield — all persistence is done
+          yield { type: "tool_result", result };
+
+          // Yield image_generated event after the tool result
+          if (imageMatch) {
+            try {
+              const img = JSON.parse(imageMatch[1]);
+              yield {
+                type: "image_generated",
+                imagePath: img.path,
+                prompt: img.prompt,
+                generatorName: img.generator,
+                description: img.description,
+              };
+            } catch {
+              // Invalid JSON in marker — skip
+            }
           }
         }
 
@@ -1258,21 +1339,6 @@ Discord interaction:
           tool_calls: toolCalls,
         };
         messages.push(assistantMsg);
-
-        // Add tool results to messages for next LLM call
-        for (const result of toolResults) {
-          const toolTimestamp = formatMessageTimestamp(new Date());
-          // Strip [IMAGE:{...}] markers and [short:...] metadata from tool results
-          const cleanResult = result.content
-            .replace(/\[IMAGE:\{.*?\}\]/g, "")
-            .replace(/\[short:.+?\]/g, "");
-          const toolMsg: ChatMessage = {
-            role: "tool",
-            content: `${toolTimestamp} ${cleanResult}`,
-            tool_call_id: result.toolCallId,
-          };
-          messages.push(toolMsg);
-        }
 
         // Continue the loop to let the LLM process tool results
       }

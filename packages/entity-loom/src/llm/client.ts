@@ -118,11 +118,12 @@ export class LLMClient {
 
   /**
    * Detect whether the current model supports the `temperature` parameter.
-   * OpenAI o-series models reject it; DeepSeek reasoner ignores it.
+   * OpenAI o-series and GPT-5.x models reject it; DeepSeek reasoner ignores it.
    */
   private modelSupportsTemperature(): boolean {
     const lower = this.config.model.toLowerCase();
     if (/^o[134]/.test(lower)) return false;
+    if (/^gpt-5/.test(lower)) return false;
     if (/deepseek-r/.test(lower)) return false;
     return true;
   }

@@ -409,6 +409,7 @@ user makes changes via the UI.
   (`{ "toolOverrides": { "shell": true } }`)
 - `POST /api/custom-tools/upload` — upload a `.js` custom tool file
   (multipart/form-data, field `tool`, max 100KB)
+- `DELETE /api/custom-tools/:name` — delete a custom tool by name
 - `GET /fragments/settings/tools` — render Tools settings page fragment
 
 **Source files:** `src/tools/tools-settings.ts`, `src/tools/custom-loader.ts`,
@@ -642,8 +643,12 @@ settings (passed through from the Psycheros environment).
 
 ### Entity Data Export & Import
 
-Settings → System Admin → Entity Data tab. Full backup and restore of all entity
-data across both entity-core and Psycheros.
+Settings → System Admin → Entity Data tab. Organized into three sections:
+
+- **Export Entity Data** — full backup as a downloadable zip
+- **Psycheros Instance Transfer** — restore/transfer from another Psycheros instance
+- **entity-loom Data Migration** — import data from external platforms
+  (ChatGPT, SillyTavern, etc.) processed through entity-loom
 
 **Export** produces a zip containing:
 
@@ -665,12 +670,21 @@ MCP disabled), the export will:
 The manifest records `parts.entity_core: false` and `entity_core_error` when
 entity-core data is missing, so imported archives are always auditable.
 
-**Import** accepts the same zip format. It clears existing Psycheros data
-(conversations, lorebooks, vault, images) before restoring, then sends
-entity-core data through MCP's `entity_import` tool. After a successful import,
-a sync pull runs on the existing MCP connection (the import handler reopens DB
-connections internally, so no restart is needed). MCP is restarted only as a
-fallback if the pull fails.
+**Full Overwrite Import** accepts the same zip format. It clears existing
+Psycheros data (conversations, lorebooks, vault, images) before restoring, then
+sends entity-core data through MCP's `entity_import` tool. After a successful
+import, a sync pull runs on the existing MCP connection (the import handler
+reopens DB connections internally, so no restart is needed). MCP is restarted
+only as a fallback if the pull fails.
+
+**Restore Conversations** merges conversation history from a standalone
+`conversations.json` file (found inside a Psycheros export zip at
+`psycheros/conversations.json`). This is an additive merge — existing
+conversations are preserved, new ones are added, and duplicate IDs are skipped.
+Fork detection handles conversations that continued on both sides after export
+by creating a `(continued)` copy. Messages are automatically embedded for RAG.
+Useful for recovering conversation history when a full overwrite import didn't
+restore chats correctly.
 
 **API endpoints:**
 
@@ -679,7 +693,10 @@ fallback if the pull fails.
   partial error JSON
 - `POST /api/admin/entity-data/export?partial=1` — skip entity-core, export
   Psycheros-only data
-- `POST /api/admin/entity-data/import` — import from zip
+- `POST /api/admin/entity-data/import` — full overwrite import from zip
+- `POST /api/admin/entity-data/restore-conversations` — additive merge from
+  conversations.json file (multipart form: `file`, `embed`). Streaming NDJSON
+  response with phases: `db` → `embed` → `done`
 - `GET /fragments/admin/entity-data` — Entity Data tab HTML fragment
 
 ## Knowledge Graph Editor

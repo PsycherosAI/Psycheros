@@ -1305,6 +1305,9 @@
       "integrity": "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="
     }
   },
+  "remote": {
+    "https://esm.sh/js-tiktoken@1.0.21/lite": "0562f21b82ca89a3bf0d054d50d3c2cb0687155022f1faa4fd50f1e0014e4c44"
+  },
   "workspace": {
     "dependencies": [
       "jsr:@db/sqlite@0.12",

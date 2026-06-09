@@ -70,7 +70,8 @@ export type PulseTriggerSource =
   | "filesystem"
   | "chain"
   | "manual"
-  | "inactivity";
+  | "inactivity"
+  | "data_event";
 
 // =============================================================================
 // Semaphore

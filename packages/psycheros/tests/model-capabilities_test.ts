@@ -57,7 +57,18 @@ Deno.test("detectModelCapabilities: GPT-5-turbo", () => {
   const caps = detectModelCapabilities("gpt-5-turbo");
   assertEquals(caps.family, "openai-gpt5");
   assertEquals(caps.usesMaxCompletionTokens, true);
-  assert(caps.supportedParams.has("temperature"));
+  assertFalse(caps.supportedParams.has("temperature"));
+  assertFalse(caps.supportedParams.has("topP"));
+  assert(caps.supportedParams.has("maxTokens"));
+});
+
+Deno.test("detectModelCapabilities: GPT-5.5 via OpenRouter", () => {
+  const caps = detectModelCapabilities("openai/gpt-5.5");
+  assertEquals(caps.family, "openai-gpt5");
+  assertEquals(caps.usesMaxCompletionTokens, true);
+  assertFalse(caps.supportedParams.has("temperature"));
+  assertFalse(caps.supportedParams.has("topP"));
+  assert(caps.supportedParams.has("maxTokens"));
 });
 
 Deno.test("detectModelCapabilities: Claude direct", () => {

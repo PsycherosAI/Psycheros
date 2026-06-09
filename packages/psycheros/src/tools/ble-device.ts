@@ -11,6 +11,7 @@ import type { ToolResult } from "../types.ts";
 import type { Tool, ToolContext } from "./types.ts";
 import type { BLESettings } from "../llm/ble-settings.ts";
 import { getDeviceBridge } from "../server/device-bridge.ts";
+import { getWearableConnectionManager } from "../wearable/mod.ts";
 
 // =============================================================================
 // Tool Definition
@@ -165,11 +166,28 @@ async function handleSend(
   }
 
   if (!bridge.isDeviceConnected(device.id)) {
+    // Device not on bridge — try wearable connection manager (entity-plexus)
+    const wearableMgr = getWearableConnectionManager();
+    if (wearableMgr.isDeviceConnected(device.id)) {
+      const sent = wearableMgr.sendCommand(device.id, command);
+      if (sent) {
+        console.log(
+          `[BLE] ${device.name}: sent "${command}" via wearable (fire-and-forget)`,
+        );
+        return {
+          toolCallId: ctx.toolCallId,
+          content:
+            `Command "${command}" sent to ${device.name} via wearable connection.`,
+          isError: false,
+        };
+      }
+    }
+
     return {
       toolCallId: ctx.toolCallId,
       content:
-        `BLE device "${device.name}" (id: ${device.id}) is not connected through any bridge client. ` +
-        "A bridge client must be open with this device paired.",
+        `BLE device "${device.name}" (id: ${device.id}) is not connected through ` +
+        "any bridge client or wearable app. A bridge client or entity-plexus must be connected.",
       isError: true,
     };
   }

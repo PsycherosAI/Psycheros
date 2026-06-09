@@ -39,6 +39,7 @@ import type { Tool } from "../tools/mod.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { pulseIconSvg } from "../pulse/templates.ts";
 import type { ExtractionHealth } from "../mcp-client/mod.ts";
+import { getWearableConnectionManager } from "../wearable/mod.ts";
 
 // =============================================================================
 // Utilities
@@ -1239,17 +1240,94 @@ function clearBackground() {
 // =============================================================================
 
 /**
- * Render the Situational Awareness settings page.
- * Shows active signal feeds and an enable/disable toggle.
+ * Render the Situational Awareness settings page with two tabs:
+ * Signals (sensor data config) and Webhooks (event rules).
  */
-export function renderSASettings(settings: { enabled: boolean }): string {
+export function renderSASettings(
+  settings: { enabled: boolean },
+  bleSettings?: import("../llm/ble-settings.ts").BLESettings,
+  eventRules?: import("../wearable/event-rules.ts").EventRule[],
+  pulses?: import("../types.ts").PulseRow[],
+): string {
+  const connectedIds = getWearableConnectionManager().connectedDeviceIds;
+  const devicesWithStreams = (bleSettings?.devices ?? []).filter(
+    (d) => d.streams && Object.keys(d.streams).length > 0,
+  );
+
+  // Collect all unique stream IDs across devices
+  const allStreamIds = [
+    ...new Set(
+      devicesWithStreams.flatMap((d) => Object.keys(d.streams ?? {})),
+    ),
+  ];
+  const streamOptions = allStreamIds.map((id) =>
+    `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`
+  ).join("\n");
+  const pulseOptions = (pulses ?? []).map((p) =>
+    `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`
+  ).join("\n");
+
+  const dataStreamsSection = devicesWithStreams.length > 0
+    ? `<section class="theme-section">
+      <h3 class="theme-section-title">Data Streams</h3>
+      <p class="theme-section-desc">Toggle which data streams from connected wearables appear in my situational awareness</p>
+      <div class="llm-fields">
+        ${
+      devicesWithStreams.map((device) => {
+        const isConnected = connectedIds.includes(device.id);
+        return `<div class="llm-field" style="margin-bottom:12px;" data-device-id="${
+          escapeHtml(device.id)
+        }">
+            <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <span style="font-weight:500;">${
+          escapeHtml(device.name || device.id)
+        }</span>
+              <span class="ble-status-badge" style="font-size:var(--font-size-xs);padding:2px 8px;border-radius:8px;${
+          isConnected
+            ? "background:rgba(76,175,80,0.15);color:#4CAF50;"
+            : "background:rgba(158,158,158,0.15);color:#9E9E9E;"
+        }">${isConnected ? "Connected" : "Disconnected"}</span>
+            </label>
+            ${
+          Object.entries(device.streams ?? {}).map(([streamId, config]) =>
+            `<div style="display:flex;align-items:center;gap:8px;padding:4px 0 4px 12px;">
+                <label class="toggle-label" style="gap:6px;">
+                  <input type="checkbox" data-sa-device="${
+              escapeHtml(device.id)
+            }" data-sa-stream="${escapeHtml(streamId)}" ${
+              config.enabled ? "checked" : ""
+            } role="switch" style="accent-color:var(--c-accent);">
+                  <span style="font-size:var(--font-size-sm);">${
+              escapeHtml(config.label)
+            }</span>
+                </label>
+                <span style="font-size:var(--font-size-xs);color:var(--c-fg-muted);font-family:monospace;">&lt;${
+              escapeHtml(config.xmlTag)
+            }&gt;</span>
+              </div>`
+          ).join("\n")
+        }
+          </div>`;
+      }).join("\n")
+    }
+      </div>
+    </section>`
+    : `<section class="theme-section">
+      <h3 class="theme-section-title">Data Streams</h3>
+      <p class="theme-section-desc" style="opacity:0.6;">No wearable data sources configured. <a href="#" onclick="event.preventDefault();htmx.ajax('GET','/fragments/settings/connections',{target:'#chat',swap:'innerHTML'});setTimeout(()=>switchConnectionsTab('ble'),50);" style="color:var(--c-accent);text-decoration:underline;">Connect a device in External Connections &gt; BLE</a> to get started.</p>
+    </section>`;
+
+  const webhooksRulesList = (eventRules ?? []).length === 0
+    ? `<p style="color: var(--c-fg-muted); margin: 8px 0;">No webhooks configured yet.</p>`
+    : (eventRules ?? []).map((r) => renderEventRuleCard(r)).join("\n");
+
   return `<div class="settings-view">
   <div class="settings-header">
     <div class="settings-header-row">
       ${renderSettingsBackButton()}
       <div>
         <h1 class="settings-title">Situational Awareness</h1>
-        <p class="settings-desc">Configure real-time signal feeds for entity awareness</p>
+        <p class="settings-desc">Configure real-time signal feeds and data-driven triggers</p>
       </div>
     </div>
   </div>
@@ -1271,33 +1349,93 @@ export function renderSASettings(settings: { enabled: boolean }): string {
       </div>
     </section>
 
-    <section class="theme-section">
-      <h3 class="theme-section-title">Active Signals</h3>
-      <p class="theme-section-desc">Built-in signal feeds currently providing data to the entity</p>
-      <div class="llm-fields">
-        <div class="llm-field">
-          <label>Current Conversation</label>
-          <div class="sa-signal-desc">Tells the entity which conversation it is currently processing, including the conversation ID and title.</div>
-        </div>
-        <div class="llm-field">
-          <label>Last User Interaction</label>
-          <div class="sa-signal-desc">Tracks the most recent human message across all threads, excluding automated Pulse messages. The entity sees the timestamp and which thread the message was sent in.</div>
-        </div>
-        <div class="llm-field">
-          <label>Device Detection</label>
-          <div class="sa-signal-desc">Detects whether you're on desktop or mobile when sending a message. The entity receives this as a simple desktop/mobile indicator.</div>
-        </div>
-        <div class="llm-field">
-          <label>Connected Devices</label>
-          <div class="sa-signal-desc">Shows which Lovense toys, Intiface devices, and home smart devices are currently connected. Refreshed every 30 seconds.</div>
-        </div>
-      </div>
-    </section>
+    <div class="sa-tabs" style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--c-border);padding-bottom:0;">
+      <button class="sa-tab sa-tab--active" onclick="switchSATab('signals')" id="sa-tab-signals" style="padding:8px 16px;border:none;background:none;color:var(--c-accent);font-weight:600;cursor:pointer;border-bottom:2px solid var(--c-accent);margin-bottom:-1px;">Signals</button>
+      <button class="sa-tab" onclick="switchSATab('webhooks')" id="sa-tab-webhooks" style="padding:8px 16px;border:none;background:none;color:var(--c-fg-muted);font-weight:400;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;">Webhooks</button>
+    </div>
 
-    <section class="theme-section">
-      <h3 class="theme-section-title">Future Feeds</h3>
-      <p class="theme-section-desc" style="opacity:0.6;">More signal feeds (biometrics, GPS, media state) will be added here as they become available.</p>
-    </section>
+    <div id="sa-panel-signals">
+      <section class="theme-section">
+        <h3 class="theme-section-title">Active Signals</h3>
+        <p class="theme-section-desc">Built-in signal feeds currently providing data to the entity</p>
+        <div class="llm-fields">
+          <div class="llm-field">
+            <label>Current Conversation</label>
+            <div class="sa-signal-desc">Tells the entity which conversation it is currently processing, including the conversation ID and title.</div>
+          </div>
+          <div class="llm-field">
+            <label>Last User Interaction</label>
+            <div class="sa-signal-desc">Tracks the most recent human message across all threads, excluding automated Pulse messages. The entity sees the timestamp and which thread the message was sent in.</div>
+          </div>
+          <div class="llm-field">
+            <label>Device Detection</label>
+            <div class="sa-signal-desc">Detects whether you're on desktop or mobile when sending a message. The entity receives this as a simple desktop/mobile indicator.</div>
+          </div>
+          <div class="llm-field">
+            <label>Connected Devices</label>
+            <div class="sa-signal-desc">Shows which Lovense toys, Intiface devices, and home smart devices are currently connected. Refreshed every 30 seconds.</div>
+          </div>
+        </div>
+      </section>
+      ${dataStreamsSection}
+    </div>
+
+    <div id="sa-panel-webhooks" style="display:none;">
+      <section class="theme-section">
+        <h3 class="theme-section-title">Webhooks</h3>
+        <p class="theme-section-desc">Trigger Pulses when data streams match conditions</p>
+        <div id="event-rules-list">
+          ${webhooksRulesList}
+        </div>
+        <div style="margin-top: 12px;">
+          <button class="btn btn--primary" onclick="addEventRule()">Add Webhook</button>
+        </div>
+      </section>
+      <template id="event-rule-blank-row">
+        <div class="event-rule-card" data-rule-id="" style="border:1px solid var(--c-border);border-radius:8px;padding:12px;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <label class="toggle-label" style="margin:0;">
+              <input type="checkbox" data-rule-enabled role="switch" checked>
+              <span class="toggle-slider"></span>
+            </label>
+            <input type="text" data-rule-name placeholder="Rule name"
+              style="flex:1;background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:6px 8px;font-size:14px;">
+            <button class="btn" onclick="deleteEventRule(this)" title="Delete rule"
+              style="padding:4px 8px;color:var(--c-fg-muted);">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;">
+            <label style="font-size:12px;color:var(--c-fg-muted);">IF</label>
+            <select data-cond-stream style="background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
+              ${streamOptions}
+            </select>
+            <select data-cond-operator style="background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
+              <option value="changes_to">changes to</option>
+              <option value="goes_above">goes above</option>
+              <option value="goes_below">goes below</option>
+            </select>
+            <input type="text" data-cond-value placeholder="value"
+              style="width:60px;background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
+            <input type="number" data-cond-sustained placeholder="sustain min" min="0"
+              style="width:80px;background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;" title="Sustained: condition must hold for this many minutes before firing">
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;">
+            <label style="font-size:12px;color:var(--c-fg-muted);">THEN</label>
+            <span style="font-size:13px;">Run Pulse:</span>
+            <select data-action-pulse style="background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
+              ${pulseOptions}
+            </select>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <label style="font-size:13px;color:var(--c-fg-muted);">Cooldown:</label>
+            <input type="number" data-rule-cooldown value="5" min="0"
+              style="width:50px;background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
+            <span style="font-size:12px;color:var(--c-fg-muted);">min</span>
+          </div>
+        </div>
+      </template>
+    </div>
 
     <div style="margin-top: 16px;">
       <button class="btn btn--primary" onclick="saveSASettings()">Save Changes</button>
@@ -1314,39 +1452,58 @@ export function renderSASettings(settings: { enabled: boolean }): string {
     line-height: 1.5;
     margin-top: 4px;
   }
-</style>
-<script>
-async function saveSASettings() {
-  const enabled = document.getElementById('sa-enabled').checked;
-
-  try {
-    const res = await fetch('/api/sa-settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled }),
-    });
-    const data = await res.json();
-    const el = document.getElementById('sa-settings-status');
-    if (!el) return;
-    if (data.success) {
-      el.className = 'settings-status visible success';
-      el.textContent = 'Settings saved successfully';
-      setTimeout(() => { el.className = 'settings-status'; }, 3000);
-    } else {
-      el.className = 'settings-status visible error';
-      el.textContent = data.error || 'Failed to save settings';
-      setTimeout(() => { el.className = 'settings-status'; }, 3000);
-    }
-  } catch (e) {
-    const el = document.getElementById('sa-settings-status');
-    if (el) {
-      el.className = 'settings-status visible error';
-      el.textContent = 'Failed to save settings';
-      setTimeout(() => { el.className = 'settings-status'; }, 3000);
-    }
-  }
+  .sa-tab--active { color: var(--c-accent) !important; font-weight: 600 !important; border-bottom-color: var(--c-accent) !important; }
+</style>`;
 }
-</script>`;
+
+function renderEventRuleCard(
+  rule: import("../wearable/event-rules.ts").EventRule,
+): string {
+  const opLabel: Record<string, string> = {
+    changes_to: "changes to",
+    goes_above: "goes above",
+    goes_below: "goes below",
+  };
+  return `<div class="event-rule-card" data-rule-id="${
+    escapeHtml(rule.id)
+  }" style="border:1px solid var(--c-border);border-radius:8px;padding:12px;margin-bottom:8px;${
+    !rule.enabled ? "opacity:0.5;" : ""
+  }">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+      <label class="toggle-label" style="margin:0;">
+        <input type="checkbox" data-rule-enabled role="switch" ${
+    rule.enabled ? "checked" : ""
+  }>
+        <span class="toggle-slider"></span>
+      </label>
+      <span style="font-weight:600;font-size:14px;flex:1;">${
+    escapeHtml(rule.name)
+  }</span>
+      <span style="font-size:12px;color:var(--c-fg-muted);">Cooldown: ${rule.cooldownMinutes}min</span>
+      <button class="btn" onclick="deleteEventRule(this)" title="Delete rule"
+        style="padding:4px 8px;color:var(--c-fg-muted);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:4px;">
+      <span style="font-size:12px;color:var(--c-fg-muted);">IF</span>
+      <span style="background:var(--input-bg);padding:2px 6px;border-radius:4px;font-size:13px;font-family:monospace;">${
+    escapeHtml(rule.condition.streamId)
+  } ${opLabel[rule.condition.operator] ?? rule.condition.operator} ${
+    escapeHtml(String(rule.condition.value))
+  }${
+    rule.condition.sustainedMinutes
+      ? " for " + rule.condition.sustainedMinutes + "min"
+      : ""
+  }</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+      <span style="font-size:12px;color:var(--c-fg-muted);">THEN</span>
+      <span style="font-size:13px;">Run Pulse: <strong>${
+    escapeHtml(rule.action.pulseId)
+  }</strong></span>
+    </div>
+  </div>`;
 }
 
 /**
@@ -4783,12 +4940,111 @@ function renderToolItem(
  * Render External Connections page with tabbed navigation.
  * Tabs: Channels (Discord, etc.), Home (smart devices), and Web Search.
  */
+
+function renderBLEDeviceRow(
+  device?: {
+    id: string;
+    name: string;
+    type: string;
+    enabled: boolean;
+    streams?: Record<
+      string,
+      { label: string; xmlTag: string; enabled: boolean }
+    >;
+  },
+  connected?: boolean,
+): string {
+  const d = device ?? {
+    id: "",
+    name: "",
+    type: "ble",
+    enabled: true,
+    streams: undefined,
+  };
+  const streamsHtml = d.streams && Object.keys(d.streams).length > 0
+    ? `<details class="ble-streams-section" style="margin-top:8px;width:100%;">
+    <summary style="cursor:pointer;font-size:var(--font-size-xs);color:var(--c-fg-muted);padding:4px 0;">
+      Data Streams (${Object.keys(d.streams).length})
+    </summary>
+    <div style="display:flex;flex-direction:column;gap:6px;padding:8px 0 0 0;">
+      ${
+      Object.entries(d.streams).map(([streamId, config]) =>
+        `<div style="display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;">
+        <span style="font-size:var(--font-size-xs);color:var(--c-fg-muted);min-width:100px;">${
+          escapeHtml(config.label)
+        }</span>
+        <label style="display:flex;flex-direction:column;gap:2px;">
+          <span style="font-size:var(--font-size-xs);color:var(--c-fg-muted);">XML Tag</span>
+          <input type="text" value="${
+          escapeHtml(config.xmlTag)
+        }" data-stream-id="${
+          escapeHtml(streamId)
+        }" data-stream-field="xmlTag" style="width:120px;" class="settings-input" />
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:var(--font-size-xs);color:var(--c-fg-muted);cursor:pointer;margin-top:14px;">
+          <input type="checkbox" data-stream-id="${
+          escapeHtml(streamId)
+        }" data-stream-field="enabled" ${
+          config.enabled ? "checked" : ""
+        } style="accent-color:var(--c-accent);" />
+          In SA
+        </label>
+      </div>`
+      ).join("\n")
+    }
+    </div>
+  </details>`
+    : "";
+  const statusBadge =
+    `<span class="ble-status-badge" style="font-size:var(--font-size-xs);padding:2px 8px;border-radius:8px;margin-top:14px;${
+      connected
+        ? "background:rgba(76,175,80,0.15);color:#4CAF50;"
+        : "background:rgba(158,158,158,0.15);color:#9E9E9E;"
+    }">${connected ? "Connected" : "Disconnected"}</span>`;
+  return `<div class="ble-device-row" data-device-id="${
+    escapeHtml(d.id)
+  }" style="display:flex;gap:var(--sp-2);align-items:center;margin-bottom:var(--sp-2);flex-wrap:wrap;">
+  <label style="display:flex;flex-direction:column;gap:2px;">
+    <span style="font-size:var(--font-size-xs);color:var(--c-fg-muted);">ID</span>
+    <input type="text" placeholder="e.g. banglejs-1" value="${
+    escapeHtml(d.id)
+  }" data-field="id" style="width:140px;" class="settings-input" />
+  </label>
+  <label style="display:flex;flex-direction:column;gap:2px;">
+    <span style="font-size:var(--font-size-xs);color:var(--c-fg-muted);">Display Name</span>
+    <input type="text" placeholder="e.g. My Bangle.js" value="${
+    escapeHtml(d.name)
+  }" data-field="name" style="width:160px;" class="settings-input" />
+  </label>
+  <label style="display:flex;flex-direction:column;gap:2px;">
+    <span style="font-size:var(--font-size-xs);color:var(--c-fg-muted);">Type</span>
+    <input type="text" placeholder="e.g. banglejs" value="${
+    escapeHtml(d.type)
+  }" data-field="type" style="width:100px;" class="settings-input" />
+  </label>
+  <label style="display:flex;align-items:center;gap:4px;font-size:var(--font-size-xs);color:var(--c-fg-muted);cursor:pointer;margin-top:14px;">
+    <input type="checkbox" data-field="enabled" ${
+    d.enabled ? "checked" : ""
+  } style="accent-color:var(--c-accent);" />
+    Enabled
+  </label>
+  ${statusBadge}
+  <button class="btn btn--xs" onclick="this.closest('.ble-device-row').remove()" title="Remove device" style="margin-top:14px;background:var(--c-bg-hover,#333);border:1px solid var(--c-border,#555);color:var(--c-fg);">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  </button>
+  ${streamsHtml}
+</div>`;
+}
+
 export function renderConnectionsSettings(
   discordSettings: DiscordSettings,
   homeSettings: import("../llm/home-settings.ts").HomeSettings,
   webSearchSettings?: import("../llm/web-search-settings.ts").WebSearchSettings,
   lovenseSettings?: import("../llm/lovense-settings.ts").LovenseSettings,
   buttplugSettings?: import("../llm/buttplug-settings.ts").ButtplugSettings,
+  bleSettings?: import("../llm/ble-settings.ts").BLESettings,
 ): string {
   const channelsContent = renderChannelsTab(discordSettings);
   const homeContent = renderHomeTab(homeSettings);
@@ -4806,6 +5062,7 @@ export function renderConnectionsSettings(
       websocketUrl: "ws://127.0.0.1:12345",
       customInstructions: "",
     };
+  const blSettings = bleSettings ?? { devices: [] };
 
   return `<div class="settings-view">
   <div class="settings-header">
@@ -4854,7 +5111,7 @@ export function renderConnectionsSettings(
           <path d="M12 2v7"/>
           <path d="M12 15v7"/>
         </svg>
-        BLE Devices
+        BLE
       </button>
     </nav>
 
@@ -4971,6 +5228,38 @@ export function renderConnectionsSettings(
           </button>
         </div>
       </section>
+
+      <section class="theme-section" style="margin-top:var(--sp-6);">
+        <h3 class="theme-section-title">Configured Devices</h3>
+        <p class="theme-section-desc">
+          Define BLE devices here so tools can reference them by a stable ID
+          (e.g. "banglejs-1") instead of the browser-assigned UUID.
+          <strong>ID</strong> is the routing handle tools use.
+          <strong>Display Name</strong> is what shows up in the UI.
+          <strong>Type</strong> is the device family (e.g. banglejs, generic-ble).
+        </p>
+        <div id="ble-devices-list">
+          ${
+    (() => {
+      const connectedIds = getWearableConnectionManager().connectedDeviceIds;
+      return blSettings.devices.map((d) =>
+        renderBLEDeviceRow(d, connectedIds.includes(d.id))
+      ).join("\n");
+    })()
+  }
+        </div>
+        <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-2);">
+          <button class="btn btn--ghost btn--xs" onclick="addBLEDeviceRow()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            Add Device
+          </button>
+          <button class="btn btn--primary btn--xs" onclick="saveBLEDevices()">Save Devices</button>
+        </div>
+        <div id="ble-devices-status" style="margin-top:8px;display:none;" class="llm-status"></div>
+      </section>
+      <template id="ble-blank-device-row">${renderBLEDeviceRow()}</template>
     </div>
 
   </div>
@@ -4986,111 +5275,6 @@ export function renderConnectionsSettings(
     .radio-text { font-weight: 500; min-width: 100px; }
     .label-hint { color: var(--text-dim); font-size: 0.85rem; }
   </style>
-
-<script>
-function switchConnectionsTab(tab) {
-  document.querySelectorAll('.connections-nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-  document.querySelectorAll('.connections-tab-panel').forEach(p => p.style.display = p.id === 'connections-tab-' + tab ? '' : 'none');
-}
-
-document.querySelectorAll('input[name="ws-provider"]').forEach(radio => {
-  radio.addEventListener('change', () => {
-    const tavily = document.getElementById('ws-tavily-section');
-    const brave = document.getElementById('ws-brave-section');
-    if (!tavily || !brave) return;
-    tavily.style.display = radio.value === 'tavily' ? '' : 'none';
-    brave.style.display = radio.value === 'brave' ? '' : 'none';
-  });
-});
-
-function showWsStatus(type, message) {
-  const el = document.getElementById('ws-status');
-  if (!el) return;
-  el.style.display = 'block';
-  el.className = 'llm-status ' + type;
-  el.textContent = message;
-}
-
-function getSelectedProvider() {
-  const checked = document.querySelector('input[name="ws-provider"]:checked');
-  return checked ? checked.value : 'disabled';
-}
-
-async function saveWebSearchSettings(event) {
-  const btn = event.currentTarget;
-  btn.disabled = true;
-  btn.textContent = 'Saving...';
-  showWsStatus('loading', 'Saving settings...');
-
-  try {
-    const settings = {
-      provider: getSelectedProvider(),
-      tavilyApiKey: document.getElementById('ws-tavily-key')?.value.trim() || '',
-      braveApiKey: document.getElementById('ws-brave-key')?.value.trim() || '',
-    };
-    const resp = await fetch('/api/web-search-settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
-    });
-    const data = await resp.json();
-    if (data.success) {
-      showWsStatus('success', 'Settings saved successfully.');
-    } else {
-      showWsStatus('error', 'Failed to save: ' + (data.error || 'Unknown error'));
-    }
-  } catch (e) {
-    showWsStatus('error', 'Failed to save: ' + e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Save Settings';
-  }
-}
-
-let wsResetPending = false;
-async function resetWebSearchDefaults(event) {
-  const btn = event.currentTarget;
-  if (!wsResetPending) {
-    wsResetPending = true;
-    btn.textContent = 'Confirm Reset?';
-    btn.classList.add('btn--danger');
-    btn.classList.remove('btn--ghost');
-    setTimeout(() => {
-      if (wsResetPending) {
-        wsResetPending = false;
-        btn.textContent = 'Reset to Defaults';
-        btn.classList.remove('btn--danger');
-        btn.classList.add('btn--ghost');
-      }
-    }, 3000);
-    return;
-  }
-  wsResetPending = false;
-  btn.textContent = 'Resetting...';
-  btn.disabled = true;
-  showWsStatus('loading', 'Resetting to defaults...');
-
-  try {
-    const resp = await fetch('/api/web-search-settings/reset', { method: 'POST' });
-    const data = await resp.json();
-    if (data.success) {
-      htmx.ajax('GET', '/fragments/settings/connections', { target: '#chat', swap: 'innerHTML' });
-    } else {
-      showWsStatus('error', 'Failed to reset: ' + (data.error || 'Unknown error'));
-      btn.disabled = false;
-      btn.textContent = 'Reset to Defaults';
-      btn.classList.remove('btn--danger');
-      btn.classList.add('btn--ghost');
-    }
-  } catch (e) {
-    showWsStatus('error', 'Failed to reset: ' + e.message);
-    btn.disabled = false;
-    btn.textContent = 'Reset to Defaults';
-    btn.classList.remove('btn--danger');
-    btn.classList.add('btn--ghost');
-  }
-}
-</script>
 </div>`;
 }
 
@@ -6486,11 +6670,22 @@ export function renderToolsSettings(
       const tool = customTools[name];
       const hasOverride = name in overrides;
       const enabled = hasOverride ? overrides[name] : true;
-      return renderToolItem({
+      const itemHtml = renderToolItem({
         name,
         description: tool.definition.function.description,
         enabled,
       });
+      return `<div class="custom-tool-row" style="display:flex;align-items:flex-start;gap:var(--sp-2);">
+  <div style="flex:1;min-width:0;">${itemHtml}</div>
+  <button class="btn btn--xs" onclick="deleteCustomTool('${
+        escapeHtml(name)
+      }')" title="Delete tool" style="margin-top:4px;flex-shrink:0;background:var(--c-bg-hover,#333);border:1px solid var(--c-border,#555);color:var(--c-danger,#e74c3c);">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+    </svg>
+  </button>
+</div>`;
     }).join("\n");
     customToolsListHtml = `<section class="tools-category" id="cat-custom">
   <div class="tools-category-header">
@@ -6616,11 +6811,22 @@ function showToolsStatus(type, message) {
   el.style.display = 'block';
   el.className = 'llm-status ' + type;
   el.textContent = message;
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(() => { el.style.display = 'none'; }, 3000);
 }
 
 function switchToolsTab(tab) {
   document.querySelectorAll('.tools-nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.querySelectorAll('.tools-tab-panel').forEach(p => p.style.display = p.id === 'tools-tab-' + tab ? '' : 'none');
+}
+
+function refreshCustomToolsList() {
+  fetch('/api/custom-tools/list')
+    .then(r => r.text())
+    .then(html => {
+      const el = document.getElementById('cat-custom');
+      if (el) el.outerHTML = html;
+    });
 }
 
 function toggleToolDetail(name) {
@@ -6672,8 +6878,8 @@ async function importCustomTool(input) {
     const resp = await fetch('/api/custom-tools/upload', { method: 'POST', body: formData });
     const data = await resp.json();
     if (data.success) {
-      showToolsStatus('success', 'Imported tool: ' + data.toolName + '. Reloading...');
-      setTimeout(() => { location.reload(); }, 1000);
+      showToolsStatus('success', 'Imported tool: ' + data.toolName);
+      refreshCustomToolsList();
     } else {
       showToolsStatus('error', 'Import failed: ' + (data.error || 'Unknown error'));
     }
@@ -6681,6 +6887,23 @@ async function importCustomTool(input) {
     showToolsStatus('error', 'Import failed: ' + e.message);
   }
   input.value = '';
+}
+
+async function deleteCustomTool(name) {
+  if (!confirm('Delete the custom tool "' + name + '"? This cannot be undone.')) return;
+  showToolsStatus('loading', 'Deleting ' + name + '...');
+  try {
+    const resp = await fetch('/api/custom-tools/' + encodeURIComponent(name), { method: 'DELETE' });
+    const data = await resp.json();
+    if (data.success) {
+      showToolsStatus('success', 'Deleted ' + name);
+      refreshCustomToolsList();
+    } else {
+      showToolsStatus('error', 'Delete failed: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    showToolsStatus('error', 'Delete failed: ' + e.message);
+  }
 }
 
 async function saveToolsSettings(event) {

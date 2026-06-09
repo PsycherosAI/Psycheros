@@ -606,6 +606,413 @@ export function handleAdminEntityDataImport(
 }
 
 /**
+ * POST /api/admin/entity-data/restore-conversations — Restore conversations from
+ * a Psycheros conversations.json file. Additive merge: existing conversations
+ * are preserved, new ones are added, fork detection merges divergent histories.
+ * Returns streaming NDJSON with real-time progress.
+ */
+export async function handleAdminEntityDataRestoreConversations(
+  ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
+  try {
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+    const doEmbed = formData.get("embed") !== "false";
+
+    if (!file) {
+      return new Response(JSON.stringify({ error: "No file provided" }), {
+        status: 400,
+        headers: JSON_HEADERS,
+      });
+    }
+
+    if (!file.name.endsWith(".json")) {
+      return new Response(
+        JSON.stringify({ error: "File must be a .json file" }),
+        {
+          status: 400,
+          headers: JSON_HEADERS,
+        },
+      );
+    }
+
+    // Parse conversations.json
+    const rawText = await file.text();
+    let conversations: Array<{
+      id: string;
+      title: string | null;
+      created_at: string;
+      updated_at: string;
+      messages: Array<{
+        id: string;
+        role: string;
+        content: string;
+        reasoning_content: string | null;
+        tool_call_id: string | null;
+        tool_calls: string | null;
+        created_at: string;
+      }>;
+    }>;
+
+    try {
+      const parsed = JSON.parse(rawText);
+      if (!Array.isArray(parsed)) {
+        return new Response(
+          JSON.stringify({
+            error:
+              "Invalid conversations.json: expected a JSON array at the top level",
+          }),
+          { status: 400, headers: JSON_HEADERS },
+        );
+      }
+      conversations = parsed;
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON file" }),
+        { status: 400, headers: JSON_HEADERS },
+      );
+    }
+
+    const psychDb = ctx.db.getRawDb();
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        const overallStart = Date.now();
+        const stats: ImportStats = {
+          conversations_created: 0,
+          conversations_forked: 0,
+          conversations_up_to_date: 0,
+          messages_imported: 0,
+          messages_skipped: 0,
+          messages_embedded: 0,
+          messages_embed_skipped: 0,
+        };
+
+        try {
+          // === Phase 1: DB Import ===
+          const totalConvs = conversations.length;
+          emit(controller, {
+            phase: "db",
+            status: "Importing conversations...",
+            conversations_processed: 0,
+            total: totalConvs,
+          });
+
+          for (let ci = 0; ci < conversations.length; ci++) {
+            const conv = conversations[ci];
+
+            if (!conv.id || !conv.created_at) {
+              continue; // skip malformed entries
+            }
+
+            // Check if conversation already exists in Psycheros
+            const existing = psychDb.prepare(
+              "SELECT updated_at FROM conversations WHERE id = ?",
+            ).get<{ updated_at: string }>(conv.id);
+
+            if (!existing) {
+              // New conversation — insert it and all its messages
+              psychDb.exec("BEGIN TRANSACTION");
+              try {
+                psychDb.exec(
+                  "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at, source_type) VALUES (?, ?, ?, ?, 'web')",
+                  [
+                    conv.id,
+                    conv.title ?? null,
+                    conv.created_at,
+                    conv.updated_at ?? conv.created_at,
+                  ],
+                );
+
+                const messages = conv.messages || [];
+                for (const msg of messages) {
+                  psychDb.exec(
+                    "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                      msg.id,
+                      conv.id,
+                      msg.role,
+                      msg.content,
+                      msg.reasoning_content ?? null,
+                      msg.tool_call_id ?? null,
+                      msg.tool_calls ?? null,
+                      msg.created_at,
+                    ],
+                  );
+                }
+
+                psychDb.exec("COMMIT");
+                stats.conversations_created++;
+                stats.messages_imported += messages.length;
+              } catch {
+                psychDb.exec("ROLLBACK");
+              }
+            } else {
+              // Existing conversation — run fork detection
+              const latestRow = psychDb.prepare(
+                "SELECT created_at FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1",
+              ).get<{ created_at: string }>(conv.id);
+
+              const messages = conv.messages || [];
+
+              // Find messages newer than Psycheros' latest
+              const postForkMessages = latestRow
+                ? messages.filter((m) => m.created_at > latestRow.created_at)
+                : messages;
+
+              if (postForkMessages.length === 0) {
+                stats.conversations_up_to_date++;
+              } else {
+                // Check if Psycheros has messages newer than the file's latest
+                const psychNewest = latestRow?.created_at ?? "";
+                const fileNewest = conv.updated_at ?? "";
+                const hasFork = psychNewest > fileNewest;
+
+                if (hasFork) {
+                  // Fork detected — create a new conversation for the post-fork messages
+                  const forkId = crypto.randomUUID();
+                  const forkTitle = `${conv.title || "Untitled"} (continued)`;
+                  const firstMsgTs = postForkMessages[0].created_at;
+                  const lastMsgTs =
+                    postForkMessages[postForkMessages.length - 1].created_at;
+
+                  psychDb.exec("BEGIN TRANSACTION");
+                  try {
+                    psychDb.exec(
+                      "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at, source_type) VALUES (?, ?, ?, ?, 'web')",
+                      [forkId, forkTitle, firstMsgTs, lastMsgTs],
+                    );
+
+                    for (const msg of postForkMessages) {
+                      psychDb.exec(
+                        "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        [
+                          msg.id,
+                          forkId,
+                          msg.role,
+                          msg.content,
+                          msg.reasoning_content ?? null,
+                          msg.tool_call_id ?? null,
+                          msg.tool_calls ?? null,
+                          msg.created_at,
+                        ],
+                      );
+                    }
+
+                    psychDb.exec("COMMIT");
+                    stats.conversations_forked++;
+                    stats.messages_imported += postForkMessages.length;
+                    emit(controller, {
+                      phase: "db",
+                      status:
+                        "Fork detected: conversation continued on both sides",
+                      conversation_title: conv.title,
+                    });
+                  } catch {
+                    psychDb.exec("ROLLBACK");
+                  }
+                } else {
+                  // No fork — just merge new messages into existing conversation
+                  psychDb.exec("BEGIN TRANSACTION");
+                  try {
+                    psychDb.exec(
+                      "UPDATE conversations SET source_type = 'web' WHERE id = ? AND (source_type IS NULL OR source_type = 'web')",
+                      [conv.id],
+                    );
+                    let newCount = 0;
+                    for (const msg of postForkMessages) {
+                      psychDb.exec(
+                        "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        [
+                          msg.id,
+                          conv.id,
+                          msg.role,
+                          msg.content,
+                          msg.reasoning_content ?? null,
+                          msg.tool_call_id ?? null,
+                          msg.tool_calls ?? null,
+                          msg.created_at,
+                        ],
+                      );
+                      newCount++;
+                    }
+
+                    if (newCount > 0) {
+                      const lastTs =
+                        postForkMessages[postForkMessages.length - 1]
+                          .created_at;
+                      psychDb.exec(
+                        "UPDATE conversations SET updated_at = ? WHERE id = ? AND updated_at < ?",
+                        [lastTs, conv.id, lastTs],
+                      );
+                    }
+
+                    psychDb.exec("COMMIT");
+                    stats.messages_imported += newCount;
+                    stats.messages_skipped += messages.length -
+                      postForkMessages.length;
+                  } catch {
+                    psychDb.exec("ROLLBACK");
+                  }
+                }
+              }
+            }
+
+            // Emit progress every 50 conversations or at the end
+            if ((ci + 1) % 50 === 0 || ci === conversations.length - 1) {
+              emit(controller, {
+                phase: "db",
+                status: "Importing conversations...",
+                conversations_processed: ci + 1,
+                total: totalConvs,
+              });
+            }
+          }
+
+          // Phase 1 done
+          emit(controller, {
+            phase: "db",
+            done: true,
+            conversations_created: stats.conversations_created,
+            conversations_forked: stats.conversations_forked,
+            conversations_up_to_date: stats.conversations_up_to_date,
+            messages_imported: stats.messages_imported,
+            messages_skipped: stats.messages_skipped,
+          });
+
+          // === Phase 2: Embedding ===
+          if (doEmbed && ctx.chatRAG) {
+            const countRow = psychDb.prepare(
+              `SELECT COUNT(*) as c FROM messages
+               LEFT JOIN message_embeddings e ON messages.id = e.message_id
+               WHERE e.message_id IS NULL
+               AND messages.role != 'tool'
+               AND length(messages.content) >= 10`,
+            ).get<{ c: number }>();
+
+            const totalToEmbed = countRow?.c ?? 0;
+
+            if (totalToEmbed === 0) {
+              emit(controller, {
+                phase: "embed",
+                status: "All messages already embedded.",
+                current: 0,
+                total: 0,
+                elapsed: "0s",
+              });
+            } else {
+              emit(controller, {
+                phase: "embed",
+                status: "Embedding messages for RAG...",
+                current: 0,
+                total: totalToEmbed,
+                elapsed: "0s",
+              });
+
+              const embedStart = Date.now();
+              const BATCH_SIZE = 100;
+              let embedded = 0;
+              let skipped = 0;
+
+              let offset = 0;
+              while (offset < totalToEmbed) {
+                const batch = psychDb.prepare(
+                  `SELECT m.id, m.conversation_id, m.role, m.content FROM messages m
+                   LEFT JOIN message_embeddings e ON m.id = e.message_id
+                   WHERE e.message_id IS NULL
+                   AND m.role != 'tool'
+                   AND length(m.content) >= 10
+                   ORDER BY m.created_at
+                   LIMIT ? OFFSET ?`,
+                ).all<
+                  {
+                    id: string;
+                    conversation_id: string;
+                    role: string;
+                    content: string;
+                  }
+                >(BATCH_SIZE, offset);
+
+                if (batch.length === 0) break;
+
+                for (const msg of batch) {
+                  try {
+                    const result = await ctx.chatRAG!.indexMessage(
+                      msg.id,
+                      msg.conversation_id,
+                      msg.role as "user" | "assistant" | "system" | "tool",
+                      msg.content,
+                    );
+                    if (result) {
+                      stats.messages_embedded++;
+                    } else {
+                      skipped++;
+                    }
+                  } catch {
+                    skipped++;
+                  }
+                }
+
+                embedded += batch.length;
+                offset += batch.length;
+
+                emit(controller, {
+                  phase: "embed",
+                  status: "Embedding messages for RAG...",
+                  current: embedded,
+                  total: totalToEmbed,
+                  elapsed: formatElapsed(Date.now() - embedStart),
+                });
+              }
+
+              stats.messages_embed_skipped = skipped;
+            }
+          } else if (doEmbed && !ctx.chatRAG) {
+            emit(controller, {
+              phase: "embed",
+              status: "RAG not available — skipping embedding.",
+            });
+          }
+
+          // === Done ===
+          const duration = formatElapsed(Date.now() - overallStart);
+          emit(controller, {
+            phase: "done",
+            conversations_created: stats.conversations_created,
+            conversations_forked: stats.conversations_forked,
+            conversations_up_to_date: stats.conversations_up_to_date,
+            messages_imported: stats.messages_imported,
+            messages_skipped: stats.messages_skipped,
+            messages_embedded: stats.messages_embedded,
+            messages_embed_skipped: stats.messages_embed_skipped,
+            duration,
+          });
+        } catch (error) {
+          emit(controller, {
+            phase: "error",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: { "Content-Type": "application/x-ndjson" },
+    });
+  } catch (error) {
+    return new Response(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      { status: 500, headers: JSON_HEADERS },
+    );
+  }
+}
+
+/**
  * Merge incoming daily memory content with existing content.
  * Deduplicates by [chat:id] tag — bullets referencing the same chat are skipped.
  * Bullets without a chat ID are always appended (cannot deduplicate).

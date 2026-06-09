@@ -1,6 +1,6 @@
 {
   "name": "@entity/entity-loom",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "exports": "./src/mod.ts",
   "imports": {
     "fflate": "npm:fflate@^0.8"

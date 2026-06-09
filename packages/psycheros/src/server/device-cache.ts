@@ -13,6 +13,8 @@ import type { HomeSettings } from "../llm/home-settings.ts";
 import type { LovenseSettings } from "../llm/lovense-settings.ts";
 import type { ButtplugSettings } from "../llm/buttplug-settings.ts";
 import { getDeviceBridge } from "./device-bridge.ts";
+import type { DeviceSensorState } from "../wearable/types.ts";
+import { getWearableDataCache } from "../wearable/cache.ts";
 
 // =============================================================================
 // Types
@@ -61,6 +63,8 @@ export interface DeviceCacheSnapshot {
   intiface: IntifaceDeviceStatus;
   homeDevices: HomeDeviceInfo[];
   bleDevices: BLEDeviceInfo[];
+  /** Wearable device sensor data (from entity-plexus). */
+  wearableDevices: Record<string, DeviceSensorState>;
 }
 
 // =============================================================================
@@ -107,11 +111,20 @@ export class DeviceStatusCache {
     const bridge = getDeviceBridge();
     const bleDevices: BLEDeviceInfo[] = bridge.connectedDeviceList;
 
+    // Wearable devices: read from wearable data cache
+    const wearableCache = getWearableDataCache();
+    const wearableDevices: Record<string, DeviceSensorState> = {};
+    for (const deviceId of wearableCache.getDeviceIds()) {
+      const state = wearableCache.getDevice(deviceId);
+      if (state) wearableDevices[deviceId] = state;
+    }
+
     return {
       lovense: this.lovenseStatus,
       intiface: this.intifaceStatus,
       homeDevices,
       bleDevices,
+      wearableDevices,
     };
   }
 

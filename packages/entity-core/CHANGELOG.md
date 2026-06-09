@@ -6,6 +6,13 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-06-09
+
+### Fixed
+
+- GPT-5.x models now correctly strip all sampling parameters (temperature,
+  top_p, frequency/presence penalty) before sending requests.
+
 ## [0.3.5] - 2026-06-03
 
 ### Fixed
@@ -228,6 +235,8 @@ All notable changes to entity-core are documented here. The format follows
 - Knowledge graph (people, places, relationships) backed by SQLite + sqlite-vec.
 - Snapshot system: pre-destructive-operation snapshots for recovery.
 
+[0.3.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.6
+[0.3.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.5
 [0.3.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.3
 [0.3.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.2
 [0.3.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.1

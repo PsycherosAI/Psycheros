@@ -768,44 +768,84 @@ export function renderAdminEntityData(): string {
   </div>
 
   <div class="admin-section">
-    <h3 class="admin-section-title">Entity Overwrite</h3>
+    <h3 class="admin-section-title">Psycheros Instance Transfer</h3>
     <p class="admin-action-desc">
-      Performs a <strong>full overwrite</strong> of all entity data from a Psycheros
-      entity zip file. A snapshot is taken before overwriting entity-core data.
-      After import, stale RAG indexes are cleared and will be rebuilt on next access.
-      The import requires MCP to be connected for entity-core data.
+      Transfer data from another Psycheros instance. Use the <strong>Full Overwrite</strong>
+      to restore everything from a Psycheros export zip, or <strong>Restore Conversations</strong>
+      to merge conversation history from a standalone conversations.json file.
     </p>
-    <div class="admin-action-form">
-      <div class="admin-action-fields">
-        <label class="admin-action-label" for="admin-import-file">Select zip file</label>
-        <input id="admin-import-file" type="file" accept=".zip" class="admin-input" />
-      </div>
-      <button id="admin-import-btn" class="admin-action-btn admin-action-btn-danger" onclick="window.adminImportEntity()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-          <polyline points="17 8 12 3 7 8"/>
-          <line x1="12" y1="3" x2="12" y2="15"/>
-        </svg>
-        Full Overwrite Import
-      </button>
-      <div class="import-progress" id="admin-entity-import-progress" style="display:none">
-        <div class="import-progress-bar">
-          <div class="import-progress-fill" id="admin-entity-import-fill"></div>
+
+    <div class="admin-section">
+      <h3 class="admin-section-title">Full Overwrite</h3>
+      <p class="admin-action-desc">
+        Performs a <strong>full overwrite</strong> of all entity data from a Psycheros
+        entity zip file. A snapshot is taken before overwriting entity-core data.
+        After import, stale RAG indexes are cleared and will be rebuilt on next access.
+        The import requires MCP to be connected for entity-core data.
+      </p>
+      <div class="admin-action-form">
+        <div class="admin-action-fields">
+          <label class="admin-action-label" for="admin-import-file">Select zip file</label>
+          <input id="admin-import-file" type="file" accept=".zip" class="admin-input" />
         </div>
-        <div class="import-progress-text" id="admin-entity-import-text">Preparing...</div>
+        <button id="admin-import-btn" class="admin-action-btn admin-action-btn-danger" onclick="window.adminImportEntity()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          Full Overwrite Import
+        </button>
+        <div class="import-progress" id="admin-entity-import-progress" style="display:none">
+          <div class="import-progress-bar">
+            <div class="import-progress-fill" id="admin-entity-import-fill"></div>
+          </div>
+          <div class="import-progress-text" id="admin-entity-import-text">Preparing...</div>
+        </div>
+        <div class="import-blocking-overlay" id="admin-entity-import-overlay" style="display:none">
+          <div class="import-blocking-text">Importing entity data...</div>
+          <div class="import-blocking-subtext">Do not close this page. The import will continue in the background.</div>
+        </div>
       </div>
-      <div class="import-blocking-overlay" id="admin-entity-import-overlay" style="display:none">
-        <div class="import-blocking-text">Importing entity data...</div>
-        <div class="import-blocking-subtext">Do not close this page. The import will continue in the background.</div>
+    </div>
+
+    <div class="admin-section">
+      <h3 class="admin-section-title">Restore Conversations</h3>
+      <p class="admin-action-desc">
+        Merge conversation history from a Psycheros conversations.json file
+        (found inside an export zip). Existing conversations are preserved —
+        new ones are added and duplicate IDs are skipped. This is an
+        <strong>additive merge</strong>; no data is ever overwritten or deleted.
+      </p>
+      <div class="admin-action-form">
+        <div class="admin-action-fields">
+          <label class="admin-action-label" for="admin-restore-conv-file">Select conversations.json</label>
+          <input id="admin-restore-conv-file" type="file" accept=".json" class="admin-input" />
+        </div>
+        <button id="admin-restore-conv-btn" class="admin-action-btn" onclick="window.adminRestoreConversations()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          Restore Conversations
+        </button>
       </div>
+      <div class="import-progress" id="admin-restore-conv-progress" style="display:none">
+        <div class="import-progress-bar">
+          <div class="import-progress-fill" id="admin-restore-conv-fill"></div>
+        </div>
+        <div class="import-progress-text" id="admin-restore-conv-text">Preparing...</div>
+      </div>
+      <div class="admin-migration-output" id="admin-restore-conv-output" style="display:none"></div>
     </div>
   </div>
 
   <div class="admin-section">
-    <h3 class="admin-section-title">Data Migration</h3>
+    <h3 class="admin-section-title">entity-loom Data Migration</h3>
     <p class="admin-action-desc">
-      Import entity data from external sources (ChatGPT, SillyTavern, etc.)
-      via <strong>entity-loom</strong> export packages. Each data type is imported
+      Import data from external platforms (ChatGPT, SillyTavern, Claude, etc.)
+      that was processed through <strong>entity-loom</strong>. Each data type is imported
       separately so failures are isolated. Imports are <strong>additive only</strong>
       — existing data is never overwritten. Requires entity-core data directory
       to be configured.

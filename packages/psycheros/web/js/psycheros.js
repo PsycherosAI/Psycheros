@@ -3889,16 +3889,32 @@ function connectDeviceBridgeWS() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   deviceBridgeWS = new WebSocket(`${protocol}//${location.host}/api/device-bridge`);
 
-  deviceBridgeWS.onopen = () => {
-    // Register our connected BLE device with the bridge
+  deviceBridgeWS.onopen = async () => {
+    // Register our connected BLE device with the bridge.
+    // Look up the configured device ID from BLE settings so the server-side
+    // routing matches what tools expect (e.g. "banglejs-1" not Chrome's UUID).
     if (deviceBridgeBLE) {
+      let deviceId = deviceBridgeBLE.device.id;
+      let deviceName = deviceBridgeBLE.device.name || 'Unknown BLE Device';
+      let deviceType = 'ble';
+
+      try {
+        const res = await fetch('/api/ble-settings');
+        const settings = await res.json();
+        const match = (settings.devices || []).find(d =>
+          d.enabled && d.name === deviceName
+        );
+        if (match) {
+          deviceId = match.id;
+          deviceType = match.type;
+        }
+      } catch (e) {
+        console.warn('[DeviceBridge] Could not fetch BLE settings for ID lookup:', e);
+      }
+
       deviceBridgeWS.send(JSON.stringify({
         type: 'register',
-        devices: [{
-          id: deviceBridgeBLE.device.id,
-          name: deviceBridgeBLE.device.name || 'Unknown BLE Device',
-          type: 'ble',
-        }],
+        devices: [{ id: deviceId, name: deviceName, type: deviceType }],
       }));
     }
     renderDeviceBridgeStatus();
@@ -4790,3 +4806,471 @@ globalThis.saveProfile = saveProfile;
 globalThis.testProfileConnection = testProfileConnection;
 globalThis.setAsActive = setAsActive;
 globalThis.deleteProfile = deleteProfile;
+
+// =============================================================================
+// External Connections — moved from inline script for HTMX swap reliability.
+// Inline scripts in HTMX-swapped fragments don't reliably re-execute on
+// subsequent swaps, so these functions live here where they persist across
+// all fragment swaps.
+// =============================================================================
+
+// --- Tab switching ---
+
+function switchConnectionsTab(tab) {
+  document.querySelectorAll('.connections-nav-tab').forEach(function(t) {
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+  document.querySelectorAll('.connections-tab-panel').forEach(function(p) {
+    p.style.display = p.id === 'connections-tab-' + tab ? '' : 'none';
+  });
+  // Start/stop BLE status polling when switching to/from BLE tab
+  if (tab === 'ble') {
+    startBLEStatusPolling();
+  } else {
+    stopBLEStatusPolling();
+  }
+}
+
+// --- Web Search ---
+
+function showWsStatus(type, message) {
+  var el = document.getElementById('ws-status');
+  if (!el) return;
+  el.style.display = 'block';
+  el.className = 'llm-status ' + type;
+  el.textContent = message;
+}
+
+function getSelectedProvider() {
+  var checked = document.querySelector('input[name="ws-provider"]:checked');
+  return checked ? checked.value : 'disabled';
+}
+
+async function saveWebSearchSettings(event) {
+  var btn = event.currentTarget;
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  showWsStatus('loading', 'Saving settings...');
+
+  try {
+    var settings = {
+      provider: getSelectedProvider(),
+      tavilyApiKey: document.getElementById('ws-tavily-key')?.value.trim() || '',
+      braveApiKey: document.getElementById('ws-brave-key')?.value.trim() || '',
+    };
+    var resp = await fetch('/api/web-search-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    var data = await resp.json();
+    if (data.success) {
+      showWsStatus('success', 'Settings saved successfully.');
+    } else {
+      showWsStatus('error', 'Failed to save: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    showWsStatus('error', 'Failed to save: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save Settings';
+  }
+}
+
+var wsResetPending = false;
+
+async function resetWebSearchDefaults(event) {
+  var btn = event.currentTarget;
+  if (!wsResetPending) {
+    wsResetPending = true;
+    btn.textContent = 'Confirm Reset?';
+    btn.classList.add('btn--danger');
+    btn.classList.remove('btn--ghost');
+    setTimeout(function() {
+      if (wsResetPending) {
+        wsResetPending = false;
+        btn.textContent = 'Reset to Defaults';
+        btn.classList.remove('btn--danger');
+        btn.classList.add('btn--ghost');
+      }
+    }, 3000);
+    return;
+  }
+  wsResetPending = false;
+  btn.textContent = 'Resetting...';
+  btn.disabled = true;
+  showWsStatus('loading', 'Resetting to defaults...');
+
+  try {
+    var resp = await fetch('/api/web-search-settings/reset', { method: 'POST' });
+    var data = await resp.json();
+    if (data.success) {
+      htmx.ajax('GET', '/fragments/settings/connections', { target: '#chat', swap: 'innerHTML' });
+    } else {
+      showWsStatus('error', 'Failed to reset: ' + (data.error || 'Unknown error'));
+      btn.disabled = false;
+      btn.textContent = 'Reset to Defaults';
+      btn.classList.remove('btn--danger');
+      btn.classList.add('btn--ghost');
+    }
+  } catch (e) {
+    showWsStatus('error', 'Failed to reset: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Reset to Defaults';
+    btn.classList.remove('btn--danger');
+    btn.classList.add('btn--ghost');
+  }
+}
+
+// --- BLE Device Management ---
+
+/** XML name validation: must start with letter/underscore, then letters/digits/hyphens/underscores/periods. */
+var XML_NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_.-]*$/;
+
+function addBLEDeviceRow() {
+  var list = document.getElementById('ble-devices-list');
+  if (!list) return;
+  var tmpl = document.getElementById('ble-blank-device-row');
+  if (!tmpl) return;
+  var clone = tmpl.content.cloneNode(true);
+  list.appendChild(clone);
+}
+
+function showBLEDevicesStatus(type, msg) {
+  var el = document.getElementById('ble-devices-status');
+  if (!el) return;
+  el.style.display = 'block';
+  el.className = 'llm-status ' + type;
+  el.textContent = msg;
+}
+
+async function saveBLEDevices() {
+  var rows = document.querySelectorAll('#ble-devices-list .ble-device-row');
+  var devices = [];
+  var errors = [];
+
+  rows.forEach(function(row) {
+    var id = (row.querySelector('[data-field="id"]')?.value || '').trim();
+    var name = (row.querySelector('[data-field="name"]')?.value || '').trim();
+    var type = (row.querySelector('[data-field="type"]')?.value || 'ble').trim();
+    var enabled = row.querySelector('[data-field="enabled"]')?.checked ?? true;
+    if (!id) return;
+
+    // Collect stream configs from the collapsible section
+    var streams = {};
+    row.querySelectorAll('[data-stream-id]').forEach(function(el) {
+      var streamId = el.dataset.streamId;
+      if (!streams[streamId]) streams[streamId] = {};
+      if (el.dataset.streamField === 'xmlTag') {
+        var tagVal = el.value.trim() || streamId;
+        if (!XML_NAME_RE.test(tagVal)) {
+          errors.push('Invalid XML tag "' + tagVal + '" for stream ' + streamId +
+            ': must start with a letter or underscore, followed by letters, digits, hyphens, underscores, or periods.');
+        }
+        streams[streamId].xmlTag = tagVal;
+      } else if (el.dataset.streamField === 'enabled') {
+        streams[streamId].enabled = el.checked;
+      }
+    });
+    // Fill in labels from the span next to each stream
+    row.querySelectorAll('[data-stream-id][data-stream-field="xmlTag"]').forEach(function(el) {
+      var streamId = el.dataset.streamId;
+      var labelSpan = el.closest('div')?.querySelector('span');
+      if (labelSpan && streams[streamId]) {
+        streams[streamId].label = labelSpan.textContent.trim();
+      }
+    });
+
+    devices.push({
+      id: id,
+      name: name,
+      type: type,
+      enabled: enabled,
+      ...(Object.keys(streams).length > 0 ? { streams: streams } : {}),
+    });
+  });
+
+  if (errors.length > 0) {
+    showBLEDevicesStatus('error', errors[0]);
+    return;
+  }
+
+  showBLEDevicesStatus('loading', 'Saving devices...');
+  try {
+    var resp = await fetch('/api/ble-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ devices: devices }),
+    });
+    var data = await resp.json();
+    if (data.success) {
+      showBLEDevicesStatus('success', 'Devices saved.');
+    } else {
+      showBLEDevicesStatus('error', 'Failed: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    showBLEDevicesStatus('error', 'Failed: ' + e.message);
+  }
+}
+
+// --- BLE Connection Status Polling ---
+
+var bleStatusInterval = null;
+
+function startBLEStatusPolling() {
+  stopBLEStatusPolling();
+  updateBLEStatusBadges(); // immediate check
+  bleStatusInterval = setInterval(updateBLEStatusBadges, 5000);
+}
+
+function stopBLEStatusPolling() {
+  if (bleStatusInterval) {
+    clearInterval(bleStatusInterval);
+    bleStatusInterval = null;
+  }
+}
+
+async function updateBLEStatusBadges() {
+  try {
+    var resp = await fetch('/api/ble-status');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var connectedIds = data.connectedIds || [];
+    // Update badges on both BLE settings (ble-device-row) and SA settings (llm-field) pages
+    document.querySelectorAll('[data-device-id]').forEach(function(container) {
+      var badge = container.querySelector('.ble-status-badge');
+      if (!badge) return;
+      var isConnected = connectedIds.indexOf(container.dataset.deviceId) !== -1;
+      badge.textContent = isConnected ? 'Connected' : 'Disconnected';
+      badge.style.background = isConnected ? 'rgba(76,175,80,0.15)' : 'rgba(158,158,158,0.15)';
+      badge.style.color = isConnected ? '#4CAF50' : '#9E9E9E';
+    });
+  } catch (_) {
+    // Silently ignore — polling will retry
+  }
+}
+
+// --- Web Search Radio Initialization ---
+
+function initWebSearchRadios() {
+  var radios = document.querySelectorAll('input[name="ws-provider"]');
+  if (radios.length === 0) return; // not on the connections page
+  radios.forEach(function(radio) {
+    // Remove old listener by cloning (simple dedup)
+    var clone = radio.cloneNode(true);
+    radio.parentNode.replaceChild(clone, radio);
+    clone.addEventListener('change', function() {
+      var tavily = document.getElementById('ws-tavily-section');
+      var brave = document.getElementById('ws-brave-section');
+      if (!tavily || !brave) return;
+      tavily.style.display = clone.value === 'tavily' ? '' : 'none';
+      brave.style.display = clone.value === 'brave' ? '' : 'none';
+    });
+  });
+}
+
+// Re-initialize after HTMX swaps the connections or SA settings page
+document.body.addEventListener('htmx:afterSwap', function(e) {
+  if (e.detail.target?.id === 'chat') {
+    initWebSearchRadios();
+    // Start BLE status polling on SA settings page (has wearable data section)
+    if (document.querySelector('[data-sa-device]')) {
+      startBLEStatusPolling();
+    } else if (!document.getElementById('connections-tab-ble')) {
+      stopBLEStatusPolling();
+    }
+  }
+});
+
+// Also initialize on DOMContentLoaded for full page loads
+document.addEventListener('DOMContentLoaded', function() {
+  initWebSearchRadios();
+  // Start BLE status polling on SA settings page for full page loads
+  if (document.querySelector('[data-sa-device]')) {
+    startBLEStatusPolling();
+  }
+});
+
+// --- SA Settings ---
+
+async function saveSASettings() {
+  var enabledEl = document.getElementById('sa-enabled');
+  var enabled = enabledEl ? enabledEl.checked : true;
+
+  // Collect wearable stream toggles
+  var streamToggles = {};
+  document.querySelectorAll('[data-sa-device][data-sa-stream]').forEach(function(el) {
+    var deviceId = el.dataset.saDevice;
+    var streamId = el.dataset.saStream;
+    var checked = el.checked;
+    if (!streamToggles[deviceId]) streamToggles[deviceId] = {};
+    streamToggles[deviceId][streamId] = { enabled: checked };
+  });
+
+  try {
+    var res = await fetch('/api/sa-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: enabled, streamToggles: streamToggles }),
+    });
+    var data = await res.json();
+    var el = document.getElementById('sa-settings-status');
+    if (!el) return;
+    if (data.success) {
+      el.className = 'settings-status visible success';
+      el.textContent = 'Settings saved successfully';
+      setTimeout(function() { el.className = 'settings-status'; }, 3000);
+    } else {
+      el.className = 'settings-status visible error';
+      el.textContent = data.error || 'Failed to save settings';
+      setTimeout(function() { el.className = 'settings-status'; }, 3000);
+    }
+  } catch (e) {
+    var el = document.getElementById('sa-settings-status');
+    if (el) {
+      el.className = 'settings-status visible error';
+      el.textContent = 'Failed to save settings';
+      setTimeout(function() { el.className = 'settings-status'; }, 3000);
+    }
+  }
+}
+
+// Expose External Connections + SA functions to global scope for onclick handlers.
+globalThis.switchConnectionsTab = switchConnectionsTab;
+globalThis.addBLEDeviceRow = addBLEDeviceRow;
+globalThis.showBLEDevicesStatus = showBLEDevicesStatus;
+globalThis.saveBLEDevices = saveBLEDevices;
+globalThis.showWsStatus = showWsStatus;
+globalThis.saveWebSearchSettings = saveWebSearchSettings;
+globalThis.resetWebSearchDefaults = resetWebSearchDefaults;
+globalThis.saveSASettings = saveSASettings;
+
+// =============================================================================
+// Event Rules (Webhooks)
+// =============================================================================
+
+function switchSATab(tab) {
+  var signalsPanel = document.getElementById('sa-panel-signals');
+  var webhooksPanel = document.getElementById('sa-panel-webhooks');
+  var signalsTab = document.getElementById('sa-tab-signals');
+  var webhooksTab = document.getElementById('sa-tab-webhooks');
+  if (!signalsPanel || !webhooksPanel || !signalsTab || !webhooksTab) return;
+
+  if (tab === 'signals') {
+    signalsPanel.style.display = '';
+    webhooksPanel.style.display = 'none';
+    signalsTab.classList.add('sa-tab--active');
+    webhooksTab.classList.remove('sa-tab--active');
+  } else {
+    signalsPanel.style.display = 'none';
+    webhooksPanel.style.display = '';
+    signalsTab.classList.remove('sa-tab--active');
+    webhooksTab.classList.add('sa-tab--active');
+  }
+}
+
+function addEventRule() {
+  var list = document.getElementById('event-rules-list');
+  var template = document.getElementById('event-rule-blank-row');
+  if (!list || !template) return;
+  var clone = template.content.cloneNode(true);
+  list.appendChild(clone);
+}
+
+function deleteEventRule(button) {
+  var card = button.closest('.event-rule-card');
+  if (!card) return;
+  var ruleId = card.dataset.ruleId;
+  if (ruleId) {
+    fetch('/api/event-rules/' + ruleId, { method: 'DELETE' })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.success) card.remove();
+      })
+      .catch(function() {});
+  } else {
+    card.remove();
+  }
+}
+
+async function saveEventRules() {
+  var cards = document.querySelectorAll('.event-rule-card');
+  var statusEl = document.getElementById('event-rules-status');
+
+  for (var i = 0; i < cards.length; i++) {
+    var el = cards[i];
+    var ruleId = el.dataset.ruleId;
+    var enabled = el.querySelector('[data-rule-enabled]')?.checked ?? true;
+    var name = el.querySelector('[data-rule-name]')?.value;
+    var streamId = el.querySelector('[data-cond-stream]')?.value;
+    var operator = el.querySelector('[data-cond-operator]')?.value;
+    var rawValue = el.querySelector('[data-cond-value]')?.value;
+    var sustainedRaw = el.querySelector('[data-cond-sustained]')?.value;
+    var pulseId = el.querySelector('[data-action-pulse]')?.value;
+    var cooldownMin = parseInt(el.querySelector('[data-rule-cooldown]')?.value || '5', 10);
+
+    if (!name || !streamId || !operator || rawValue === undefined || rawValue === '' || !pulseId) {
+      if (statusEl) {
+        statusEl.className = 'settings-status visible error';
+        statusEl.textContent = 'All fields are required for each webhook rule';
+        setTimeout(function() { statusEl.className = 'settings-status'; }, 3000);
+      }
+      return;
+    }
+
+    var value = isNaN(Number(rawValue)) ? rawValue : Number(rawValue);
+    var condition = { streamId: streamId, operator: operator, value: value };
+    if (sustainedRaw && parseInt(sustainedRaw, 10) > 0) {
+      condition.sustainedMinutes = parseInt(sustainedRaw, 10);
+    }
+
+    var rule = {
+      name: name,
+      enabled: enabled,
+      condition: condition,
+      action: { pulseId: pulseId },
+      cooldownMinutes: cooldownMin,
+    };
+
+    try {
+      var method = ruleId ? 'PUT' : 'POST';
+      var url = ruleId ? '/api/event-rules/' + ruleId : '/api/event-rules';
+      var res = await fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rule),
+      });
+      var data = await res.json();
+      if (!data.success) {
+        if (statusEl) {
+          statusEl.className = 'settings-status visible error';
+          statusEl.textContent = data.error || 'Failed to save webhook';
+          setTimeout(function() { statusEl.className = 'settings-status'; }, 3000);
+        }
+        return;
+      }
+      // Update the DOM element with the new ID for subsequent saves
+      if (!ruleId && data.rule?.id) {
+        el.dataset.ruleId = data.rule.id;
+      }
+    } catch (e) {
+      if (statusEl) {
+        statusEl.className = 'settings-status visible error';
+        statusEl.textContent = 'Failed to save webhook';
+        setTimeout(function() { statusEl.className = 'settings-status'; }, 3000);
+      }
+      return;
+    }
+  }
+
+  if (statusEl) {
+    statusEl.className = 'settings-status visible success';
+    statusEl.textContent = 'Webhooks saved successfully';
+    setTimeout(function() { statusEl.className = 'settings-status'; }, 3000);
+  }
+}
+
+globalThis.switchSATab = switchSATab;
+globalThis.addEventRule = addEventRule;
+globalThis.deleteEventRule = deleteEventRule;
+globalThis.saveEventRules = saveEventRules;

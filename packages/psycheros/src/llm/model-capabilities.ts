@@ -86,19 +86,14 @@ const MODEL_FAMILY_RULES: ReadonlyArray<ModelFamilyRule> = [
     },
   },
 
-  // --- OpenAI GPT-5.x ---
-  // OpenRouter prefix: openai/gpt-5-turbo
+  // --- OpenAI GPT-5.x (including 5.5) ---
+  // Reject temperature, top_p, freq/presence penalty — like o-series.
+  // OpenRouter prefix: openai/gpt-5-turbo, openai/gpt-5.5
   {
     pattern: /(?:openai\/)?gpt-5/,
     capabilities: {
       family: "openai-gpt5",
-      supportedParams: new Set([
-        "temperature",
-        "topP",
-        "frequencyPenalty",
-        "presencePenalty",
-        "maxTokens",
-      ]),
+      supportedParams: new Set(["maxTokens"]),
       usesMaxCompletionTokens: true,
     },
   },

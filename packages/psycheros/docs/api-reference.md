@@ -12,6 +12,19 @@ draining the stream so the server finishes processing and persists the full
 response. The explicit Stop button (double-tap) still aborts and prevents
 persistence.
 
+**Persist-before-yield:** Tool results are persisted to the database and added
+to the in-memory messages array *before* being yielded as SSE events. This
+ensures that if the SSE connection drops mid-stream (browser timeout, network
+blip), the generator's `.return()` cancellation cannot skip the DB insert,
+which would leave an orphaned tool call with no result and cause the LLM to
+re-issue the same tool call on every subsequent turn.
+
+**Orphan repair:** At the start of each turn, the entity loop scans
+conversation history for assistant messages with `tool_calls` that have no
+matching `tool` role result message. Any orphans receive a synthetic error
+result, preventing infinite re-issue loops from pre-fix conversations or
+unexpected crashes.
+
 Event flow:
 `message_id (user) → context → thinking → content → tool_call → tool_result → image_generated → metrics → done → message_id (assistant)`
 
@@ -195,8 +208,21 @@ Settings stored in `.psycheros/sa-settings.json`. Shape:
 `{ "enabled": boolean }`. Defaults to `{ "enabled": true }`. When enabled, the
 entity receives a `<situational_awareness>` XML block in its system message each
 turn containing the current conversation, last user message (cross-conversation,
-excluding Pulses), user device type, and connected devices (Lovense, Intiface,
-home).
+excluding Pulses), user device type, connected devices (Lovense, Intiface,
+home), and wearable sensor data.
+
+The SA settings page also shows a "Wearable Data" section with per-device stream
+toggles for all configured BLE devices. When saved, the `streamToggles` field is
+applied to the corresponding BLE device stream configs:
+`{ "enabled": boolean, "streamToggles": { "deviceId": { "streamId": { "enabled": boolean } } } }`.
+
+**Wearable data in SA:** The `<wearable_data>` block appears inside
+`<situational_awareness>` when at least one BLE device is connected with fresh
+sensor readings and has streams enabled. Each stream renders using its
+configured `xmlTag`. Known stream types are rendered as human-readable values
+(e.g. accel → activity level: resting/light/moderate/active); unknown types
+serialize as JSON. Readings older than 5 minutes are considered stale and
+excluded.
 
 ### LLM Settings (Multi-Provider Profiles)
 
@@ -251,8 +277,15 @@ The `control_device` tool is auto-enabled when any device has `enabled: true`.
 | `POST` | `/api/ble-settings` | Save BLE settings and hot-reload tool registry |
 
 Settings stored in `.psycheros/ble-settings.json`. Shape:
-`{ "devices": Array<{ id: string, name: string, type: string, enabled: boolean }> }`.
+`{ "devices": Array<{ id: string, name: string, type: string, enabled: boolean, streams?: Record<string, { label: string, xmlTag: string, enabled: boolean }> }> }`.
 The `ble_device` tool is auto-enabled when any device has `enabled: true`.
+
+The External Connections → BLE tab provides a UI for managing the devices array:
+add/remove devices with id, display name, type, and enabled toggle. Each device
+with discovered data streams shows a collapsible "Data Streams" section where
+the user can edit XML tag names and toggle per-stream SA inclusion. Device
+connection status (Connected/Disconnected) is shown via live badges. Saves via
+`POST /api/ble-settings`.
 
 **WebSocket endpoint:**
 
@@ -276,15 +309,98 @@ the devices, and sends responses and inbound data back. Messages:
 | `POST` | `/api/device/command` | Send a command to a connected BLE device via bridge |
 
 Generic endpoint for custom tools and external callers (Android apps, scripts)
-to send commands to BLE devices. Looks up the device by ID, routes through the
-DeviceBridge, and returns the response. Request body:
+to send commands to BLE devices. Looks up the device by ID, tries DeviceBridge
+first, then falls back to the wearable connection manager. Request body:
 
 ```json
 { "device_id": "banglejs-1", "command": "B:200,100,200", "params": {} }
 ```
 
 Response: `{ success: boolean, data?: unknown, error?: string }`. Returns 503 if
-the device is not connected, 400 for invalid input, 502 for bridge errors.
+the device is not connected through any path, 400 for invalid input, 502 for
+bridge errors.
+
+### Wearable Data Streaming
+
+Entity-plexus (Android app connected to Bangle.js via BLE) sends sensor readings
+and receives commands over these endpoints. Two transports, same JSON protocol.
+
+**Localhost / dev paths** (no Authelia):
+
+| Method | Path                 | Description                                          |
+| ------ | -------------------- | ---------------------------------------------------- |
+| `GET`  | `/api/device/stream` | WebSocket upgrade for real-time bidirectional stream |
+| `POST` | `/api/device/data`   | HTTP fallback for sensor data ingestion              |
+
+**Production paths** (gated by Authelia `client_credentials` bearer auth):
+
+| Method | Path                 | Description                                          |
+| ------ | -------------------- | ---------------------------------------------------- |
+| `GET`  | `/api/ingest/stream` | WebSocket upgrade for real-time bidirectional stream |
+| `POST` | `/api/ingest`        | HTTP fallback for sensor data ingestion              |
+
+Both path sets delegate to the same handlers. Use `/api/ingest/*` when behind
+Authelia (the access-control rule only allows bearer-authenticated requests on
+those paths). Use `/api/device/*` for localhost/dev without Authelia.
+
+**Auth:** In production, Authelia validates the bearer token before the request
+reaches Psycheros — no server-side JWT handling needed. In localhost/dev mode,
+no auth header is required.
+
+**Inbound (app → server):**
+
+Sensor readings:
+
+```json
+{
+  "device_id": "banglejs-1",
+  "readings": [
+    { "type": "sleep", "state": "deep", "timestamp": 1749300000000 },
+    { "type": "hr", "bpm": 72, "movement": 0.35, "timestamp": 1749300000000 },
+    {
+      "type": "accel",
+      "x": 0.12,
+      "y": -0.03,
+      "z": 9.81,
+      "timestamp": 1749300000000
+    },
+    { "type": "battery", "percent": 85, "timestamp": 1749300000000 }
+  ]
+}
+```
+
+Capabilities declaration (WebSocket only, optional):
+
+```json
+{
+  "type": "capabilities",
+  "device_id": "banglejs-1",
+  "streams": [
+    { "id": "sleep", "label": "Sleep State" },
+    { "id": "hr", "label": "Heart Rate", "unit": "bpm" }
+  ]
+}
+```
+
+Reading types: `sleep` (state: deep/light/awake), `hr` (bpm, movement?), `accel`
+(x, y, z), `battery` (percent), `gps` (lat, lng), `screen` (on). Timestamps are
+epoch milliseconds.
+
+**Stream discovery:** When a capabilities message or sensor readings arrive with
+stream types not yet configured on the device, Psycheros auto-registers them in
+the BLE device profile with default labels and XML tags. Both WebSocket and HTTP
+paths trigger discovery. Config persists across device disconnects.
+
+**Outbound (server → app, WebSocket only):**
+
+```json
+{ "type": "command", "device_id": "banglejs-1", "command": "V(200)" }
+```
+
+Commands are fire-and-forget — no response round-trip. Handled by
+`WearableConnectionManager` in `src/wearable/connection-manager.ts`. Sensor
+readings are cached in `WearableDataCache` (`src/wearable/cache.ts`) for
+synchronous SA access.
 
 **Manual override (`POST /api/home-device/control`):** Bypasses the entity/LLM
 loop entirely. Request body:
@@ -401,11 +517,12 @@ fails or is not configured, falls back to
 
 ### Tools Settings
 
-| Method | Path                       | Description                                                                                                                        |
-| ------ | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/api/tools-settings`      | Get all tools metadata, categories, current overrides, and custom tool names                                                       |
-| `POST` | `/api/tools-settings`      | Save tool overrides and hot-reload registry (`{ "toolOverrides": { "shell": true, ... } }`)                                        |
-| `POST` | `/api/custom-tools/upload` | Upload a custom tool `.js` file (multipart/form-data, field `tool`, max 100KB); writes to `custom-tools/` and hot-reloads registry |
+| Method   | Path                       | Description                                                                                                                        |
+| -------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/api/tools-settings`      | Get all tools metadata, categories, current overrides, and custom tool names                                                       |
+| `POST`   | `/api/tools-settings`      | Save tool overrides and hot-reload registry (`{ "toolOverrides": { "shell": true, ... } }`)                                        |
+| `POST`   | `/api/custom-tools/upload` | Upload a custom tool `.js` file (multipart/form-data, field `tool`, max 100KB); writes to `custom-tools/` and hot-reloads registry |
+| `DELETE` | `/api/custom-tools/:name`  | Delete a custom tool by name; removes file from `custom-tools/` and hot-reloads registry                                           |
 
 Settings stored in `.psycheros/tools-settings.json`. Shape:
 `{ "toolOverrides": Record<string, boolean> }`. When this file exists, overrides
@@ -468,6 +585,7 @@ The custom tools upload endpoint accepts a `multipart/form-data` request with a
 | `POST` | `/api/admin/entity-data/export`                   | Export all entity data as zip. Filename includes the entity name (e.g. `my-entity-export-2026-06-01T12-34-56.zip`). Returns zip on success, or JSON `{ partial: true, error, message }` if entity-core is unavailable                                |
 | `POST` | `/api/admin/entity-data/export?partial=1`         | Export Psycheros-only data (skips entity-core collection)                                                                                                                                                                                            |
 | `POST` | `/api/admin/entity-data/import`                   | Import entity data from uploaded zip (body = raw zip bytes). Streaming NDJSON response with phases: `validate` → `conversations` → `lorebooks` → `vault` → `images` → `anchors` → `entity-core` → `sync` → `restart` (fallback) → `cleanup` → `done` |
+| `POST` | `/api/admin/entity-data/restore-conversations`    | Additive merge of conversations from a Psycheros `conversations.json` file (multipart form: `file`, `embed`). Streaming NDJSON response with phases: `db` → `embed` → `done`                                                                        |
 | `POST` | `/api/admin/data-migration/graph`                 | Import knowledge graph from entity-loom `.db` file (multipart form: `file`, `embed`). Streaming NDJSON response with phases: `restart` → `db` → `embed` → `done`                                                                                     |
 
 ### Pulse
@@ -494,33 +612,36 @@ The custom tools upload endpoint accepts a `multipart/form-data` request with a
 
 ## Related Source Files
 
-| File                            | Purpose                                                                                                     |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `src/server/routes.ts`          | All API endpoint handlers                                                                                   |
-| `src/server/admin-routes.ts`    | Admin panel route handlers                                                                                  |
-| `src/server/admin-templates.ts` | Admin panel HTML rendering                                                                                  |
-| `src/server/diagnostics.ts`     | Diagnostics snapshot aggregation                                                                            |
-| `src/server/logger.ts`          | Log capture ring buffer                                                                                     |
-| `src/server/sse.ts`             | SSE encoding utilities                                                                                      |
-| `src/server/broadcaster.ts`     | Persistent SSE channel (EventBroadcaster)                                                                   |
-| `src/server/state-changes.ts`   | Unified state mutations                                                                                     |
-| `src/server/ui-updates.ts`      | Reactive DOM updates                                                                                        |
-| `src/server/templates.ts`       | HTML rendering for fragments                                                                                |
-| `src/tools/tools-settings.ts`   | Tool settings types, categories, persistence                                                                |
-| `src/tools/custom-loader.ts`    | Dynamic custom tool loader                                                                                  |
-| `src/pulse/engine.ts`           | Pulse scheduling and execution engine                                                                       |
-| `src/pulse/routes.ts`           | Pulse CRUD and trigger API handlers                                                                         |
-| `src/pulse/templates.ts`        | Pulse settings UI rendering                                                                                 |
-| `src/llm/discord-settings.ts`   | Discord settings type, persistence, token masking                                                           |
-| `src/llm/home-settings.ts`      | Home automation settings type, persistence                                                                  |
-| `src/tools/control-device.ts`   | Home automation tool (Shelly Plug local HTTP API)                                                           |
-| `src/llm/ble-settings.ts`       | BLE device bridge settings type, persistence                                                                |
-| `src/server/device-bridge.ts`   | DeviceBridge singleton — WebSocket routing, command/response, inbound buffer                                |
-| `src/tools/ble-device.ts`       | BLE device bridge tool (`ble_device` — send, query, list)                                                   |
-| `src/llm/lovense-settings.ts`   | Lovense settings type, persistence, LAN/Game Mode config                                                    |
-| `src/llm/buttplug-settings.ts`  | Universal toy control settings type, persistence, WebSocket URL config                                      |
-| `src/tools/control-lovense.ts`  | Lovense device control tool (state-based patterns, speed, presets)                                          |
-| `src/tools/control-buttplug.ts` | Universal toy control tool (`control_toy`, vibration/rotation/position/oscillate/constrict, pattern engine) |
-| `src/llm/image-gen-settings.ts` | Image generator + captioning config type, persistence, API key masking                                      |
-| `src/tools/generate-image.ts`   | Image generation tool (OpenRouter, Gemini), auto-captioning                                                 |
-| `src/tools/describe-image.ts`   | Image captioning tool (Gemini, OpenRouter), shared caption logic                                            |
+| File                                 | Purpose                                                                                                     |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `src/server/routes.ts`               | All API endpoint handlers                                                                                   |
+| `src/server/admin-routes.ts`         | Admin panel route handlers                                                                                  |
+| `src/server/admin-templates.ts`      | Admin panel HTML rendering                                                                                  |
+| `src/server/diagnostics.ts`          | Diagnostics snapshot aggregation                                                                            |
+| `src/server/logger.ts`               | Log capture ring buffer                                                                                     |
+| `src/server/sse.ts`                  | SSE encoding utilities                                                                                      |
+| `src/server/broadcaster.ts`          | Persistent SSE channel (EventBroadcaster)                                                                   |
+| `src/server/state-changes.ts`        | Unified state mutations                                                                                     |
+| `src/server/ui-updates.ts`           | Reactive DOM updates                                                                                        |
+| `src/server/templates.ts`            | HTML rendering for fragments                                                                                |
+| `src/tools/tools-settings.ts`        | Tool settings types, categories, persistence                                                                |
+| `src/tools/custom-loader.ts`         | Dynamic custom tool loader                                                                                  |
+| `src/pulse/engine.ts`                | Pulse scheduling and execution engine                                                                       |
+| `src/pulse/routes.ts`                | Pulse CRUD and trigger API handlers                                                                         |
+| `src/pulse/templates.ts`             | Pulse settings UI rendering                                                                                 |
+| `src/llm/discord-settings.ts`        | Discord settings type, persistence, token masking                                                           |
+| `src/llm/home-settings.ts`           | Home automation settings type, persistence                                                                  |
+| `src/tools/control-device.ts`        | Home automation tool (Shelly Plug local HTTP API)                                                           |
+| `src/llm/ble-settings.ts`            | BLE device bridge settings type, persistence                                                                |
+| `src/server/device-bridge.ts`        | DeviceBridge singleton — WebSocket routing, command/response, inbound buffer                                |
+| `src/wearable/connection-manager.ts` | WearableConnectionManager singleton — entity-plexus WebSocket connections, fire-and-forget commands         |
+| `src/wearable/cache.ts`              | WearableDataCache singleton — latest sensor readings per device, synchronous SA snapshot                    |
+| `src/wearable/types.ts`              | Sensor reading types (sleep, hr, accel, battery, gps, screen), wire protocol types                          |
+| `src/tools/ble-device.ts`            | BLE device bridge tool (`ble_device` — send, query, list), falls back to wearable manager                   |
+| `src/llm/lovense-settings.ts`        | Lovense settings type, persistence, LAN/Game Mode config                                                    |
+| `src/llm/buttplug-settings.ts`       | Universal toy control settings type, persistence, WebSocket URL config                                      |
+| `src/tools/control-lovense.ts`       | Lovense device control tool (state-based patterns, speed, presets)                                          |
+| `src/tools/control-buttplug.ts`      | Universal toy control tool (`control_toy`, vibration/rotation/position/oscillate/constrict, pattern engine) |
+| `src/llm/image-gen-settings.ts`      | Image generator + captioning config type, persistence, API key masking                                      |
+| `src/tools/generate-image.ts`        | Image generation tool (OpenRouter, Gemini), auto-captioning                                                 |
+| `src/tools/describe-image.ts`        | Image captioning tool (Gemini, OpenRouter), shared caption logic                                            |

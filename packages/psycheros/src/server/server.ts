@@ -111,16 +111,20 @@ import {
   handleCORS,
   handleCreateConversation,
   handleCreateCustomFile,
+  handleCreateEventRule,
   handleCreateGraphEdge,
   handleCreateGraphNode,
   handleCreateLorebook,
   handleCreateLorebookEntry,
   handleCreateSignificantMemory,
   handleCreateSnapshot,
+  handleCustomToolsListFragment,
   handleDeleteAnchorImage,
   handleDeleteBackground,
   handleDeleteConversation,
   handleDeleteCustomFile,
+  handleDeleteCustomTool,
+  handleDeleteEventRule,
   handleDeleteGraphEdge,
   handleDeleteGraphNode,
   handleDeleteImageGenSlot,
@@ -147,10 +151,12 @@ import {
   handleGeneralSettingsFragment,
   handleGetAppearanceSettings,
   handleGetBLESettings,
+  handleGetBLEStatus,
   handleGetButtplugSettings,
   handleGetContextSnapshots,
   handleGetDiscordSettings,
   handleGetEntityCoreLLMSettings,
+  handleGetEventRules,
   handleGetGeneralSettings,
   handleGetGraphData,
   handleGetHomeSettings,
@@ -230,6 +236,7 @@ import {
   handleTestLovenseConnection,
   handleToolsSettingsFragment,
   handleUpdateAnchorImage,
+  handleUpdateEventRule,
   handleUpdateGraphEdge,
   handleUpdateGraphNode,
   handleUpdateLorebook,
@@ -250,6 +257,8 @@ import {
   handleVisionGeneratorsFragment,
   handleVisionImageGenSlotFragment,
   handleVisionSettingsFragment,
+  handleWearableData,
+  handleWearableStream,
   type RouteContext,
 } from "./routes.ts";
 import {
@@ -273,6 +282,8 @@ import {
 } from "../pulse/routes.ts";
 import { getBroadcaster } from "./broadcaster.ts";
 import { getDeviceBridge } from "./device-bridge.ts";
+import { getWearableConnectionManager } from "../wearable/mod.ts";
+import { EventRulesEngine } from "../wearable/event-rules-engine.ts";
 import {
   handleAdminActionsFragment,
   handleAdminAddInstanceSuffix,
@@ -285,6 +296,7 @@ import {
   handleAdminEntityDataExport,
   handleAdminEntityDataFragment,
   handleAdminEntityDataImport,
+  handleAdminEntityDataRestoreConversations,
   handleAdminFragment,
   handleAdminJobRowsFragment,
   handleAdminJobsAPI,
@@ -375,6 +387,7 @@ export class Server {
   private customTools: Record<string, import("../tools/types.ts").Tool>;
   private pulseEngine: PulseEngine | null = null;
   private scheduler: Scheduler | null = null;
+  private eventRulesEngine: EventRulesEngine | null = null;
   private deviceCache: DeviceStatusCache;
   private discordGatewayConfig: DiscordGatewayConfig;
   private discordGatewayClient: DiscordGatewayClient | null = null;
@@ -1137,9 +1150,6 @@ export class Server {
     if (this.buttplugSettings.enabled) {
       autoEnabled.push("control_toy");
     }
-    if (this.bleSettings.devices.some((d) => d.enabled)) {
-      autoEnabled.push("ble_device");
-    }
     if (this.imageGenSettings.generators.some((g) => g.enabled)) {
       autoEnabled.push("generate_image");
     }
@@ -1180,6 +1190,14 @@ export class Server {
     const port = this.config.port;
 
     console.log(`Starting Psycheros server on http://${hostname}:${port}`);
+
+    // Set data root on wearable connection manager for stream discovery
+    getWearableConnectionManager().setDataRoot(this.config.dataRoot);
+
+    // Initialize event rules engine and wire into wearable connection manager
+    this.eventRulesEngine = new EventRulesEngine(this.config.dataRoot);
+    await this.eventRulesEngine.reload();
+    getWearableConnectionManager().setEventEngine(this.eventRulesEngine);
 
     // Ensure identity directories exist
     const identityDirs = ["self", "user", "relationship", "custom"];
@@ -1463,6 +1481,11 @@ export class Server {
     // Wire pulse engine into the entity-facing pulse tool
     setPulseEngine(this.pulseEngine);
 
+    // Wire pulse engine into event rules engine
+    if (this.eventRulesEngine) {
+      this.eventRulesEngine.setPulseEngine(this.pulseEngine);
+    }
+
     // All handlers registered — start the scheduler ticker.
     this.scheduler.start();
 
@@ -1539,6 +1562,9 @@ export class Server {
     // Close device bridge WebSocket connections
     getDeviceBridge().closeAll();
 
+    // Close wearable connection manager WebSocket connections
+    getWearableConnectionManager().closeAll();
+
     // Clear keepalive timer
     if (this.keepaliveInterval !== null) {
       clearInterval(this.keepaliveInterval);
@@ -1604,7 +1630,11 @@ export class Server {
       updateEntityCoreLLMSettings: (settings) =>
         this.updateEntityCoreLLMSettings(settings),
       getDeviceStatusCache: () => this.deviceCache,
+      getEventRulesEngine: () => this.eventRulesEngine!,
       customTools: this.customTools,
+      updateCustomTools: (tools) => {
+        this.customTools = tools;
+      },
     };
   }
 
@@ -1640,7 +1670,8 @@ export class Server {
           path === "/api/admin/data-migration/memories" ||
           path === "/api/admin/data-migration/chats" ||
           path === "/api/admin/data-migration/graph" ||
-          path === "/api/admin/entity-data/import";
+          path === "/api/admin/entity-data/import" ||
+          path === "/api/admin/entity-data/restore-conversations";
         const limit = isUpload ? MAX_UPLOAD_BODY_SIZE : MAX_REQUEST_BODY_SIZE;
         if (size > limit) {
           return new Response(
@@ -1718,6 +1749,25 @@ export class Server {
       return handleDeviceCommand(ctx, request);
     }
 
+    // GET /api/device/stream - WebSocket endpoint for entity-plexus wearable streaming
+    if (method === "GET" && path === "/api/device/stream") {
+      return handleWearableStream(ctx, request);
+    }
+
+    // POST /api/device/data - HTTP fallback for entity-plexus wearable data
+    if (method === "POST" && path === "/api/device/data") {
+      return await handleWearableData(ctx, request);
+    }
+
+    // /api/ingest routes — same handlers, aliased for Authelia bearer-auth gating
+    // Authelia is configured to only allow client_credentials tokens on /api/ingest
+    if (method === "POST" && path === "/api/ingest") {
+      return await handleWearableData(ctx, request);
+    }
+    if (method === "GET" && path === "/api/ingest/stream") {
+      return handleWearableStream(ctx, request);
+    }
+
     // GET /api/ble-settings - BLE device bridge settings
     if (method === "GET" && path === "/api/ble-settings") {
       return handleGetBLESettings(ctx);
@@ -1726,6 +1776,27 @@ export class Server {
     // POST /api/ble-settings - Save BLE device bridge settings
     if (method === "POST" && path === "/api/ble-settings") {
       return await handleSaveBLESettings(ctx, request);
+    }
+
+    // GET /api/ble-status - Currently connected BLE device IDs (for live polling)
+    if (method === "GET" && path === "/api/ble-status") {
+      return handleGetBLEStatus(ctx);
+    }
+
+    // Event Rules CRUD
+    if (method === "GET" && path === "/api/event-rules") {
+      return handleGetEventRules(ctx);
+    }
+    if (method === "POST" && path === "/api/event-rules") {
+      return await handleCreateEventRule(ctx, request);
+    }
+    const eventRuleIdMatch = path.match(/^\/api\/event-rules\/([^/]+)$/);
+    if (eventRuleIdMatch) {
+      const ruleId = eventRuleIdMatch[1];
+      if (method === "PUT") {
+        return await handleUpdateEventRule(ctx, request, ruleId);
+      }
+      if (method === "DELETE") return await handleDeleteEventRule(ctx, ruleId);
     }
 
     // GET /api/conversations - List conversations (JSON)
@@ -2448,6 +2519,19 @@ export class Server {
       return await handleUploadCustomTool(ctx, request);
     }
 
+    // DELETE /api/custom-tools/:name - Delete a custom tool
+    if (method === "DELETE" && path.startsWith("/api/custom-tools/")) {
+      const toolName = path.slice("/api/custom-tools/".length);
+      if (toolName && toolName !== "upload" && toolName !== "list") {
+        return await handleDeleteCustomTool(ctx, toolName);
+      }
+    }
+
+    // GET /api/custom-tools/list - Custom tools list HTML for in-place refresh
+    if (method === "GET" && path === "/api/custom-tools/list") {
+      return handleCustomToolsListFragment(ctx);
+    }
+
     // ========================================
     // Admin API Routes
     // ========================================
@@ -2511,6 +2595,14 @@ export class Server {
     if (method === "POST" && path === "/api/admin/entity-data/import") {
       const body = await request.arrayBuffer();
       return await handleAdminEntityDataImport(ctx, new Uint8Array(body));
+    }
+
+    // POST /api/admin/entity-data/restore-conversations - Restore conversations from JSON
+    if (
+      method === "POST" &&
+      path === "/api/admin/entity-data/restore-conversations"
+    ) {
+      return await handleAdminEntityDataRestoreConversations(ctx, request);
     }
 
     // POST /api/admin/data-migration/memories - Import memory .md files

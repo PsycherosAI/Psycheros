@@ -46,7 +46,9 @@ code changes are needed.
 3. `ctx` provides: `toolCallId`, `conversationId`, `db` (database client),
    `config` (with `projectRoot` for source paths and `dataRoot` for user-mutable
    state like `.psycheros/`, `identity/`, `custom-tools/`)
-4. Restart the server — the tool appears in Settings > Tools under Custom Tools
+4. Restart the server — the tool appears in Settings > Tools under Custom Tools.
+   Alternatively, use the **Import Tool** button on the Custom tab to upload a
+   `.js` file without restarting.
 5. Toggle it on to enable it for the entity
 
 Invalid custom tool files are logged as warnings and skipped.
@@ -66,6 +68,7 @@ managing tool enable/disable state.
 - Global "Enable All" / "Disable All" buttons
 - Expandable detail view showing full description and parameters schema
 - Custom tab includes an **Import Tool** button to upload `.js` files directly
+- Custom tools have a **Delete** button (trash icon) with confirmation prompt
 - Save persists to `.psycheros/tools-settings.json` and hot-reloads the tool
   registry
 

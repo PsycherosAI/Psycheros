@@ -31,6 +31,60 @@ The agentic loop is in `src/entity/loop.ts` — LLM call, tool execution, contex
 capture, image and tool-arg fading. The chat HTTP route in
 `src/server/routes.ts` calls into it and streams SSE back to the browser.
 
+## Wearable data pipeline
+
+`src/wearable/` handles sensor data from entity-plexus (Android app connected to
+Bangle.js watches via BLE). Separate from the existing DeviceBridge (which
+serves web BLE gateway clients with a different protocol). Two singleton
+services:
+
+- **WearableConnectionManager** (`connection-manager.ts`) — WebSocket
+  connections from entity-plexus, fire-and-forget command push, implicit device
+  registration from first inbound message. Discovers data streams from incoming
+  readings and an optional capabilities message, persists them to BLE device
+  profiles in `.psycheros/ble-settings.json`.
+- **WearableDataCache** (`cache.ts`) — latest sensor reading per type per
+  device, synchronous `getSnapshot()` for zero-latency SA reads.
+
+The `ble_device` tool and `/api/device/command` endpoint try DeviceBridge first,
+then fall back to WearableConnectionManager. The wearable cache is included in
+`DeviceCacheSnapshot.wearableDevices` for SA reads.
+
+**Stream discovery and SA injection:** Data streams (sleep, hr, accel, etc.) are
+discovered dynamically when readings arrive — either from an explicit
+capabilities message or auto-detected from incoming data. Each stream gets a
+`BLEStreamConfig` entry (label, xmlTag, enabled) on the device's BLE profile.
+The user configures XML tag names and per-stream on/off toggles in two UIs: BLE
+settings (per-device stream config) and SA settings (global toggle view). The
+entity loop's `formatWearableData()` renders a `<wearable_data>` block in the SA
+XML using each stream's configured xmlTag, only including enabled streams with
+fresh readings (< 5 min). Known stream types (sleep, hr, accel, battery, gps,
+screen) get human-readable renderers; unknown types serialize as JSON.
+
+**Connection status** is tracked by
+`WearableConnectionManager.connectedDeviceIds` and surfaced in both BLE and SA
+settings UIs with Connected/Disconnected badges.
+
+**Event Rules (Webhooks):** The SA settings page has a Webhooks tab that lets
+the user define rules that trigger Pulses when sensor readings match conditions.
+Each rule has a single condition (stream ID + operator: `changes_to`,
+`goes_above`, `goes_below` + value) and a single action (`Run Pulse`). The
+`EventRulesEngine` (`event-rules-engine.ts`) evaluates incoming readings from
+`WearableConnectionManager.handleMessage()` (after `cache.ingest()`), calling
+`PulseEngine.triggerPulse(rule.action.pulseId, "data_event")` on match.
+Sustained tracking (`condition.sustainedMinutes`) requires the condition to hold
+continuously before firing; cooldown prevents re-triggering within
+`cooldownMinutes`. Types and persistence live in `event-rules.ts`. Config persists across device
+disconnects — all registered devices are always visible and editable regardless
+of connection state.
+
+**Production vs localhost routes:** The wearable endpoints are registered under
+two path sets. `/api/device/stream` and `/api/device/data` are for localhost/dev
+(no Authelia). `/api/ingest/stream` and `/api/ingest` are for production behind
+Authelia's `client_credentials` bearer auth — the access-control rule only
+allows authenticated requests on `/api/ingest`. Both path sets delegate to the
+same handlers. Route registration is in `server.ts` `handleAPIRoute()`.
+
 ## LLM client and model capabilities
 
 `src/llm/client.ts` is the OpenAI-compatible LLM client. It handles chat
@@ -44,9 +98,11 @@ parameters before the API call and logs what was removed. Zero-value no-op
 params (`topK=0`, `frequencyPenalty=0`, `presencePenalty=0`) are silently
 skipped rather than stripped — they're defaults, not intentional user choices.
 Non-zero values on unsupported models still warn. Unknown models get a
-permissive default (send everything). The rules cover OpenAI o-series/GPT,
-Claude, DeepSeek, Gemini, Qwen, GLM, Llama, Mistral, Kimi, and Gemma — including
-OpenRouter-prefixed names like `anthropic/claude-sonnet-4-20250514`.
+permissive default (send everything). The rules cover OpenAI o-series, GPT-5.x
+(including 5.5), GPT-4.x/3.5, Claude, DeepSeek, Gemini, Qwen, GLM, Llama,
+Mistral, Kimi, and Gemma — including OpenRouter-prefixed names like
+`anthropic/claude-sonnet-4-20250514`. GPT-5.x only supports `maxTokens`
+(sampling params rejected like o-series).
 
 **Reasoning parameters** are gated on provider in `buildRequest()`:
 
