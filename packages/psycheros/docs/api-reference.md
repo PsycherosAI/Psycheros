@@ -12,18 +12,6 @@ draining the stream so the server finishes processing and persists the full
 response. The explicit Stop button (double-tap) still aborts and prevents
 persistence.
 
-**Persist-before-yield:** Tool results are persisted to the database and added
-to the in-memory messages array _before_ being yielded as SSE events. This
-ensures that if the SSE connection drops mid-stream (browser timeout, network
-blip), the generator's `.return()` cancellation cannot skip the DB insert, which
-would leave an orphaned tool call with no result and cause the LLM to re-issue
-the same tool call on every subsequent turn.
-
-**Orphan repair:** At the start of each turn, the entity loop scans conversation
-history for assistant messages with `tool_calls` that have no matching `tool`
-role result message. Any orphans receive a synthetic error result, preventing
-infinite re-issue loops from pre-fix conversations or unexpected crashes.
-
 Event flow:
 `message_id (user) → context → thinking → content → tool_call → tool_result → image_generated → metrics → done → message_id (assistant)`
 
