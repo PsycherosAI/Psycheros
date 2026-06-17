@@ -6,6 +6,15 @@ All notable changes to entity-loom are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-06-17
+
+### Added
+
+- `is_voice` column on the `messages` table. Conversations imported via the
+  setup wizard now preserve voice-attribution metadata — messages spoken via
+  voice chat are flagged at import time. Always `false` for external platform
+  imports (ChatGPT/Claude/etc. don't have voice context).
+
 ## [0.3.6] - 2026-06-10
 
 ### Security
@@ -109,6 +118,7 @@ All notable changes to entity-loom are documented here. The format follows
   - **Kindroid / KinLog** — JSON
 - Five-stage wizard served at `http://localhost:3210`.
 
+[0.3.7]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.7
 [0.3.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.6
 [0.3.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.5
 [0.3.4]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.4

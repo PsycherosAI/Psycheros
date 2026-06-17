@@ -752,6 +752,43 @@
   cursor: not-allowed;
 }
 
+/* Voice call FAB — floats in the top-right of the chat panel.
+   Sibling of .chat inside .main, so it survives HTMX swaps of #chat.
+   Visibility toggled by JS via /api/voice/status (display: none by default). */
+.voice-call-fab {
+  display: none;
+  position: absolute;
+  top: calc(var(--sp-3) + env(safe-area-inset-top));
+  right: var(--sp-3);
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: var(--c-bg-raised);
+  border: 1px solid var(--c-accent-muted);
+  color: var(--c-accent);
+  cursor: pointer;
+  z-index: 50;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition:
+    color var(--transition),
+    background-color var(--transition),
+    transform var(--transition),
+    box-shadow var(--transition),
+    border-color var(--transition);
+}
+
+.voice-call-fab:hover {
+  background-color: var(--c-bg-hover);
+  border-color: var(--c-accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2), var(--glow-accent);
+}
+
+.voice-call-fab:active {
+  transform: scale(0.95);
+}
+
 /* Stop button - replaces send button during streaming */
 .stop-btn {
   display: flex;

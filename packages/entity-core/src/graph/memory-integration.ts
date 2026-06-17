@@ -8,7 +8,7 @@
 import type { GraphStore } from "./store.ts";
 import type { MemoryEntry } from "../types.ts";
 import type { ExtractionType } from "./extraction-prompt.ts";
-import { createLLMClient } from "../llm/mod.ts";
+import { createLLMClient, isLlmConfigured } from "../llm/mod.ts";
 import { getEmbedder } from "../embeddings/mod.ts";
 import {
   buildExtractionPrompt,
@@ -30,7 +30,13 @@ export interface ExtractionResult {
  * Tracked at module level so it persists across all extraction calls.
  */
 export interface ExtractionHealth {
-  /** Whether an LLM client can be created (API key + model + base URL all present) */
+  /**
+   * Whether an LLM client can be created right now from current env.
+   * Refreshed on every `getExtractionHealth()` call via `isLlmConfigured()`
+   * — not a cached snapshot from the last extraction attempt. A fresh
+   * boot with credentials correctly passed will report `true` immediately,
+   * without waiting for the first extraction to run.
+   */
   llmAvailable: boolean;
   /** ISO timestamp of the last extraction attempt */
   lastAttempt: string | null;
@@ -63,9 +69,11 @@ const extractionHealth: ExtractionHealth = {
 };
 
 /**
- * Get the current extraction health snapshot.
+ * Get the current extraction health snapshot. The `llmAvailable` flag
+ * is refreshed from env on every call — see the field doc.
  */
 export function getExtractionHealth(): ExtractionHealth {
+  extractionHealth.llmAvailable = isLlmConfigured();
   return { ...extractionHealth };
 }
 
@@ -97,12 +105,10 @@ export async function extractMemoryToGraph(
   // Create LLM client — returns null if no API key configured
   const llm = createLLMClient();
   if (!llm) {
-    extractionHealth.llmAvailable = false;
     extractionHealth.lastError =
       "No LLM client available (missing API key, base URL, or model)";
     return empty;
   }
-  extractionHealth.llmAvailable = true;
 
   // Ensure graph store is initialized
   await graphStore.initialize();

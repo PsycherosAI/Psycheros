@@ -238,10 +238,11 @@ export async function exportEntityData(
       tool_call_id: string | null;
       tool_calls: string | null;
       created_at: string;
+      is_voice: number | null;
     }
   >(
     ctx,
-    "SELECT id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at FROM messages ORDER BY conversation_id, created_at",
+    "SELECT id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice FROM messages ORDER BY conversation_id, created_at",
   );
   messageCount = messages.length;
 
@@ -256,6 +257,7 @@ export async function exportEntityData(
         tool_call_id: msg.tool_call_id,
         tool_calls: msg.tool_calls,
         created_at: msg.created_at,
+        is_voice: msg.is_voice ?? 0,
       });
     }
   }
@@ -548,22 +550,37 @@ export async function importEntityData(
 
           for (const msg of conv.messages) {
             const m = msg as Record<string, unknown>;
+            // Resolve is_voice: modern backups include the field; old
+            // backups detect via [Voice Chat] prefix in content.
+            const hasIsVoiceField = typeof m.is_voice === "number";
+            const detectedVoice = hasIsVoiceField
+              ? (m.is_voice as number)
+              : (typeof m.content === "string" &&
+                  m.content.startsWith("[Voice Chat] ")
+                ? 1
+                : 0);
+            const cleanContent = hasIsVoiceField
+              ? String(m.content)
+              : (detectedVoice === 1 && typeof m.content === "string"
+                ? m.content.slice("[Voice Chat] ".length)
+                : String(m.content));
             execSql(
               ctx,
               `INSERT OR IGNORE INTO messages
-                (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 String(m.id),
                 conv.id,
                 String(m.role),
-                String(m.content),
+                cleanContent,
                 m.reasoning_content != null
                   ? String(m.reasoning_content)
                   : null,
                 m.tool_call_id != null ? String(m.tool_call_id) : null,
                 m.tool_calls != null ? String(m.tool_calls) : null,
                 String(m.created_at),
+                detectedVoice,
               ],
             );
             messageTotal++;

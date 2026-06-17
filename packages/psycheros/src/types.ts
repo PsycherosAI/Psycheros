@@ -26,6 +26,13 @@ export interface Message {
   pulseId?: string;
   /** If this message was triggered by a Pulse, the Pulse's display name */
   pulseName?: string;
+  /**
+   * True if this message was spoken via voice chat (either the user's
+   * transcribed speech or the entity's TTS response). Authoritative —
+   * the `[Voice Chat] ` prefix in content is derived from this flag at
+   * read time, never stored.
+   */
+  isVoice?: boolean;
 }
 
 // =============================================================================

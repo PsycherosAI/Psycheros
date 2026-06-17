@@ -483,6 +483,24 @@ function hasSuffix(
   return stem.includes("_");
 }
 
+/**
+ * Resolve `is_voice` for an imported message. Modern backups include the
+ * field directly; old backups (pre-column) are detected via the legacy
+ * `[Voice Chat] ` content prefix, which is stripped on import.
+ */
+function resolveIsVoiceForImport(
+  msg: { is_voice?: number | null; content?: string | null },
+): [number, string | null] {
+  const content = msg.content ?? null;
+  if (typeof msg.is_voice === "number") {
+    return [msg.is_voice, content];
+  }
+  if (typeof content === "string" && content.startsWith("[Voice Chat] ")) {
+    return [1, content.slice("[Voice Chat] ".length)];
+  }
+  return [0, content];
+}
+
 // ===== Entity Data Export & Import =====
 
 /**
@@ -727,17 +745,21 @@ export async function handleAdminEntityDataRestoreConversations(
 
                 const messages = conv.messages || [];
                 for (const msg of messages) {
+                  const [isVoiceVal, cleanContent] = resolveIsVoiceForImport(
+                    msg,
+                  );
                   psychDb.exec(
-                    "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [
                       msg.id,
                       conv.id,
                       msg.role,
-                      msg.content,
+                      cleanContent,
                       msg.reasoning_content ?? null,
                       msg.tool_call_id ?? null,
                       msg.tool_calls ?? null,
                       msg.created_at,
+                      isVoiceVal,
                     ],
                   );
                 }
@@ -785,17 +807,20 @@ export async function handleAdminEntityDataRestoreConversations(
                     );
 
                     for (const msg of postForkMessages) {
+                      const [isVoiceVal, cleanContent] =
+                        resolveIsVoiceForImport(msg);
                       psychDb.exec(
-                        "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         [
                           msg.id,
                           forkId,
                           msg.role,
-                          msg.content,
+                          cleanContent,
                           msg.reasoning_content ?? null,
                           msg.tool_call_id ?? null,
                           msg.tool_calls ?? null,
                           msg.created_at,
+                          isVoiceVal,
                         ],
                       );
                     }
@@ -822,17 +847,20 @@ export async function handleAdminEntityDataRestoreConversations(
                     );
                     let newCount = 0;
                     for (const msg of postForkMessages) {
+                      const [isVoiceVal, cleanContent] =
+                        resolveIsVoiceForImport(msg);
                       psychDb.exec(
-                        "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         [
                           msg.id,
                           conv.id,
                           msg.role,
-                          msg.content,
+                          cleanContent,
                           msg.reasoning_content ?? null,
                           msg.tool_call_id ?? null,
                           msg.tool_calls ?? null,
                           msg.created_at,
+                          isVoiceVal,
                         ],
                       );
                       newCount++;
@@ -1344,17 +1372,21 @@ export async function handleAdminDataMigrationChats(
                 ).all<LoomMessage>(conv.id);
 
                 for (const msg of messages) {
+                  const [isVoiceVal, cleanContent] = resolveIsVoiceForImport(
+                    msg,
+                  );
                   psychDb.exec(
-                    "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [
                       msg.id,
                       msg.conversation_id,
                       msg.role,
-                      msg.content,
+                      cleanContent,
                       msg.reasoning_content,
                       msg.tool_call_id,
                       msg.tool_calls,
                       msg.created_at,
+                      isVoiceVal,
                     ],
                   );
                 }
@@ -1408,17 +1440,20 @@ export async function handleAdminDataMigrationChats(
                     );
 
                     for (const msg of postForkMessages) {
+                      const [isVoiceVal, cleanContent] =
+                        resolveIsVoiceForImport(msg);
                       psychDb.exec(
-                        "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         [
                           msg.id,
                           forkId,
                           msg.role,
-                          msg.content,
+                          cleanContent,
                           msg.reasoning_content,
                           msg.tool_call_id,
                           msg.tool_calls,
                           msg.created_at,
+                          isVoiceVal,
                         ],
                       );
                     }
@@ -1446,17 +1481,20 @@ export async function handleAdminDataMigrationChats(
                     );
                     let newCount = 0;
                     for (const msg of postForkMessages) {
+                      const [isVoiceVal, cleanContent] =
+                        resolveIsVoiceForImport(msg);
                       psychDb.exec(
-                        "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         [
                           msg.id,
                           msg.conversation_id,
                           msg.role,
-                          msg.content,
+                          cleanContent,
                           msg.reasoning_content,
                           msg.tool_call_id,
                           msg.tool_calls,
                           msg.created_at,
+                          isVoiceVal,
                         ],
                       );
                       newCount++;

@@ -60,6 +60,8 @@ export interface RetrievedMessage {
   score: number;
   /** When the message was created */
   createdAt: Date;
+  /** True if this message was spoken via voice chat */
+  isVoice?: boolean;
 }
 
 /**
@@ -73,6 +75,7 @@ interface MessageVectorSearchRow {
   content: string;
   created_at: string;
   distance: number;
+  is_voice?: number | null;
 }
 
 /**
@@ -86,6 +89,7 @@ interface MessageEmbeddingRow {
   content: string;
   embedding: Uint8Array | null;
   created_at: string;
+  is_voice?: number | null;
 }
 
 /**
@@ -214,7 +218,7 @@ export class ConversationRAG {
       : options.limit;
 
     const sql = `
-      SELECT e.id, e.message_id, e.conversation_id, e.role, e.content, e.created_at, v.distance
+      SELECT e.id, e.message_id, e.conversation_id, e.role, e.content, e.created_at, v.distance, m.is_voice
       FROM (
         SELECT rowid, distance
         FROM vec_messages
@@ -223,6 +227,7 @@ export class ConversationRAG {
         LIMIT ?
       ) v
       JOIN message_embeddings e ON e.rowid = v.rowid
+      LEFT JOIN messages m ON m.id = e.message_id
       ${options.conversationId ? "WHERE e.conversation_id = ?" : ""}
       ORDER BY v.distance
     `;
@@ -250,6 +255,7 @@ export class ConversationRAG {
           content: row.content,
           score: similarity,
           createdAt: new Date(row.created_at),
+          isVoice: !!row.is_voice,
         });
       }
 
@@ -283,15 +289,17 @@ export class ConversationRAG {
 
     if (options.conversationId) {
       sql = `
-        SELECT id, message_id, conversation_id, role, content, embedding, created_at
-        FROM message_embeddings
-        WHERE conversation_id = ?
+        SELECT e.id, e.message_id, e.conversation_id, e.role, e.content, e.embedding, e.created_at, m.is_voice
+        FROM message_embeddings e
+        LEFT JOIN messages m ON m.id = e.message_id
+        WHERE e.conversation_id = ?
       `;
       params = [options.conversationId];
     } else {
       sql = `
-        SELECT id, message_id, conversation_id, role, content, embedding, created_at
-        FROM message_embeddings
+        SELECT e.id, e.message_id, e.conversation_id, e.role, e.content, e.embedding, e.created_at, m.is_voice
+        FROM message_embeddings e
+        LEFT JOIN messages m ON m.id = e.message_id
       `;
       params = [];
     }
@@ -318,6 +326,7 @@ export class ConversationRAG {
           content: row.content,
           score: similarity,
           createdAt: new Date(row.created_at),
+          isVoice: !!row.is_voice,
         });
       }
     }
@@ -612,10 +621,15 @@ export function formatChatHistoryForContext(
 
   for (const msg of messages) {
     const timestamp = formatMessageTimestamp(msg.createdAt);
-    // Strip any LLM-echoed <t>...</t> tags before adding the canonical one
-    const cleanContent = msg.content.replace(/<t>[^<]*<\/t>\s*/g, "");
+    // Strip any LLM-echoed <t>...</t> tags before adding the canonical one.
+    // Also strip any stray [Voice Chat] prefix from content (defense-in-depth
+    // — the authoritative source is msg.isVoice, derived below).
+    const cleanContent = msg.content
+      .replace(/<t>[^<]*<\/t>\s*/g, "")
+      .replace(/\[Voice Chat\]\s*/g, "");
+    const voicePrefix = msg.isVoice ? "[Voice Chat] " : "";
     const line =
-      `[${msg.role}]: ${timestamp} ${cleanContent} [chat:${msg.conversationId}]`;
+      `[${msg.role}]: ${timestamp} ${voicePrefix}${cleanContent} [chat:${msg.conversationId}]`;
     const lineTokens = estimateTokens(line);
 
     if (totalTokens + lineTokens > maxTokens) {

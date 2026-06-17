@@ -40,6 +40,13 @@ export interface ImportedMessage {
   isSystemPrompt?: boolean;
   /** The actual system prompt text */
   systemPromptText?: string;
+  /**
+   * True if this message was spoken via voice chat. Always false for
+   * external platform imports (ChatGPT/Claude/etc. don't have voice
+   * data) — the field exists so the import schema mirrors Psycheros
+   * and the column can be backfilled cleanly.
+   */
+  isVoice?: boolean;
 }
 
 /** A conversation from an external platform, normalized for import */

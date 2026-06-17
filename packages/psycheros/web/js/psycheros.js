@@ -816,6 +816,9 @@ async function loadConversationFromUrl(conversationId, { silent = false } = {}) 
     // Re-init scroll system for new DOM — defer scroll until browser has laid out content
     AutoScroll.reinit();
 
+    // Show/hide voice call button based on voice enabled state
+    updateVoiceCallButtonVisibility();
+
     // Initialize lazy loading for older messages
     if (document.getElementById('load-earlier-sentinel')) {
       LazyLoader.init(conversationId);
@@ -1602,6 +1605,562 @@ async function retryFailedTurn(failedAssistantEl) {
   }
 }
 
+/**
+ * Start a voice call for the current conversation.
+ * Checks voice status first, then delegates to voice.js openVoiceChat.
+ */
+async function startVoiceCall() {
+  if (isStreaming) {
+    showToast('Wait for the current response to finish');
+    return;
+  }
+  try {
+    const resp = await fetch('/api/voice/status');
+    const status = await resp.json();
+    if (!status.enabled) {
+      showToast('Voice chat is not enabled');
+      return;
+    }
+  } catch {
+    showToast('Could not check voice status');
+    return;
+  }
+  const convId = currentConversationId;
+  if (!convId) {
+    showToast('Select a conversation first');
+    return;
+  }
+  openVoiceChat(convId);
+}
+
+async function testTTSConnection() {
+  var btn = document.getElementById('test-tts-btn');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = 'Testing...';
+
+  try {
+    var resp = await fetch('/api/voice/test-tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    var contentType = resp.headers.get('Content-Type') || '';
+
+    if (contentType.includes('audio')) {
+      var blob = await resp.blob();
+      var url = URL.createObjectURL(blob);
+      var audio = new Audio(url);
+      audio.play();
+      var latency = resp.headers.get('X-TTS-Latency') || '?';
+      var provider = resp.headers.get('X-TTS-Provider') || '?';
+      btn.textContent = 'Test TTS';
+      showToast('TTS test OK (' + latency + 'ms, ' + provider + ')');
+      audio.onended = function() { URL.revokeObjectURL(url); };
+    } else {
+      var data = await resp.json();
+      btn.textContent = 'Test TTS';
+      showToast('TTS test failed: ' + (data.error || 'Unknown error'), 'error');
+    }
+  } catch (e) {
+    btn.textContent = 'Test TTS';
+    showToast('TTS test failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    if (btn.textContent === 'Testing...') btn.textContent = 'Test TTS';
+  }
+}
+
+globalThis.testTTSConnection = testTTSConnection;
+
+// =============================================================================
+// Voice Settings
+// =============================================================================
+
+function onVoiceTTSProviderChange() {
+  var provider = document.getElementById('voice-tts-provider').value;
+  document.querySelectorAll('.voice-provider-fields[id^="tts-fields-"]').forEach(function(el) {
+    el.style.display = 'none';
+  });
+  var target = document.getElementById('tts-fields-' + provider);
+  if (target) target.style.display = 'block';
+}
+
+function onVoiceSTTProviderChange() {
+  var provider = document.getElementById('voice-stt-provider').value;
+  document.querySelectorAll('.voice-provider-fields[id^="stt-fields-"]').forEach(function(el) {
+    el.style.display = 'none';
+  });
+  var target = document.getElementById('stt-fields-' + provider);
+  if (target) target.style.display = 'block';
+}
+
+function toggleVoiceFieldVisibility(fieldId) {
+  var field = document.getElementById(fieldId);
+  if (!field) return;
+  field.type = field.type === 'password' ? 'text' : 'password';
+}
+
+function gatherVoiceProfile() {
+  var id = document.getElementById('voice-profile-id').value;
+  var isNew = !id;
+  var ttsProvider = document.getElementById('voice-tts-provider').value;
+  var sttProvider = document.getElementById('voice-stt-provider').value;
+
+  var profile = {
+    id: isNew ? ('vp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)) : id,
+    name: document.getElementById('voice-profile-name').value || 'Untitled',
+    description: document.getElementById('voice-profile-desc').value || '',
+    enabled: document.getElementById('voice-profile-enabled').checked,
+    providerSettings: {
+      tts: { provider: ttsProvider },
+      stt: { provider: sttProvider }
+    },
+    pronunciation: [],
+    sttCorrections: [],
+    customInstructions: document.getElementById('voice-custom-instructions').value || '',
+    audioEffects: [],
+    contextWindowSize: parseInt(document.getElementById('voice-context-window').value) || 64000,
+    vadThreshold: parseFloat(document.getElementById('voice-vad-threshold').value) || 0.5,
+    idleTimeoutSeconds: parseInt(document.getElementById('voice-idle-timeout').value) || 300,
+    ttsKeepAliveDays: parseInt(document.getElementById('voice-keep-alive-days').value) || 0,
+    pushToTalk: document.getElementById('voice-push-to-talk')?.checked ?? false,
+    disableReasoning: document.getElementById('voice-disable-reasoning')?.checked ?? true,
+    endOfTurnSilence: parseFloat(document.getElementById('voice-end-of-turn-silence')?.value ?? 1.5),
+    phraseDebounceMs: parseInt(document.getElementById('voice-phrase-debounce')?.value ?? 1200),
+    sttDebug: document.getElementById('voice-stt-debug')?.checked ?? false,
+    voiceEffect: document.getElementById('voice-effect')?.value ?? 'none',
+  };
+
+  // TTS provider fields
+  if (ttsProvider === 'minimax') {
+    profile.providerSettings.tts.minimax = {
+      apiKey: document.getElementById('tts-minimax-api-key').value,
+      groupId: document.getElementById('tts-minimax-group-id').value,
+      voiceId: document.getElementById('tts-minimax-voice-id').value,
+      model: document.getElementById('tts-minimax-model').value || 'speech-2.8-hd',
+    };
+  } else if (ttsProvider === 'elevenlabs') {
+    profile.providerSettings.tts.elevenlabs = {
+      apiKey: document.getElementById('tts-elevenlabs-api-key').value,
+      voiceId: document.getElementById('tts-elevenlabs-voice-id').value,
+      model: document.getElementById('tts-elevenlabs-model').value || 'eleven_multilingual_v2',
+    };
+  } else if (ttsProvider === 'openai') {
+    profile.providerSettings.tts.openai = {
+      apiKey: document.getElementById('tts-openai-api-key').value,
+      baseUrl: document.getElementById('tts-openai-base-url').value,
+      voice: document.getElementById('tts-openai-voice').value,
+      model: document.getElementById('tts-openai-model').value || 'tts-1',
+    };
+  } else if (ttsProvider === 'custom') {
+    profile.providerSettings.tts.custom = {
+      baseUrl: document.getElementById('tts-custom-base-url').value,
+      apiKey: document.getElementById('tts-custom-api-key').value || undefined,
+      model: document.getElementById('tts-custom-model').value,
+      voice: document.getElementById('tts-custom-voice').value,
+    };
+  }
+
+  // STT provider fields
+  if (sttProvider === 'browser') {
+    profile.providerSettings.stt.browser = {
+      language: document.getElementById('stt-browser-language').value || undefined,
+    };
+  } else if (sttProvider === 'deepgram') {
+    profile.providerSettings.stt.deepgram = {
+      apiKey: document.getElementById('stt-deepgram-api-key').value,
+      model: document.getElementById('stt-deepgram-model').value || 'nova-2',
+      language: document.getElementById('stt-deepgram-language').value || 'en',
+    };
+  } else if (sttProvider === 'openai') {
+    profile.providerSettings.stt.openai = {
+      apiKey: document.getElementById('stt-openai-api-key').value,
+      baseUrl: document.getElementById('stt-openai-base-url').value,
+      model: document.getElementById('stt-openai-model').value || 'whisper-1',
+    };
+  } else if (sttProvider === 'custom') {
+    profile.providerSettings.stt.custom = {
+      baseUrl: document.getElementById('stt-custom-base-url').value,
+      apiKey: document.getElementById('stt-custom-api-key').value || undefined,
+      model: document.getElementById('stt-custom-model').value,
+      language: document.getElementById('stt-custom-language').value || undefined,
+    };
+  }
+
+  // Pronunciation entries (text → phonetic for TTS)
+  var pronRows = document.querySelectorAll('#pronunciation-list .pronunciation-row');
+  pronRows.forEach(function(row) {
+    var inputs = row.querySelectorAll('input[type="text"]');
+    if (inputs.length >= 2 && inputs[0].value && inputs[1].value) {
+      profile.pronunciation.push({ written: inputs[0].value, spoken: inputs[1].value });
+    }
+  });
+
+  // STT correction entries (misheard → correct, applied before LLM)
+  var corrRows = document.querySelectorAll('#stt-corrections-list .stt-correction-row');
+  corrRows.forEach(function(row) {
+    var inputs = row.querySelectorAll('input[type="text"]');
+    if (inputs.length >= 2 && inputs[0].value && inputs[1].value) {
+      profile.sttCorrections.push({ misheard: inputs[0].value, correct: inputs[1].value });
+    }
+  });
+
+  return profile;
+}
+
+async function saveVoiceProfile(event) {
+  if (event) event.preventDefault();
+  var profile = gatherVoiceProfile();
+
+  try {
+    // Fetch current settings to merge the profile into
+    var resp = await fetch('/api/voice/settings');
+    var settings = await resp.json();
+
+    // Find and replace or push
+    var idx = settings.profiles.findIndex(function(p) { return p.id === profile.id; });
+    if (idx >= 0) {
+      // Preserve lastKeepAlive from existing profile
+      if (settings.profiles[idx].lastKeepAlive) {
+        profile.lastKeepAlive = settings.profiles[idx].lastKeepAlive;
+      }
+      settings.profiles[idx] = profile;
+    } else {
+      settings.profiles.push(profile);
+      // Auto-set as active if first profile
+      if (!settings.activeProfileId) {
+        settings.activeProfileId = profile.id;
+      }
+    }
+
+    var saveResp = await fetch('/api/voice/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    var result = await saveResp.json();
+    if (result.success) {
+      showToast('Voice profile saved');
+      htmx.ajax('GET', '/fragments/settings/voice', { target: '#chat', swap: 'innerHTML' });
+    } else {
+      showToast('Failed to save: ' + (result.error || 'Unknown error'), 'error');
+    }
+  } catch (e) {
+    showToast('Failed to save: ' + e.message, 'error');
+  }
+}
+
+async function deleteVoiceProfile(profileId) {
+  var btn = document.getElementById('delete-voice-profile-btn');
+  if (!btn) return;
+  if (!btn.dataset.confirming) {
+    btn.dataset.confirming = 'true';
+    btn.textContent = 'Confirm Delete?';
+    btn.classList.add('btn--danger');
+    btn.classList.remove('btn--ghost');
+    setTimeout(function() {
+      if (btn.dataset.confirming) {
+        delete btn.dataset.confirming;
+        btn.textContent = 'Delete Profile';
+        btn.classList.remove('btn--danger');
+        btn.classList.add('btn--ghost');
+      }
+    }, 3000);
+    return;
+  }
+
+  try {
+    var resp = await fetch('/api/voice/settings');
+    var settings = await resp.json();
+    settings.profiles = settings.profiles.filter(function(p) { return p.id !== profileId; });
+    if (settings.activeProfileId === profileId) {
+      settings.activeProfileId = settings.profiles.length > 0 ? settings.profiles[0].id : null;
+    }
+    var saveResp = await fetch('/api/voice/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    var result = await saveResp.json();
+    if (result.success) {
+      showToast('Voice profile deleted');
+      htmx.ajax('GET', '/fragments/settings/voice', { target: '#chat', swap: 'innerHTML' });
+    } else {
+      showToast('Failed to delete: ' + (result.error || 'Unknown error'), 'error');
+    }
+  } catch (e) {
+    showToast('Failed to delete: ' + e.message, 'error');
+  }
+}
+
+async function setActiveVoiceProfile(profileId) {
+  try {
+    var resp = await fetch('/api/voice/settings');
+    var settings = await resp.json();
+    settings.activeProfileId = profileId;
+    var saveResp = await fetch('/api/voice/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    var result = await saveResp.json();
+    if (result.success) {
+      showToast('Active voice profile updated');
+      htmx.ajax('GET', '/fragments/settings/voice', { target: '#chat', swap: 'innerHTML' });
+    } else {
+      showToast('Failed to set active: ' + (result.error || 'Unknown error'), 'error');
+    }
+  } catch (e) {
+    showToast('Failed to set active: ' + e.message, 'error');
+  }
+}
+
+async function toggleVoiceEnabled() {
+  var enabled = document.getElementById('voice-enabled').checked;
+  try {
+    var resp = await fetch('/api/voice/settings');
+    var settings = await resp.json();
+    settings.enabled = enabled;
+    var saveResp = await fetch('/api/voice/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    var result = await saveResp.json();
+    if (result.success) {
+      showToast(enabled ? 'Voice chat enabled (restart may be needed)' : 'Voice chat disabled');
+    } else {
+      showToast('Failed: ' + (result.error || 'Unknown error'), 'error');
+    }
+  } catch (e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+
+// =============================================================================
+// Push-to-Talk global settings
+// =============================================================================
+
+var pttKeyCaptureActive = false;
+var pttCaptureSilentAudio = null;
+
+function capturePTTKey() {
+  pttKeyCaptureActive = true;
+  var hint = document.getElementById('ptt-capture-hint');
+  var addBtn = document.getElementById('ptt-add-key-btn');
+  if (hint) hint.style.display = 'block';
+  if (addBtn) addBtn.style.display = 'none';
+  document.addEventListener('keydown', handlePTTKeyCapture, true);
+  document.addEventListener('mousedown', handlePTTMouseCapture, true);
+  // Play silent audio so the OS routes Bluetooth media button events to
+  // the page. Without active audio, Android doesn't give us the media
+  // session and Shokz/headset buttons never fire. The user clicked "Add
+  // binding" to get here, which counts as the user gesture play() needs.
+  // Mobile-only — desktop Chrome gets media key events on focused tabs
+  // without claiming the session, and the empty WAV data URL we used
+  // previously spun Chrome's audio thread on loop.
+  var isMobile = typeof navigator !== 'undefined' &&
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+  if (isMobile && !pttCaptureSilentAudio) {
+    // Generate a real 1-second silent WAV — empty WAVs loop infinitely
+    // fast and freeze Chrome. Same approach as voice.js's startSilentAudio.
+    try {
+      var sampleRate = 8000;
+      var numSamples = sampleRate * 1;
+      var buf = new ArrayBuffer(44 + numSamples);
+      var view = new DataView(buf);
+      var writeAscii = function (offset, str) {
+        for (var i = 0; i < str.length; i++) {
+          view.setUint8(offset + i, str.charCodeAt(i));
+        }
+      };
+      writeAscii(0, 'RIFF');
+      view.setUint32(4, 36 + numSamples, true);
+      writeAscii(8, 'WAVE');
+      writeAscii(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate, true);
+      view.setUint16(32, 1, true);
+      view.setUint16(34, 8, true);
+      writeAscii(36, 'data');
+      view.setUint32(40, numSamples, true);
+      for (var i = 0; i < numSamples; i++) {
+        view.setUint8(44 + i, 0x80);
+      }
+      var blob = new Blob([buf], { type: 'audio/wav' });
+      var url = URL.createObjectURL(blob);
+      pttCaptureSilentAudio = new Audio(url);
+      pttCaptureSilentAudio.loop = true;
+      pttCaptureSilentAudio.volume = 0.001;
+    } catch (e) {
+      console.debug('[PTT capture] Silent audio setup failed:', e);
+    }
+  }
+  if (pttCaptureSilentAudio) {
+    pttCaptureSilentAudio.play().catch(function (err) {
+      console.debug('[PTT capture] Silent audio play() failed:', err);
+    });
+  }
+  // Also capture MediaSession actions for Bluetooth headset buttons.
+  // Activate a temporary session so the OS routes media key events to us.
+  if ('mediaSession' in navigator) {
+    if (!navigator.mediaSession.metadata) {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: 'PTT Capture' });
+    }
+    var actions = ['play', 'pause', 'previoustrack', 'nexttrack', 'stop'];
+    actions.forEach(function (action) {
+      try {
+        navigator.mediaSession.setActionHandler(action, function () {
+          if (!pttKeyCaptureActive) return;
+          addPTTKeyBinding('MediaSession:' + action);
+          cancelPTTKeyCapture();
+        });
+      } catch (e) { /* not all actions are supported on all browsers */ }
+    });
+  }
+}
+
+function cancelPTTKeyCapture() {
+  pttKeyCaptureActive = false;
+  var hint = document.getElementById('ptt-capture-hint');
+  var addBtn = document.getElementById('ptt-add-key-btn');
+  if (hint) hint.style.display = 'none';
+  if (addBtn) addBtn.style.display = '';
+  document.removeEventListener('keydown', handlePTTKeyCapture, true);
+  document.removeEventListener('mousedown', handlePTTMouseCapture, true);
+  // Stop the silent audio used to claim the media session during capture.
+  if (pttCaptureSilentAudio) {
+    try { pttCaptureSilentAudio.pause(); } catch (e) {}
+  }
+  // Clean up MediaSession action handlers set during capture
+  if ('mediaSession' in navigator) {
+    var actions = ['play', 'pause', 'previoustrack', 'nexttrack', 'stop'];
+    actions.forEach(function (action) {
+      try { navigator.mediaSession.setActionHandler(action, null); } catch (e) {}
+    });
+  }
+}
+
+function handlePTTKeyCapture(e) {
+  if (!pttKeyCaptureActive) return;
+  e.preventDefault();
+  e.stopPropagation();
+  var key = e.code;
+  addPTTKeyBinding(key);
+  cancelPTTKeyCapture();
+}
+
+function handlePTTMouseCapture(e) {
+  if (!pttKeyCaptureActive) return;
+  // Ignore clicks on the Cancel button
+  if (e.target.closest && e.target.closest('#ptt-capture-hint')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  var key = 'Mouse' + e.button;
+  addPTTKeyBinding(key);
+  cancelPTTKeyCapture();
+}
+
+async function addPTTKeyBinding(key) {
+  try {
+    var resp = await fetch('/api/voice/settings');
+    var settings = await resp.json();
+    if (!settings.pttKeys) settings.pttKeys = ['Space'];
+    if (settings.pttKeys.includes(key)) {
+      showToast('That key is already bound');
+      return;
+    }
+    settings.pttKeys.push(key);
+    await fetch('/api/voice/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    // Reload the settings view to show the new chip
+    htmx.ajax('GET', '/fragments/settings/voice', { target: '#chat', swap: 'innerHTML' });
+  } catch (e) {
+    console.warn('Failed to add PTT key binding:', e);
+  }
+}
+
+async function removePTTKeyBinding(index) {
+  try {
+    var resp = await fetch('/api/voice/settings');
+    var settings = await resp.json();
+    if (!settings.pttKeys) return;
+    settings.pttKeys.splice(index, 1);
+    // Don't allow removing the last binding
+    if (settings.pttKeys.length === 0) {
+      showToast('At least one key binding is required');
+      settings.pttKeys = ['Space'];
+    }
+    await fetch('/api/voice/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    htmx.ajax('GET', '/fragments/settings/voice', { target: '#chat', swap: 'innerHTML' });
+  } catch (e) {
+    console.warn('Failed to remove PTT key binding:', e);
+  }
+}
+
+function addPronunciationEntry() {
+  var list = document.getElementById('pronunciation-list');
+  if (!list) return;
+  var idx = list.querySelectorAll('.pronunciation-row').length;
+  var row = document.createElement('div');
+  row.className = 'pronunciation-row';
+  row.dataset.idx = idx;
+  row.innerHTML =
+    '<input type="text" class="input-field llm-input" placeholder="Written (e.g. Psycheros)">' +
+    '<span style="color: var(--text-dim);">&rarr;</span>' +
+    '<input type="text" class="input-field llm-input" placeholder="Spoken (e.g. sy-KEH-ros)">' +
+    '<button class="btn btn--ghost btn--sm" onclick="removePronunciationEntry(this)" title="Remove">&times;</button>';
+  list.appendChild(row);
+}
+
+function removePronunciationEntry(el) {
+  var row = el.closest ? el.closest('.pronunciation-row') : el.parentElement;
+  if (row) row.remove();
+}
+
+function addSTTCorrectionEntry() {
+  var list = document.getElementById('stt-corrections-list');
+  if (!list) return;
+  var row = document.createElement('div');
+  row.className = 'pronunciation-row stt-correction-row';
+  row.innerHTML =
+    '<input type="text" class="input-field llm-input" placeholder="Misheard (e.g. sih keh ros)">' +
+    '<span style="color: var(--text-dim);">&rarr;</span>' +
+    '<input type="text" class="input-field llm-input" placeholder="Correct (e.g. Psycheros)">' +
+    '<button class="btn btn--ghost btn--sm" onclick="removeSTTCorrectionEntry(this)" title="Remove">&times;</button>';
+  list.appendChild(row);
+}
+
+function removeSTTCorrectionEntry(el) {
+  var row = el.closest ? el.closest('.stt-correction-row') : el.parentElement;
+  if (row) row.remove();
+}
+
+globalThis.onVoiceTTSProviderChange = onVoiceTTSProviderChange;
+globalThis.onVoiceSTTProviderChange = onVoiceSTTProviderChange;
+globalThis.toggleVoiceFieldVisibility = toggleVoiceFieldVisibility;
+globalThis.saveVoiceProfile = saveVoiceProfile;
+globalThis.deleteVoiceProfile = deleteVoiceProfile;
+globalThis.setActiveVoiceProfile = setActiveVoiceProfile;
+globalThis.toggleVoiceEnabled = toggleVoiceEnabled;
+globalThis.capturePTTKey = capturePTTKey;
+globalThis.cancelPTTKeyCapture = cancelPTTKeyCapture;
+globalThis.removePTTKeyBinding = removePTTKeyBinding;
+globalThis.addPronunciationEntry = addPronunciationEntry;
+globalThis.removePronunciationEntry = removePronunciationEntry;
+globalThis.addSTTCorrectionEntry = addSTTCorrectionEntry;
+globalThis.removeSTTCorrectionEntry = removeSTTCorrectionEntry;
+
 // =============================================================================
 // Streaming Content Renderer
 // =============================================================================
@@ -2375,6 +2934,8 @@ function showToast(message, variant) {
 
   setTimeout(() => toast.remove(), 5000);
 }
+// Exposed for voice.js and other modules that aren't in this file's scope.
+globalThis.showToast = showToast;
 
 // =============================================================================
 // Metrics Display
@@ -4360,7 +4921,20 @@ globalThis.Psycheros = {
   // Auto-scroll (for inline scripts in fragments)
   autoScrollReinit: () => AutoScroll.reinit(),
   autoScrollJump: () => AutoScroll.jumpToBottom(),
+  // Voice chat
+  startVoiceCall,
 };
+
+// Show voice call button if voice chat is enabled.
+// Runs at module load time (modules are deferred, DOM is ready).
+function updateVoiceCallButtonVisibility() {
+  fetch('/api/voice/status').then(function(r) { return r.json(); }).then(function(status) {
+    var btn = document.getElementById('voice-call-btn');
+    if (btn) btn.style.display = status.enabled ? 'flex' : 'none';
+  }).catch(function() {});
+}
+
+updateVoiceCallButtonVisibility();
 
 /**
  * Toggle the sticky duration input when the sticky checkbox changes.

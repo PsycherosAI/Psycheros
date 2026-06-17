@@ -46,6 +46,7 @@ import { EntityTurn } from "../entity/mod.ts";
 import { getBroadcaster } from "../server/broadcaster.ts";
 import { generateUIUpdates } from "../server/ui-updates.ts";
 import { renderMessage } from "../server/templates.ts";
+import { VoiceSessionManager } from "../voice/mod.ts";
 import type { Message, PulseRow } from "../types.ts";
 
 // =============================================================================
@@ -669,6 +670,33 @@ export class PulseEngine {
       getBroadcaster().broadcastUpdates(updates, null);
     } catch {
       // Broadcaster may have no connected clients
+    }
+
+    // If this conversation is in an active voice call, hand the Pulse off
+    // to the voice pipeline instead of running it through the text chat
+    // path. The voice session queues it, drains at the next idle transition
+    // (after entity finishes any in-flight response), plays a heartbeat cue
+    // + shows a toast, and reads the entity's response aloud via TTS.
+    // Returns the same HandlerResult shape so the scheduler's job_runs
+    // tracking works identically.
+    if (conversationId) {
+      const voiceSession = VoiceSessionManager.getInstance()
+        .getSessionByConversation(conversationId);
+      if (voiceSession) {
+        console.log(
+          `[Pulse] "${pulse.name}" routed to voice session in ${
+            conversationId.slice(0, 8)
+          }`,
+        );
+        return await VoiceSessionManager.getInstance().executePulseInVoice(
+          conversationId,
+          {
+            id: pulse.id,
+            name: pulse.name,
+            promptText: pulse.promptText,
+          },
+        );
+      }
     }
 
     console.log(

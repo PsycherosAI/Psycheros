@@ -27,6 +27,12 @@ import type {
   LLMProvider,
   LLMSettings,
 } from "../llm/mod.ts";
+import type {
+  VoiceProfile,
+  VoiceSettings,
+  VoiceSTTProvider,
+  VoiceTTSProvider,
+} from "../llm/voice-settings.ts";
 import { LLM_PROVIDER_PRESETS, maskApiKey } from "../llm/mod.ts";
 import type { DiscordGatewayConfig, DiscordSettings } from "../llm/mod.ts";
 import type { ToolsSettings } from "../tools/mod.ts";
@@ -284,6 +290,18 @@ export function renderAppShell(): string {
         ${renderEmptyState()}
         ${renderInputArea()}
       </div>
+      <button
+        class="voice-call-fab"
+        id="voice-call-btn"
+        style="display: none; position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 50%; align-items: center; justify-content: center; background-color: var(--c-bg-raised, #0a0a0a); border: 1px solid var(--c-accent-muted, #7e22ce); color: var(--c-accent, #a855f7); cursor: pointer; z-index: 50; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); padding: 0; margin: 0; box-sizing: border-box;"
+        onclick="Psycheros.startVoiceCall()"
+        title="Start voice call"
+        aria-label="Start voice call"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/>
+        </svg>
+      </button>
     </div>
   </div>
   <script src="/js/theme.js"></script>
@@ -362,6 +380,7 @@ export function renderAppShell(): string {
   })();
   </script>
   <script type="module" src="/js/psycheros.js"></script>
+  <script type="module" src="/js/voice.js"></script>
 </body>
 </html>`;
 }
@@ -599,6 +618,23 @@ export function renderSettingsHub(): string {
         </svg>
       </a>
       <a class="settings-hub-card"
+        hx-get="/fragments/settings/voice"
+        hx-target="#chat"
+        hx-swap="innerHTML">
+        <div class="settings-hub-card-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+          </svg>
+        </div>
+        <div class="settings-hub-card-body">
+          <span class="settings-hub-card-title">Audio</span>
+          <span class="settings-hub-card-desc">Voice profiles, TTS/STT providers, pronunciation</span>
+        </div>
+        <svg class="settings-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </a>
+      <a class="settings-hub-card"
         hx-get="/fragments/settings/pulse"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -712,6 +748,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
+
       <a class="settings-hub-card"
         hx-get="/fragments/admin"
         hx-target="#chat"
@@ -1685,19 +1722,26 @@ export function renderMessage(
   metrics?: TurnMetrics,
   displayNames?: { entityName: string; userName: string },
 ): string {
-  if (msg.role === "user") {
-    if (msg.pulseId || msg.pulseName) {
-      return renderPulseMessage(msg);
+  // Derive [Voice Chat] prefix from the isVoice column (authoritative).
+  // Also strip any stray prefix from content as defense-in-depth — the
+  // column is the source of truth, content should never carry the prefix.
+  const cleanContent = msg.content.replace(/\[Voice Chat\]\s*/g, "");
+  const voicedMsg = msg.isVoice
+    ? { ...msg, content: "[Voice Chat] " + cleanContent }
+    : { ...msg, content: cleanContent };
+  if (voicedMsg.role === "user") {
+    if (voicedMsg.pulseId || voicedMsg.pulseName) {
+      return renderPulseMessage(voicedMsg);
     }
     return renderUserMessage(
-      msg.content,
-      msg.id,
-      msg.editedAt,
-      msg.createdAt,
+      voicedMsg.content,
+      voicedMsg.id,
+      voicedMsg.editedAt,
+      voicedMsg.createdAt,
       displayNames?.userName,
     );
-  } else if (msg.role === "assistant") {
-    return renderAssistantMessage(msg, metrics, displayNames?.entityName);
+  } else if (voicedMsg.role === "assistant") {
+    return renderAssistantMessage(voicedMsg, metrics, displayNames?.entityName);
   }
   return "";
 }
@@ -7638,6 +7682,8 @@ export function renderImageGenSlotSettings(
     },
   };
   const orSettings = g.settings.openrouter;
+  const veniceSettings = g.settings.venice;
+  const nanogptSettings = g.settings.nanogpt;
 
   return `<div class="settings-view">
   <div class="settings-header">
@@ -7702,6 +7748,12 @@ export function renderImageGenSlotSettings(
             <option value="gemini" ${
     g.provider === "gemini" ? "selected" : ""
   }>Google AI Studio</option>
+            <option value="venice" ${
+    g.provider === "venice" ? "selected" : ""
+  }>Venice AI</option>
+            <option value="nanogpt" ${
+    g.provider === "nanogpt" ? "selected" : ""
+  }>NanoGPT</option>
             <option value="comfyui" disabled>ComfyUI (coming soon)</option>
             <option value="native" disabled>Native (coming soon)</option>
           </select>
@@ -7764,6 +7816,56 @@ export function renderImageGenSlotSettings(
           <p class="settings-note">Size and aspect ratio are decided per-generation by the entity based on context.</p>
         </div>
 
+        <div id="ig-venice-section" style="${
+    g.provider === "venice" ? "" : "display:none;"
+  }">
+          <h3 style="margin-top:var(--sp-4);font-size:var(--font-size-sm);color:var(--c-fg-muted);">Venice AI Settings</h3>
+          <div class="llm-field">
+            <label for="ig-venice-key">API Key</label>
+            <input type="password" id="ig-venice-key" class="input-field llm-input" value="${
+    escapeHtml(veniceSettings?.apiKey || "")
+  }" placeholder="Bearer token from venice.ai">
+          </div>
+          <div class="llm-field">
+            <label for="ig-venice-model">Model</label>
+            <input type="text" id="ig-venice-model" class="input-field llm-input" value="${
+    escapeHtml(veniceSettings?.model || "")
+  }" placeholder="e.g. venice-sd35, grok-imagine-image, nano-banana-pro">
+          </div>
+          <div class="llm-field">
+            <label for="ig-venice-baseurl">Base URL</label>
+            <input type="text" id="ig-venice-baseurl" class="input-field llm-input" value="${
+    escapeHtml(veniceSettings?.baseUrl || "")
+  }" placeholder="https://api.venice.ai/api/v1 (default)">
+          </div>
+          <p class="settings-note">Venice does not currently support image anchors (inpaint was deprecated May 2025). Anchor-using requests will be processed as text-to-image only.</p>
+        </div>
+
+        <div id="ig-nanogpt-section" style="${
+    g.provider === "nanogpt" ? "" : "display:none;"
+  }">
+          <h3 style="margin-top:var(--sp-4);font-size:var(--font-size-sm);color:var(--c-fg-muted);">NanoGPT Settings</h3>
+          <div class="llm-field">
+            <label for="ig-nanogpt-key">API Key</label>
+            <input type="password" id="ig-nanogpt-key" class="input-field llm-input" value="${
+    escapeHtml(nanogptSettings?.apiKey || "")
+  }" placeholder="API key from nano-gpt.com">
+          </div>
+          <div class="llm-field">
+            <label for="ig-nanogpt-model">Model</label>
+            <input type="text" id="ig-nanogpt-model" class="input-field llm-input" value="${
+    escapeHtml(nanogptSettings?.model || "")
+  }" placeholder="e.g. flux-kontext, gpt-4o-image, gpt-image-1">
+          </div>
+          <div class="llm-field">
+            <label for="ig-nanogpt-baseurl">Base URL</label>
+            <input type="text" id="ig-nanogpt-baseurl" class="input-field llm-input" value="${
+    escapeHtml(nanogptSettings?.baseUrl || "")
+  }" placeholder="https://nano-gpt.com/v1 (default)">
+          </div>
+          <p class="settings-note">Multi-image anchor support depends on the model (e.g. flux-kontext, gpt-4o-image, gpt-image-1 accept multiple; others accept one).</p>
+        </div>
+
         <div class="llm-field" style="display:flex;gap:var(--sp-3);margin-top:var(--sp-4);">
           <button class="btn btn--primary" onclick="saveImageGenSlot('${
     escapeHtml(id)
@@ -7786,6 +7888,8 @@ function toggleImageGenProvider() {
   const provider = document.getElementById('ig-provider').value;
   document.getElementById('ig-openrouter-section').style.display = provider === 'openrouter' ? '' : 'none';
   document.getElementById('ig-gemini-section').style.display = provider === 'gemini' ? '' : 'none';
+  document.getElementById('ig-venice-section').style.display = provider === 'venice' ? '' : 'none';
+  document.getElementById('ig-nanogpt-section').style.display = provider === 'nanogpt' ? '' : 'none';
 }
 
 async function saveImageGenSlot(id, isNew) {
@@ -7812,6 +7916,20 @@ async function saveImageGenSlot(id, isNew) {
     generator.settings.gemini = {
       apiKey: document.getElementById('ig-gemini-key').value,
       model: document.getElementById('ig-gemini-model').value,
+    };
+  }
+  if (provider === 'venice') {
+    generator.settings.venice = {
+      apiKey: document.getElementById('ig-venice-key').value,
+      model: document.getElementById('ig-venice-model').value,
+      baseUrl: document.getElementById('ig-venice-baseurl').value,
+    };
+  }
+  if (provider === 'nanogpt') {
+    generator.settings.nanogpt = {
+      apiKey: document.getElementById('ig-nanogpt-key').value,
+      model: document.getElementById('ig-nanogpt-model').value,
+      baseUrl: document.getElementById('ig-nanogpt-baseurl').value,
     };
   }
 
@@ -8339,4 +8457,811 @@ function clearDiscordContext(convId) {
     .catch(() => showToast('Failed to clear context'));
 }
 </script>`;
+}
+
+// =============================================================================
+// Voice Settings Template
+// =============================================================================
+
+const TTS_PROVIDERS: { value: VoiceTTSProvider; label: string }[] = [
+  { value: "minimax", label: "Minimax" },
+  { value: "elevenlabs", label: "ElevenLabs" },
+  { value: "openai", label: "OpenAI" },
+  { value: "custom", label: "Custom (OpenAI-compatible)" },
+];
+
+const STT_PROVIDERS: { value: VoiceSTTProvider; label: string }[] = [
+  { value: "browser", label: "Browser-native (Web Speech API)" },
+  { value: "deepgram", label: "Deepgram" },
+  { value: "openai", label: "OpenAI" },
+  { value: "custom", label: "Custom (OpenAI-compatible)" },
+];
+
+/**
+ * Convert a stored PTT key binding into a human-readable label.
+ * "Space" → "Space", "KeyV" → "V", "Mouse3" → "Mouse Back",
+ * "MediaPlayPause" → "Play/Pause", etc.
+ */
+function formatPTTKey(key: string): string {
+  if (key.startsWith("Key")) return key.slice(3);
+  if (key.startsWith("Digit")) return key.slice(5);
+  if (key.startsWith("Mouse")) {
+    const btn = parseInt(key.slice(5));
+    const labels = ["Left", "Middle", "Right", "Back", "Forward"];
+    return "Mouse " + (labels[btn] ?? btn);
+  }
+  if (key.startsWith("MediaSession:")) {
+    const action = key.slice("MediaSession:".length);
+    const labels: Record<string, string> = {
+      "play": "Play (toggle)",
+      "pause": "Pause (toggle)",
+      "previoustrack": "Prev Track (toggle)",
+      "nexttrack": "Next Track (toggle)",
+      "stop": "Stop (toggle)",
+    };
+    return labels[action] ?? action + " (toggle)";
+  }
+  const mediaLabels: Record<string, string> = {
+    "MediaPlayPause": "Play/Pause",
+    "MediaTrackNext": "Next Track",
+    "MediaTrackPrevious": "Prev Track",
+    "MediaStop": "Stop",
+  };
+  return mediaLabels[key] ?? key;
+}
+
+/**
+ * Render the voice profile hub (card grid of profiles + master toggle).
+ */
+export function renderVoiceProfileHub(settings: VoiceSettings): string {
+  const count = settings.profiles.length;
+  const plural = count !== 1 ? "s" : "";
+
+  const profileCards = settings.profiles.map((p) => {
+    const isActive = p.id === settings.activeProfileId;
+    const ttsLabel = TTS_PROVIDERS.find((t) =>
+      t.value === p.providerSettings.tts.provider
+    )?.label || p.providerSettings.tts.provider;
+    const sttLabel = STT_PROVIDERS.find((s) =>
+      s.value === p.providerSettings.stt.provider
+    )?.label || p.providerSettings.stt.provider;
+    return `
+    <a class="settings-hub-card ${isActive ? "settings-hub-card--active" : ""}"
+       hx-get="/fragments/settings/voice/${escapeHtml(p.id)}"
+       hx-target="#chat"
+       hx-swap="innerHTML">
+      <div class="settings-hub-card-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </div>
+      <div class="settings-hub-card-body">
+        <span class="settings-hub-card-title">${escapeHtml(p.name)}</span>
+        <span class="settings-hub-card-desc">
+          TTS: ${escapeHtml(ttsLabel)} &bull; STT: ${escapeHtml(sttLabel)}
+          ${isActive ? ' <span class="badge badge--active">Active</span>' : ""}
+        </span>
+      </div>
+      <svg class="settings-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="9 18 15 12 9 6"/>
+      </svg>
+    </a>`;
+  }).join("");
+
+  const addCard = `
+    <button class="settings-hub-card settings-hub-card-add"
+      hx-get="/fragments/settings/voice/new"
+      hx-target="#chat"
+      hx-swap="innerHTML">
+      <div class="settings-hub-card-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"/>
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+      </div>
+      <div class="settings-hub-card-body">
+        <span class="settings-hub-card-title">Add Profile</span>
+        <span class="settings-hub-card-desc">Configure a new voice profile</span>
+      </div>
+    </button>`;
+
+  return `<div class="settings-view">
+  <div class="settings-header">
+    <div class="settings-header-row">
+      ${renderSettingsBackButton()}
+      <div>
+        <h1 class="settings-title">Audio</h1>
+        <p class="settings-desc">Voice chat profiles &mdash; ${count} profile${plural}</p>
+      </div>
+    </div>
+    <div style="margin-top: var(--sp-3);">
+      <label class="toggle-label">
+        <input type="checkbox" id="voice-enabled" role="switch" aria-label="Enable voice chat" ${
+    settings.enabled ? "checked" : ""
+  } onchange="toggleVoiceEnabled()">
+        <span class="toggle-slider"></span>
+        <span class="toggle-text">Enable voice chat</span>
+      </label>
+      <span id="voice-status-msg" style="margin-left: var(--sp-2); font-size: var(--text-xs);"></span>
+    </div>
+    ${/* Hold to Talk key bindings section */ ""}
+    <div class="settings-section" style="margin-top: var(--sp-4); padding: var(--sp-4); border: 1px solid var(--c-border); border-radius: 8px;">
+      <div style="margin-bottom: var(--sp-2);">
+        <strong style="font-size: var(--font-size-sm);">Hold to Talk</strong>
+        <p style="font-size: var(--text-xs); color: var(--c-fg-muted); margin: var(--sp-1) 0 0;">
+          Configure keys for hold-to-talk. Toggle on/off from the voice overlay.
+        </p>
+      </div>
+      <div id="ptt-keybindings">
+        <span style="font-size: var(--text-xs); color: var(--c-fg-muted); display: block; margin-bottom: var(--sp-1);">Key bindings</span>
+        <div id="ptt-keys-list" style="display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center;">
+          ${
+    (settings.pttKeys ?? ["Space"]).map((key, i) =>
+      `<span class="ptt-key-chip" data-index="${i}">
+              <span>${escapeHtml(formatPTTKey(key))}</span>
+              <button type="button" onclick="removePTTKeyBinding(${i})" style="background: none; border: none; color: var(--c-fg-subtle); cursor: pointer; padding: 0 0 0 4px; font-size: var(--font-size-xs);">&times;</button>
+            </span>`
+    ).join("")
+  }
+          <button type="button" class="btn btn--ghost btn--sm" id="ptt-add-key-btn" onclick="capturePTTKey()" style="font-size: var(--font-size-xs);">+ Add binding</button>
+        </div>
+        <div id="ptt-capture-hint" style="display: none; margin-top: var(--sp-2); font-size: var(--text-xs); color: var(--c-accent);">
+          Press any key or mouse button...
+          <button type="button" class="btn btn--ghost btn--sm" onclick="cancelPTTKeyCapture()" style="margin-left: var(--sp-2);">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="settings-content" id="settings-content">
+    <div class="settings-hub-grid">
+      ${profileCards}
+      ${addCard}
+    </div>
+  </div>
+</div>`;
+}
+
+/**
+ * Render the voice profile edit/create form.
+ */
+export function renderVoiceProfileEdit(
+  profile: VoiceProfile | null,
+  isNew: boolean,
+  activeProfileId: string | null,
+): string {
+  const p = profile;
+  const id = p?.id || "";
+  const isActive = !isNew && id === activeProfileId;
+  const tts = p?.providerSettings.tts;
+  const stt = p?.providerSettings.stt;
+
+  function ttsProviderOptions(): string {
+    return TTS_PROVIDERS.map((t) =>
+      `<option value="${t.value}" ${
+        tts?.provider === t.value ? "selected" : ""
+      }>${t.label}</option>`
+    ).join("");
+  }
+
+  function sttProviderOptions(): string {
+    return STT_PROVIDERS.map((s) =>
+      `<option value="${s.value}" ${
+        stt?.provider === s.value ? "selected" : ""
+      }>${s.label}</option>`
+    ).join("");
+  }
+
+  function pronunciationRows(): string {
+    if (!p?.pronunciation?.length) return "";
+    return p.pronunciation.map((entry, idx) => `
+      <div class="pronunciation-row" data-idx="${idx}">
+        <input type="text" class="input-field llm-input" value="${
+      escapeHtml(entry.written)
+    }" placeholder="Written (e.g. Psycheros)">
+        <span style="color: var(--text-dim);">&rarr;</span>
+        <input type="text" class="input-field llm-input" value="${
+      escapeHtml(entry.spoken)
+    }" placeholder="Spoken (e.g. sy-KEH-ros)">
+        <button class="btn btn--ghost btn--sm" onclick="removePronunciationEntry(${idx})" title="Remove">&times;</button>
+      </div>
+    `).join("");
+  }
+
+  function sttCorrectionRows(): string {
+    if (!p?.sttCorrections?.length) return "";
+    return p.sttCorrections.map((entry, idx) => `
+      <div class="pronunciation-row stt-correction-row" data-idx="${idx}">
+        <input type="text" class="input-field llm-input" value="${
+      escapeHtml(entry.misheard)
+    }" placeholder="Misheard (e.g. sih keh ros)">
+        <span style="color: var(--text-dim);">&rarr;</span>
+        <input type="text" class="input-field llm-input" value="${
+      escapeHtml(entry.correct)
+    }" placeholder="Correct (e.g. Psycheros)">
+        <button class="btn btn--ghost btn--sm" onclick="removeSTTCorrectionEntry(${idx})" title="Remove">&times;</button>
+      </div>
+    `).join("");
+  }
+
+  return `<div class="settings-view">
+  <div class="settings-header">
+    <div class="settings-header-row">
+      ${renderSettingsBackButton()}
+      <div>
+        <h1 class="settings-title">${
+    isNew ? "New Voice Profile" : escapeHtml(p!.name)
+  }</h1>
+        <p class="settings-desc">${
+    isNew ? "Configure a new voice profile" : "Edit voice profile settings"
+  }</p>
+      </div>
+    </div>
+  </div>
+  <div class="settings-content" id="settings-content">
+    <div class="llm-edit">
+      <input type="hidden" id="voice-profile-id" value="${escapeHtml(id)}">
+
+      <!-- Profile Identity -->
+      <section class="theme-section">
+        <h3 class="theme-section-title">Profile</h3>
+        <div class="llm-fields">
+          <div class="llm-field">
+            <label for="voice-profile-name">Name</label>
+            <input type="text" id="voice-profile-name" class="input-field llm-input" value="${
+    p ? escapeHtml(p.name) : ""
+  }" placeholder="e.g. Daily Driver">
+          </div>
+          <div class="llm-field">
+            <label for="voice-profile-desc">Description</label>
+            <input type="text" id="voice-profile-desc" class="input-field llm-input" value="${
+    p ? escapeHtml(p.description) : ""
+  }" placeholder="Optional description">
+          </div>
+          <div class="llm-field">
+            <label class="toggle-label">
+              <input type="checkbox" id="voice-profile-enabled" role="switch" aria-label="Enable this profile" ${
+    p?.enabled !== false ? "checked" : ""
+  }>
+              <span class="toggle-slider"></span>
+              <span class="toggle-text">Enabled</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- TTS Provider -->
+      <section class="theme-section">
+        <h3 class="theme-section-title">TTS Provider</h3>
+        <div class="llm-fields">
+          <div class="llm-field">
+            <label for="voice-tts-provider">Provider</label>
+            <select id="voice-tts-provider" class="input-field llm-input" onchange="onVoiceTTSProviderChange()">
+              ${ttsProviderOptions()}
+            </select>
+          </div>
+        </div>
+
+        <!-- Minimax TTS fields -->
+        <div id="tts-fields-minimax" class="voice-provider-fields" style="display: ${
+    tts?.provider === "minimax" ? "block" : "none"
+  }">
+          <div class="llm-fields">
+            <div class="llm-field">
+              <label for="tts-minimax-api-key">API Key</label>
+              <div class="llm-api-key-row">
+                <input type="password" id="tts-minimax-api-key" class="input-field llm-input" value="${
+    tts?.provider === "minimax" ? escapeHtml(tts.minimax?.apiKey || "") : ""
+  }" placeholder="Minimax API key">
+                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('tts-minimax-api-key')" title="Show/hide key">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="llm-field">
+              <label for="tts-minimax-group-id">Group ID</label>
+              <input type="text" id="tts-minimax-group-id" class="input-field llm-input" value="${
+    tts?.provider === "minimax" ? escapeHtml(tts.minimax?.groupId || "") : ""
+  }" placeholder="Group ID">
+            </div>
+            <div class="llm-field">
+              <label for="tts-minimax-voice-id">Voice ID</label>
+              <input type="text" id="tts-minimax-voice-id" class="input-field llm-input" value="${
+    tts?.provider === "minimax" ? escapeHtml(tts.minimax?.voiceId || "") : ""
+  }" placeholder="Voice ID">
+            </div>
+            <div class="llm-field">
+              <label for="tts-minimax-model">Model</label>
+              <input type="text" id="tts-minimax-model" class="input-field llm-input" value="${
+    tts?.provider === "minimax"
+      ? escapeHtml(tts.minimax?.model || "speech-2.8-hd")
+      : "speech-2.8-hd"
+  }" placeholder="speech-2.8-hd">
+            </div>
+          </div>
+        </div>
+
+        <!-- ElevenLabs TTS fields -->
+        <div id="tts-fields-elevenlabs" class="voice-provider-fields" style="display: ${
+    tts?.provider === "elevenlabs" ? "block" : "none"
+  }">
+          <div class="llm-fields">
+            <div class="llm-field">
+              <label for="tts-elevenlabs-api-key">API Key</label>
+              <div class="llm-api-key-row">
+                <input type="password" id="tts-elevenlabs-api-key" class="input-field llm-input" value="${
+    tts?.provider === "elevenlabs"
+      ? escapeHtml(tts.elevenlabs?.apiKey || "")
+      : ""
+  }" placeholder="ElevenLabs API key">
+                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('tts-elevenlabs-api-key')" title="Show/hide key">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="llm-field">
+              <label for="tts-elevenlabs-voice-id">Voice ID</label>
+              <input type="text" id="tts-elevenlabs-voice-id" class="input-field llm-input" value="${
+    tts?.provider === "elevenlabs"
+      ? escapeHtml(tts.elevenlabs?.voiceId || "")
+      : ""
+  }" placeholder="Voice ID">
+            </div>
+            <div class="llm-field">
+              <label for="tts-elevenlabs-model">Model</label>
+              <input type="text" id="tts-elevenlabs-model" class="input-field llm-input" value="${
+    tts?.provider === "elevenlabs"
+      ? escapeHtml(tts.elevenlabs?.model || "eleven_multilingual_v2")
+      : "eleven_multilingual_v2"
+  }" placeholder="eleven_multilingual_v2">
+            </div>
+          </div>
+        </div>
+
+        <!-- OpenAI TTS fields -->
+        <div id="tts-fields-openai" class="voice-provider-fields" style="display: ${
+    tts?.provider === "openai" ? "block" : "none"
+  }">
+          <div class="llm-fields">
+            <div class="llm-field">
+              <label for="tts-openai-api-key">API Key</label>
+              <div class="llm-api-key-row">
+                <input type="password" id="tts-openai-api-key" class="input-field llm-input" value="${
+    tts?.provider === "openai" ? escapeHtml(tts.openai?.apiKey || "") : ""
+  }" placeholder="OpenAI API key">
+                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('tts-openai-api-key')" title="Show/hide key">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="llm-field">
+              <label for="tts-openai-base-url">Base URL</label>
+              <input type="text" id="tts-openai-base-url" class="input-field llm-input" value="${
+    tts?.provider === "openai" ? escapeHtml(tts.openai?.baseUrl || "") : ""
+  }" placeholder="https://api.openai.com/v1">
+            </div>
+            <div class="llm-field">
+              <label for="tts-openai-model">Model</label>
+              <input type="text" id="tts-openai-model" class="input-field llm-input" value="${
+    tts?.provider === "openai"
+      ? escapeHtml(tts.openai?.model || "tts-1")
+      : "tts-1"
+  }" placeholder="tts-1">
+            </div>
+            <div class="llm-field">
+              <label for="tts-openai-voice">Voice</label>
+              <input type="text" id="tts-openai-voice" class="input-field llm-input" value="${
+    tts?.provider === "openai" ? escapeHtml(tts.openai?.voice || "") : ""
+  }" placeholder="alloy">
+            </div>
+          </div>
+        </div>
+
+        <!-- Custom TTS fields -->
+        <div id="tts-fields-custom" class="voice-provider-fields" style="display: ${
+    tts?.provider === "custom" ? "block" : "none"
+  }">
+          <div class="llm-fields">
+            <div class="llm-field">
+              <label for="tts-custom-base-url">Base URL</label>
+              <input type="text" id="tts-custom-base-url" class="input-field llm-input" value="${
+    tts?.provider === "custom" ? escapeHtml(tts.custom?.baseUrl || "") : ""
+  }" placeholder="http://localhost:8000/v1">
+            </div>
+            <div class="llm-field">
+              <label for="tts-custom-api-key">API Key</label>
+              <div class="llm-api-key-row">
+                <input type="password" id="tts-custom-api-key" class="input-field llm-input" value="${
+    tts?.provider === "custom" ? escapeHtml(tts.custom?.apiKey || "") : ""
+  }" placeholder="Optional">
+                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('tts-custom-api-key')" title="Show/hide key">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="llm-field">
+              <label for="tts-custom-model">Model</label>
+              <input type="text" id="tts-custom-model" class="input-field llm-input" value="${
+    tts?.provider === "custom" ? escapeHtml(tts.custom?.model || "") : ""
+  }" placeholder="tts-1">
+            </div>
+            <div class="llm-field">
+              <label for="tts-custom-voice">Voice</label>
+              <input type="text" id="tts-custom-voice" class="input-field llm-input" value="${
+    tts?.provider === "custom" ? escapeHtml(tts.custom?.voice || "") : ""
+  }" placeholder="default">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- STT Provider -->
+      <section class="theme-section">
+        <h3 class="theme-section-title">STT Provider</h3>
+        <div class="llm-fields">
+          <div class="llm-field">
+            <label for="voice-stt-provider">Provider</label>
+            <select id="voice-stt-provider" class="input-field llm-input" onchange="onVoiceSTTProviderChange()">
+              ${sttProviderOptions()}
+            </select>
+          </div>
+        </div>
+
+        <!-- Browser-native STT fields (Web Speech API) -->
+        <div id="stt-fields-browser" class="voice-provider-fields" style="display: ${
+    stt?.provider === "browser" ? "block" : "none"
+  }">
+          <div class="llm-fields">
+            <div class="llm-field">
+              <label for="stt-browser-language">Language</label>
+              <input type="text" id="stt-browser-language" class="input-field llm-input" value="${
+    stt?.provider === "browser" ? escapeHtml(stt.browser?.language || "") : ""
+  }" placeholder="e.g. en-US (empty for browser default)">
+              <span class="llm-field-hint">BCP-47 code (e.g. en-US). No API key needed.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Deepgram STT fields -->
+        <div id="stt-fields-deepgram" class="voice-provider-fields" style="display: ${
+    stt?.provider === "deepgram" ? "block" : "none"
+  }">
+          <div class="llm-fields">
+            <div class="llm-field">
+              <label for="stt-deepgram-api-key">API Key</label>
+              <div class="llm-api-key-row">
+                <input type="password" id="stt-deepgram-api-key" class="input-field llm-input" value="${
+    stt?.provider === "deepgram" ? escapeHtml(stt.deepgram?.apiKey || "") : ""
+  }" placeholder="Deepgram API key">
+                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('stt-deepgram-api-key')" title="Show/hide key">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="llm-field">
+              <label for="stt-deepgram-model">Model</label>
+              <input type="text" id="stt-deepgram-model" class="input-field llm-input" value="${
+    stt?.provider === "deepgram"
+      ? escapeHtml(stt.deepgram?.model || "nova-2")
+      : "nova-2"
+  }" placeholder="nova-2">
+            </div>
+            <div class="llm-field">
+              <label for="stt-deepgram-language">Language</label>
+              <input type="text" id="stt-deepgram-language" class="input-field llm-input" value="${
+    stt?.provider === "deepgram"
+      ? escapeHtml(stt.deepgram?.language || "en")
+      : "en"
+  }" placeholder="en">
+            </div>
+          </div>
+        </div>
+
+        <!-- OpenAI STT fields -->
+        <div id="stt-fields-openai" class="voice-provider-fields" style="display: ${
+    stt?.provider === "openai" ? "block" : "none"
+  }">
+          <div class="llm-fields">
+            <div class="llm-field">
+              <label for="stt-openai-api-key">API Key</label>
+              <div class="llm-api-key-row">
+                <input type="password" id="stt-openai-api-key" class="input-field llm-input" value="${
+    stt?.provider === "openai" ? escapeHtml(stt.openai?.apiKey || "") : ""
+  }" placeholder="OpenAI API key">
+                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('stt-openai-api-key')" title="Show/hide key">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="llm-field">
+              <label for="stt-openai-base-url">Base URL</label>
+              <input type="text" id="stt-openai-base-url" class="input-field llm-input" value="${
+    stt?.provider === "openai" ? escapeHtml(stt.openai?.baseUrl || "") : ""
+  }" placeholder="https://api.openai.com/v1">
+            </div>
+            <div class="llm-field">
+              <label for="stt-openai-model">Model</label>
+              <input type="text" id="stt-openai-model" class="input-field llm-input" value="${
+    stt?.provider === "openai"
+      ? escapeHtml(stt.openai?.model || "whisper-1")
+      : "whisper-1"
+  }" placeholder="whisper-1">
+            </div>
+          </div>
+        </div>
+
+        <!-- Custom STT fields -->
+        <div id="stt-fields-custom" class="voice-provider-fields" style="display: ${
+    stt?.provider === "custom" ? "block" : "none"
+  }">
+          <div class="llm-fields">
+            <div class="llm-field">
+              <label for="stt-custom-base-url">Base URL</label>
+              <input type="text" id="stt-custom-base-url" class="input-field llm-input" value="${
+    stt?.provider === "custom" ? escapeHtml(stt.custom?.baseUrl || "") : ""
+  }" placeholder="http://localhost:8000/v1">
+            </div>
+            <div class="llm-field">
+              <label for="stt-custom-api-key">API Key</label>
+              <div class="llm-api-key-row">
+                <input type="password" id="stt-custom-api-key" class="input-field llm-input" value="${
+    stt?.provider === "custom" ? escapeHtml(stt.custom?.apiKey || "") : ""
+  }" placeholder="Optional">
+                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('stt-custom-api-key')" title="Show/hide key">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="llm-field">
+              <label for="stt-custom-model">Model</label>
+              <input type="text" id="stt-custom-model" class="input-field llm-input" value="${
+    stt?.provider === "custom" ? escapeHtml(stt.custom?.model || "") : ""
+  }" placeholder="whisper-small">
+            </div>
+            <div class="llm-field">
+              <label for="stt-custom-language">Language</label>
+              <input type="text" id="stt-custom-language" class="input-field llm-input" value="${
+    stt?.provider === "custom" ? escapeHtml(stt.custom?.language || "") : ""
+  }" placeholder="en">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Voice Behavior -->
+      <section class="theme-section">
+        <h3 class="theme-section-title">Behavior</h3>
+        <div class="llm-fields">
+          <div class="llm-field">
+            <label for="voice-context-window">Context Window (tokens)</label>
+            <input type="number" id="voice-context-window" class="input-field llm-input" value="${
+    p?.contextWindowSize || 64000
+  }" min="4096" max="200000" step="4096">
+          </div>
+          <div class="llm-field">
+            <label for="voice-vad-threshold">VAD Threshold: <span id="voice-vad-val">${
+    p?.vadThreshold ?? 0.5
+  }</span></label>
+            <input type="range" id="voice-vad-threshold" min="0" max="1" step="0.05" value="${
+    p?.vadThreshold ?? 0.5
+  }" oninput="document.getElementById('voice-vad-val').textContent = this.value">
+            <span class="llm-field-hint">Mic energy level that counts as speech (0&ndash;1). Higher = less sensitive (ignores more background).</span>
+          </div>
+          <div class="llm-field">
+            <label for="voice-end-of-turn-silence">End-of-turn silence (seconds)</label>
+            <input type="number" id="voice-end-of-turn-silence" class="input-field llm-input" value="${
+    p?.endOfTurnSilence ?? 1.5
+  }" min="0.3" max="5" step="0.1">
+            <span class="llm-field-hint">Silence duration before turn ends. Server-side STT only.</span>
+          </div>
+          <div class="llm-field">
+            <label for="voice-phrase-debounce">Phrase debounce (milliseconds)</label>
+            <input type="number" id="voice-phrase-debounce" class="input-field llm-input" value="${
+    p?.phraseDebounceMs ?? 1200
+  }" min="300" max="5000" step="100">
+            <span class="llm-field-hint">Browser STT fires a final result at every natural pause &mdash; this batches consecutive phrases into one utterance. Higher = longer sentences before sending; lower = faster but more fragmented.</span>
+          </div>
+          <div class="llm-field">
+            <label style="display: flex; align-items: center; gap: var(--sp-2); cursor: pointer;">
+              <input type="checkbox" id="voice-stt-debug" ${
+    p?.sttDebug ? "checked" : ""
+  }>
+              <span>Show STT debug toasts</span>
+            </label>
+            <span class="llm-field-hint">Surfaces SpeechRecognition events during a call (listening started, speech detected, interim and final transcripts). STT error toasts always show.</span>
+          </div>
+          <div class="llm-field">
+            <label for="voice-idle-timeout">Idle Timeout (seconds)</label>
+            <input type="number" id="voice-idle-timeout" class="input-field llm-input" value="${
+    p?.idleTimeoutSeconds || 300
+  }" min="30" max="1800" step="30">
+          </div>
+          <div class="llm-field">
+            <label style="display: flex; align-items: center; gap: var(--sp-2); cursor: pointer;">
+              <input type="checkbox" id="voice-disable-reasoning" ${
+    p?.disableReasoning !== false ? "checked" : ""
+  }>
+              <span>Disable LLM reasoning/thinking</span>
+            </label>
+            <span class="llm-field-hint">Faster responses. Default on.</span>
+          </div>
+          <div class="llm-field">
+            <label for="voice-effect">Voice effects</label>
+            <select id="voice-effect" class="input-field llm-input">
+              <option value="none" ${
+    p?.voiceEffect === "none" || !p?.voiceEffect ? "selected" : ""
+  }>None</option>
+              <option value="comms" ${
+    p?.voiceEffect === "comms" ? "selected" : ""
+  }>Comms &mdash; sci-fi intercom</option>
+              <option value="robot" ${
+    p?.voiceEffect === "robot" ? "selected" : ""
+  }>Robot &mdash; metallic</option>
+              <option value="telephone" ${
+    p?.voiceEffect === "telephone" ? "selected" : ""
+  }>Telephone &mdash; retro lo-fi</option>
+              <option value="deep" ${
+    p?.voiceEffect === "deep" ? "selected" : ""
+  }>Deep &mdash; commanding</option>
+              <option value="cavern" ${
+    p?.voiceEffect === "cavern" ? "selected" : ""
+  }>Cavern &mdash; distant space</option>
+            </select>
+            <button type="button" class="btn btn--ghost btn--sm" onclick="testVoiceEffect()" style="margin-top: var(--sp-1);">Test Effect</button>
+            <span class="llm-field-hint">Adds character to TTS playback.</span>
+          </div>
+          <div class="llm-field">
+            <label for="voice-custom-instructions">Custom Instructions</label>
+            <textarea id="voice-custom-instructions" class="input-field llm-input" rows="3" placeholder="Additional instructions for voice mode...">${
+    p ? escapeHtml(p.customInstructions) : ""
+  }</textarea>
+          </div>
+        </div>
+      </section>
+
+      <!-- Keep-Alive -->
+      <section class="theme-section">
+        <h3 class="theme-section-title">TTS Keep-Alive</h3>
+        <p class="theme-section-desc">Prevents voice deletion on providers like Minimax (deletes unused voices after 7 days).</p>
+        <div class="llm-fields">
+          <div class="llm-field">
+            <label for="voice-keep-alive-days">Keep-alive interval (days, 0 = disabled)</label>
+            <input type="number" id="voice-keep-alive-days" class="input-field llm-input" value="${
+    p?.ttsKeepAliveDays || 0
+  }" min="0" max="30" step="1">
+          </div>
+          ${
+    p?.lastKeepAlive
+      ? `<div class="llm-field"><span style="font-size: var(--text-xs); color: var(--text-dim);">Last keep-alive: ${
+        escapeHtml(p.lastKeepAlive)
+      }</span></div>`
+      : ""
+  }
+        </div>
+      </section>
+
+      <!-- Pronunciation -->
+      <section class="theme-section">
+        <h3 class="theme-section-title">Pronunciation (TTS)</h3>
+        <p class="theme-section-desc">Map written words to phonetic spellings so the TTS engine pronounces them correctly. Applied to LLM output before synthesis.</p>
+        <div id="pronunciation-list">
+          ${pronunciationRows()}
+        </div>
+        <button class="btn btn--ghost btn--sm" onclick="addPronunciationEntry()" style="margin-top: var(--sp-2);">+ Add Entry</button>
+      </section>
+
+      <!-- STT Corrections -->
+      <section class="theme-section">
+        <h3 class="theme-section-title">STT Corrections</h3>
+        <p class="theme-section-desc">Fix consistent misrecognitions before the LLM sees them. Useful for proper nouns &mdash; e.g. map "sih keh ros" &rarr; "Psycheros" so Whisper/Deepgram mistakes get corrected automatically.</p>
+        <div id="stt-corrections-list">
+          ${sttCorrectionRows()}
+        </div>
+        <button class="btn btn--ghost btn--sm" onclick="addSTTCorrectionEntry()" style="margin-top: var(--sp-2);">+ Add Entry</button>
+      </section>
+
+      <!-- Action Bar -->
+      <div class="llm-actions">
+        <div class="llm-actions-left">
+          <button class="btn btn--primary" onclick="saveVoiceProfile(event)">Save Profile</button>
+          <button class="btn btn--ghost" onclick="testTTSConnection()" id="test-tts-btn">Test TTS</button>
+          ${
+    !isNew && !isActive
+      ? `<button class="btn btn--ghost" onclick="setActiveVoiceProfile('${
+        escapeHtml(id)
+      }')">Set as Active</button>`
+      : ""
+  }
+        </div>
+        <div class="llm-actions-right">
+          ${
+    !isNew
+      ? `<button class="btn btn--ghost" onclick="deleteVoiceProfile('${
+        escapeHtml(id)
+      }')" id="delete-voice-profile-btn">Delete Profile</button>`
+      : ""
+  }
+          <button class="btn btn--ghost" onclick="htmx.ajax('GET', '/fragments/settings/voice', { target: '#chat', swap: 'innerHTML' })">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>`;
+}
+
+export function renderVoiceCallView(
+  conversationId: string,
+  profile: VoiceProfile,
+  pttEnabled: boolean,
+  pttKeys: string[],
+): string {
+  const sttProvider = profile.providerSettings.stt.provider;
+  return `<div class="voice-overlay" id="voice-overlay">
+  <div class="voice-call">
+    <div class="voice-status" id="voice-status">
+      <span class="voice-status-dot voice-status-dot--connecting" id="voice-status-dot"></span>
+      <span id="voice-status-text">Connecting...</span>
+      <button class="btn btn--ghost" id="test-tts-btn" onclick="testTTSConnection()" style="margin-left: auto; font-size: var(--text-xs);">Test TTS</button>
+    </div>
+
+    <div class="voice-text-input-area" id="voice-text-input-area" style="display: none;">
+      <textarea
+        class="voice-text-input"
+        id="voice-text-input"
+        placeholder="Type a message..."
+        rows="2"
+        onkeydown="handleVoiceTextInputKey(event)"
+      ></textarea>
+      <button class="voice-btn voice-text-send-btn" id="voice-text-send-btn" onclick="sendVoiceTextInput()" aria-label="Send" title="Send">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      </button>
+    </div>
+
+    <div class="voice-controls">
+      <button class="voice-btn" id="voice-btn-yinyang" onclick="toggleYinYangMode()" aria-label="Toggle Yin Yang mode" title="Yin Yang mode (type instead of speak)">
+        ☯
+      </button>
+      <button class="voice-btn" id="voice-btn-ptt-toggle" onclick="togglePTTMode()" aria-label="Toggle push-to-talk" title="Push to talk">
+        🎙️
+      </button>
+      <button class="voice-btn voice-btn--end" onclick="endVoiceChat()" aria-label="End voice call" title="End call">
+        📞
+      </button>
+    </div>
+
+    <div class="voice-hold-circle-container" id="voice-hold-circle" style="display: none;">
+      <button class="voice-hold-circle" id="voice-hold-btn"
+        onmousedown="startPTT()" ontouchstart="startPTT()"
+        onmouseup="endPTT()" ontouchend="endPTT()"
+        aria-label="Hold to talk" title="Hold to talk">
+        <span>HOLD<br>TO<br>TALK</span>
+      </button>
+    </div>
+
+    <div class="voice-tools" id="voice-tools"></div>
+  </div>
+</div>
+
+<script type="application/json" id="voice-config">${
+    escapeHtml(
+      JSON.stringify({ conversationId }),
+    )
+  }</script>
+<script type="application/json" id="voice-status-cfg">${
+    escapeHtml(
+      JSON.stringify({
+        wsUrl: `/api/voice/ws?conversationId=${conversationId}`,
+        sttProvider,
+        pttEnabled,
+        pttKeys,
+        endOfTurnSilence: profile.endOfTurnSilence ?? 1.5,
+        phraseDebounceMs: profile.phraseDebounceMs ?? 1200,
+        sttDebug: profile.sttDebug ?? false,
+        sttLanguage: profile.providerSettings.stt.browser?.language ?? "",
+        voiceEffect: profile.voiceEffect ?? "none",
+      }),
+    )
+  }</script>`;
 }

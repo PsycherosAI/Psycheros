@@ -21,6 +21,7 @@ psycheros-workspace/
 ├── deno.json              # workspace root: shared compilerOptions + hoisted deps
 ├── packages/
 │   ├── psycheros/         # harness daemon (port 3000) — embodiment
+│   │   └── pipecat/       # Python sidecar (port 8080) — voice pipeline (Pipecat)
 │   ├── entity-core/       # MCP server (stdio) — canonical identity + memory
 │   ├── entity-loom/       # chat-history import wizard (port 3210)
 │   ├── launcher/          # v1: bootstrap installer + dashboard (port 3001)

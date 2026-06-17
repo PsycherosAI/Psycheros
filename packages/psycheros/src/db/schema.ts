@@ -30,6 +30,7 @@ export const SCHEMA = `
     tool_call_id TEXT,
     tool_calls TEXT,
     created_at TEXT NOT NULL,
+    is_voice INTEGER DEFAULT 0,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
   );
 
@@ -695,6 +696,25 @@ function runMigrations(db: Database): void {
     );
     db.exec("ALTER TABLE messages ADD COLUMN pulse_name TEXT");
     console.log("[DB] Added pulse_id and pulse_name columns to messages");
+  }
+
+  // is_voice migration: column is authoritative for voice attribution,
+  // prefix is derived on read. Backfill scans legacy content for the
+  // prefix, tags the message, strips prefix (substr 14 = len "[Voice Chat] ").
+  const hasIsVoiceCol = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('messages') WHERE name = 'is_voice'",
+    )
+    .get();
+
+  if (!hasIsVoiceCol) {
+    db.exec("ALTER TABLE messages ADD COLUMN is_voice INTEGER DEFAULT 0");
+    console.log("[DB] Added is_voice column to messages table");
+    db.exec(
+      "UPDATE messages SET is_voice = 1, content = substr(content, 14) " +
+        "WHERE content LIKE '[Voice Chat] %'",
+    );
+    console.log("[DB] Backfilled is_voice from legacy prefix");
   }
 
   // Migration: Add push_subscriptions table if missing

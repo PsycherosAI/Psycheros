@@ -56,6 +56,7 @@ interface MessageRow {
   edited_at: string | null;
   pulse_id: string | null;
   pulse_name: string | null;
+  is_voice: number | null;
 }
 
 /**
@@ -529,8 +530,8 @@ export class DBClient {
 
       this.db.exec(
         `INSERT INTO messages
-         (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, pulse_id, pulse_name)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, pulse_id, pulse_name, is_voice)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           conversationId,
@@ -542,6 +543,7 @@ export class DBClient {
           nowISO,
           message.pulseId ?? null,
           message.pulseName ?? null,
+          message.isVoice ? 1 : 0,
         ],
       );
 
@@ -567,6 +569,7 @@ export class DBClient {
       createdAt: now,
       pulseId: message.pulseId,
       pulseName: message.pulseName,
+      isVoice: !!message.isVoice,
     };
   }
 
@@ -587,7 +590,7 @@ export class DBClient {
     const stmt = this.db.prepare(
       `SELECT id, conversation_id, role, content, reasoning_content,
               tool_call_id, tool_calls, created_at, edited_at,
-              pulse_id, pulse_name
+              pulse_id, pulse_name, is_voice
        FROM messages
        WHERE conversation_id = ?
        ORDER BY created_at ASC`,
@@ -624,7 +627,7 @@ export class DBClient {
       const hasTiebreaker = !!options.beforeId;
       query = `SELECT id, conversation_id, role, content, reasoning_content,
                       tool_call_id, tool_calls, created_at, edited_at,
-                      pulse_id, pulse_name
+                      pulse_id, pulse_name, is_voice
                FROM messages
                WHERE conversation_id = ?
                  AND (created_at < ?${
@@ -645,7 +648,7 @@ export class DBClient {
       // Initial load: fetch the most recent messages (DESC). Reversed below.
       query = `SELECT id, conversation_id, role, content, reasoning_content,
                       tool_call_id, tool_calls, created_at, edited_at,
-                      pulse_id, pulse_name
+                      pulse_id, pulse_name, is_voice
                FROM messages
                WHERE conversation_id = ?
                ORDER BY created_at DESC
@@ -709,6 +712,7 @@ export class DBClient {
       editedAt: row.edited_at ? new Date(row.edited_at) : undefined,
       pulseId: row.pulse_id ?? undefined,
       pulseName: row.pulse_name ?? undefined,
+      isVoice: !!row.is_voice,
     };
   }
 
@@ -756,7 +760,7 @@ export class DBClient {
       const getUpdatedStmt = this.db.prepare(
         `SELECT id, conversation_id, role, content, reasoning_content,
                 tool_call_id, tool_calls, created_at, edited_at,
-                pulse_id, pulse_name
+                pulse_id, pulse_name, is_voice
          FROM messages WHERE id = ?`,
       );
       const updatedRow = getUpdatedStmt.get<MessageRow>(id);
@@ -933,7 +937,7 @@ export class DBClient {
     const stmt = this.db.prepare(
       `SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content,
               m.tool_call_id, m.tool_calls, m.created_at, m.edited_at,
-              m.pulse_id, m.pulse_name
+              m.pulse_id, m.pulse_name, m.is_voice
        ${join}
        WHERE ${dateExpr} = ?${sourceFilter}
        ORDER BY m.created_at ASC`,

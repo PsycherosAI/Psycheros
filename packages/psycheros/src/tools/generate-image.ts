@@ -481,6 +481,207 @@ async function generateViaGemini(
 }
 
 // =============================================================================
+// Venice AI Provider
+// =============================================================================
+
+/**
+ * I use Venice's native /image/generate endpoint. Venice's inpaint parameter
+ * was deprecated on May 19, 2025 and the OpenAI-compatible /images/generations
+ * endpoint does not accept image input, so this path is text-to-image only.
+ * Anchor/user/input images are dropped here; the execute() function appends a
+ * note to the tool result so I learn to pick a different generator when I
+ * need image references.
+ */
+async function generateViaVenice(
+  config: ImageGenConfig,
+  prompt: string,
+  negativePrompt: string | undefined,
+): Promise<{ imageData: string; mediaType: string }> {
+  const settings = config.settings.venice;
+  if (!settings) {
+    throw new Error("Venice settings not configured for this generator");
+  }
+
+  const baseUrl = (settings.baseUrl || "https://api.venice.ai/api/v1").trim()
+    .replace(/\/+$/, "");
+
+  const params = config.settings.params;
+  const aspectRatio = params.aspect_ratio ||
+    mapToAspectRatio(params.width, params.height);
+
+  const body: Record<string, unknown> = {
+    model: settings.model,
+    prompt,
+    aspect_ratio: aspectRatio,
+    format: "png",
+    safe_mode: !config.nsfw,
+  };
+  if (negativePrompt) {
+    body.negative_prompt = negativePrompt;
+  }
+
+  const response = await fetch(`${baseUrl}/image/generate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${sanitizeHeaderValue(settings.apiKey)}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Venice API error (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json() as { images?: string[] };
+  if (!data.images || data.images.length === 0) {
+    throw new Error("Venice returned no images in the response");
+  }
+
+  return {
+    imageData: data.images[0],
+    mediaType: "image/png",
+  };
+}
+
+// =============================================================================
+// NanoGPT Provider
+// =============================================================================
+
+/**
+ * Map an aspect ratio string to a WIDTHxHEIGHT size token for NanoGPT's
+ * OpenAI-compatible /images/generations endpoint. Defaults to 1024x1024.
+ */
+function mapAspectRatioToSize(aspectRatio: string | undefined): string {
+  switch (aspectRatio) {
+    case "16:9":
+      return "1024x576";
+    case "9:16":
+      return "576x1024";
+    case "4:3":
+      return "1024x768";
+    case "3:4":
+      return "768x1024";
+    case "3:2":
+      return "1024x683";
+    case "2:3":
+      return "683x1024";
+    case "5:4":
+      return "1024x819";
+    case "4:5":
+      return "819x1024";
+    case "21:9":
+      return "1024x439";
+    case "1:1":
+    default:
+      return "1024x1024";
+  }
+}
+
+/**
+ * I use NanoGPT's OpenAI-compatible /images/generations endpoint. Supports
+ * image-to-image via imageDataUrl (single image) or imageDataUrls (multiple —
+ * model-dependent, e.g. flux-kontext, gpt-4o-image, gpt-image-1).
+ */
+async function generateViaNanoGPT(
+  config: ImageGenConfig,
+  prompt: string,
+  negativePrompt: string | undefined,
+  anchorImages: Array<{ data: string; mediaType: string }>,
+  userImage: { data: string; mediaType: string } | undefined,
+  inputImage: { data: string; mediaType: string } | undefined,
+): Promise<{ imageData: string; mediaType: string }> {
+  const settings = config.settings.nanogpt;
+  if (!settings) {
+    throw new Error("NanoGPT settings not configured for this generator");
+  }
+
+  const baseUrl = (settings.baseUrl || "https://nano-gpt.com/v1").trim()
+    .replace(/\/+$/, "");
+
+  // Combine every input image. The endpoint takes one (imageDataUrl) or many
+  // (imageDataUrls); model support for plural varies.
+  const allImages = [
+    ...anchorImages,
+    ...(userImage ? [userImage] : []),
+    ...(inputImage ? [inputImage] : []),
+  ];
+
+  const params = config.settings.params;
+  const size = mapAspectRatioToSize(params.aspect_ratio);
+
+  // The OpenAI-compatible spec has no negative_prompt field — fold it in.
+  let fullPrompt = prompt;
+  if (negativePrompt) {
+    fullPrompt += `\n\nAvoid: ${negativePrompt}.`;
+  }
+
+  const body: Record<string, unknown> = {
+    model: settings.model,
+    prompt: fullPrompt,
+    n: 1,
+    size,
+  };
+
+  if (allImages.length === 1) {
+    body.imageDataUrl = `data:${allImages[0].mediaType};base64,${
+      allImages[0].data
+    }`;
+  } else if (allImages.length > 1) {
+    body.imageDataUrls = allImages.map((img) =>
+      `data:${img.mediaType};base64,${img.data}`
+    );
+  }
+
+  const response = await fetch(`${baseUrl}/images/generations`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${sanitizeHeaderValue(settings.apiKey)}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`NanoGPT API error (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json() as {
+    data?: Array<{ b64_json?: string; url?: string }>;
+  };
+
+  const first = data.data?.[0];
+  if (!first) {
+    throw new Error("NanoGPT returned no data in the response");
+  }
+
+  if (first.b64_json) {
+    return {
+      imageData: first.b64_json,
+      mediaType: "image/png",
+    };
+  }
+
+  if (first.url) {
+    // Hosted URL — download and inline. Presigned URLs expire (~1h).
+    const imgResponse = await fetch(first.url);
+    if (!imgResponse.ok) {
+      throw new Error(
+        `NanoGPT returned URL but download failed (${imgResponse.status})`,
+      );
+    }
+    const buffer = await imgResponse.arrayBuffer();
+    const base64 = uint8ToBase64(new Uint8Array(buffer));
+    const contentType = imgResponse.headers.get("content-type") || "image/png";
+    return { imageData: base64, mediaType: contentType };
+  }
+
+  throw new Error("NanoGPT response did not contain b64_json or url");
+}
+
+// =============================================================================
 // Tool Executor
 // =============================================================================
 
@@ -627,6 +828,11 @@ async function execute(
 
     let result: { imageData: string; mediaType: string };
 
+    // Venice drops image references (inpaint deprecated May 2025). I track
+    // whether any were provided so I can note it in the tool result.
+    const veniceDroppedImages = generator.provider === "venice" &&
+      (anchorImages.length > 0 || userImage || inputImage);
+
     switch (generator.provider) {
       case "openrouter":
         result = await generateViaOpenRouter(
@@ -640,6 +846,23 @@ async function execute(
         break;
       case "gemini":
         result = await generateViaGemini(
+          generator,
+          prompt,
+          negative_prompt,
+          anchorImages,
+          userImage,
+          inputImage,
+        );
+        break;
+      case "venice":
+        result = await generateViaVenice(
+          generator,
+          prompt,
+          negative_prompt,
+        );
+        break;
+      case "nanogpt":
+        result = await generateViaNanoGPT(
           generator,
           prompt,
           negative_prompt,
@@ -723,6 +946,16 @@ async function execute(
     if (description) resultText += ` ${description}`;
     if (shortDescription) resultText += `[short:${shortDescription}]`;
     resultText += ` [IMAGE:${marker}]`;
+
+    if (veniceDroppedImages) {
+      resultText +=
+        "\n\nNote: Venice AI does not currently support image input " +
+        "(inpaint was deprecated May 2025). The request was processed as " +
+        "text-to-image only; provided anchor_ids, user_image_path, and " +
+        "input_image_path were ignored. If image-reference-based generation " +
+        "is needed, choose a different generator.";
+    }
+
     return {
       toolCallId: ctx.toolCallId,
       content: resultText,

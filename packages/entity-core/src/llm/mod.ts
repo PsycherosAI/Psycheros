@@ -6,6 +6,7 @@
 
 export {
   createLLMClient,
+  isLlmConfigured,
   LLMClient,
   type LLMConfig,
   LLMError,

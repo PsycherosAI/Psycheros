@@ -151,3 +151,31 @@ export {
   loadBLESettings,
   saveBLESettings,
 } from "./ble-settings.ts";
+
+// Re-export Voice chat settings
+export type {
+  AudioEffect,
+  AudioEffectType,
+  BrowserSTTSettings,
+  CustomSTTSettings,
+  CustomTTSSettings,
+  DeepgramSTTSettings,
+  ElevenLabsTTSSettings,
+  MinimaxTTSSettings,
+  OpenAISTTSettings,
+  OpenAITTSSettings,
+  PronunciationEntry,
+  STTCorrectionEntry,
+  VoiceProfile,
+  VoiceProviderSettings,
+  VoiceSettings,
+  VoiceSTTProvider,
+  VoiceTTSProvider,
+} from "./voice-settings.ts";
+export {
+  getDefaultVoiceSettings,
+  loadVoiceSettings,
+  maskVoiceSettings,
+  normalizeVoiceProfile,
+  saveVoiceSettings,
+} from "./voice-settings.ts";

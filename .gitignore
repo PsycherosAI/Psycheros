@@ -2,6 +2,13 @@
 # Runtime data — never commit user/entity data
 # ============================================
 
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+uv.lock
+
 # entity-core runtime
 data/
 

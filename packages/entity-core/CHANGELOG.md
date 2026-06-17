@@ -6,6 +6,15 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-17
+
+### Fixed
+
+- `extraction.llmAvailable` in sync_status now reflects the current environment
+  on every read instead of a cached snapshot from the last extraction attempt. A
+  fresh boot with credentials correctly passed reports `true` immediately,
+  without waiting for the first extraction to run.
+
 ## [0.4.0] - 2026-06-09
 
 ### Added
@@ -244,6 +253,7 @@ All notable changes to entity-core are documented here. The format follows
 - Knowledge graph (people, places, relationships) backed by SQLite + sqlite-vec.
 - Snapshot system: pre-destructive-operation snapshots for recovery.
 
+[0.4.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.1
 [0.4.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.0
 [0.3.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.6
 [0.3.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.5

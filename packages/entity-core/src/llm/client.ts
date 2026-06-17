@@ -390,3 +390,25 @@ export function createLLMClient(): LLMClient | null {
   );
   return new LLMClient(config);
 }
+
+/**
+ * Quiet env-presence check. Reports whether all three required LLM
+ * credentials (API key, base URL, model) are currently set, without
+ * constructing a client or emitting any logs.
+ *
+ * Used for status reporting (e.g. sync_status extraction.llmAvailable)
+ * where the previous approach — reading a flag mutated during actual
+ * extraction attempts — reported stale state. On a fresh boot with no
+ * extractions yet, the flag stayed at its `false` default and the admin
+ * UI badge said "No LLM" even though credentials were correctly passed
+ * via env. This function reflects the current configuration truthfully.
+ */
+export function isLlmConfigured(): boolean {
+  const apiKey = Deno.env.get("ENTITY_CORE_LLM_API_KEY") ||
+    Deno.env.get("ZAI_API_KEY");
+  const baseUrl = Deno.env.get("ENTITY_CORE_LLM_BASE_URL") ||
+    Deno.env.get("ZAI_BASE_URL");
+  const model = Deno.env.get("ENTITY_CORE_LLM_MODEL") ||
+    Deno.env.get("ZAI_MODEL");
+  return Boolean(apiKey && baseUrl && model);
+}

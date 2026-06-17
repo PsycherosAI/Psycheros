@@ -12,7 +12,13 @@ import { maskApiKey } from "./settings.ts";
 // Types
 // =============================================================================
 
-export type ImageGenProvider = "openrouter" | "gemini" | "comfyui" | "native";
+export type ImageGenProvider =
+  | "openrouter"
+  | "gemini"
+  | "venice"
+  | "nanogpt"
+  | "comfyui"
+  | "native";
 
 export interface OpenRouterImageSettings {
   apiKey: string;
@@ -23,6 +29,18 @@ export interface OpenRouterImageSettings {
 export interface GeminiImageSettings {
   apiKey: string;
   model: string;
+}
+
+export interface VeniceImageSettings {
+  apiKey: string;
+  model: string;
+  baseUrl?: string;
+}
+
+export interface NanoGPTImageSettings {
+  apiKey: string;
+  model: string;
+  baseUrl?: string;
 }
 
 export interface ComfyUIImageSettings {
@@ -47,6 +65,8 @@ export interface CommonImageGenParams {
 export interface ImageGenProviderSettings {
   openrouter?: OpenRouterImageSettings;
   gemini?: GeminiImageSettings;
+  venice?: VeniceImageSettings;
+  nanogpt?: NanoGPTImageSettings;
   comfyui?: ComfyUIImageSettings;
   native?: NativeImageSettings;
   params: CommonImageGenParams;
@@ -158,6 +178,18 @@ export function maskImageGenSettings(
           ? {
             ...g.settings.gemini,
             apiKey: maskApiKey(g.settings.gemini.apiKey || ""),
+          }
+          : undefined,
+        venice: g.settings.venice
+          ? {
+            ...g.settings.venice,
+            apiKey: maskApiKey(g.settings.venice.apiKey || ""),
+          }
+          : undefined,
+        nanogpt: g.settings.nanogpt
+          ? {
+            ...g.settings.nanogpt,
+            apiKey: maskApiKey(g.settings.nanogpt.apiKey || ""),
           }
           : undefined,
       },

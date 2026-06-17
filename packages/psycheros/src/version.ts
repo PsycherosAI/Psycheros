@@ -9,8 +9,8 @@ export const VERSION: string = SUFFIX
   : VERSION_BASE;
 
 // True when the build carries the staging-stream suffix specifically — used
-// in JSON payloads where the consumer wants to know "is this Echo's dogfood
-// image" vs. "is this any non-release build."
+// in JSON payloads where the consumer wants to distinguish the staging
+// dogfood build from any other non-release build.
 export const IS_STAGING: boolean = SUFFIX.startsWith("+staging");
 
 // True when the build carries any build-metadata suffix at all — staging

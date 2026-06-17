@@ -6,6 +6,44 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-17
+
+### Added
+
+- **Voice chat subsystem.** Real-time voice conversations with the entity via a
+  Deno-native walkie-talkie pipeline supporting custom TTS/STT providers,
+  push-to-talk (configurable keybinds, hold-to-talk, global hotkey), screen wake
+  lock during calls, voice effects, and a "Yin Yang" mode that lets you type
+  instead of speaking mid-call. Includes a voice FAB in the chat panel, audio
+  cues, interruption guard, and Pulses routed through the voice pipeline when a
+  call is active.
+- Venice AI and NanoGPT image generation providers. Both surface in Settings >
+  Vision > Generators alongside the existing OpenRouter and Google AI Studio
+  options. Venice uses the native `/v1/image/generate` endpoint and is
+  text-to-image only (its inpaint parameter was deprecated May 2025); when the
+  entity passes `anchor_ids`/`user_image_path`/`input_image_path` to a Venice
+  generator, the request proceeds as text-to-image and the tool result includes
+  a note explaining the references were ignored. NanoGPT uses the
+  OpenAI-compatible `/v1/images/generations` endpoint and supports image input
+  via `imageDataUrl` (single) or `imageDataUrls` (plural, model-dependent).
+- Each image generator's entry in the entity's image-gen context block now
+  includes an anchor-capability tag (`accepts anchor images` or
+  `text-to-image only (no anchor support)` for Venice) so the entity can pick
+  the right generator when it needs image references.
+- `is_voice` column on messages for authoritative voice attribution — messages
+  spoken via voice chat are tagged at write time.
+
+### Fixed
+
+- Browser STT rapid-cycling on Chrome Android (cumulative-result snowballing);
+  utterances now batch into full phrases with configurable debounce.
+- Silent-audio CPU spin on desktop that caused browser-wide freezes.
+- Post-TTS cooldown prevents echo transcription triggers.
+- Voice display state now waits for audio playback to drain before advancing.
+- Timezone handling and parroted `[Voice Chat]` prefix stripping in voice
+  transcripts.
+- Profanity restorations expanded for intimate use cases.
+
 ## [0.7.2] - 2026-06-10
 
 ### Fixed
@@ -642,6 +680,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 [0.1.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.2
 [0.1.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.1
 [0.1.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.0
+[0.8.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.0
 [0.7.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.7.2
 [0.7.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.7.1
 [0.7.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.7.0

@@ -92,6 +92,7 @@ import {
 import { join } from "@std/path";
 import { MAX_REQUEST_BODY_SIZE, MAX_UPLOAD_BODY_SIZE } from "../constants.ts";
 import {
+  callTTS,
   handleBatchDeleteConversations,
   handleButtplugStatus,
   handleChat,
@@ -169,6 +170,8 @@ import {
   handleGetSnapshot,
   handleGetToolsSettings,
   handleGetVault,
+  handleGetVoiceSettings,
+  handleGetVoiceStatus,
   handleGetWebSearchSettings,
   handleHealth,
   handleImportSillyTavernLorebook,
@@ -218,6 +221,7 @@ import {
   handleSaveSASettings,
   handleSaveSettingsFile,
   handleSaveToolsSettings,
+  handleSaveVoiceSettings,
   handleSaveWebSearchSettings,
   handleSearchVault,
   handleServeBackground,
@@ -234,6 +238,7 @@ import {
   handleTestButtplugConnection,
   handleTestLLMConnection,
   handleTestLovenseConnection,
+  handleTestTTSConnection,
   handleToolsSettingsFragment,
   handleUpdateAnchorImage,
   handleUpdateEventRule,
@@ -257,6 +262,10 @@ import {
   handleVisionGeneratorsFragment,
   handleVisionImageGenSlotFragment,
   handleVisionSettingsFragment,
+  handleVoiceCallFragment,
+  handleVoiceProfileEditFragment,
+  handleVoiceSettingsHubFragment,
+  handleVoiceWebSocket,
   handleWearableData,
   handleWearableStream,
   type RouteContext,
@@ -283,6 +292,13 @@ import {
 import { getBroadcaster } from "./broadcaster.ts";
 import { getDeviceBridge } from "./device-bridge.ts";
 import { getWearableConnectionManager } from "../wearable/mod.ts";
+import { VoiceSessionManager } from "../voice/mod.ts";
+import {
+  getDefaultVoiceSettings,
+  loadVoiceSettings,
+  saveVoiceSettings,
+  type VoiceSettings,
+} from "../llm/voice-settings.ts";
 import { EventRulesEngine } from "../wearable/event-rules-engine.ts";
 import {
   handleAdminActionsFragment,
@@ -394,6 +410,7 @@ export class Server {
   private discordRouter: MessageRouter | null = null;
   private discordConversationMapper: ConversationMapper | null = null;
   private discordResponseHandler: ResponseHandler | null = null;
+  private voiceSettings: VoiceSettings;
 
   /**
    * Create a new Server instance.
@@ -453,6 +470,9 @@ export class Server {
 
     // Initialize custom tools (will be loaded in init())
     this.customTools = {};
+
+    // Initialize voice settings (will be reloaded from settings in init())
+    this.voiceSettings = getDefaultVoiceSettings();
 
     // Initialize tool registry with only allowed tools
     this.tools = createDefaultRegistry(config.allowedTools ?? []);
@@ -521,6 +541,7 @@ export class Server {
     );
     this.toolSettings = await loadToolsSettings(this.config.dataRoot);
     this.customTools = await loadCustomTools(this.config.dataRoot);
+    this.voiceSettings = await loadVoiceSettings(this.config.dataRoot);
     this.reloadLLMClient();
     this.reloadToolRegistry();
 
@@ -1043,6 +1064,26 @@ export class Server {
   }
 
   /**
+   * Update voice chat settings. The Deno-native walkie-talkie pipeline has
+   * no subprocess lifecycle to manage — settings take effect on the next
+   * session start.
+   */
+  async updateVoiceSettings(settings: VoiceSettings): Promise<void> {
+    const wasEnabled = this.voiceSettings.enabled;
+    // saveVoiceSettings returns the corrected settings (with masked API
+    // keys replaced by the real ones from disk). Use that for the in-memory
+    // state so the next voice session sees the real keys, not the masked
+    // display values that came back from the UI.
+    const corrected = await saveVoiceSettings(this.config.dataRoot, settings);
+    this.voiceSettings = corrected;
+
+    // If voice was just disabled, close any in-flight voice sessions.
+    if (!corrected.enabled && wasEnabled) {
+      VoiceSessionManager.getInstance().closeAll();
+    }
+  }
+
+  /**
    * Get the current entity-core LLM settings.
    */
   getEntityCoreLLMSettings(): EntityCoreLLMSettings {
@@ -1441,6 +1482,72 @@ export class Server {
       });
     }
 
+    // TTS keep-alive: prevents voice deletion on providers like Minimax.
+    // Fires daily, checks each profile's ttsKeepAliveDays.
+    if (this.voiceSettings.enabled) {
+      this.scheduler.register(
+        "voice.tts-keep-alive",
+        async () => {
+          const settings = this.voiceSettings;
+          let kept = 0;
+          let skipped = 0;
+
+          for (const profile of settings.profiles) {
+            if (!profile.enabled || profile.ttsKeepAliveDays <= 0) continue;
+
+            const now = Date.now();
+            const lastKeep = profile.lastKeepAlive
+              ? new Date(profile.lastKeepAlive).getTime()
+              : 0;
+            const daysSince = (now - lastKeep) / (1000 * 60 * 60 * 24);
+
+            if (daysSince >= profile.ttsKeepAliveDays) {
+              try {
+                await callTTS(profile);
+                profile.lastKeepAlive = new Date().toISOString();
+                kept++;
+                console.log(
+                  `[Voice] TTS keep-alive success for profile "${profile.name}"`,
+                );
+              } catch (err) {
+                console.error(
+                  `[Voice] TTS keep-alive failed for profile "${profile.name}":`,
+                  err instanceof Error ? err.message : String(err),
+                );
+              }
+            } else {
+              skipped++;
+            }
+          }
+
+          // Persist updated timestamps
+          await this.updateVoiceSettings(settings);
+
+          return {
+            status: "success",
+            result: kept > 0
+              ? `Keep-alive sent for ${kept} profile(s), ${skipped} not due`
+              : `${skipped} profile(s) not due, 0 sent`,
+          };
+        },
+      );
+
+      this.scheduler.defineSchedule({
+        id: "voice-tts-keep-alive",
+        kind: "recurring",
+        handler: "voice.tts-keep-alive",
+        cronExpr: "0 4 * * *",
+        catchupPolicy: "fire_once_then_align",
+        maxAttempts: 1,
+        metadata: {
+          name: "TTS Voice Keep-Alive",
+          description:
+            "Periodic TTS call to prevent voice deletion on providers like Minimax",
+          manualTrigger: true,
+        },
+      });
+    }
+
     // Start keepalive timer for persistent SSE connections
     const broadcaster = getBroadcaster();
     this.keepaliveInterval = setInterval(() => {
@@ -1565,6 +1672,9 @@ export class Server {
     // Close wearable connection manager WebSocket connections
     getWearableConnectionManager().closeAll();
 
+    // Stop voice subsystem
+    VoiceSessionManager.getInstance().closeAll();
+
     // Clear keepalive timer
     if (this.keepaliveInterval !== null) {
       clearInterval(this.keepaliveInterval);
@@ -1636,6 +1746,8 @@ export class Server {
         this.customTools = tools;
         this.reloadToolRegistry();
       },
+      getVoiceSettings: () => this.voiceSettings,
+      updateVoiceSettings: (settings) => this.updateVoiceSettings(settings),
     };
   }
 
@@ -1743,6 +1855,31 @@ export class Server {
     // GET /api/device-bridge - WebSocket endpoint for BLE device bridge
     if (method === "GET" && path === "/api/device-bridge") {
       return handleDeviceBridge(ctx, request);
+    }
+
+    // GET /api/voice/status - Voice subsystem status
+    if (method === "GET" && path === "/api/voice/status") {
+      return handleGetVoiceStatus(ctx);
+    }
+
+    // GET /api/voice/settings - Voice chat settings
+    if (method === "GET" && path === "/api/voice/settings") {
+      return handleGetVoiceSettings(ctx);
+    }
+
+    // POST /api/voice/settings - Save voice chat settings
+    if (method === "POST" && path === "/api/voice/settings") {
+      return await handleSaveVoiceSettings(ctx, request);
+    }
+
+    // POST /api/voice/test-tts - Test TTS connection (returns audio bytes)
+    if (method === "POST" && path === "/api/voice/test-tts") {
+      return await handleTestTTSConnection(ctx, request);
+    }
+
+    // GET /api/voice/ws - WebSocket endpoint for voice chat
+    if (method === "GET" && path.match(/^\/api\/voice\/ws/)) {
+      return handleVoiceWebSocket(ctx, request);
     }
 
     // POST /api/device/command - Send command to BLE device via bridge
@@ -3270,6 +3407,30 @@ export class Server {
     // GET /fragments/admin/entity-data - Entity Data tab
     if (path === "/fragments/admin/entity-data") {
       return handleAdminEntityDataFragment(ctx);
+    }
+
+    // GET /fragments/voice-call/:conversationId - Voice call overlay fragment
+    const voiceCallMatch = path.match(/^\/fragments\/voice-call\/([^/]+)$/);
+    if (voiceCallMatch) {
+      return handleVoiceCallFragment(ctx, voiceCallMatch[1]);
+    }
+
+    // GET /fragments/settings/voice - Voice profile hub
+    if (path === "/fragments/settings/voice") {
+      return handleVoiceSettingsHubFragment(ctx);
+    }
+
+    // GET /fragments/settings/voice/new - New voice profile form
+    if (path === "/fragments/settings/voice/new") {
+      return handleVoiceProfileEditFragment(ctx, null);
+    }
+
+    // GET /fragments/settings/voice/:id - Edit voice profile
+    const voiceProfileMatch = path.match(
+      /^\/fragments\/settings\/voice\/([^/]+)$/,
+    );
+    if (voiceProfileMatch) {
+      return handleVoiceProfileEditFragment(ctx, voiceProfileMatch[1]);
     }
 
     // GET /backgrounds/:filename - Serve background image files

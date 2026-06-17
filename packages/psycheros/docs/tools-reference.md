@@ -618,11 +618,11 @@ queryable via `ble_device(action: "query")`.
 
 ## Image Generation Tool
 
-The entity can generate images using configured provider slots (OpenRouter or
-Google AI Studio). Multiple generators can be configured with different models
-and settings. Anchor images provide style/character reference, users can attach
-images to chat messages, and the entity can iterate on previously generated
-images.
+The entity can generate images using configured provider slots (OpenRouter,
+Google AI Studio, Venice AI, or NanoGPT). Multiple generators can be configured
+with different models and settings. Anchor images provide style/character
+reference, users can attach images to chat messages, and the entity can iterate
+on previously generated images.
 
 | Tool             | Description                                                                |
 | ---------------- | -------------------------------------------------------------------------- |
@@ -638,17 +638,19 @@ the generator's default — one of `1:1`, `4:3`, `3:4`, `3:2`, `2:3`, `16:9`,
 `9:16`, `5:4`, `4:5`, `21:9`).
 
 **Setup:** Configure via Settings > Vision > Generators. Each generator has a
-name, description, provider (OpenRouter or Gemini), and provider-specific
-settings. Settings are persisted to `.psycheros/image-gen-settings.json`
-(gitignored). The tool is auto-enabled when at least one generator has
-`enabled: true`.
+name, description, provider (OpenRouter, Gemini, Venice, or NanoGPT), and
+provider-specific settings. Settings are persisted to
+`.psycheros/image-gen-settings.json` (gitignored). The tool is auto-enabled when
+at least one generator has `enabled: true`.
 
 **Supported Providers:**
 
-| Provider         | Models                                                                                                  | Notes                                                                                                                                                                       |
-| ---------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenRouter       | Any image-capable model on OpenRouter (e.g. `openai/gpt-5-image-mini`, `google/gemini-2.5-flash-image`) | Requires API key; uses `modalities: ["image", "text"]` via chat completions; images returned in `message.images[]`; uses `image_config` for `aspect_ratio` and `image_size` |
-| Google AI Studio | `gemini-3.1-flash-image-preview`, `gemini-3-pro-image-preview`, `gemini-2.5-flash-image`                | Requires Google API key; supports aspect ratio selection                                                                                                                    |
+| Provider         | Models                                                                                                  | Notes                                                                                                                                                                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| OpenRouter       | Any image-capable model on OpenRouter (e.g. `openai/gpt-5-image-mini`, `google/gemini-2.5-flash-image`) | Requires API key; uses `modalities: ["image", "text"]` via chat completions; images returned in `message.images[]`; uses `image_config` for `aspect_ratio` and `image_size`. Accepts anchor images.                                                          |
+| Google AI Studio | `gemini-3.1-flash-image-preview`, `gemini-3-pro-image-preview`, `gemini-2.5-flash-image`                | Requires Google API key; supports aspect ratio selection. Accepts anchor images via `inline_data` parts.                                                                                                                                                     |
+| Venice AI        | Any Venice image model (e.g. `venice-sd35`, `grok-imagine-image`, `qwen-image`, `nano-banana-pro`)      | Bearer token auth; uses native `/v1/image/generate` endpoint; `safe_mode` flips off when generator marked NSFW. **Text-to-image only** — Venice's inpaint parameter was deprecated May 2025, so anchor/reference images are dropped with a tool-result note. |
+| NanoGPT          | OpenAI-compatible image models (e.g. `flux-kontext`, `gpt-4o-image`, `gpt-image-1`, `hidream`)          | Bearer token auth; OpenAI-compatible `/v1/images/generations` endpoint. Single anchor → `imageDataUrl`; multiple anchors → `imageDataUrls` (model-dependent). Multi-image models include `flux-kontext`, `gpt-4o-image`, `gpt-image-1`.                      |
 
 **Anchor Images:** Reference images stored in `.psycheros/anchors/` with
 metadata in the `anchor_images` SQLite table. The entity sees available anchor
@@ -689,24 +691,33 @@ Additionally, tool call arguments for image tools (`generate_image`,
 50 characters are cut short. Non-image tools are unaffected.
 
 **Data flow:** Entity calls `generate_image` → server reads generator config →
-dispatches to provider (OpenRouter or Gemini API) → saves image to disk →
-auto-captions via configured captioning provider (dual short/long) → returns
-plain text description with `[IMAGE:...]` marker for loop detection → entity
-loop strips marker before sending to LLM, yields `image_generated` SSE event,
-appends marker to assistant message for UI persistence → frontend renders inline
-image.
+dispatches to provider (OpenRouter, Gemini, Venice, or NanoGPT API) → saves
+image to disk → auto-captions via configured captioning provider (dual
+short/long) → returns plain text description with `[IMAGE:...]` marker for loop
+detection → entity loop strips marker before sending to LLM, yields
+`image_generated` SSE event, appends marker to assistant message for UI
+persistence → frontend renders inline image.
+
+**Anchor capability tagging:** Each generator's entry in the entity's image-gen
+context block includes an anchor-capability tag (`accepts anchor images` or
+`text-to-image only (no anchor support)` for Venice). This tells the entity
+upfront which generator to pick when it needs image references. When Venice is
+called with `anchor_ids`/`user_image_path`/`input_image_path` anyway, the
+request succeeds as text-to-image and the tool result includes a note explaining
+the references were ignored — so the entity learns to pick a different generator
+next time.
 
 **Error handling:** The tool returns clear messages for provider errors, missing
 generators, disabled generators, and image read failures.
 
 ### Related Source Files
 
-| File                            | Purpose                                                                     |
-| ------------------------------- | --------------------------------------------------------------------------- |
-| `src/tools/generate-image.ts`   | `generate_image` tool with OpenRouter and Gemini providers, auto-captioning |
-| `src/tools/describe-image.ts`   | Shared captioning functions (dual short/long), `describe_image` tool        |
-| `src/tools/look-closer.ts`      | `look_closer` tool for re-examining images after context fade               |
-| `src/llm/image-gen-settings.ts` | Settings type (generators + captioning), load/save, API key masking         |
+| File                            | Purpose                                                                                       |
+| ------------------------------- | --------------------------------------------------------------------------------------------- |
+| `src/tools/generate-image.ts`   | `generate_image` tool with OpenRouter, Gemini, Venice, and NanoGPT providers, auto-captioning |
+| `src/tools/describe-image.ts`   | Shared captioning functions (dual short/long), `describe_image` tool                          |
+| `src/tools/look-closer.ts`      | `look_closer` tool for re-examining images after context fade                                 |
+| `src/llm/image-gen-settings.ts` | Settings type (generators + captioning), load/save, API key masking                           |
 
 ## Image Captioning
 

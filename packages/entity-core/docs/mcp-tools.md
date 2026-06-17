@@ -215,16 +215,16 @@ resolution details.
 
 ### sync_status extraction Field
 
-| Field               | Type           | Description                                                                  |
-| ------------------- | -------------- | ---------------------------------------------------------------------------- |
-| `llmAvailable`      | boolean        | Whether an LLM client can be created (API key + model + base URL configured) |
-| `lastAttempt`       | string \| null | ISO timestamp of last extraction attempt                                     |
-| `lastSuccess`       | string \| null | ISO timestamp of last successful extraction (>=1 node/edge created)          |
-| `lastError`         | string \| null | Error message from most recent failure                                       |
-| `attemptsTotal`     | number         | Total extraction attempts since server start                                 |
-| `successesTotal`    | number         | Successful extractions since server start                                    |
-| `nodesCreatedTotal` | number         | Cumulative nodes created                                                     |
-| `edgesCreatedTotal` | number         | Cumulative edges created                                                     |
+| Field               | Type           | Description                                                                                                                                                                                                                                                                |
+| ------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llmAvailable`      | boolean        | Whether an LLM client can be created **right now** from current env (API key + base URL + model all present). Refreshed on every call — not a cached snapshot from the last extraction attempt. A fresh boot with credentials correctly passed reports `true` immediately. |
+| `lastAttempt`       | string \| null | ISO timestamp of last extraction attempt                                                                                                                                                                                                                                   |
+| `lastSuccess`       | string \| null | ISO timestamp of last successful extraction (>=1 node/edge created)                                                                                                                                                                                                        |
+| `lastError`         | string \| null | Error message from most recent failure                                                                                                                                                                                                                                     |
+| `attemptsTotal`     | number         | Total extraction attempts since server start                                                                                                                                                                                                                               |
+| `successesTotal`    | number         | Successful extractions since server start                                                                                                                                                                                                                                  |
+| `nodesCreatedTotal` | number         | Cumulative nodes created                                                                                                                                                                                                                                                   |
+| `edgesCreatedTotal` | number         | Cumulative edges created                                                                                                                                                                                                                                                   |
 
 ## Snapshot Tools
 

@@ -27,6 +27,7 @@ const SCHEMA_SQL = `
     tool_call_id TEXT,
     tool_calls TEXT,
     created_at TEXT NOT NULL,
+    is_voice INTEGER DEFAULT 0,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
   );
 
@@ -107,8 +108,8 @@ export class DBWriter {
 
     // Insert messages (skip system and tool messages)
     const insertMsg = this.db.prepare(
-      `INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, created_at, is_voice)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
 
     for (const msg of conv.messages) {
@@ -121,6 +122,7 @@ export class DBWriter {
         msg.content,
         msg.reasoning || null,
         msg.createdAt.toISOString(),
+        msg.isVoice ? 1 : 0,
       );
       messageCount++;
     }

@@ -1,0 +1,525 @@
+/**
+ * Voice Chat Styles
+ * Phone-call overlay, waveform visualization, voice controls.
+ */
+
+/* ========================================================================== */
+/* Overlay                                                                  */
+/* ========================================================================== */
+
+.voice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated, rgba(0, 0, 0, 0.92));
+  backdrop-filter: blur(12px);
+}
+
+.voice-overlay--hidden {
+  display: none;
+}
+
+/* ========================================================================== */
+/* Call container                                                           */
+/* ========================================================================== */
+
+.voice-call {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 2rem;
+  max-width: 420px;
+  width: 100%;
+}
+
+/* ========================================================================== */
+/* Connection status                                                        */
+/* ========================================================================== */
+
+.voice-status {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.voice-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-secondary, #555);
+}
+
+.voice-status-dot--connecting {
+  background: var(--c-accent);
+  animation: pulse-dot 1s ease-in-out infinite;
+}
+
+.voice-status-dot--active {
+  background: #4caf50;
+}
+
+.voice-status-dot--error {
+  background: #e53935;
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ========================================================================== */
+/* Waveform canvas                                                          */
+/* ========================================================================== */
+
+/* ========================================================================== */
+/* Hold-to-talk circle (shown below controls when PTT is enabled)             */
+/* ========================================================================== */
+
+.voice-hold-circle-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+
+.voice-hold-circle {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 3px solid var(--c-accent-muted);
+  background: var(--c-bg-sunken);
+  color: var(--c-accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.1s ease,
+    box-shadow 0.15s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+}
+
+.voice-hold-circle:hover {
+  border-color: var(--c-accent);
+  box-shadow: var(--glow-accent);
+}
+
+.voice-hold-circle--active {
+  background: var(--c-accent);
+  color: #000;
+  border-color: var(--c-accent);
+  transform: scale(0.95);
+  box-shadow: var(--glow-accent);
+}
+
+/* ========================================================================== */
+/* Controls                                                                  */
+/* ========================================================================== */
+
+.voice-controls {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+
+.voice-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  transition: background-color 0.15s, transform 0.1s;
+  background: var(--bg-card, rgba(255, 255, 255, 0.1));
+  color: var(--text-primary, #fff);
+}
+
+.voice-btn:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.15));
+}
+
+.voice-btn:active {
+  transform: scale(0.95);
+}
+
+.voice-btn:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.voice-btn--active {
+  background: var(--c-accent);
+  color: #000;
+}
+
+.voice-btn--end {
+  width: 64px;
+  height: 64px;
+  background: #e53935;
+  color: #fff;
+  font-size: 1.4rem;
+}
+
+.voice-btn--end:hover {
+  background: #c62828;
+}
+
+/* ========================================================================== */
+/* Tool activity strip                                                      */
+/* ========================================================================== */
+
+.voice-tools {
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-tool-chip {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  background: var(--bg-card, rgba(255, 255, 255, 0.08));
+  color: var(--text-secondary, #aaa);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  animation: fade-in 0.2s ease-in;
+}
+
+.voice-tool-chip--active {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+/* ========================================================================== */
+/* Toast notifications                                                      */
+/* ========================================================================== */
+
+.voice-toast {
+  position: absolute;
+  top: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  background: var(--bg-card, rgba(255, 255, 255, 0.12));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  color: var(--text-primary, #fff);
+  animation: toast-in 0.3s ease, toast-out 0.3s ease 2.7s forwards;
+  pointer-events: none;
+  z-index: 10;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* ========================================================================== */
+/* Pulse toast (sticky indicator during a Pulse response)                    */
+/* ========================================================================== */
+
+/* Pulse toast — displayed when a Pulse fires during a voice call. Stays
+   visible through processing + speaking states (until state returns to
+   idle), dismissed by hidePulseToast(). Distinct from .voice-toast which
+   auto-dismisses.
+
+   Visually mirrors how text chat renders Pulses (.msg--pulse in
+   components.css) — accent-colored border and icon, sunken background,
+   clearly a system-style message rather than something "from the user". */
+.voice-pulse-toast {
+  position: absolute;
+  top: 1.5rem;
+  left: 50%;
+  transform: translate(-50%, -12px);
+  padding: 0.75rem 1.5rem;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  background: var(--c-bg-sunken, rgba(0, 0, 0, 0.4));
+  border: 2px solid var(--c-accent);
+  color: var(--c-accent);
+  opacity: 0;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), var(--glow-accent);
+  letter-spacing: 0.02em;
+}
+
+.voice-pulse-toast--visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  animation: pulse-toast-glow 1.4s ease-in-out infinite;
+}
+
+.voice-pulse-name {
+  color: var(--c-accent);
+}
+
+.voice-pulse-icon {
+  color: var(--c-accent);
+  animation: pulse-heartbeat 0.9s ease infinite;
+  flex-shrink: 0;
+}
+
+/* Subtle whole-toast glow pulse layered on top of the icon heartbeat —
+   reinforces "something is happening" without being distracting. */
+@keyframes pulse-toast-glow {
+  0%, 100% {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 8px var(--c-accent-subtle);
+  }
+  50% {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 18px var(--c-accent-glow);
+  }
+}
+
+@keyframes pulse-heartbeat {
+  0%, 100% {
+    transform: scale(1);
+  }
+  20% {
+    transform: scale(1.25);
+  }
+  40% {
+    transform: scale(1);
+  }
+  60% {
+    transform: scale(1.2);
+  }
+}
+
+/* ========================================================================== */
+/* Yin Yang mode text input (replaces waveform when active)                   */
+/* ========================================================================== */
+
+/* Replaces the waveform when Yin Yang mode is on. User types, hits Enter
+   (or clicks send), text is sent as a transcript message — server doesn't
+   know it's typed vs speech-recognized. For when the user can hear but
+   can't speak (library, sleeping baby, meeting). */
+.voice-text-input-area {
+  width: 100%;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.voice-text-input {
+  flex: 1;
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  background: var(--c-bg-sunken);
+  border: 1px solid var(--c-border);
+  color: var(--c-fg);
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  line-height: 1.4;
+  resize: none;
+  min-height: 44px;
+  max-height: 120px;
+}
+
+.voice-text-input:focus {
+  outline: none;
+  border-color: var(--c-accent-muted);
+}
+
+.voice-text-input::placeholder {
+  color: var(--c-fg-subtle);
+}
+
+.voice-text-send-btn {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  background: var(--c-accent);
+  color: #000;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.voice-text-send-btn:hover:not(:disabled) {
+  background: var(--c-accent-hover);
+}
+
+.voice-text-send-btn--disabled,
+.voice-text-send-btn:disabled {
+  background: var(--c-muted);
+  color: var(--c-fg-subtle);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ========================================================================== */
+/* Tool toast (entity is calling a tool)                                      */
+/* ========================================================================== */
+
+/* Distinct visual language from the Pulse toast: muted/secondary tone
+   instead of the accent color, squared corners, more compact, stack-down
+   arrangement for parallel tool calls. The Pulse toast is at top: 1.5rem;
+   this one sits below it (top: 4.5rem) so they never overlap.
+
+   Design rationale: Pulses are urgent/system-initiated, so they get the
+   accent. Tools are routine entity activity, so they get the muted/
+   secondary treatment — distinct without competing for attention. */
+.voice-tool-toast {
+  position: absolute;
+  top: 4.5rem;
+  left: 50%;
+  transform: translate(-50%, -8px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: stretch;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+  z-index: 12;
+  min-width: 180px;
+}
+
+.voice-tool-toast--visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.voice-tool-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  background: var(--c-bg-sunken);
+  border: 1px solid var(--c-muted);
+  color: var(--c-fg-muted);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3), var(--c-muted-subtle);
+  animation: tool-chip-in 0.2s ease-out;
+  font-family: var(--font-mono, monospace);
+  letter-spacing: 0.02em;
+}
+
+@keyframes tool-chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.voice-tool-icon {
+  color: var(--c-fg-muted);
+  flex-shrink: 0;
+  animation: tool-icon-spin 2s linear infinite;
+}
+
+@keyframes tool-icon-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ========================================================================== */
+/* Banner (shown in chat view during active voice call)                      */
+/* ========================================================================== */
+
+.voice-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: var(--c-accent);
+  color: #000;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: 6px;
+  margin: 0.5rem 0;
+}
+
+.voice-banner--hidden {
+  display: none;
+}
+
+/* ========================================================================== */
+/* Reduced motion                                                           */
+/* ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-status-dot--connecting {
+    animation: none;
+  }
+  .voice-tool-chip {
+    animation: none;
+  }
+  .voice-toast {
+    animation: none;
+  }
+}

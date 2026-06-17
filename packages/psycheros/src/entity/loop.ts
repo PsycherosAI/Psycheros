@@ -162,20 +162,27 @@ function formatConnectedDevices(
  * metadata rather than content to reproduce.
  */
 export function formatMessageTimestamp(date: Date): string {
-  const timeZone = Deno.env.get("PSYCHEROS_DISPLAY_TZ") || Deno.env.get("TZ") ||
-    "UTC";
+  // PSYCHEROS_DISPLAY_TZ is set from Main Settings; TZ comes from the
+  // process environment. If neither is set ("System Default" in Main
+  // Settings with no TZ env), omit the timeZone option entirely so
+  // toLocale* uses the system's actual timezone — NOT UTC. This was a
+  // bug where "System Default" silently meant UTC and the entity
+  // thought it was the middle of the night when it wasn't.
+  const timeZone = Deno.env.get("PSYCHEROS_DISPLAY_TZ") ||
+    Deno.env.get("TZ");
+  const opts = timeZone ? { timeZone } : {};
   const weekday = date.toLocaleDateString("en-US", {
-    timeZone,
+    ...opts,
     weekday: "short",
   });
-  const year = date.toLocaleDateString("en-US", { timeZone, year: "numeric" });
+  const year = date.toLocaleDateString("en-US", { ...opts, year: "numeric" });
   const month = date.toLocaleDateString("en-US", {
-    timeZone,
+    ...opts,
     month: "2-digit",
   });
-  const day = date.toLocaleDateString("en-US", { timeZone, day: "2-digit" });
+  const day = date.toLocaleDateString("en-US", { ...opts, day: "2-digit" });
   const time = date.toLocaleTimeString("en-US", {
-    timeZone,
+    ...opts,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -216,6 +223,31 @@ export interface ProcessOptions {
     senderUserId: string;
     activeTier?: import("../llm/discord-settings.ts").ActiveTier;
   };
+  /**
+   * Voice mode flag. When true:
+   * - messagePrefix is prepended to persisted user/assistant messages
+   * - Any parrot-emitted leading messagePrefix in LLM output is stripped
+   *   before persist (snowball prevention, same pattern as <t> tags)
+   * - disableTools is implied true unless explicitly overridden
+   */
+  voiceMode?: boolean;
+  /**
+   * Appended to the end of the system message. Used by voice mode to add
+   * the VOICE CHAT MODE note + per-profile custom instructions.
+   */
+  systemPromptSuffix?: string;
+  /**
+   * Prepended to user and assistant message content when persisting.
+   * Voice mode uses "[Voice Chat] " so humans (and the entity, in history)
+   * can see which turns were voice vs text.
+   */
+  messagePrefix?: string;
+  /**
+   * Skip tool definitions and tool_call handling. The LLM gets no tool
+   * list and any tool_call chunks it emits anyway are ignored. Voice mode
+   * sets this until tool support for voice is designed.
+   */
+  disableTools?: boolean;
 }
 
 /**
@@ -619,11 +651,15 @@ export class EntityTurn {
       const enabled = this.config.imageGenSettings.generators.filter((g) =>
         g.enabled
       );
-      imageGenContent = enabled.map((g) =>
-        `- "${g.name}" (ID: ${g.id}): ${g.description} [${g.provider}${
-          g.nsfw ? ", NSFW-capable" : ", SFW only"
-        }]`
-      ).join("\n");
+      imageGenContent = enabled.map((g) => {
+        const nsfwTag = g.nsfw ? "NSFW-capable" : "SFW only";
+        // Venice's inpaint parameter was deprecated May 2025 — it is the only
+        // image-gen provider that cannot accept anchor/reference images.
+        const anchorTag = g.provider === "venice"
+          ? "text-to-image only (no anchor support)"
+          : "accepts anchor images";
+        return `- "${g.name}" (ID: ${g.id}): ${g.description} [${g.provider}, ${nsfwTag}, ${anchorTag}]`;
+      }).join("\n");
 
       // Include available anchor images so the entity knows what IDs to use
       const anchors = this.db.getRawDb()
@@ -833,15 +869,21 @@ Discord interaction:
       imageGenContent,
       saContent,
       discordChannelContent,
-    );
+    ) + (options?.systemPromptSuffix ?? "");
 
     // Get conversation history from DB
     const history = this.db.getMessages(conversationId);
 
     // For Pulse messages, prefix the content so the entity perceives it as system-initiated
-    const displayContent = options?.pulseId && options?.pulseName
+    const baseContent = options?.pulseId && options?.pulseName
       ? `[System — Pulse "${options.pulseName}"] ${userMessage}`
       : userMessage;
+    // Voice mode prefixes persisted messages so voice attribution is
+    // visible in history. Same pattern as <t> tags: system inserts once,
+    // parrot copies stripped before persist (see assistant side below).
+    const displayContent = options?.messagePrefix
+      ? `${options.messagePrefix}${baseContent}`
+      : baseContent;
     let userMessageId: string | undefined;
 
     const shouldPersist = !options?.retry && !options?.skipUserPersist;
@@ -863,6 +905,7 @@ Discord interaction:
             content: displayContent,
             pulseId: options?.pulseId,
             pulseName: options?.pulseName,
+            isVoice: options?.messagePrefix === "[Voice Chat] ",
           }, userMessageId);
 
           // Yield user message ID so the frontend can attach edit capability
@@ -902,8 +945,13 @@ Discord interaction:
         }
       }
 
-      // Get tool definitions (needed for context budget estimation)
-      const toolDefinitions = this.tools().getDefinitions();
+      // Get tool definitions (needed for context budget estimation).
+      // Voice mode now has full tool support — only the explicit
+      // disableTools flag (set by callers that genuinely want a tool-less
+      // turn) suppresses tool definitions.
+      const toolDefinitions = options?.disableTools
+        ? undefined
+        : this.tools().getDefinitions();
 
       // Build the messages array for the LLM
       const messages = this.buildMessages(
@@ -937,7 +985,7 @@ Discord interaction:
           toolCalls: msg.tool_calls,
           toolCallId: msg.tool_call_id,
         })),
-        toolDefinitions,
+        toolDefinitions: toolDefinitions ?? [],
         metrics: {
           systemMessageLength: systemMessage.length,
           totalMessages: messages.length,
@@ -986,9 +1034,13 @@ Discord interaction:
         graphContent,
         vaultContent,
         situationalAwarenessContent: saContent,
-        messagesJson: JSON.stringify(contextSnapshot.messages),
-        toolDefinitionsJson: JSON.stringify(toolDefinitions),
-        metricsJson: JSON.stringify(contextSnapshot.metrics),
+        messagesJson: JSON.stringify(contextSnapshot.messages ?? []),
+        // toolDefinitions is undefined when disableTools/voiceMode is set.
+        // JSON.stringify(undefined) returns undefined (not a string), which
+        // SQLite rejects with "Value of unsupported type: undefined". Coerce
+        // to "[]" so the column always has a valid JSON string.
+        toolDefinitionsJson: JSON.stringify(toolDefinitions ?? []),
+        metricsJson: JSON.stringify(contextSnapshot.metrics ?? {}),
       });
 
       yield { type: "context", context: contextSnapshot };
@@ -1020,6 +1072,13 @@ Discord interaction:
           assistantReasoning = "";
           toolCalls.length = 0;
           streamError = null;
+          // Hold back the first 13 chars (length of "[Voice Chat] ") to
+          // detect and strip a parroted leading prefix before it streams
+          // to the browser. Persist-side strip still catches mid-message
+          // parrots for DB.
+          let leadingPrefixBuffer = "";
+          let leadingPrefixResolved = false;
+          const VOICE_PREFIX = "[Voice Chat] ";
           finishReason = "stop";
           metricsCollector = createCollector(conversationId);
 
@@ -1040,7 +1099,26 @@ Discord interaction:
                   break;
                 case "content":
                   assistantContent += chunk.content;
-                  yield chunk;
+                  if (leadingPrefixResolved) {
+                    yield chunk;
+                  } else {
+                    leadingPrefixBuffer += chunk.content;
+                    const couldStillMatch = VOICE_PREFIX.startsWith(
+                      leadingPrefixBuffer,
+                    ) && leadingPrefixBuffer.length < VOICE_PREFIX.length;
+                    if (couldStillMatch) break;
+                    leadingPrefixResolved = true;
+                    if (leadingPrefixBuffer.startsWith(VOICE_PREFIX)) {
+                      const cleaned = leadingPrefixBuffer.slice(
+                        VOICE_PREFIX.length,
+                      );
+                      if (cleaned) {
+                        yield { type: "content", content: cleaned };
+                      }
+                    } else {
+                      yield { type: "content", content: leadingPrefixBuffer };
+                    }
+                  }
                   break;
                 case "tool_call":
                   toolCalls.push(chunk.toolCall);
@@ -1051,6 +1129,23 @@ Discord interaction:
                   finishReason = chunk.finishReason;
                   setFinishReason(metricsCollector, chunk.finishReason);
                   break;
+              }
+            }
+            // Stream ended — flush any pending leading-prefix buffer.
+            // If the LLM emitted less than 13 chars of content total,
+            // we never resolved above. Strip if it's a full prefix,
+            // emit as-is otherwise.
+            if (!leadingPrefixResolved && leadingPrefixBuffer) {
+              leadingPrefixResolved = true;
+              if (leadingPrefixBuffer.startsWith(VOICE_PREFIX)) {
+                const cleaned = leadingPrefixBuffer.slice(
+                  VOICE_PREFIX.length,
+                );
+                if (cleaned) {
+                  yield { type: "content", content: cleaned };
+                }
+              } else {
+                yield { type: "content", content: leadingPrefixBuffer };
               }
             }
           } catch (error) {
@@ -1109,11 +1204,25 @@ Discord interaction:
         // This ensures we don't lose content that was already streamed
         if (hasContent) {
           try {
+            // Strip parrot-emitted `[Voice Chat] ` prefixes and `<t>` tags
+            // from LLM output before persist. Same snowball-prevention
+            // pattern as the history-read strip below — system inserts
+            // these markers once, parrots get stripped so they can't
+            // accumulate across turns.
+            const prefixPattern = new RegExp(
+              "\\[Voice Chat\\]\\s*",
+              "g",
+            );
+            const tTagPattern = /<t>[^<]*<\/t>\s*/g;
+            const cleanedAssistantContent = assistantContent
+              .replace(prefixPattern, "")
+              .replace(tTagPattern, "");
             this.db.addMessage(conversationId, {
               role: "assistant",
-              content: assistantContent,
+              content: cleanedAssistantContent,
               reasoningContent: assistantReasoning || undefined,
               toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+              isVoice: options?.messagePrefix === "[Voice Chat] ",
             }, messageId);
 
             // Index the assistant message for chat RAG (non-blocking, non-fatal)
@@ -1264,9 +1373,14 @@ Discord interaction:
 
         // Add assistant message with tool calls to the messages array
         const assistantTimestamp = formatMessageTimestamp(new Date());
-        // Strip any <t>...</t> tags the LLM echoed to prevent accumulation
+        // Strip any <t>...</t> tags the LLM echoed to prevent accumulation.
+        // Also strip parroted `[Voice Chat] ` prefixes — same pattern as
+        // the persist path (line ~1171). Without this, a tool-calling turn
+        // would feed the next iteration's LLM call a context that contains
+        // the very prefix we're trying to prevent.
         const cleanAssistantContent = (assistantContent || "")
           .replace(/<t>[^<]*<\/t>\s*/g, "")
+          .replace(/\[Voice Chat\]\s*/g, "")
           // Strip [IMAGE:{...}] markers — UI-only, not part of entity's text
           .replace(/\[IMAGE:\{.*?\}\]/g, "");
         const assistantMsg: ChatMessage = {
@@ -1446,8 +1560,16 @@ Discord interaction:
 
       const timestamp = formatMessageTimestamp(msg.createdAt);
       // Strip any <t>...</t> tags the LLM may have echoed in its output
-      // to prevent timestamp accumulation across turns
-      let cleanContent = msg.content.replace(/<t>[^<]*<\/t>\s*/g, "");
+      // to prevent timestamp accumulation across turns. Also strip any
+      // stray [Voice Chat] prefixes from content — the authoritative
+      // source for voice attribution is now msg.isVoice (column), not
+      // content. We re-prepend the prefix below if msg.isVoice is true.
+      let cleanContent = msg.content
+        .replace(/<t>[^<]*<\/t>\s*/g, "")
+        .replace(/\[Voice Chat\]\s*/g, "");
+      if (msg.isVoice) {
+        cleanContent = "[Voice Chat] " + cleanContent;
+      }
       // Strip [IMAGE:{...}] markers from assistant messages — UI-only
       cleanContent = cleanContent.replace(/\[IMAGE:\{.*?\}\]/g, "");
       // Strip [short:...] metadata from tool results — hidden from the LLM

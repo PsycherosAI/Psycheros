@@ -44,6 +44,7 @@ import {
 } from "../llm/mod.ts";
 import { getActiveProfile } from "../llm/settings.ts";
 import { detectModelCapabilities } from "../llm/model-capabilities.ts";
+import { createClientFromProfile } from "../llm/client.ts";
 import {
   loadMemorySettings,
   saveMemorySettings,
@@ -131,6 +132,9 @@ import {
   renderVisionGalleryTab,
   renderVisionGeneratorsTab,
   renderVisionSettings,
+  renderVoiceCallView,
+  renderVoiceProfileEdit,
+  renderVoiceProfileHub,
 } from "./templates.ts";
 import {
   deleteConversation,
@@ -155,6 +159,13 @@ import {
   saveSubscription,
 } from "../push/mod.ts";
 import { renderMarkdown } from "./markdown.ts";
+import {
+  isMaskedApiKey,
+  maskVoiceSettings,
+  type VoiceProfile,
+  type VoiceSettings,
+} from "../llm/voice-settings.ts";
+import { VoiceSessionManager } from "../voice/mod.ts";
 import {
   FLAVOR_LABEL,
   IS_PRERELEASE,
@@ -283,6 +294,9 @@ export interface RouteContext {
   updateCustomTools: (
     tools: Record<string, import("../tools/types.ts").Tool>,
   ) => void;
+  /** Voice chat settings */
+  getVoiceSettings: () => VoiceSettings;
+  updateVoiceSettings: (settings: VoiceSettings) => Promise<void>;
 }
 
 /**
@@ -9993,6 +10007,468 @@ export async function handleDeleteEventRule(
     return new Response(
       JSON.stringify({ error: "Failed to delete rule" }),
       { status: 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
+}
+
+// =============================================================================
+// Voice Chat Routes
+// =============================================================================
+
+/**
+ * GET /api/voice/settings — Retrieve voice settings (masked).
+ */
+export function handleGetVoiceSettings(ctx: RouteContext): Response {
+  const settings = ctx.getVoiceSettings();
+  return new Response(
+    JSON.stringify(maskVoiceSettings(settings)),
+    { headers: { "Content-Type": "application/json" } },
+  );
+}
+
+/**
+ * POST /api/voice/settings — Save voice settings.
+ */
+export async function handleSaveVoiceSettings(
+  ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
+  try {
+    const settings = (await request.json()) as VoiceSettings;
+    await ctx.updateVoiceSettings(settings);
+    return new Response(
+      JSON.stringify({ success: true }),
+      { headers: { "Content-Type": "application/json" } },
+    );
+  } catch (error) {
+    console.error("[Routes] Failed to save voice settings:", error);
+    return new Response(
+      JSON.stringify({ error: "Failed to save settings" }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
+}
+
+/**
+ * GET /api/voice/status — Get voice subsystem status.
+ */
+export function handleGetVoiceStatus(ctx: RouteContext): Response {
+  const settings = ctx.getVoiceSettings();
+  const sessionManager = getVoiceSessionManager();
+
+  return new Response(
+    JSON.stringify({
+      enabled: settings.enabled,
+      activeProfileId: settings.activeProfileId,
+      activeSessions: sessionManager.activeSessionCount,
+    }),
+    { headers: { "Content-Type": "application/json" } },
+  );
+}
+
+/**
+ * GET /api/voice/ws — WebSocket endpoint for voice chat sessions.
+ * Query params: conversationId, profileId
+ */
+export function handleVoiceWebSocket(
+  ctx: RouteContext,
+  request: Request,
+): Response {
+  const url = new URL(request.url);
+  const conversationId = url.searchParams.get("conversationId");
+  const profileId = url.searchParams.get("profileId");
+
+  if (!conversationId) {
+    return new Response(
+      JSON.stringify({ error: "conversationId required" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  const settings = ctx.getVoiceSettings();
+
+  if (!settings.enabled) {
+    return new Response(
+      JSON.stringify({ error: "Voice chat is not enabled" }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  const profile = settings.profiles.find((p) => p.id === profileId) ??
+    settings.profiles.find((p) => p.enabled) ??
+    settings.profiles[0];
+
+  if (!profile) {
+    return new Response(
+      JSON.stringify({ error: "No voice profile configured" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  const { response, socket } = Deno.upgradeWebSocket(request);
+  const sessionManager = getVoiceSessionManager();
+
+  socket.onopen = async () => {
+    // Voice uses the same LLM as text chat — the active connection profile.
+    // If none is configured, the session manager will reject this attempt
+    // when it tries to build the LLM client.
+    const activeProfile = ctx.getActiveLLMProfile();
+    if (!activeProfile) {
+      socket.send(JSON.stringify({
+        type: "error",
+        message: "No active LLM profile configured — voice chat requires one",
+      }));
+      socket.close();
+      return;
+    }
+
+    // Voice mode now reuses the text chat entity loop: we construct an
+    // EntityTurn with the same EntityConfig as handleChat, and the voice
+    // pipeline iterates `entityTurn.process()` to stream content chunks
+    // to TTS. This gives voice mode the same context text chat gets —
+    // full situational awareness, lorebook, RAG memories, chat history
+    // RAG, vault documents, knowledge graph, image-gen descriptions,
+    // context snapshots, metrics. See `docs/VOICE_CHAT_UX.md` and the
+    // plan at `.claude/plans/clever-nibbling-marshmallow.md`.
+    //
+    // Two voice-specific overrides:
+    //   1. Voice profile's disableReasoning flips thinkingEnabled on the
+    //      LLM client. Latency matters more than reasoning for voice, so
+    //      default is to disable.
+    //   2. Voice profile's contextWindowSize overrides the LLM profile's
+    //      contextLength. Users may want a tighter context window for
+    //      voice to improve latency (cut off older history).
+    const voiceLlm = createClientFromProfile(activeProfile, {
+      thinkingEnabled: !profile.disableReasoning,
+    });
+    const entityTurn = new EntityTurn(
+      voiceLlm,
+      ctx.db,
+      ctx.tools,
+      {
+        projectRoot: ctx.projectRoot,
+        dataRoot: ctx.dataRoot,
+        chatRAG: ctx.chatRAG,
+        mcpClient: ctx.mcpClient,
+        lorebookManager: ctx.lorebookManager,
+        vaultManager: ctx.vaultManager,
+        webSearchSettings: ctx.getWebSearchSettings(),
+        discordSettings: ctx.getDiscordSettings(),
+        homeSettings: ctx.getHomeSettings(),
+        lovenseSettings: ctx.getLovenseSettings(),
+        buttplugSettings: ctx.getButtplugSettings(),
+        imageGenSettings: ctx.getImageGenSettings(),
+        bleSettings: ctx.getBLESettings(),
+        deviceStatusCache: ctx.getDeviceStatusCache(),
+        contextLength: profile.contextWindowSize ||
+          activeProfile?.contextLength,
+        maxTokens: activeProfile?.maxTokens,
+      },
+    );
+
+    // Voice-specific system prompt suffix: VOICE CHAT MODE note + any
+    // per-profile custom instructions. EntityTurn appends this after
+    // building the rest of the system message (identity + SA + RAG +
+    // lorebook + vault + graph + image-gen).
+    const voiceSuffix = "\n\n=== VOICE CHAT MODE ===\n" +
+      "This is currently a real-time voice conversation. I'll keep responses " +
+      "concise and natural; I speak as if on a phone call — brief, " +
+      "conversational, just a couple sentences unless I need to elaborate.\n" +
+      "I can use tools during voice mode. The user hears a soft chime when " +
+      "I start using a tool, so they're not left hanging in silence. I " +
+      "shouldn't read tool names, results, or arguments aloud — just weave " +
+      "what I learned into my spoken response naturally." +
+      (profile.customInstructions?.trim()
+        ? `\n\n${profile.customInstructions}`
+        : "");
+
+    const result = sessionManager.createSession(
+      conversationId,
+      profile.id,
+      socket,
+      profile,
+      entityTurn,
+      voiceSuffix,
+    );
+
+    if ("error" in result) {
+      socket.send(JSON.stringify({ type: "error", message: result.error }));
+      socket.close();
+    }
+  };
+
+  return response;
+}
+
+// Singleton access for the session manager
+function getVoiceSessionManager() {
+  return VoiceSessionManager.getInstance();
+}
+
+/**
+ * GET /fragments/settings/voice — Voice profile hub.
+ */
+export function handleVoiceSettingsHubFragment(ctx: RouteContext): Response {
+  const settings = ctx.getVoiceSettings();
+  const html = renderVoiceProfileHub(maskVoiceSettings(settings));
+  return new Response(html, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+/**
+ * GET /fragments/settings/voice/:id — Edit voice profile.
+ * GET /fragments/settings/voice/new — New voice profile.
+ */
+export function handleVoiceProfileEditFragment(
+  ctx: RouteContext,
+  profileId: string | null,
+): Response {
+  const settings = ctx.getVoiceSettings();
+  const isNew = profileId === null;
+  const profile = isNew
+    ? null
+    : settings.profiles.find((p) => p.id === profileId) || null;
+  if (!isNew && !profile) {
+    return new Response("Profile not found", { status: 404 });
+  }
+  const html = renderVoiceProfileEdit(
+    profile
+      ? maskVoiceSettings({ ...settings, profiles: [profile] }).profiles[0]
+      : null,
+    isNew,
+    settings.activeProfileId,
+  );
+  return new Response(html, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+export function handleVoiceCallFragment(
+  ctx: RouteContext,
+  conversationId: string,
+): Response {
+  const settings = ctx.getVoiceSettings();
+  if (!settings.enabled) {
+    return new Response("Voice chat is not enabled", { status: 403 });
+  }
+  const profile =
+    settings.profiles.find((p) => p.id === settings.activeProfileId) ??
+      settings.profiles.find((p) => p.enabled) ?? settings.profiles[0];
+  if (!profile) {
+    return new Response("No voice profile configured", { status: 400 });
+  }
+  const html = renderVoiceCallView(
+    conversationId,
+    profile,
+    settings.pttEnabled ?? false,
+    settings.pttKeys ?? ["Space"],
+  );
+  return new Response(html, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+// =============================================================================
+// TTS Test Connection
+// =============================================================================
+
+const TTS_TEST_TEXT = "Hello, this is a test of the text to speech system.";
+
+interface TTSTestResult {
+  audio: Uint8Array;
+  contentType: string;
+}
+
+/**
+ * Call a TTS provider directly and return audio bytes.
+ * Used by both the test endpoint and the keep-alive scheduler.
+ *
+ * Throws a clear error if the configured API key looks masked — masked
+ * values aren't valid HTTP ByteString and would otherwise fail with a
+ * cryptic "Failed to construct Request" error.
+ */
+export async function callTTS(
+  profile: VoiceProfile,
+): Promise<TTSTestResult> {
+  const tts = profile.providerSettings.tts;
+
+  if (tts.provider === "minimax") {
+    const s = tts.minimax!;
+    if (isMaskedApiKey(s.apiKey)) {
+      throw new Error(
+        "Minimax API key looks masked — re-enter the real key in Settings → Voice",
+      );
+    }
+    const resp = await fetch("https://api.minimax.io/v1/t2a_v2", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${s.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: s.model || "speech-2.8-hd",
+        text: TTS_TEST_TEXT,
+        stream: false,
+        output_format: "hex",
+        voice_setting: {
+          voice_id: s.voiceId,
+          speed: 1,
+          vol: 1,
+          pitch: 0,
+        },
+        audio_setting: {
+          sample_rate: 32000,
+          bitrate: 128000,
+          format: "mp3",
+          channel: 1,
+        },
+      }),
+    });
+
+    if (!resp.ok) {
+      let msg = `Minimax HTTP ${resp.status}`;
+      try {
+        const body = await resp.json() as Record<string, unknown>;
+        const baseResp = body.base_resp as Record<string, unknown> | undefined;
+        if (baseResp?.status_msg) msg = String(baseResp.status_msg);
+      } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+
+    const body = await resp.json() as Record<string, unknown>;
+    const data = body.data as Record<string, unknown> | undefined;
+    const hex = (data?.audio as string) || "";
+    if (!hex) throw new Error("No audio data in Minimax response");
+
+    const audio = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < hex.length; i += 2) {
+      audio[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+    }
+
+    return { audio, contentType: "audio/mpeg" };
+  }
+
+  if (tts.provider === "elevenlabs") {
+    const s = tts.elevenlabs!;
+    const resp = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${s.voiceId}`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${s.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: TTS_TEST_TEXT,
+          model_id: s.model,
+          voice_settings: { stability: 0.5, similarity_boost: 0.5 },
+        }),
+      },
+    );
+
+    if (!resp.ok) {
+      let msg = `ElevenLabs HTTP ${resp.status}`;
+      try {
+        const err = await resp.json() as Record<string, unknown>;
+        const detail = err.detail as Record<string, unknown>;
+        if (detail?.message) msg = String(detail.message);
+      } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+
+    const audio = new Uint8Array(await resp.arrayBuffer());
+    return {
+      audio,
+      contentType: resp.headers.get("Content-Type") || "audio/mpeg",
+    };
+  }
+
+  // OpenAI-compatible (both "openai" and "custom" providers)
+  const s = tts.openai || tts.custom;
+  if (s) {
+    const baseUrl = s.baseUrl.replace(/\/+$/, "");
+    const resp = await fetch(`${baseUrl}/audio/speech`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${s.apiKey || "not-needed"}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: s.model,
+        input: TTS_TEST_TEXT,
+        voice: "voice" in s ? (s as { voice: string }).voice : "default",
+      }),
+    });
+
+    if (!resp.ok) {
+      let msg = `TTS HTTP ${resp.status}`;
+      try {
+        const err = await resp.json() as { error?: { message?: string } };
+        if (err.error?.message) msg = err.error.message;
+      } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+
+    const buf = await resp.arrayBuffer();
+    return {
+      audio: new Uint8Array(buf),
+      contentType: resp.headers.get("Content-Type") || "audio/mpeg",
+    };
+  }
+
+  throw new Error(`Unknown TTS provider: ${tts.provider}`);
+}
+
+/**
+ * POST /api/voice/test-tts — Test TTS connection.
+ * Accepts { profileId?: string } to test a specific profile, or uses active profile.
+ * Returns audio bytes on success, JSON error on failure.
+ */
+export async function handleTestTTSConnection(
+  ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
+  try {
+    let profileId: string | undefined;
+
+    try {
+      const body = await request.json() as { profileId?: string } | undefined;
+      if (body) profileId = body.profileId;
+    } catch { /* no body */ }
+
+    const settings = ctx.getVoiceSettings();
+    const profile = profileId
+      ? settings.profiles.find((p) => p.id === profileId)
+      : settings.profiles.find((p) => p.id === settings.activeProfileId);
+
+    if (!profile) {
+      return new Response(
+        JSON.stringify({ success: false, error: "No voice profile found" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    const startTime = performance.now();
+    const { audio, contentType } = await callTTS(profile);
+    const latency = Math.round(performance.now() - startTime);
+
+    return new Response(audio.buffer as ArrayBuffer, {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+        "Content-Length": String(audio.length),
+        "X-TTS-Latency": String(latency),
+        "X-TTS-Provider": profile.providerSettings.tts.provider,
+      },
+    });
+  } catch (error) {
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
     );
   }
 }

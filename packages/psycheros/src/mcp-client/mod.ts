@@ -703,10 +703,21 @@ export class MCPClient {
             return this.cache.identity;
           }
 
+          // Suppress the no-op log: the scheduler fires this every 5
+          // minutes and the admin log UI tails stderr directly, so an
+          // unconditional line here buries real diagnostics inside a
+          // couple of minutes. Only announce pulls that actually moved
+          // state — first pull (cache null) or content differing.
+          const prev = this.cache.identity;
+          const changed = prev === null ||
+            JSON.stringify(prev) !== JSON.stringify(response.identityFiles);
+
           this.cache.identity = response.identityFiles;
           this.cache.lastSync = new Date().toISOString();
 
-          console.log("[MCP] Pulled identity from entity-core");
+          if (changed) {
+            console.log("[MCP] Pulled identity from entity-core");
+          }
 
           // Sync to local disk so Core Prompts UI stays current
           await this.syncIdentityToLocal();
