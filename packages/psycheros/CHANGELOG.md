@@ -6,6 +6,17 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-06-17
+
+### Fixed
+
+- ElevenLabs TTS now authenticates with the `xi-api-key` header as its API
+  requires. The streaming pipeline (`voice/tts.ts`) and the test / keep-alive
+  path (`server/routes.ts`) previously sent `Authorization: Bearer`, which
+  ElevenLabs rejected with "Provided authorization header was invalid" — so even
+  valid keys failed at TTS fetch time. MiniMax and OpenAI TTS still use Bearer
+  (correctly).
+
 ## [0.8.0] - 2026-06-17
 
 ### Added
@@ -680,6 +691,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 [0.1.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.2
 [0.1.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.1
 [0.1.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.0
+[0.8.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.1
 [0.8.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.0
 [0.7.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.7.2
 [0.7.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.7.1

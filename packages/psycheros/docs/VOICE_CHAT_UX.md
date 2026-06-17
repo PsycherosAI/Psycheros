@@ -103,6 +103,13 @@ handle legacy data and LLM parrots that slip through.
   incoming values. `isMaskedApiKey()` + `ensureRealKey()` guards at every
   TTS/STT fetch site catch future masking bugs with a clear "re-enter your API
   key" message instead of a cryptic ByteString error.
+- **Each TTS/STT provider uses a different auth header.** Don't assume
+  `Authorization: Bearer` everywhere. MiniMax, OpenAI, and custom
+  OpenAI-compatible endpoints use Bearer; **ElevenLabs requires `xi-api-key`**
+  and rejects Bearer with `"Provided authorization header was invalid."` Keep
+  both call sites in sync when touching TTS auth: `streamElevenLabs` in
+  `voice/tts.ts` (live pipeline) and `callTTS` in `server/routes.ts` (Test TTS
+  button + keep-alive scheduler).
 - **Multi-device lock.** One voice session per conversation. Second client
   trying to start voice on the same conversation is rejected.
 - **Pulse queuing.** Pulses that fire during a voice call are queued and drained

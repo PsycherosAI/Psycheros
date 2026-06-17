@@ -12,6 +12,8 @@
  *   `pipecat-shelved/bot.py` (the buffer_remaining bug fix lives here too —
  *   we process whatever's left in the buffer after the stream ends).
  * - ElevenLabs: request `output_format: "pcm_16000"`, stream raw bytes.
+ *   Auth is `xi-api-key` (NOT `Authorization: Bearer` — ElevenLabs rejects
+ *   Bearer with "Provided authorization header was invalid").
  * - OpenAI / custom: request `response_format: "pcm"`, stream raw bytes,
  *   resample from 24kHz to 16kHz.
  *
@@ -210,7 +212,7 @@ async function* streamElevenLabs(
     {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${settings.apiKey}`,
+        "xi-api-key": settings.apiKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

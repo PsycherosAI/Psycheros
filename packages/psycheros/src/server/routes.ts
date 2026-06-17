@@ -10356,7 +10356,7 @@ export async function callTTS(
       {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${s.apiKey}`,
+          "xi-api-key": s.apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
