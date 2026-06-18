@@ -77,13 +77,23 @@ entity-core/data/memories/        (canonical storage — managed by entity-core)
 
 ### Trigger
 
-On startup and via the daily schedule, Psycheros checks for unsummarized dates
-(days with messages not yet recorded in `memory_summaries`). The schedule fires
-at 5 AM in the user's local timezone (when `PSYCHEROS_DISPLAY_TZ` is set), or at
-`PSYCHEROS_MEMORY_HOUR` UTC (default: 4 AM) as a fallback. On startup,
-`repairOrphanedSummaries()` detects DB records where the corresponding memory
-doesn't exist in entity-core (e.g., from a failed MCP write), clears them, and
-re-summarizes.
+On startup and via the daily schedule, Psycheros checks for unsummarized dates —
+days where messages exist but no `summarized_chats` row covers them. The
+schedule fires at 5 AM in the user's local timezone (when `PSYCHEROS_DISPLAY_TZ`
+is set), or at `PSYCHEROS_MEMORY_HOUR` UTC (default: 4 AM) as a fallback. On
+startup, `repairOrphanedSummaries()` detects DB records where the corresponding
+memory doesn't exist in entity-core (e.g., from a failed MCP write), clears
+them, and re-summarizes.
+
+When a date already has an owned daily memory in entity-core (created by this
+Psycheros instance or by entity-loom), catch-up skips re-summarizing it but
+still records the skip locally so it doesn't re-query entity-core on every
+restart. The skip path writes **both** tables: a row in `memory_summaries` (via
+`upsertMemorySummary`) and one `summarized_chats` row per conversation with
+messages on that date (via `markConversationsForDateSummarized`). Both writes
+are required — `getUnsummarizedDates` LEFT JOINs `summarized_chats`, so writing
+only `memory_summaries` leaves the date re-appearing as unsummarized on every
+boot.
 
 Imported conversations (from entity-loom) are excluded from summarization since
 entity-loom handles memory extraction during its pipeline. These are tagged with

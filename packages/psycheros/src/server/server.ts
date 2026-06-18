@@ -387,7 +387,7 @@ export class Server {
   private ragConfig: RAGConfig;
   private abortController: AbortController;
   private config: ServerConfig;
-  private keepaliveInterval: number | null = null;
+  private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
   private mcpClient: MCPClient | null = null;
   private lorebookManager: LorebookManager;
   private vaultManager: VaultManager;

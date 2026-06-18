@@ -1185,6 +1185,41 @@ export class DBClient {
   }
 
   /**
+   * Marks every conversation that has messages on a given date as summarized.
+   * Used by the catch-up skip path (entity-core already has the memory) to keep
+   * summarized_chats consistent with memory_summaries so getUnsummarizedDates
+   * stops re-listing the date on every restart.
+   *
+   * @param date - The logical date (YYYY-MM-DD) — must match what the modifier produces
+   * @param summaryId - The memory_summaries.id to associate
+   * @param modifier - Optional SQLite datetime() modifier, matching getUnsummarizedDates
+   */
+  markConversationsForDateSummarized(
+    date: string,
+    summaryId: string,
+    modifier?: string,
+  ): void {
+    const now = new Date().toISOString();
+    if (modifier) {
+      this.db.exec(
+        `INSERT OR IGNORE INTO summarized_chats (chat_id, message_date, summary_id, summarized_at)
+         SELECT DISTINCT m.conversation_id, DATE(datetime(m.created_at, ?)), ?, ?
+         FROM messages m
+         WHERE DATE(datetime(m.created_at, ?)) = ?`,
+        [modifier, summaryId, now, modifier, date],
+      );
+    } else {
+      this.db.exec(
+        `INSERT OR IGNORE INTO summarized_chats (chat_id, message_date, summary_id, summarized_at)
+         SELECT DISTINCT m.conversation_id, DATE(m.created_at), ?, ?
+         FROM messages m
+         WHERE DATE(m.created_at) = ?`,
+        [summaryId, now, date],
+      );
+    }
+  }
+
+  /**
    * Gets the most recent memory summary for a granularity level.
    *
    * @param granularity - The granularity level

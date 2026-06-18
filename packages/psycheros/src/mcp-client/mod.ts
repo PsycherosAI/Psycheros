@@ -153,7 +153,7 @@ export class MCPClient {
   private intentionalClose = false;
   private lastPingSuccess: Date | null = null;
   private lastPingAttempt: Date | null = null;
-  private pingTimer: number | null = null;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
   private pingInterval = 30000; // 30 seconds
   private wasAlive = true;
   private toolCallTimeoutMs = 60_000; // 60 seconds default for tool calls

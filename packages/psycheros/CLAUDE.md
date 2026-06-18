@@ -82,6 +82,14 @@ Browser (Web Speech API or PCM capture)
   ends, the transcript is persisted as regular messages prefixed `[Voice Chat]`
   via `db.addMessage` under the per-conversation write lock — so the text
   conversation can continue naturally with the voice exchange as context.
+- **Voice call FAB lives in the app shell, not the chat fragment.** The trigger
+  button (`#voice-call-btn`) is a sibling of `#chat` inside `.main` so it
+  survives HTMX swaps of `#chat`. Visibility is JS-driven
+  (`updateVoiceCallButtonVisibility` in `web/js/psycheros.js`): shown only when
+  `/api/voice/status` reports enabled AND `#messages` exists in the DOM (i.e., a
+  conversation is actually open). Re-evaluated on every `htmx:afterSwap` into
+  `#chat`. Don't move the FAB into `renderChatView()` — the swap survival is
+  load-bearing. Renaming the `#messages` id silently breaks the gate.
 - **Multi-device lock** — one voice session per conversation. If a second client
   tries to start voice on the same conversation, it's rejected.
 - **Independent context window** — voice mode uses its own rolling context

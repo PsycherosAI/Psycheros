@@ -98,6 +98,14 @@ handle legacy data and LLM parrots that slip through.
 
 ## Known gotchas
 
+- **Voice FAB visibility depends on `#messages`.** The floating call button
+  (`#voice-call-btn`) lives in `renderAppShell()` as a sibling of `#chat` (so it
+  survives HTMX swaps) and is shown only when
+  `document.getElementById('messages')` exists — i.e., inside an open
+  conversation. `updateVoiceCallButtonVisibility` in `web/js/psycheros.js`
+  re-evaluates on every `htmx:afterSwap` into `#chat`. Renaming or removing the
+  `#messages` id silently breaks the gate (FAB would disappear everywhere, or
+  appear on settings if switched to a negative check).
 - **Masked API keys leak into runtime state.** `saveVoiceSettings` returns
   corrected settings; `updateVoiceSettings` must store those, not the masked
   incoming values. `isMaskedApiKey()` + `ensureRealKey()` guards at every

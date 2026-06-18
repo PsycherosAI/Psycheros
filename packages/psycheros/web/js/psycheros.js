@@ -4940,16 +4940,28 @@ globalThis.Psycheros = {
   startVoiceCall,
 };
 
-// Show voice call button if voice chat is enabled.
-// Runs at module load time (modules are deferred, DOM is ready).
+// Show voice call button only inside an open conversation — voice needs a
+// conversationId, and the button has no business on settings or other
+// non-chat views. `#messages` is the conversation-view signal: it only
+// exists when renderChatView() has been swapped into #chat.
 function updateVoiceCallButtonVisibility() {
   fetch('/api/voice/status').then(function(r) { return r.json(); }).then(function(status) {
     var btn = document.getElementById('voice-call-btn');
-    if (btn) btn.style.display = status.enabled ? 'flex' : 'none';
+    if (!btn) return;
+    var inConversationView = document.getElementById('messages') !== null;
+    var shouldShow = status.enabled && inConversationView;
+    btn.style.display = shouldShow ? 'flex' : 'none';
   }).catch(function() {});
 }
 
 updateVoiceCallButtonVisibility();
+
+// Re-evaluate whenever #chat is swapped via HTMX (settings nav, sidebar, etc.).
+document.body.addEventListener('htmx:afterSwap', function(e) {
+  if (e.detail.target && e.detail.target.id === 'chat') {
+    updateVoiceCallButtonVisibility();
+  }
+});
 
 /**
  * Toggle the sticky duration input when the sticky checkbox changes.

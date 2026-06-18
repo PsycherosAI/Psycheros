@@ -83,6 +83,39 @@ export const generateImageTool: Tool = {
 // =============================================================================
 
 /**
+ * OpenRouter model families that only emit image output. Requesting
+ * `modalities: ["image", "text"]` against one of these fails on the provider
+ * side (observed locally as a 404 for Flux). I match by substring on the model
+ * id so vendor rebranding (e.g. `black-forest-labs/flux.2-max`) still hits.
+ */
+const OPENROUTER_IMAGE_ONLY_PATTERNS = [
+  "black-forest-labs", // Flux
+  "flux",
+  "sourceful",
+  "recraft",
+  "mai-image", // Microsoft MAI Image
+  "grok-imagine",
+  "seedream",
+];
+
+export function isOpenRouterImageOnlyModel(model: string): boolean {
+  const lower = model.toLowerCase();
+  return OPENROUTER_IMAGE_ONLY_PATTERNS.some((p) => lower.includes(p));
+}
+
+/**
+ * Normalize a user-pasted OpenRouter base URL. I strip trailing slashes and a
+ * trailing `/chat/completions` so that pasting the full endpoint — a common
+ * copy-paste mistake — does not double the path into
+ * `…/chat/completions/chat/completions`.
+ */
+export function normalizeOpenRouterBaseUrl(raw: string): string {
+  return raw.trim()
+    .replace(/\/+$/, "")
+    .replace(/\/chat\/completions\/?$/i, "");
+}
+
+/**
  * Extract image data from an OpenRouter chat completions response.
  * The response `content` may be:
  *   - An array of content parts: [{ type: "image_url", image_url: { url: "data:..." } }, ...]
@@ -163,8 +196,9 @@ async function generateViaOpenRouter(
     throw new Error("OpenRouter settings not configured for this generator");
   }
 
-  const baseUrl = (settings.baseUrl || "https://openrouter.ai/api/v1").trim()
-    .replace(/\/+$/, "");
+  const baseUrl = normalizeOpenRouterBaseUrl(
+    settings.baseUrl || "https://openrouter.ai/api/v1",
+  );
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Authorization": `Bearer ${sanitizeHeaderValue(settings.apiKey)}`,
@@ -219,10 +253,14 @@ async function generateViaOpenRouter(
     imageConfig.image_size = imageSize;
   }
 
+  const modalities = isOpenRouterImageOnlyModel(settings.model)
+    ? ["image"]
+    : ["image", "text"];
+
   const body: Record<string, unknown> = {
     model: settings.model,
     messages: [{ role: "user", content: messageContent }],
-    modalities: ["image", "text"],
+    modalities,
     image_config: imageConfig,
   };
 

@@ -6,6 +6,47 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-06-18
+
+### Fixed
+
+- **OpenRouter image-only generators no longer request text output.**
+  `generateViaOpenRouter()` always sent `modalities: ["image", "text"]`, which
+  is correct for text-capable image models like `openai/gpt-5-image` but fails
+  provider-side for image-only families (Flux/Black Forest Labs, Sourceful,
+  Recraft, Microsoft MAI Image, Grok Imagine, Seedream — observed locally as a
+  404). New `isOpenRouterImageOnlyModel()` helper substring-matches those
+  families and sends `modalities: ["image"]` for them; text-capable models keep
+  the existing shape. Also normalized a pasted full `…/chat/completions` URL in
+  `baseUrl` back to the API base so the path doesn't double. Fixes
+  [#11](https://github.com/PsycherosAI/Psycheros/issues/11).
+
+- **Interval timer handles type-check cleanly under Node ambient types.**
+  `setInterval` returns `number` in Deno but `NodeJS.Timeout` once Node's
+  ambient type definitions are in scope. Windows contributors whose editors or
+  transitive deps pulled in `@types/node` hit
+  `TS2322: Type 'Timeout' is not assignable to type 'number'` on three interval
+  handles: `pingTimer` in `mcp-client/mod.ts`, `tickTimer` in
+  `scheduler/scheduler.ts`, and `keepaliveInterval` in `server/server.ts`. All
+  three now use `ReturnType<typeof setInterval> | null` so the type resolves
+  correctly in either environment. Runtime behavior is unchanged — types are
+  erased at compile time. Fixes
+  [#18](https://github.com/PsycherosAI/Psycheros/issues/18).
+
+- **Daily memory catch-up no longer re-processes already-summarized dates on
+  every restart.** The catch-up skip path (entity-core already owns the memory)
+  wrote only `memory_summaries` but `getUnsummarizedDates` LEFT JOINs
+  `summarized_chats`, so skipped dates re-appeared on every boot — re-querying
+  entity-core and logging ~80 skip lines per restart. New
+  `markConversationsForDateSummarized` batch-inserts the missing
+  `summarized_chats` rows so both tables stay consistent.
+
+- **Voice call button no longer appears on non-chat screens.** The floating
+  voice call button was showing in the top-right of every view (including
+  settings) whenever voice chat was enabled. Visibility now also requires a
+  conversation to be open (`#messages` in the DOM), and re-evaluates on every
+  HTMX view swap so navigating to/from settings toggles it correctly.
+
 ## [0.8.3] - 2026-06-18
 
 ### Added
@@ -777,6 +818,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 [0.1.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.2
 [0.1.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.1
 [0.1.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.0
+[0.8.4]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.4
 [0.8.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.3
 [0.8.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.2
 [0.8.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.1

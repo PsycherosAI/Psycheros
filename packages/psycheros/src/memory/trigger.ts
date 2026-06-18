@@ -138,7 +138,15 @@ export async function catchUpSummarization(
       console.log(
         `[Memory] Date ${date} already has an owned memory in entity-core, skipping`,
       );
-      db.upsertMemorySummary(date, "daily", `entity-core://${date}`, []);
+      const summaryId = db.upsertMemorySummary(
+        date,
+        "daily",
+        `entity-core://${date}`,
+        [],
+      );
+      // Mark every conversation with messages on this date as summarized,
+      // otherwise getUnsummarizedDates keeps re-listing it on every restart.
+      db.markConversationsForDateSummarized(date, summaryId, modifier);
       continue;
     }
 

@@ -201,7 +201,7 @@ export class Scheduler {
 
   private readonly handlers = new Map<string, Handler>();
   private readonly inflight = new Map<string, AbortController>();
-  private tickTimer: number | null = null;
+  private tickTimer: ReturnType<typeof setInterval> | null = null;
   private tickInProgress = false;
   private stopping = false;
 

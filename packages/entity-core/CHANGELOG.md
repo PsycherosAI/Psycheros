@@ -6,6 +6,17 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-06-18
+
+### Fixed
+
+- `ConsolidationRunner.tickTimer` now uses
+  `ReturnType<typeof setInterval> | null` instead of `number | null` so the type
+  resolves correctly under Node ambient types (`NodeJS.Timeout`) as well as Deno
+  (`number`). Windows contributors whose editor pulled in `@types/node` hit
+  `TS2322` on the field assignment. Part of the same workspace-wide fix — see
+  [#18](https://github.com/PsycherosAI/Psycheros/issues/18).
+
 ## [0.4.2] - 2026-06-18
 
 ### Fixed
@@ -269,6 +280,7 @@ All notable changes to entity-core are documented here. The format follows
 - Knowledge graph (people, places, relationships) backed by SQLite + sqlite-vec.
 - Snapshot system: pre-destructive-operation snapshots for recovery.
 
+[0.4.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.3
 [0.4.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.2
 [0.4.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.1
 [0.4.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.0
