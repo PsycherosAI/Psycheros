@@ -679,6 +679,14 @@ import, a sync pull runs on the existing MCP connection (the import handler
 reopens DB connections internally, so no restart is needed). MCP is restarted
 only as a fallback if the pull fails.
 
+Wrapped zips — everything nested under a single top-level folder, with
+`manifest.json` at `<folder>/manifest.json` instead of the root — are
+auto-detected and flattened before import. This happens when Windows "Send to →
+Compressed folder" is invoked on an extracted folder rather than its contents,
+and from some cloud-sync re-packaging. Ambiguous layouts (multiple top-level
+folders, or a mix of root files and a wrapper) are rejected with the standard
+"missing manifest.json" error rather than guessed at.
+
 **Restore Conversations** merges conversation history from a standalone
 `conversations.json` file (found inside a Psycheros export zip at
 `psycheros/conversations.json`). This is an additive merge — existing

@@ -207,6 +207,28 @@ Extraction behavior:
 - All node/edge creation for a single memory happens in one SQLite transaction
 - Errors are logged but never fail the memory write
 
+### LLM Failure Handling
+
+Extraction is the most failure-prone step in the pipeline — long-running,
+dependent on an external API, and sensitive to mid-stream truncation. The LLM
+client (`src/llm/client.ts`) catches the common transient failure modes instead
+of propagating them:
+
+- **Null/empty content** — some providers return HTTP 200 with
+  `choices[0].message.content = null` when an upstream stream drops mid-call.
+  Surfaced as a `NO_COMPLETION` error with a clear message rather than crashing
+  the caller with a null-pointer.
+- **Truncated JSON** — when a response hits the token limit or a stream drops
+  mid-call, the client attempts repair (closing unclosed brackets/braces,
+  stripping incomplete trailing strings) before giving up.
+- **Markdown code fences** — models often wrap JSON in `` ```json...``` ``
+  blocks. The client strips paired fences, unpaired opening fences (truncation
+  case), and the bare `json\n` language prefix (when the opening fence bytes
+  themselves were lost mid-stream) before parsing.
+
+When extraction fails, the error is logged and the memory is skipped — other
+memories in the same pass continue unaffected.
+
 The extraction logic lives in `src/graph/memory-integration.ts`
 (`extractMemoryToGraph()`). The prompt, types, and dedup logic are defined in
 `src/graph/extraction-prompt.ts` and shared with the batch scripts.

@@ -140,7 +140,27 @@ async function openVoiceChat(conversationId) {
         },
       });
     } catch (err) {
-      showToast('Microphone access denied');
+      // Detect the most common cause first: insecure origin. Browsers
+      // silently refuse getUserMedia on http://<lan-ip>:port with no
+      // prompt — the user never sees a dialog and "allow mic in settings"
+      // doesn't help because the page itself isn't allowed to ask.
+      // Has to be HTTPS, localhost, or a secure context (Tauri).
+      if (!window.isSecureContext) {
+        showToast(
+          'Mic needs a secure origin. Open Psycheros at http://localhost:3000 or https://... — LAN IPs over plain HTTP cannot access the mic.',
+          'warning',
+        );
+      } else if (err && err.name === 'NotAllowedError') {
+        showToast(
+          'Microphone permission denied. Allow it in your browser site settings for this origin.',
+          'warning',
+        );
+      } else if (err && err.name === 'NotFoundError') {
+        showToast('No microphone found. Connect one and try again.', 'warning');
+      } else {
+        const detail = err && err.message ? err.message : 'access denied';
+        showToast(`Microphone error: ${detail}`, 'warning');
+      }
       cleanup();
       return;
     }
@@ -384,6 +404,10 @@ function cleanup() {
   playbackBuffer = [];
   playbackPlaying = false;
   pendingYourTurnCue = false;
+  pendingBytes = null;
+
+  const transcriptEl = document.getElementById('voice-transcript');
+  if (transcriptEl) transcriptEl.innerHTML = '';
 
   // Reset toast element references — the overlay (and everything inside
   // it) gets removed below, so these references would be stale.
@@ -1001,10 +1025,32 @@ let playbackPlaying = false;
 // here until the playback queue actually drains — otherwise it fires
 // underneath the tail of the entity's TTS audio and gets masked.
 let pendingYourTurnCue = false;
+// Carry odd bytes across WebSocket frames. HTTP streaming can split a
+// 2-byte Int16 sample across two frames; without this, an odd-byte frame
+// throws RangeError in `new Int16Array(buf)` and misaligns every sample
+// thereafter — the classic "TV losing signal" static.
+let pendingBytes = null;
 
-function queueAudioFrame(int16Buffer) {
+function queueAudioFrame(frame) {
   if (isDeafened) return;
-  playbackBuffer.push(int16Buffer);
+  const bytes = frame instanceof ArrayBuffer
+    ? new Uint8Array(frame)
+    : new Uint8Array(frame.buffer || frame);
+  const merged = pendingBytes && pendingBytes.byteLength > 0
+    ? (() => {
+        const m = new Uint8Array(pendingBytes.byteLength + bytes.byteLength);
+        m.set(pendingBytes);
+        m.set(bytes, pendingBytes.byteLength);
+        return m;
+      })()
+    : bytes;
+  const evenLength = merged.byteLength - (merged.byteLength % 2);
+  if (evenLength < 2) {
+    pendingBytes = merged;
+    return;
+  }
+  pendingBytes = evenLength < merged.byteLength ? merged.slice(evenLength) : null;
+  playbackBuffer.push(merged.slice(0, evenLength).buffer);
   if (!playbackPlaying) {
     drainPlaybackBuffer();
   }
@@ -1111,15 +1157,24 @@ function handleVoiceMessage(data) {
         break;
 
       case 'state':
+        // Idle means the daemon finished its turn and isn't going to send
+        // more audio for the in-flight response. Drop any odd-byte carry so
+        // it can't poison the next sentence (defends against mid-sentence
+        // aborts where the server's alignChunks flush didn't run).
+        if (msg.state === 'idle' && playbackBuffer.length === 0) {
+          pendingBytes = null;
+        }
         updateWalkieTalkieState(msg.state);
         break;
 
       case 'transcript':
-        // Transcript messages used to update a "User said / Assistant said"
-        // label under the waveform. With the waveform removed (2026-06-17),
-        // there's no surface to display this on mid-call. Transcripts still
-        // get persisted via EntityTurn and appear in the chat UI after the
-        // call ends.
+        updateTranscript(
+          msg.role === 'user'
+            ? (globalThis.PsycherosSettings?.userName || 'You')
+            : (globalThis.PsycherosSettings?.entityName || 'Assistant'),
+          msg.role,
+          msg.text,
+        );
         break;
 
       case 'pulse_start':
@@ -1662,6 +1717,25 @@ function updateConnectionStatus(state, text) {
       (state === 'error' ? ' voice-status-dot--error' : '');
   }
   if (label) label.textContent = text;
+}
+
+// Latest-exchange blurb under the status row. Overwrites on each new
+// transcript — the full history lives in chat after the call ends.
+function updateTranscript(speaker, role, text) {
+  const el = document.getElementById('voice-transcript');
+  if (!el) return;
+  const truncated = text.length > 200 ? text.slice(0, 197) + '...' : text;
+  const speakerClass = role === 'user'
+    ? 'voice-transcript__speaker voice-transcript__speaker--user'
+    : 'voice-transcript__speaker voice-transcript__speaker--assistant';
+  el.innerHTML =
+    `<span class="${speakerClass}">${escapeForTranscript(speaker)}:</span>` +
+    `<span>${escapeForTranscript(truncated)}</span>`;
+}
+
+function escapeForTranscript(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
 function showVoiceToast(message) {

@@ -6,6 +6,92 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-06-18
+
+### Added
+
+- **Custom OpenAI-compatible TTS servers now auto-decode MP3 and WAV
+  responses.** Many third-party servers (PocketTTS, Kokoro, and others) ignore
+  the `response_format: "pcm"` parameter and return MP3 by default, which
+  previously played as raw-PCM static. `streamOpenAICompatible` in
+  `voice/tts.ts` now sniffs the first chunk's magic bytes (and Content-Type as
+  fallback) and switches paths: WAV is parsed inline (44-byte header walk, no
+  new dep), MP3 is decoded via the `mpg123-decoder` WASM package (~77 KB,
+  libmpg123 reference decoder, one-time ~50ms compile). Raw PCM stays on the
+  low-latency streaming path. Eliminates the need for users to write a
+  translation adapter between their TTS server and Psycheros.
+
+### Fixed
+
+- **Streaming TTS chunks are byte-aligned before Int16 playback.** HTTP framing
+  can split a 2-byte Int16 sample across two chunks; if the client treats each
+  chunk independently, `new Int16Array(oddByteLengthBuffer)` throws RangeError
+  and every subsequent sample plays as static ("TV losing signal" — reported as
+  "TEST TTS works but live voice is glitchy"). The OpenAI path had this fixed
+  inline; ElevenLabs and MiniMax didn't. New shared `alignChunks()` helper in
+  `voice/tts.ts` covers all three. The browser side (`queueAudioFrame` in
+  `web/js/voice.js`) also carries odd bytes across WebSocket frames via
+  `pendingBytes` as defense-in-depth, reset on cleanup and on
+  idle-when-playback-empty.
+
+- **Mic permission errors now self-diagnose.** Browsers silently refuse
+  `getUserMedia` on insecure origins (`http://<lan-ip>:port`) with no prompt —
+  Mac users hitting Psycheros from another machine saw "mic not asking for
+  permission" and no clue why. `setupAudioCapture` in `web/js/voice.js` now
+  detects `!window.isSecureContext` and shows an actionable toast pointing at
+  localhost/HTTPS/Tauri. Also distinguishes `NotAllowedError` vs
+  `NotFoundError`.
+
+- **TTS HTTP errors now include enough context to self-diagnose.** ElevenLabs
+  404 (almost always a `voice_id` that doesn't exist on the calling account,
+  e.g. after switching providers) and custom OpenAI-compatible 404 (wrong
+  `baseUrl` / route shape) now append the voiceId suffix + model and the URL
+  tried respectively, instead of bare "HTTP 404".
+
+## [0.8.2] - 2026-06-18
+
+### Added
+
+- Voice transcript blurb: the "You: …" / "Entity: …" text under the voice call
+  overlay is back as its own element (it disappeared when the waveform canvas
+  was removed). Shows the latest exchange during the call; full history still
+  persists to chat when the call ends.
+
+### Fixed
+
+- Client disconnect during tool execution no longer orphans tool calls. The chat
+  (`POST /api/chat`), retry (`POST /api/chat/retry`), and voice pipeline
+  (`voice/pipeline.ts`) consumers previously `break`-ed out of the generator on
+  any abort, which skipped the `db.addMessage` scheduled after the tool-result
+  yield — leaving an assistant row with `tool_calls` but no matching
+  `role='tool'` row. The next user message would then see the orphaned tool_call
+  and re-issue it indefinitely. Network disconnects now drain the generator to
+  completion, skipping only the consumer-side forward (SSE enqueue or TTS
+  flush). Regression test in `tests/disconnect_orphan_test.ts`.
+
+- Stop button is preserved as a hard stop. The client POSTs to a new
+  `/api/chat/stop` endpoint before aborting; the chat handler's `cancel()`
+  consumes that flag and aborts with `reason.name === "StopRequested"`. The
+  for-await then `break`s (instead of draining), halting further persistence and
+  tool execution. Required to limit cost during glitched generations and to
+  interrupt tool misuse (e.g., entity running wild with `shell`).
+  Double-tap-to-confirm UX unchanged.
+
+- Entity import no longer fails silently on wrapped export zips. When Windows
+  "Send to → Compressed folder" or a cloud-sync tool nests the export one level
+  deep, the importer detects and flattens the wrapper before processing.
+
+### Changed
+
+- Voice mode no longer implies `disableTools`. The `voiceMode` gate that
+  suppressed tool definitions was removed in `caf23a8` (June 2026) when voice
+  tool support landed, but stale docstrings in `src/entity/loop.ts` and
+  `CLAUDE.md` still claimed `disableTools: true` was the default. Both updated
+  to reflect current behavior.
+
+- Export normalizes `file_path` in `vault-metadata.json` to the canonical
+  relative path instead of leaking the exporter's absolute home directory path.
+
 ## [0.8.1] - 2026-06-17
 
 ### Fixed
@@ -691,6 +777,8 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 [0.1.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.2
 [0.1.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.1
 [0.1.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.0
+[0.8.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.3
+[0.8.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.2
 [0.8.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.1
 [0.8.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.0
 [0.7.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.7.2

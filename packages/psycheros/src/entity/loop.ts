@@ -228,7 +228,11 @@ export interface ProcessOptions {
    * - messagePrefix is prepended to persisted user/assistant messages
    * - Any parrot-emitted leading messagePrefix in LLM output is stripped
    *   before persist (snowball prevention, same pattern as <t> tags)
-   * - disableTools is implied true unless explicitly overridden
+   *
+   * Note: voiceMode previously implied disableTools, but that gate was
+   * removed in caf23a8 when voice tool support landed. Tools are now
+   * enabled for voice turns. Pass disableTools: true explicitly to
+   * suppress tool definitions for a specific turn.
    */
   voiceMode?: boolean;
   /**

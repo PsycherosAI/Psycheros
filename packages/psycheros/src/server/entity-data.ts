@@ -380,10 +380,23 @@ export async function exportEntityData(
     }
 
     // Preserve full metadata so import can reconstruct with correct
-    // scope, conversation_id, title, etc.
+    // scope, conversation_id, title, etc. Normalize file_path: the DB
+    // value may be absolute (seed/upload), which leaks the user's home
+    // directory name and is meaningless on another machine. Emit the
+    // canonical relative path the importer reconstructs anyway.
+    const sanitizedDocs = vaultDocs.map((doc) => ({
+      ...doc,
+      file_path: join(
+        ".psycheros",
+        "vault",
+        "documents",
+        doc.scope ?? "global",
+        doc.filename,
+      ),
+    }));
     zip.file(
       "psycheros/vault-metadata.json",
-      JSON.stringify(vaultDocs, null, 2),
+      JSON.stringify(sanitizedDocs, null, 2),
     );
   }
 
@@ -451,6 +464,56 @@ export async function exportEntityData(
 }
 
 /**
+ * Detect a single top-level wrapper folder around the expected export
+ * structure. Some Windows workflows (right-click → "Send to → Compressed
+ * folder" on an extracted folder) and certain cloud-sync tools wrap exports
+ * one level deep — `manifest.json` ends up at `<wrapper>/manifest.json`
+ * instead of `/manifest.json`, and the importer's root-manifest lookup fails.
+ * Detect and strip.
+ *
+ * Returns the wrapper prefix (e.g. `"export-folder/"`) when there is exactly
+ * one top-level folder containing `manifest.json`, otherwise null.
+ */
+function detectWrapperPrefix(zip: JSZip): string | null {
+  const entries = Object.entries(zip.files);
+  // Any file at the root means the layout isn't wrapper-only.
+  if (entries.some(([path, file]) => !file.dir && !path.includes("/"))) {
+    return null;
+  }
+  const topLevel = new Set<string>();
+  for (const [path, file] of entries) {
+    if (file.dir) continue;
+    const idx = path.indexOf("/");
+    if (idx === -1) continue;
+    topLevel.add(path.slice(0, idx + 1));
+  }
+  if (topLevel.size !== 1) return null;
+  const prefix = [...topLevel][0];
+  if (!zip.file(`${prefix}manifest.json`)) return null;
+  return prefix;
+}
+
+/**
+ * Strip a wrapper folder if one is detected, otherwise return the original
+ * zip. Re-builds without the prefix so the rest of the importer can use
+ * root-relative paths unchanged.
+ */
+async function unwrapSingletonFolder(zip: JSZip): Promise<JSZip> {
+  const prefix = detectWrapperPrefix(zip);
+  if (!prefix) return zip;
+  console.log(
+    `[entity-data] Wrapper folder "${prefix}" detected — stripping.`,
+  );
+  const cleaned = new JSZip();
+  for (const [path, file] of Object.entries(zip.files)) {
+    if (file.dir || !path.startsWith(prefix)) continue;
+    const content = await file.async("uint8array");
+    cleaned.file(path.slice(prefix.length), content);
+  }
+  return cleaned;
+}
+
+/**
  * Import entity data from a zip file.
  *
  * Imports Psycheros data directly, and sends entity-core data
@@ -477,7 +540,8 @@ export async function importEntityData(
     "MB",
   );
   try {
-    const zip = await JSZip.loadAsync(zipData);
+    const rawZip = await JSZip.loadAsync(zipData);
+    const zip = await unwrapSingletonFolder(rawZip);
     console.log(
       "[entity-data] Zip parsed, file count:",
       Object.keys(zip.files).length,

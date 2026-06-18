@@ -98,6 +98,7 @@ import {
   handleChat,
   handleChatFragment,
   handleChatRetry,
+  handleChatStop,
   handleClearConversationContext,
   handleConnectionsButtplugFragment,
   handleConnectionsDiscordFragment,
@@ -1840,6 +1841,12 @@ export class Server {
     // POST /api/chat/retry - Retry a failed turn without re-persisting user message
     if (method === "POST" && path === "/api/chat/retry") {
       return await handleChatRetry(ctx, request);
+    }
+
+    // POST /api/chat/stop - Mark in-flight turn as user-stopped so cancel()
+    // can distinguish stop from network disconnect
+    if (method === "POST" && path === "/api/chat/stop") {
+      return await handleChatStop(ctx, request);
     }
 
     // POST /api/chat - Stream chat response

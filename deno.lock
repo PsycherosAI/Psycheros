@@ -24,6 +24,7 @@
     "npm:jszip@3": "3.10.1",
     "npm:mammoth@^1.8.0": "1.12.0",
     "npm:marked@15": "15.0.12",
+    "npm:mpg123-decoder@^1.0.3": "1.0.3",
     "npm:pdf-parse@^1.1.1": "1.1.4",
     "npm:sanitize-html@2": "2.17.4",
     "npm:web-push@^3.6.0": "3.6.7",
@@ -103,6 +104,9 @@
       "dependencies": [
         "tslib"
       ]
+    },
+    "@eshaz/web-worker@1.2.2": {
+      "integrity": "sha512-WxXiHFmD9u/owrzempiDlBB1ZYqiLnm9s6aPc8AlFQalq2tKmqdmMr9GXOupDgzXtqnBipj8Un0gkIm7Sjf8mw=="
     },
     "@hono/node-server@1.19.11_hono@4.12.7": {
       "integrity": "sha512-dr8/3zEaB+p0D2n/IUrlPF1HZm586qgJNXK1a9fhg/PzdtkK7Ksd5l312tJX2yBuALqDYBlG20QEbayqPyxn+g==",
@@ -309,6 +313,13 @@
       "integrity": "sha512-jp2P3tQMSxWugkCUKLRPVUpGaL5MVFwF8RDuSRztfwgN1wmqJeMSbKlnEtQqU8UrhTmzEmZdu2I6v2dpp7XIxw==",
       "dependencies": [
         "undici-types"
+      ]
+    },
+    "@wasm-audio-decoders/common@9.0.7": {
+      "integrity": "sha512-WRaUuWSKV7pkttBygml/a6dIEpatq2nnZGFIoPTc5yPLkxL6Wk4YaslPM98OPQvWacvNZ+Py9xROGDtrFBDzag==",
+      "dependencies": [
+        "@eshaz/web-worker",
+        "simple-yenc"
       ]
     },
     "@xmldom/xmldom@0.8.13": {
@@ -880,6 +891,12 @@
         "minipass"
       ]
     },
+    "mpg123-decoder@1.0.3": {
+      "integrity": "sha512-+fjxnWigodWJm3+4pndi+KUg9TBojgn31DPk85zEsim7C6s0X5Ztc/hQYdytXkwuGXH+aB0/aEkG40Emukv6oQ==",
+      "dependencies": [
+        "@wasm-audio-decoders/common"
+      ]
+    },
     "ms@2.1.3": {
       "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="
     },
@@ -1186,6 +1203,9 @@
         "is-arrayish"
       ]
     },
+    "simple-yenc@1.0.4": {
+      "integrity": "sha512-5gvxpSd79e9a3V4QDYUqnqxeD4HGlhCakVpb6gMnDD7lexJggSBJRBO5h52y/iJrdXRilX9UCuDaIJhSWm5OWw=="
+    },
     "source-map-js@1.2.1": {
       "integrity": "sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA=="
     },
@@ -1337,6 +1357,7 @@
           "npm:emojilib@3",
           "npm:mammoth@^1.8.0",
           "npm:marked@15",
+          "npm:mpg123-decoder@^1.0.3",
           "npm:pdf-parse@^1.1.1",
           "npm:sanitize-html@2",
           "npm:web-push@^3.6.0",

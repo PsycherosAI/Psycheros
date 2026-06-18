@@ -80,8 +80,37 @@
 }
 
 /* ========================================================================== */
-/* Waveform canvas                                                          */
+/* Transcript blurb — shows latest exchange ("You: ..." / "Entity: ...")     */
 /* ========================================================================== */
+
+.voice-transcript {
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: var(--bg-card, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  font-size: 0.85rem;
+  color: var(--text-secondary, #aaa);
+  overflow-wrap: break-word;
+}
+
+.voice-transcript:empty {
+  display: none;
+}
+
+.voice-transcript__speaker {
+  font-weight: 600;
+  color: var(--text-primary, #eee);
+  margin-right: 0.35rem;
+}
+
+.voice-transcript__speaker--user {
+  color: var(--c-accent, #a855f7);
+}
+
+.voice-transcript__speaker--assistant {
+  color: var(--c-accent-hover, #c084fc);
+}
 
 /* ========================================================================== */
 /* Hold-to-talk circle (shown below controls when PTT is enabled)             */

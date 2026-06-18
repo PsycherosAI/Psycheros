@@ -8869,6 +8869,7 @@ export function renderVoiceProfileEdit(
               <input type="text" id="tts-custom-base-url" class="input-field llm-input" value="${
     tts?.provider === "custom" ? escapeHtml(tts.custom?.baseUrl || "") : ""
   }" placeholder="http://localhost:8000/v1">
+              <span class="field-hint">OpenAI-compatible server URL. Psycheros calls <code>&lt;this&gt;/audio/speech</code>. Check your TTS server's startup log for the port (common defaults: 5000, 8000, 8005, 7851). Add <code>/v1</code> if the server prefixes its routes; try without if you get a 404.</span>
             </div>
             <div class="llm-field">
               <label for="tts-custom-api-key">API Key</label>
@@ -9002,6 +9003,7 @@ export function renderVoiceProfileEdit(
               <input type="text" id="stt-custom-base-url" class="input-field llm-input" value="${
     stt?.provider === "custom" ? escapeHtml(stt.custom?.baseUrl || "") : ""
   }" placeholder="http://localhost:8000/v1">
+              <span class="field-hint">OpenAI-compatible server URL. Psycheros calls <code>&lt;this&gt;/audio/transcriptions</code>. Check your STT server's startup log for the port (common defaults: 5000, 8000, 8005, 7851). Add <code>/v1</code> if the server prefixes its routes; try without if you get a 404.</span>
             </div>
             <div class="llm-field">
               <label for="stt-custom-api-key">API Key</label>
@@ -9205,6 +9207,8 @@ export function renderVoiceCallView(
       <span id="voice-status-text">Connecting...</span>
       <button class="btn btn--ghost" id="test-tts-btn" onclick="testTTSConnection()" style="margin-left: auto; font-size: var(--text-xs);">Test TTS</button>
     </div>
+
+    <div class="voice-transcript" id="voice-transcript" aria-live="polite"></div>
 
     <div class="voice-text-input-area" id="voice-text-input-area" style="display: none;">
       <textarea

@@ -6,6 +6,22 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-06-18
+
+### Fixed
+
+- `LLMClient.complete()` throws `NO_COMPLETION` on null or empty content instead
+  of returning null and crashing callers downstream (notably graph extraction
+  with "Cannot read properties of null (reading 'trim')").
+
+- `LLMClient.completeJSON()` strips a bare `"json\n"` prefix when no surrounding
+  backticks survive — happens when an upstream stream drop loses the opening
+  fence bytes mid-flight.
+
+- Entity import no longer fails on wrapped export zips. When a Windows "Send to
+  → Compressed folder" workflow or cloud-sync tool nests the export one level
+  deep, the importer detects and flattens the wrapper before processing.
+
 ## [0.4.1] - 2026-06-17
 
 ### Fixed
@@ -253,6 +269,7 @@ All notable changes to entity-core are documented here. The format follows
 - Knowledge graph (people, places, relationships) backed by SQLite + sqlite-vec.
 - Snapshot system: pre-destructive-operation snapshots for recovery.
 
+[0.4.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.2
 [0.4.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.1
 [0.4.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.0
 [0.3.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.3.6

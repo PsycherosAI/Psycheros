@@ -110,6 +110,49 @@ handle legacy data and LLM parrots that slip through.
   both call sites in sync when touching TTS auth: `streamElevenLabs` in
   `voice/tts.ts` (live pipeline) and `callTTS` in `server/routes.ts` (Test TTS
   button + keep-alive scheduler).
+- **Streamed PCM chunks must be byte-aligned before Int16 playback.** HTTP
+  framing can split a 2-byte Int16 sample across two chunks; if the client
+  treats each chunk independently, `new Int16Array(oddByteLengthBuffer)` throws
+  RangeError and every subsequent sample plays as static ("TV losing signal").
+  The OpenAI path had this fixed inline (`leftover` carry in
+  `streamOpenAICompatible`); ElevenLabs and MiniMax were missing it and would
+  static intermittently on Mac especially. `alignChunks()` in `voice/tts.ts` is
+  the shared helper — apply it to any new TTS provider's raw byte stream. The
+  browser side (`queueAudioFrame` in `web/js/voice.js`) also carries odd bytes
+  across WebSocket frames via `pendingBytes` as defense-in-depth. Reset on
+  cleanup AND on idle-when-playback-empty (mid-sentence aborts can leave a stale
+  byte).
+- **Test TTS plays a different format than live voice.** `callTTS` in
+  `server/routes.ts` deliberately requests default-format audio (MP3 for
+  ElevenLabs, MiniMax, OpenAI) so the browser can decode a single blob — fine
+  for a one-shot button click. Live voice uses raw PCM (16kHz Int16) for
+  streaming latency. So "Test TTS works but live voice sounds like static" is
+  the signature of a streaming-PCM alignment bug, not a provider-config bug.
+- **Mic access requires a secure origin.** Browsers silently refuse
+  `getUserMedia` on `http://<lan-ip>:port` — no prompt, no error, just denial.
+  Users on Mac hitting Psycheros from another machine over plain HTTP will see
+  "mic not asking for permission" because the browser won't even prompt. Three
+  valid contexts: `http://localhost:3000`, any `https://` URL, or the Tauri
+  desktop app (which uses `http://tauri.localhost` internally). The client
+  (`setupAudioCapture` in `web/js/voice.js`) detects `!window.isSecureContext`
+  and shows an actionable toast — don't strip that check.
+- **Tauri macOS desktop needs `NSMicrophoneUsageDescription`** in
+  `packages/launcher-v2/src-tauri/Info.plist` (auto-discovered by Tauri 2).
+  Without it, macOS won't even prompt the user for mic access — the app silently
+  can't capture audio. Windows/Linux Tauri don't need an analog; WebView2 treats
+  `tauri.localhost` as secure and OS mic privacy is user-level.
+- **Custom OpenAI-compatible TTS servers may return MP3 or WAV, not PCM.** The
+  OpenAI TTS API supports `response_format: "pcm"` (raw 24kHz Int16), but
+  third-party servers (PocketTTS, Kokoro, etc.) often ignore the parameter and
+  return MP3 by default — played as raw PCM that's the "TV losing signal" static
+  again. `streamOpenAICompatible` in `voice/tts.ts` now sniffs the first chunk's
+  magic bytes + Content-Type and switches paths: WAV is parsed inline (44-byte
+  header walk, no new dep); MP3 is decoded via `mpg123-decoder` (WASM, libmpg123
+  reference decoder, ~77 KB). Detection logs to the console as "Custom server
+  returned mp3 (requested pcm) — decoding transparently." Raw PCM stays on the
+  low-latency streaming path. The user shouldn't need to write a FastAPI
+  translation layer between their TTS server and Psycheros — that was the
+  original bug.
 - **Multi-device lock.** One voice session per conversation. Second client
   trying to start voice on the same conversation is rejected.
 - **Pulse queuing.** Pulses that fire during a voice call are queued and drained

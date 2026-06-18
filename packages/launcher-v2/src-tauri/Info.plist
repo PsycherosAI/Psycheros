@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Tauri 2 auto-discovers this file next to tauri.conf.json and merges it
+    with the generated Info.plist. These keys are required for the browser
+    webview's getUserMedia() call to surface a macOS permission prompt —
+    without NSMicrophoneUsageDescription, macOS refuses to even ASK the
+    user, so Psycheros voice chat silently can't capture audio.
+
+    On Windows/Linux Tauri builds, this file is ignored.
+  -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Psycheros uses the microphone for voice chat with the entity.</string>
+  <key>NSAudioInputUsageDescription</key>
+  <string>Psycheros uses audio input for voice chat with the entity.</string>
+</dict>
+</plist>

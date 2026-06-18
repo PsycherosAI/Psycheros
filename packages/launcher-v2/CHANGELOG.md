@@ -7,6 +7,19 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.17] - 2026-06-18
+
+### Fixed
+
+- **macOS desktop app now prompts for microphone access.** The Tauri bundle had
+  no `NSMicrophoneUsageDescription` in its Info.plist, so macOS refused to even
+  ask the user for mic permission — voice chat silently failed in the desktop
+  app on Mac. Added `src-tauri/Info.plist` with the required usage descriptions
+  (`NSMicrophoneUsageDescription` + `NSAudioInputUsageDescription`); Tauri 2
+  auto-discovers and merges it with the generated Info.plist. Windows/Linux
+  unaffected — WebView2 treats `tauri.localhost` as a secure context and OS mic
+  privacy is user-level.
+
 ## [0.2.16] - 2026-06-04
 
 ### Fixed

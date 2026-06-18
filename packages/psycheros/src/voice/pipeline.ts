@@ -378,7 +378,11 @@ export class WalkieTalkieSession {
       });
 
       for await (const event of stream) {
-        if (signal?.aborted) break;
+        // Drain the generator even after disconnect so post-yield
+        // persistence (tool results) still runs. Breaking would skip
+        // the db.addMessage after a tool_result yield, orphaning the
+        // tool call — same bug that affected the chat handlers.
+        if (signal?.aborted) continue;
         // Route stream events by type. Content feeds the TTS pipeline;
         // tool_call / tool_result drive the tool toast + chime in the
         // browser; other event types (metrics, context snapshots,
@@ -407,14 +411,16 @@ export class WalkieTalkieSession {
         const piece = event.content;
         fullResponse += piece;
         sentenceBuffer += piece;
+        // Re-check signal before any TTS call — don't synthesize audio
+        // for a disconnected client. fullResponse still accumulates
+        // (cheap) but is discarded post-loop on abort.
+        if (signal?.aborted) continue;
         // Flush at sentence boundaries or when buffer gets large
         const lastChar = piece[piece.length - 1];
         if (lastChar && SENTENCE_BOUNDARY.test(lastChar)) {
           await flushSentence();
-          if (signal?.aborted) break;
         } else if (sentenceBuffer.length >= MAX_SENTENCE_CHARS) {
           await flushSentence();
-          if (signal?.aborted) break;
         }
       }
       // Flush any remaining buffered text

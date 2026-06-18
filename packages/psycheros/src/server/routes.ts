@@ -1140,6 +1140,79 @@ interface RetryChatRequestBody {
  * @param request - HTTP Request with body { conversationId: string, message: string }
  * @returns HTTP Response with SSE stream
  */
+// -----------------------------------------------------------------------------
+// Stop-requested registry
+// -----------------------------------------------------------------------------
+// The Stop button needs different semantics from a network disconnect: stop
+// must actually halt the turn (no further persistence, no further tool calls)
+// to limit cost during glitched generations and to interrupt tool misuse.
+// Network disconnect must drain the generator so tool results persist and
+// don't orphan.
+//
+// The client differentiates by POSTing to /api/chat/stop before aborting the
+// SSE connection. The chat handler's stream.cancel() consumes the flag and
+// uses it to pick an abort reason. The for-await then branches on the reason.
+const stopRequestedByConversation = new Set<string>();
+
+/** Mark a conversation's in-flight turn as user-stopped. */
+function requestStop(conversationId: string): void {
+  stopRequestedByConversation.add(conversationId);
+}
+
+/**
+ * Consume (clear-and-return) any pending stop request for a conversation.
+ * Returns true if a stop was requested and not yet consumed.
+ */
+function consumeStopRequest(conversationId: string): boolean {
+  return stopRequestedByConversation.delete(conversationId);
+}
+
+/** Reason name used when the user explicitly clicked Stop. */
+const STOP_REASON_NAME = "StopRequested";
+
+/**
+ * Handle POST /api/chat/stop - Mark a conversation's in-flight turn as
+ * user-stopped so the chat handler's cancel() can distinguish stop from
+ * network disconnect.
+ */
+export async function handleChatStop(
+  ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
+  let body: { conversationId?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: 400,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  }
+  if (!body.conversationId || typeof body.conversationId !== "string") {
+    return new Response(
+      JSON.stringify({ error: "Missing or invalid conversationId" }),
+      {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  }
+  requestStop(body.conversationId);
+  void ctx; // route signature parity with other handlers
+  return new Response(JSON.stringify({ success: true }), {
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
 export async function handleChat(
   ctx: RouteContext,
   request: Request,
@@ -1187,7 +1260,10 @@ export async function handleChat(
   const existingMessages = ctx.db.getMessages(body.conversationId);
   const isFirstMessage = existingMessages.length === 0 && !conversation.title;
 
-  // Create an AbortController to handle client disconnect
+  // Create an AbortController to handle client disconnect.
+  // Clear any stale stop-requested flag from a previous turn that wasn't
+  // consumed (e.g., POST /api/chat/stop arrived after the turn completed).
+  consumeStopRequest(body.conversationId);
   const abortController = new AbortController();
   const { signal } = abortController;
 
@@ -1275,15 +1351,20 @@ export async function handleChat(
           },
         );
 
-        // Process the message and stream chunks
+        // Process the message and stream chunks. After client disconnect we
+        // drain the generator so post-yield persistence (tool results) still
+        // runs — breaking would orphan tool calls. The exception is an
+        // explicit user Stop (signal.reason.name === "StopRequested"), which
+        // must halt the turn to limit cost during glitched generations and
+        // interrupt tool misuse.
         for await (
           const chunk of turn.process(body.conversationId, userMessage, {
             deviceType: body.deviceType,
           })
         ) {
           if (signal.aborted) {
-            console.log("Client disconnected, stopping stream");
-            break;
+            if (signal.reason?.name === STOP_REASON_NAME) break;
+            continue;
           }
           controller.enqueue(convertToSSEEvent(chunk));
         }
@@ -1360,8 +1441,18 @@ export async function handleChat(
       }
     },
     cancel() {
-      // Called when the client disconnects or the stream is cancelled
-      abortController.abort();
+      // Called when the client disconnects or the stream is cancelled.
+      // If POST /api/chat/stop marked this conversation, the disconnect is a
+      // user-initiated Stop — set the reason so the for-await can break
+      // instead of draining.
+      const wasStopRequested = consumeStopRequest(body.conversationId);
+      if (wasStopRequested) {
+        abortController.abort(
+          new DOMException("User requested stop", STOP_REASON_NAME),
+        );
+      } else {
+        abortController.abort();
+      }
     },
   });
 
@@ -1436,6 +1527,8 @@ export async function handleChatRetry(
 
   const userMessage = lastUserMessage.content;
 
+  // Same stop-vs-disconnect differentiation as the chat handler.
+  consumeStopRequest(body.conversationId);
   const abortController = new AbortController();
   const { signal } = abortController;
 
@@ -1467,13 +1560,17 @@ export async function handleChatRetry(
           },
         );
 
-        // Process with retry mode: skip user message persistence
+        // Process with retry mode: skip user message persistence.
+        // Same drain-vs-stop branching as the chat handler.
         for await (
           const chunk of turn.process(body.conversationId, userMessage, {
             retry: true,
           })
         ) {
-          if (signal.aborted) break;
+          if (signal.aborted) {
+            if (signal.reason?.name === STOP_REASON_NAME) break;
+            continue;
+          }
           controller.enqueue(convertToSSEEvent(chunk));
         }
       } catch (error) {
@@ -1532,7 +1629,14 @@ export async function handleChatRetry(
       }
     },
     cancel() {
-      abortController.abort();
+      const wasStopRequested = consumeStopRequest(body.conversationId);
+      if (wasStopRequested) {
+        abortController.abort(
+          new DOMException("User requested stop", STOP_REASON_NAME),
+        );
+      } else {
+        abortController.abort();
+      }
     },
   });
 

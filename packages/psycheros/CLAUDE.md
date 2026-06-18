@@ -99,8 +99,10 @@ Browser (Web Speech API or PCM capture)
   (VOICE CHAT MODE note + per-profile custom instructions),
   `messagePrefix: "[Voice Chat] "` (prepended to persisted messages so voice
   attribution is visible in history; parrot-emitted copies stripped before
-  persist, same pattern as `<t>` tag handling), `disableTools: true` (voice tool
-  support is future work).
+  persist, same pattern as `<t>` tag handling). Tools are enabled for voice
+  turns (since `caf23a8`, June 2026) — the entity can call any tool during a
+  voice call. Pass `disableTools: true` explicitly to suppress tools for a
+  specific voice turn.
 - **Pulse queuing during voice** — Pulses that fire during a voice call are
   queued and batched at the next conversational break.
 - **TTS pronunciation + STT corrections** — both are per-profile string

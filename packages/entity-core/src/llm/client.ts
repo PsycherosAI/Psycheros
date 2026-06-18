@@ -139,7 +139,15 @@ export class LLMClient {
       throw new LLMError("No completion returned", "NO_COMPLETION");
     }
 
-    return data.choices[0].message.content;
+    const content = data.choices[0].message.content;
+    if (content === null || content === undefined || content === "") {
+      throw new LLMError(
+        "Empty completion content (upstream returned null/empty — likely a dropped stream)",
+        "NO_COMPLETION",
+      );
+    }
+
+    return content;
   }
 
   /**
@@ -171,6 +179,15 @@ export class LLMClient {
         /\n?```\s*$/,
         "",
       ).trim();
+    }
+
+    // Final fallback: a bare "json\n" prefix with no surrounding backticks
+    // at all. This shows up when an upstream stream drop loses the opening
+    // fence bytes mid-flight — the model produced ```json\n{... but only
+    // json\n{... survived. Require a newline so we don't match prose like
+    // "json is...".
+    if (/^json\s*\n/.test(jsonStr)) {
+      jsonStr = jsonStr.replace(/^json\s*\n/, "").trim();
     }
 
     try {

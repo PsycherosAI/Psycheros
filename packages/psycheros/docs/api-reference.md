@@ -6,11 +6,21 @@ Two SSE channels serve different purposes:
 
 ### Per-Request Stream (`POST /api/chat`)
 
-Opened per chat request, closes when the response is complete. If the user
-switches conversations mid-stream, the client stops rendering but continues
-draining the stream so the server finishes processing and persists the full
-response. The explicit Stop button (double-tap) still aborts and prevents
-persistence.
+Opened per chat request, closes when the response is complete. Disconnect
+handling depends on **why** the stream was cancelled:
+
+- **Network drop / tab close / conversation switch** — the server keeps draining
+  the generator to completion, just stops forwarding chunks to the gone client.
+  This guarantees post-yield persistence (notably tool results) still runs,
+  preventing orphaned tool_calls that historically caused infinite re-issuing
+  loops on the next turn.
+- **Explicit Stop button (double-tap)** — the client POSTs to `/api/chat/stop`
+  first, then aborts. The chat handler's `cancel()` consumes that flag and
+  aborts with `reason: { name: "StopRequested" }`, which the for-await branches
+  on to `break` instead of draining. The turn halts: further persistence and
+  tool execution are skipped. This is required to limit cost during glitched
+  generations and to interrupt tool misuse (e.g., the entity running wild with
+  `shell`).
 
 Event flow:
 `message_id (user) → context → thinking → content → tool_call → tool_result → image_generated → metrics → done → message_id (assistant)`
@@ -22,11 +32,21 @@ without a page refresh.
 
 ### Retry Stream (`POST /api/chat/retry`)
 
-Same SSE format as `POST /api/chat`, but re-attempts the last user message
-without re-persisting it. Used by the Retry button shown when a turn fails with
-no assistant content. The server retrieves the last user message from the
-database and passes `{ retry: true }` to the entity loop, which skips user
-message insertion and avoids double-appending the message to the LLM context.
+Same SSE format and stop/disconnect semantics as `POST /api/chat`. Re-attempts
+the last user message without re-persisting it. Used by the Retry button shown
+when a turn fails with no assistant content. The server retrieves the last user
+message from the database and passes `{ retry: true }` to the entity loop, which
+skips user message insertion and avoids double-appending the message to the LLM
+context.
+
+### Stop Endpoint (`POST /api/chat/stop`)
+
+Body: `{ conversationId: string }`. Marks the conversation's in-flight turn as
+user-stopped. The next `cancel()` on the per-request stream consumes the flag
+and aborts with `reason.name === "StopRequested"` so the for-await breaks
+instead of draining. The flag is consumed on next turn start if it wasn't (e.g.,
+the POST arrived after the turn completed), so stale flags don't affect future
+turns.
 
 ### Persistent Channel (`GET /api/events`)
 

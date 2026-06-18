@@ -1045,11 +1045,26 @@ function requestStopGeneration() {
 }
 
 /**
- * Stop the current generation by aborting the request.
- * This prevents the partial assistant message from being persisted.
+ * Stop the current generation. Posts to /api/chat/stop first so the server's
+ * cancel() can mark the abort as a user-initiated Stop (not a network drop),
+ * then aborts the SSE stream. The server uses the marker to break instead of
+ * drain — halting further persistence and tool execution.
  */
 function stopGeneration() {
   if (currentAbortController && isStreaming) {
+    const convId = streamingConversationId ?? currentConversationId;
+    if (convId) {
+      // Fire-and-forget; the server may receive this after the abort lands,
+      // in which case the flag is consumed on the next turn's start.
+      fetch('/api/chat/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: convId }),
+        keepalive: true,
+      }).catch((err) => {
+        console.warn('[Stop] Failed to notify server, aborting anyway:', err);
+      });
+    }
     currentAbortController.abort();
     currentAbortController = null;
     stopConfirmed = false;
