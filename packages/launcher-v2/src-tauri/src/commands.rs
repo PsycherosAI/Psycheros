@@ -2242,79 +2242,12 @@ pub fn install_xcode_clt() -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// Microphone permission (Tauri/wry macOS workaround)
+// Microphone permission — moved to `mic_plugin.rs`.
+//
+// Tauri 2's ACL only resolves plugin-namespaced commands for remote origins
+// (http://localhost:3000), so the command lives in a tiny plugin now. See
+// `mic_plugin.rs` for the rationale + the AVCaptureDevice pre-grant code.
 // ---------------------------------------------------------------------------
-
-/// Pre-request macOS microphone permission before the webview's
-/// `getUserMedia` call. Workaround for a known Tauri 2 / wry bug where
-/// WKWebView's media-capture delegate isn't wired up, so `getUserMedia`
-/// silently fails with no system prompt — the app never appears in
-/// System Settings → Microphone. Calling `AVCaptureDevice.requestAccess`
-/// directly writes the same TCC entry the prompt would, so WKWebView's
-/// internal TCC check passes without needing its (broken) delegate path.
-///
-/// Voice chat invokes this from `voice.js` only when it detects it's
-/// running inside Tauri (`window.__TAURI__` present). The JS branch is
-/// a no-op in browser mode.
-#[tauri::command]
-pub async fn request_mic_permission() -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(request_mic_permission_blocking)
-        .await
-        .map_err(|e| format!("join error: {e}"))?
-}
-
-#[cfg(target_os = "macos")]
-fn request_mic_permission_blocking() -> Result<bool, String> {
-    use std::sync::mpsc;
-    use std::time::Duration;
-
-    use block2::RcBlock;
-    use objc2::runtime::Bool;
-    use objc2::{class, msg_send};
-    use objc2_foundation::NSString;
-
-    let (tx, rx) = mpsc::sync_channel::<bool>(1);
-
-    // The completion handler is `void(^)(BOOL granted)`. RcBlock owns
-    // the block on the heap and keeps the captured `tx` alive until the
-    // handler runs (which may be much later — user takes their time
-    // answering the prompt).
-    let handler = RcBlock::new(move |granted: Bool| {
-        let _ = tx.send(granted.as_bool());
-    });
-
-    // AVMediaTypeAudio is an NSString whose value is the four-char-code
-    // "soun". Constructing it directly avoids pulling in
-    // objc2-av-foundation just to look up one constant.
-    let media_type = NSString::from_str("soun");
-
-    // requestAccessForMediaType:completionHandler: is asynchronous; the
-    // completion handler fires on an internal queue whenever the user
-    // resolves the prompt (or immediately if they've already granted).
-    // We block on the channel below.
-    unsafe {
-        let cls = class!(AVCaptureDevice);
-        let _: () = msg_send![
-            cls,
-            requestAccessForMediaType: &*media_type,
-            completionHandler: &*handler,
-        ];
-    }
-
-    // 60s ceiling so a user who walks away from the prompt doesn't
-    // hold the voice-call click open forever. macOS keeps the prompt
-    // open indefinitely until answered, but we'd rather time out and
-    // surface a "Mic permission timed out" error than hang.
-    rx.recv_timeout(Duration::from_secs(60))
-        .map_err(|e| format!("mic permission response timeout: {e}"))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn request_mic_permission_blocking() -> Result<bool, String> {
-    // Windows WebView2 and Linux webkit2gtk handle getUserMedia via the
-    // standard browser permission flow; no pre-request needed.
-    Ok(true)
-}
 
 /// Target triple of the currently-running launcher binary. Used to pick
 /// the right per-triple sidecar Deno from `Resources/`. Lives above

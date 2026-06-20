@@ -22,6 +22,7 @@ pub mod config;
 pub mod daemon;
 pub mod http;
 pub mod macos_media;
+pub mod mic_plugin;
 pub mod paths;
 pub mod proc;
 pub mod supervisor;
@@ -236,7 +237,12 @@ pub fn run() {
         // the keystroke before the menu accelerator chain sees it.
         // The handler is gated on window focus so we don't react when
         // the user is in a different app.
-        .plugin(register_preferences_shortcut_plugin());
+        .plugin(register_preferences_shortcut_plugin())
+        // Mic permission plugin. Lives outside the main `commands.rs`
+        // surface because Tauri 2's ACL only resolves plugin-namespaced
+        // commands for remote origins (http://localhost:3000 from the
+        // daemon-loaded voice UI). See `mic_plugin.rs`.
+        .plugin(crate::mic_plugin::init());
 
     // WebDriver server for E2E testing — opt-in via the `webdriver`
     // cargo feature, off in release builds. When enabled, exposes a
@@ -301,7 +307,6 @@ pub fn run() {
             commands::rollback_to_snapshot,
             commands::get_tahoe_compat,
             commands::set_tahoe_compat,
-            commands::request_mic_permission,
         ])
         .on_window_event(|window, event| {
             // Closing the manager window doesn't unconditionally quit

@@ -7,6 +7,19 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.20] - 2026-06-20
+
+### Fixed
+
+- Microphone permission command now resolves from the psycheros web UI. Tauri
+  2's ACL only honors plugin-namespaced commands for remote origins, so the bare
+  `request_mic_permission` was silently dropped — extracted into a small `mic`
+  plugin; capability now references `mic:allow-request-mic-permission`.
+- `macos_media.rs` no longer writes the hallucinated private KVC selectors
+  (`_allowedMediaCapture` etc.) that wry never actually used. It is now a
+  read-only diagnostic logging WKWebView class, pointer retain, and selector
+  probes.
+
 ## [0.2.19] - 2026-06-20
 
 ### Fixed

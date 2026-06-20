@@ -13,6 +13,6 @@
   },
   "permissions": [
     "core:default",
-    "allow-request-mic-permission"
+    "mic:allow-request-mic-permission"
   ]
 }

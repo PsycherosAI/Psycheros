@@ -6,6 +6,21 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-06-20
+
+### Fixed
+
+- Voice chat mic-permission call now targets the launcher's plugin-namespaced
+  command (`plugin:mic|request_mic_permission`), matching the launcher-v2 0.2.20
+  mic plugin. The old bare command name was silently rejected by Tauri 2's ACL
+  from the localhost origin.
+
+### Changed
+
+- Voice-chat diagnostic panel now distinguishes "mediaDevices surface missing
+  entirely" from "surface present but getUserMedia gated," and enumerates
+  navigator media/audio prototype keys — narrows the next troubleshooting step.
+
 ## [0.8.7] - 2026-06-20
 
 ### Fixed
@@ -864,6 +879,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 [0.1.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.2
 [0.1.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.1
 [0.1.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.0
+[0.8.8]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.8
 [0.8.7]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.7
 [0.8.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.6
 [0.8.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.5

@@ -165,7 +165,7 @@ async function openVoiceChat(conversationId) {
         globalThis.appendVoiceDebug('mic-perm', 'Voice chat start — Tauri detected, calling request_mic_permission');
       }
       try {
-        const granted = await window.__TAURI__.core.invoke('request_mic_permission');
+        const granted = await window.__TAURI__.core.invoke('plugin:mic|request_mic_permission');
         if (earlyVoiceChatDebug && globalThis.appendVoiceDebug) {
           globalThis.appendVoiceDebug('mic-perm', `invoke returned: ${JSON.stringify(granted)}`);
         }

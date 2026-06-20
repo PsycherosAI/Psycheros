@@ -6006,9 +6006,9 @@ async function runVoiceChatTest() {
   appendVoiceDebug('mic-perm', `window.__TAURI__.core.invoke available: ${hasInvoke}`);
 
   if (hasInvoke) {
-    appendVoiceDebug('mic-perm', "Calling invoke('request_mic_permission')...");
+    appendVoiceDebug('mic-perm', "Calling invoke('plugin:mic|request_mic_permission')...");
     try {
-      const granted = await window.__TAURI__.core.invoke('request_mic_permission');
+      const granted = await window.__TAURI__.core.invoke('plugin:mic|request_mic_permission');
       appendVoiceDebug('mic-perm', `invoke returned: ${JSON.stringify(granted)}`);
     } catch (err) {
       const detail = err && err.message ? err.message : String(err);
@@ -6019,10 +6019,24 @@ async function runVoiceChatTest() {
   }
 
   // --- getUserMedia probe ---
-  appendVoiceDebug('mic', 'Probing navigator.mediaDevices.getUserMedia...');
-  if (!navigator.mediaDevices?.getUserMedia) {
-    appendVoiceDebug('mic', 'navigator.mediaDevices.getUserMedia NOT available');
+  // Differentiate the two failure modes so we know whether the whole
+  // mediaDevices surface is missing or just getUserMedia:
+  //   - "navigator.mediaDevices is undefined" → API surface missing entirely
+  //   - "mediaDevices present but getUserMedia undefined" → surface exists,
+  //     just the capture method is gated (different fix)
+  if (typeof navigator.mediaDevices === 'undefined') {
+    appendVoiceDebug('mic', 'navigator.mediaDevices is undefined — entire API surface missing');
+    appendVoiceDebug('mic', `navigator.mediaDevices type: ${typeof navigator.mediaDevices}`);
+    // Also enumerate any media-related navigator keys we can see.
+    const mediaKeys = Object.getOwnPropertyNames(Object.getPrototypeOf(navigator)).filter(
+      (k) => k.toLowerCase().includes('media') || k.toLowerCase().includes('audio'),
+    );
+    appendVoiceDebug('mic', `navigator prototype media/audio keys: ${mediaKeys.join(', ') || 'none'}`);
+  } else if (typeof navigator.mediaDevices.getUserMedia !== 'function') {
+    appendVoiceDebug('mic', `navigator.mediaDevices present but getUserMedia is ${typeof navigator.mediaDevices.getUserMedia} (expected function)`);
+    appendVoiceDebug('mic', `mediaDevices keys: ${Object.keys(navigator.mediaDevices).join(', ')}`);
   } else {
+    appendVoiceDebug('mic', 'Probing navigator.mediaDevices.getUserMedia...');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const tracks = stream.getTracks();

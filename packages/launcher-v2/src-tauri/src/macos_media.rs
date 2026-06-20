@@ -1,89 +1,89 @@
-//! One-shot WKWebView private-API fix for the missing `navigator.mediaDevices`
-//! surface inside the Tauri macOS webview.
+//! Diagnostic probe for WKWebView mediaDevices availability.
 //!
-//! ## Bug context
+//! ## History
 //!
-//! WKWebView does not expose `navigator.mediaDevices` (or `getUserMedia`) at
-//! all unless the host app flips several private WebKit flags on its
-//! configuration. This is the underlying cause of voice chat failing inside
-//! the Psycheros desktop app on macOS — the API surface is missing, not just
-//! the permission prompt.
+//! An earlier version of this file tried to flip private WebKit KVC keys
+//! (`_allowedMediaCapture`) and selectors (`_setRequiresUserActionForMediaCapture:`)
+//! to make `navigator.mediaDevices` appear inside the desktop webview.
+//! Research later confirmed those keys were never used by upstream wry —
+//! they were a hallucination in the original plan. The code was useless.
 //!
-//! Upstream `wry` had a fix using these private APIs. It was reverted because
-//! private API use triggers App Store rejection, and wry targets
-//! MAS-compatible builds. Psycheros ships ad-hoc signed
-//! (`signingIdentity: "-"` in `tauri.conf.json`) with no MAS distribution
-//! goal, so the same restriction does not apply. See
-//! `packages/launcher-v2/CLAUDE.md` "Traps that bite" → "WKWebView's
-//! getUserMedia..." for the full bug + workaround rationale, and
-//! `encapsulated-growing-dewdrop.md` for the implementation plan.
+//! Wry 0.55.1 (the version in our `Cargo.lock`) already auto-grants
+//! `getUserMedia` on macOS via `WryWebViewUIDelegate::request_media_capture_permission`
+//! which calls the decision handler with `WKPermissionDecision::Grant`
+//! unconditionally. So in theory `navigator.mediaDevices` should work
+//! out of the box. In practice the friend's test shows it doesn't.
 //!
-//! ## Three layers
+//! ## Current role
 //!
-//! 1. **KVC `_allowedMediaCapture = YES`** on `WKWebViewConfiguration` —
-//!    makes `navigator.mediaDevices` exist at all.
-//! 2. **`_setRequiresUserActionForMediaCapture:NO`** selector on the config
-//!    — lets `getUserMedia` run programmatically without a user gesture.
-//!    Probed via `respondsToSelector:` because the selector name has
-//!    shifted across macOS versions (older was
-//!    `_setMediaCaptureRequiresAction:`).
-//! 3. **KVC `mediaCaptureEnabled = YES`** on `WKPreferences` —
-//!    hard-enables the feature flag.
+//! This module now exists purely as a diagnostic. When the launcher
+//! starts, it logs what the WKWebView setup looks like so we can see
+//! what's happening on the friend's Mac and stop guessing. Output goes
+//! to the launcher's stderr (visible via the tray → View Logs action).
 //!
-//! Combined with the existing `request_mic_permission` TCC pre-grant (which
-//! handles macOS-level permission) and wry's existing `WKUIDelegate` (which
-//! grants the webview-level request when TCC passes), this is enough for
-//! voice chat to work identically to the browser.
+//! Read-only inspection only — no KVC writes, no selectors that mutate
+//! state.
 
 #[cfg(target_os = "macos")]
 pub fn enable_media_capture(window: &tauri::WebviewWindow) {
     use objc2::rc::Retained;
-    use objc2::runtime::Bool;
+    use objc2::runtime::AnyClass;
     use objc2::{class, msg_send, sel};
-    use objc2_foundation::{ns_string, NSNumber, NSObjectNSKeyValueCoding};
-    use objc2_web_kit::{WKPreferences, WKWebView, WKWebViewConfiguration};
+    use objc2_foundation::NSString;
+    use objc2_web_kit::WKWebView;
 
-    // with_webview on macOS hands us a PlatformWebview. Its .inner() method
-    // returns *mut c_void — the raw WKWebView pointer. Retain it for objc2's
-    // Rc tracking, use it one-shot, let it autorelease.
+    eprintln!("[macos_media] enable_media_capture starting");
+
     let _ = window.with_webview(|webview| unsafe {
+        eprintln!("[macos_media] with_webview closure fired");
+
         let wv = webview.inner();
+        eprintln!("[macos_media] raw webview pointer = {:p}", wv);
+
         let wk: Option<Retained<WKWebView>> = Retained::retain(wv as *mut WKWebView);
         let wk = match wk {
-            Some(wk) => wk,
-            None => return,
+            Some(wk) => {
+                eprintln!("[macos_media] retained as WKWebView OK");
+                wk
+            }
+            None => {
+                eprintln!(
+                    "[macos_media] FAILED to retain as WKWebView — not actually a WKWebView pointer?"
+                );
+                return;
+            }
         };
-        let config: Retained<WKWebViewConfiguration> = wk.configuration();
 
-        // Layer 1: expose the navigator.mediaDevices surface. Without this
-        // key the JS bindings for mediaDevices aren't even compiled in.
-        let yes = NSNumber::numberWithBool(true);
-        config.setValue_forKey(Some(&yes), ns_string!("_allowedMediaCapture"));
+        // Log the actual class name — catches the case where wry wraps
+        // WKWebView in a custom subclass we didn't know about.
+        let cls: Retained<AnyClass> = msg_send![&wk, class];
+        let cls_name: Retained<NSString> = msg_send![&cls, description];
+        eprintln!("[macos_media] webview class = {}", cls_name.to_string());
 
-        // Layer 2: programmatic getUserMedia without a user gesture. Probe
-        // before sending — selector name has shifted across macOS versions.
-        let cls = class!(WKWebViewConfiguration);
-        let responds: Bool = msg_send![
-            cls,
-            respondsToSelector: sel!(_setRequiresUserActionForMediaCapture:)
+        // Probe whether the config responds to the selectors we previously
+        // tried to call. If these come back false, the selectors don't exist
+        // on this macOS version — which would explain why our earlier
+        // KVC approach did nothing.
+        let config_cls = class!(WKWebViewConfiguration);
+        let probes = [
+            ("_setRequiresUserActionForMediaCapture:", sel!(_setRequiresUserActionForMediaCapture:)),
+            ("_setMediaCaptureRequiresAction:", sel!(_setMediaCaptureRequiresAction:)),
         ];
-        if responds.as_bool() {
-            let _: () = msg_send![
-                &config,
-                _setRequiresUserActionForMediaCapture: Bool::new(false),
-            ];
+        for (name, selector) in probes {
+            let responds: bool = msg_send![config_cls, respondsToSelector: selector];
+            eprintln!(
+                "[macos_media] WKWebViewConfiguration responds to {name}: {responds}"
+            );
         }
 
-        // Layer 3: feature flag on preferences.
-        let prefs: Retained<WKPreferences> = config.preferences();
-        prefs.setValue_forKey(Some(&yes), ns_string!("mediaCaptureEnabled"));
+        eprintln!("[macos_media] diagnostic complete");
     });
+
+    eprintln!("[macos_media] enable_media_capture finished");
 }
 
 #[cfg(not(target_os = "macos"))]
 pub fn enable_media_capture(_window: &tauri::WebviewWindow) {
-    // WebView2 (Windows) and webkit2gtk (Linux) handle mediaDevices via the
-    // normal browser permission flow — no private-API gymnastics required.
-    // This function exists as a no-op so the lib.rs setup hook can call it
-    // unconditionally without #[cfg] noise at the call site.
+    // Non-Apple platforms: no-op. WebView2 / webkit2gtk handle mediaDevices
+    // via the standard browser permission flow.
 }
