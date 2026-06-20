@@ -43,13 +43,14 @@ pub fn enable_media_capture(window: &tauri::WebviewWindow) {
     use objc2_foundation::{ns_string, NSNumber, NSObjectNSKeyValueCoding};
     use objc2_web_kit::{WKPreferences, WKWebView, WKWebViewConfiguration};
 
-    // with_webview on macOS hands us the raw WKWebView pointer. Caveat
+    // with_webview on macOS hands us a PlatformWebview whose `.webview` field
+    // is the raw WKWebView pointer (*mut c_void). Caveat
     // (tauri-apps/tauri#15210): the closure over-retains the webview on
     // macOS — fine for a one-shot selector call, just don't store the
     // pointer past the closure.
-    let _ = window.with_webview(|wv: *mut std::ffi::c_void| unsafe {
-        // Retain the WKWebView so objc2's Rc tracking applies. The pointer
-        // comes from wry as a +0 reference; Retained::retain promotes it.
+    let _ = window.with_webview(|webview| unsafe {
+        // PlatformWebview.webview is *mut c_void → cast to WKWebView.
+        let wv = webview.webview;
         let wk: Option<Retained<WKWebView>> = Retained::retain(wv as *mut WKWebView);
         let wk = match wk {
             Some(wk) => wk,
