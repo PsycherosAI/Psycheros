@@ -8577,7 +8577,9 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
         <p class="settings-desc">Voice chat profiles &mdash; ${count} profile${plural}</p>
       </div>
     </div>
-    <div style="margin-top: var(--sp-3);">
+  </div>
+  <div class="settings-content" id="settings-content">
+    <div style="margin-bottom: var(--sp-3);">
       <label class="toggle-label">
         <input type="checkbox" id="voice-enabled" role="switch" aria-label="Enable voice chat" ${
     settings.enabled ? "checked" : ""
@@ -8587,8 +8589,11 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
       </label>
       <span id="voice-status-msg" style="margin-left: var(--sp-2); font-size: var(--text-xs);"></span>
     </div>
-    ${/* Hold to Talk key bindings section */ ""}
-    <div class="settings-section" style="margin-top: var(--sp-4); padding: var(--sp-4); border: 1px solid var(--c-border); border-radius: 8px;">
+    <div class="settings-hub-grid">
+      ${profileCards}
+      ${addCard}
+    </div>
+    <div class="settings-section" style="margin-top: var(--sp-5); padding: var(--sp-4); border: 1px solid var(--c-border); border-radius: 8px;">
       <div style="margin-bottom: var(--sp-2);">
         <strong style="font-size: var(--font-size-sm);">Hold to Talk</strong>
         <p style="font-size: var(--text-xs); color: var(--c-fg-muted); margin: var(--sp-1) 0 0;">
@@ -8614,11 +8619,32 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
         </div>
       </div>
     </div>
-  </div>
-  <div class="settings-content" id="settings-content">
-    <div class="settings-hub-grid">
-      ${profileCards}
-      ${addCard}
+    ${/* Debug section: sits below Hold to Talk; secondary utility. */ ""}
+    <div class="settings-section" style="margin-top: var(--sp-5); padding: var(--sp-4); border: 1px solid var(--c-border); border-radius: 8px;">
+      <div style="margin-bottom: var(--sp-2);">
+        <strong style="font-size: var(--font-size-sm);">Debug</strong>
+        <p style="font-size: var(--text-xs); color: var(--c-fg-muted); margin: var(--sp-1) 0 0;">
+          Diagnostic tools for voice chat. Enable the panel to capture the full pipeline (mic permission, WebSocket events, state transitions, TTS frame arrival, audio setup) &mdash; useful when asking for support or debugging audio glitches.
+        </p>
+      </div>
+      <div style="margin-bottom: var(--sp-2);">
+        <label style="display: flex; align-items: center; gap: var(--sp-2); cursor: pointer;">
+          <input type="checkbox" id="voice-chat-debug" ${
+    settings.voiceChatDebug ? "checked" : ""
+  } onchange="toggleVoiceChatDebug(this.checked)">
+          <span>Enable voice chat debug panel</span>
+        </label>
+      </div>
+      <div id="voice-chat-debug-panel" style="${
+    settings.voiceChatDebug ? "" : "display: none;"
+  }">
+        <textarea id="voice-chat-debug-log" readonly rows="8" class="input-field" style="font-family: monospace; font-size: 11px; white-space: pre; resize: vertical; width: 100%; box-sizing: border-box;" placeholder="Click 'Run test' to capture diagnostic info, or start a voice call — events will appear here."></textarea>
+        <div style="display: flex; gap: var(--sp-2); margin-top: var(--sp-2); flex-wrap: wrap;">
+          <button type="button" class="btn btn--ghost btn--sm" onclick="runVoiceChatTest()">Run test</button>
+          <button type="button" class="btn btn--ghost btn--sm" onclick="copyVoiceChatDebugLog(this)">Copy</button>
+          <button type="button" class="btn btn--ghost btn--sm" onclick="clearVoiceChatDebugLog()">Clear</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>`;
@@ -9198,6 +9224,7 @@ export function renderVoiceCallView(
   profile: VoiceProfile,
   pttEnabled: boolean,
   pttKeys: string[],
+  voiceChatDebug: boolean,
 ): string {
   const sttProvider = profile.providerSettings.stt.provider;
   return `<div class="voice-overlay" id="voice-overlay">
@@ -9263,6 +9290,7 @@ export function renderVoiceCallView(
         endOfTurnSilence: profile.endOfTurnSilence ?? 1.5,
         phraseDebounceMs: profile.phraseDebounceMs ?? 1200,
         sttDebug: profile.sttDebug ?? false,
+        voiceChatDebug: voiceChatDebug ?? false,
         sttLanguage: profile.providerSettings.stt.browser?.language ?? "",
         voiceEffect: profile.voiceEffect ?? "none",
       }),

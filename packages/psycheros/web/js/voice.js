@@ -58,6 +58,7 @@ let pttHolding = false;
 let endOfTurnSilence = 1.5;
 let phraseDebounceMs = 1200;
 let sttDebug = false;
+let voiceChatDebug = false;
 let sttLanguage = "";
 let voiceEffect = "none";
 let voiceEffectNodes = null; // { input, output } for the effect chain
@@ -65,6 +66,20 @@ let recognition = null; // SpeechRecognition instance (browser STT)
 let silenceTimer = null; // setTimeout handle for end-of-speech detection
 let silenceLevel = new Uint8Array(0); // last analyser reading
 let isRecording = false; // tracks whether we're accumulating audio
+
+// Voice chat debug helper. No-op unless voiceChatDebug is on (set from
+// the active voice profile via #voice-status-cfg). Routes to the
+// "Voice chat debug log" panel in Audio settings when present, falls
+// back to console only otherwise. Categories: mic-perm, ws, state,
+// audio, tts, stt, debug.
+function voiceDebug(category, message) {
+  if (!voiceChatDebug) return;
+  if (globalThis.appendVoiceDebug) {
+    globalThis.appendVoiceDebug(category, message);
+  } else {
+    console.log(`[voice:${category}] ${message}`);
+  }
+}
 
 const PCM_FRAME_SIZE = 640; // 20ms of 16kHz mono Int16
 const SAMPLE_RATE = 16000;
@@ -106,7 +121,10 @@ async function openVoiceChat(conversationId) {
 
   // Peek at the embedded config to learn the STT provider before mic
   // acquisition. Wrapped in a try/catch — defaults to 'browser' on error.
+  // Also peek at voiceChatDebug so the diagnostic logs below can be gated
+  // without waiting for the full config parse.
   let earlySttProvider = 'browser';
+  let earlyVoiceChatDebug = false;
   try {
     const temp = document.createElement('div');
     temp.innerHTML = loadedHtml;
@@ -114,6 +132,7 @@ async function openVoiceChat(conversationId) {
     if (cfgEl) {
       const c = JSON.parse(cfgEl.textContent);
       earlySttProvider = c.sttProvider ?? 'browser';
+      earlyVoiceChatDebug = !!c.voiceChatDebug;
     }
   } catch {}
 
@@ -140,8 +159,16 @@ async function openVoiceChat(conversationId) {
     // path. No-op on Windows/Linux; falls through cleanly when running
     // standalone in a browser.
     if (window.__TAURI__?.core?.invoke) {
+      // Diagnostic logs routed to the Voice chat debug panel in Audio
+      // settings (globalThis.appendVoiceDebug) when voiceChatDebug is on.
+      if (earlyVoiceChatDebug && globalThis.appendVoiceDebug) {
+        globalThis.appendVoiceDebug('mic-perm', 'Voice chat start — Tauri detected, calling request_mic_permission');
+      }
       try {
         const granted = await window.__TAURI__.core.invoke('request_mic_permission');
+        if (earlyVoiceChatDebug && globalThis.appendVoiceDebug) {
+          globalThis.appendVoiceDebug('mic-perm', `invoke returned: ${JSON.stringify(granted)}`);
+        }
         if (granted === false) {
           showToast('Microphone permission denied.', 'warning');
           cleanup();
@@ -149,10 +176,19 @@ async function openVoiceChat(conversationId) {
         }
       } catch (err) {
         // Older launcher without the command, capability not granted,
-        // or invoke unavailable — fall through to getUserMedia and let
-        // its error path surface the failure.
+        // or invoke unavailable — surface via debug panel if enabled,
+        // always log to console.
+        if (earlyVoiceChatDebug && globalThis.appendVoiceDebug) {
+          const detail = err && err.message ? err.message : String(err);
+          globalThis.appendVoiceDebug('mic-perm', `invoke FAILED: ${detail}`);
+        }
         console.warn('[voice] Tauri mic permission request failed:', err);
       }
+    } else if (earlyVoiceChatDebug && globalThis.appendVoiceDebug) {
+      globalThis.appendVoiceDebug(
+        'mic-perm',
+        `Voice chat start — no __TAURI__ (window keys with 'tauri': ${Object.keys(window).filter((k) => k.toLowerCase().includes('tauri')).join(',') || 'none'})`,
+      );
     }
 
     try {
@@ -210,6 +246,7 @@ async function openVoiceChat(conversationId) {
       endOfTurnSilence = parsed.endOfTurnSilence ?? 1.5;
       phraseDebounceMs = parsed.phraseDebounceMs ?? 1200;
       sttDebug = !!parsed.sttDebug;
+      voiceChatDebug = !!parsed.voiceChatDebug;
       sttLanguage = parsed.sttLanguage ?? "";
       voiceEffect = parsed.voiceEffect ?? "none";
     } catch {}
@@ -430,6 +467,8 @@ function cleanup() {
   playbackPlaying = false;
   pendingYourTurnCue = false;
   pendingBytes = null;
+  sawFirstTtsFrame = false;
+  ttsFrameCount = 0;
 
   const transcriptEl = document.getElementById('voice-transcript');
   if (transcriptEl) transcriptEl.innerHTML = '';
@@ -500,6 +539,8 @@ function setupAudioCapture() {
   if (audioContext.state === 'suspended') {
     audioContext.resume();
   }
+  voiceDebug('audio', `AudioContext created: state=${audioContext.state} sampleRate=${audioContext.sampleRate} (requested 48000)`);
+  voiceDebug('audio', `mic stream: ${mediaStream ? 'present' : 'null'} — sttProvider=${sttProvider} voiceEffect=${voiceEffect}`);
 
   // Source + analyser + processor are only set up when we have a mic
   // stream. In browser STT mode we skip getUserMedia entirely (see
@@ -1162,11 +1203,26 @@ let pendingYourTurnCue = false;
 // thereafter — the classic "TV losing signal" static.
 let pendingBytes = null;
 
+// First TTS frame seen during this call. Used to log frame size + total
+// count once at start of speech, then go quiet so the log doesn't drown
+// out everything else during long responses. Reset in cleanup().
+let sawFirstTtsFrame = false;
+let ttsFrameCount = 0;
+
 function queueAudioFrame(frame) {
   if (isDeafened) return;
   const bytes = frame instanceof ArrayBuffer
     ? new Uint8Array(frame)
     : new Uint8Array(frame.buffer || frame);
+  if (!sawFirstTtsFrame) {
+    sawFirstTtsFrame = true;
+    voiceDebug('tts', `first frame arrived: ${bytes.byteLength} bytes (expect Int16 PCM 16kHz mono = 32ms per 1024 bytes)`);
+  }
+  ttsFrameCount++;
+  // Sample every 50th frame so the log shows progress without spam.
+  if (ttsFrameCount % 50 === 0) {
+    voiceDebug('tts', `${ttsFrameCount} frames received`);
+  }
   const merged = pendingBytes && pendingBytes.byteLength > 0
     ? (() => {
         const m = new Uint8Array(pendingBytes.byteLength + bytes.byteLength);
@@ -1258,6 +1314,7 @@ function connectVoiceWs(conversationId) {
   voiceWs.binaryType = 'arraybuffer';
 
   voiceWs.onopen = () => {
+    voiceDebug('ws', `connected → ${fullUrl}`);
     updateConnectionStatus('active', pttEnabled ? 'PTT ready' : 'Listening');
   };
 
@@ -1270,12 +1327,14 @@ function connectVoiceWs(conversationId) {
     }
   };
 
-  voiceWs.onclose = () => {
+  voiceWs.onclose = (event) => {
+    voiceDebug('ws', `closed code=${event.code} reason="${event.reason || ''}" clean=${event.wasClean}`);
     updateConnectionStatus('error', 'Disconnected');
     cleanup();
   };
 
   voiceWs.onerror = () => {
+    voiceDebug('ws', 'error event fired (browser gives no detail — check network/proxy/cert)');
     updateConnectionStatus('error', 'Connection error');
   };
 }
@@ -1342,6 +1401,7 @@ function handleVoiceMessage(data) {
 function updateWalkieTalkieState(state) {
   previousWalkieState = currentWalkieState;
   currentWalkieState = state;
+  voiceDebug('state', `${previousWalkieState ?? '(none)'} → ${state}`);
 
   // End-of-turn cue: when the daemon transitions INTO processing, the user's
   // message has been received and sent to the LLM. Play a soft tick so the

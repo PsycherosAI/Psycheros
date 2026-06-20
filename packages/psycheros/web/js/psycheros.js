@@ -5896,3 +5896,197 @@ globalThis.switchSATab = switchSATab;
 globalThis.addEventRule = addEventRule;
 globalThis.deleteEventRule = deleteEventRule;
 globalThis.saveEventRules = saveEventRules;
+
+// =============================================================================
+// Voice chat debug panel
+// =============================================================================
+// General-purpose diagnostic panel for the voice chat pipeline. Captures:
+//   - Mic permission flow (Tauri invoke + getUserMedia probe)
+//   - WebSocket connection lifecycle (open/close/error)
+//   - Walkie-talkie state transitions
+//   - TTS frame arrival + decode errors
+//   - AudioContext setup + sample-rate mismatches
+// Useful for: macOS desktop mic issues, STT/TTS pipeline debugging,
+// diagnosing audio glitches (pops, dropouts, format mismatches).
+//
+// Log entries come from two sources:
+//   1. The "Run test" button below (one-shot probe of env + mic + audio + WS)
+//   2. voice.js during a real voice chat (live events tagged by category)
+// Both routes funnel through appendVoiceDebug(category, message) so the
+// panel shows a unified timeline.
+//
+// State is in-memory; reload clears the log. Intentional — debug sessions
+// are short-lived and stale logs would confuse users.
+
+const voiceChatDebugLog = [];
+
+function appendVoiceDebug(category, message) {
+  const prefix = category ? `[${category}]` : '';
+  const line = `[${new Date().toISOString()}] ${prefix} ${message}`.trim();
+  voiceChatDebugLog.push(line);
+  // Also surface in the browser console so debug works even when the
+  // settings panel isn't open. Tagged the same way for grep-ability.
+  console.log(`[voice:${category || 'debug'}] ${message}`);
+  const textarea = document.getElementById('voice-chat-debug-log');
+  if (textarea) {
+    textarea.value = voiceChatDebugLog.join('\n');
+    textarea.scrollTop = textarea.scrollHeight;
+  }
+}
+
+function toggleVoiceChatDebugPanel() {
+  // Legacy no-op stub — kept for any cached page that still calls the
+  // old name. The real toggle is toggleVoiceChatDebug(checked) below.
+  const checkbox = document.getElementById('voice-chat-debug');
+  const panel = document.getElementById('voice-chat-debug-panel');
+  if (!checkbox || !panel) return;
+  panel.style.display = checkbox.checked ? '' : 'none';
+}
+
+async function toggleVoiceChatDebug(checked) {
+  // Show/hide the panel immediately for responsiveness, then persist.
+  const panel = document.getElementById('voice-chat-debug-panel');
+  if (panel) panel.style.display = checked ? '' : 'none';
+  try {
+    const resp = await fetch('/api/voice/settings');
+    const settings = await resp.json();
+    settings.voiceChatDebug = checked;
+    const saveResp = await fetch('/api/voice/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    const result = await saveResp.json();
+    if (result.success) {
+      showToast(checked ? 'Voice chat debug enabled' : 'Voice chat debug disabled');
+    } else {
+      showToast('Failed: ' + (result.error || 'Unknown error'), 'error');
+    }
+  } catch (e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+
+function clearVoiceChatDebugLog() {
+  voiceChatDebugLog.length = 0;
+  const textarea = document.getElementById('voice-chat-debug-log');
+  if (textarea) textarea.value = '';
+}
+
+async function copyVoiceChatDebugLog(btn) {
+  const text = voiceChatDebugLog.join('\n');
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) {
+      const original = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    }
+  } catch (err) {
+    console.warn('[voice:debug] copy failed:', err);
+    if (btn) {
+      const original = btn.textContent;
+      btn.textContent = 'Copy failed — select manually';
+      setTimeout(() => { btn.textContent = original; }, 2000);
+    }
+  }
+}
+
+async function runVoiceChatTest() {
+  appendVoiceDebug('test', '=== Voice chat test started ===');
+  appendVoiceDebug('env', `URL: ${window.location.href}`);
+  appendVoiceDebug('env', `User agent: ${navigator.userAgent}`);
+  appendVoiceDebug('env', `Secure context: ${window.isSecureContext}`);
+  const tauriKeys = Object.keys(window).filter((k) => k.toLowerCase().includes('tauri'));
+  appendVoiceDebug('env', `window keys containing 'tauri': ${tauriKeys.join(', ') || 'none'}`);
+
+  // --- Mic permission path (Tauri desktop only) ---
+  const hasInvoke = !!window.__TAURI__?.core?.invoke;
+  appendVoiceDebug('mic-perm', `window.__TAURI__.core.invoke available: ${hasInvoke}`);
+
+  if (hasInvoke) {
+    appendVoiceDebug('mic-perm', "Calling invoke('request_mic_permission')...");
+    try {
+      const granted = await window.__TAURI__.core.invoke('request_mic_permission');
+      appendVoiceDebug('mic-perm', `invoke returned: ${JSON.stringify(granted)}`);
+    } catch (err) {
+      const detail = err && err.message ? err.message : String(err);
+      appendVoiceDebug('mic-perm', `invoke FAILED: ${detail}`);
+    }
+  } else {
+    appendVoiceDebug('mic-perm', 'Skipping Tauri invoke — not in desktop app context');
+  }
+
+  // --- getUserMedia probe ---
+  appendVoiceDebug('mic', 'Probing navigator.mediaDevices.getUserMedia...');
+  if (!navigator.mediaDevices?.getUserMedia) {
+    appendVoiceDebug('mic', 'navigator.mediaDevices.getUserMedia NOT available');
+  } else {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const tracks = stream.getTracks();
+      appendVoiceDebug('mic', `getUserMedia succeeded — ${tracks.length} track(s)`);
+      tracks.forEach((t) => {
+        appendVoiceDebug('mic', `  track: label="${t.label}" kind=${t.kind} enabled=${t.enabled}`);
+        const settings = t.getSettings ? t.getSettings() : {};
+        appendVoiceDebug('mic', `  settings: sampleRate=${settings.sampleRate ?? 'n/a'} channelCount=${settings.channelCount ?? 'n/a'} echoCancellation=${settings.echoCancellation ?? 'n/a'}`);
+        t.stop();
+      });
+    } catch (err) {
+      const detail = err && err.name ? `${err.name}: ${err.message || 'no message'}` : String(err);
+      appendVoiceDebug('mic', `getUserMedia FAILED: ${detail}`);
+    }
+  }
+
+  // --- AudioContext probe (catches sample-rate mismatches that cause pops) ---
+  appendVoiceDebug('audio', 'Probing AudioContext...');
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) {
+      appendVoiceDebug('audio', 'AudioContext API NOT available');
+    } else {
+      const ctx = new AC();
+      await ctx.resume().catch(() => {});
+      appendVoiceDebug('audio', `AudioContext state=${ctx.state} sampleRate=${ctx.sampleRate} baseLatency=${ctx.baseLatency ?? 'n/a'}${ctx.outputLatency ? ' outputLatency=' + ctx.outputLatency : ''}`);
+      // Play a 200ms soft sine pulse to confirm output routing works.
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      gain.gain.value = 0.05;
+      osc.frequency.value = 440;
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      setTimeout(() => { try { osc.stop(); ctx.close(); } catch {} }, 250);
+      appendVoiceDebug('audio', 'Test tone scheduled (440Hz, 200ms, 5% gain) — should hear a soft beep');
+    }
+  } catch (err) {
+    const detail = err && err.message ? err.message : String(err);
+    appendVoiceDebug('audio', `AudioContext FAILED: ${detail}`);
+  }
+
+  // --- Voice endpoint probe (catches routing/proxy/auth issues) ---
+  appendVoiceDebug('ws', 'Probing /api/voice/status endpoint...');
+  try {
+    // Use a relative URL so it inherits the page's protocol + host —
+    // fetch needs http/https, not ws/wss. Earlier versions built the
+    // URL with the WS scheme which silently failed with "Failed to fetch".
+    const resp = await fetch('/api/voice/status', { headers: { 'Accept': 'application/json' } });
+    appendVoiceDebug('ws', `GET /api/voice/status → ${resp.status} ${resp.statusText}`);
+    if (resp.ok) {
+      const body = await resp.json().catch(() => null);
+      appendVoiceDebug('ws', `voice status: ${JSON.stringify(body)}`);
+    }
+  } catch (err) {
+    const detail = err && err.message ? err.message : String(err);
+    appendVoiceDebug('ws', `voice status probe FAILED: ${detail}`);
+  }
+
+  appendVoiceDebug('test', '=== Test complete ===');
+}
+
+globalThis.appendVoiceDebug = appendVoiceDebug;
+globalThis.toggleVoiceChatDebugPanel = toggleVoiceChatDebugPanel;
+globalThis.toggleVoiceChatDebug = toggleVoiceChatDebug;
+globalThis.clearVoiceChatDebugLog = clearVoiceChatDebugLog;
+globalThis.copyVoiceChatDebugLog = copyVoiceChatDebugLog;
+globalThis.runVoiceChatTest = runVoiceChatTest;

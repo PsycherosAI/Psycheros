@@ -244,6 +244,19 @@ export interface VoiceSettings {
    * Space on desktop, media key for headset on mobile).
    */
   pttKeys: string[];
+  /**
+   * Show diagnostic log for the voice chat pipeline (default false).
+   * Captures the Tauri mic-permission pre-request flow, WebSocket
+   * connection events, walkie-talkie state transitions, TTS frame
+   * arrival, AudioContext setup, and any decode/playback errors.
+   * Useful when diagnosing why voice chat can't start, why STT/TTS
+   * isn't flowing, or where audio glitches (pops, dropouts, format
+   * mismatches) originate. Output goes to the "Debug" section in
+   * Audio settings — copy/paste-friendly for support threads.
+   * Lives at the VoiceSettings level (not per-profile) because it's
+   * a global diagnostic, not something that varies by profile.
+   */
+  voiceChatDebug: boolean;
 }
 
 // =============================================================================
@@ -257,6 +270,7 @@ export function getDefaultVoiceSettings(): VoiceSettings {
     profiles: [],
     pttEnabled: false,
     pttKeys: ["Space"],
+    voiceChatDebug: false,
   };
 }
 
@@ -322,11 +336,24 @@ export async function loadVoiceSettings(
       pttEnabled = (activeProfile as { pushToTalk?: boolean })?.pushToTalk ??
         false;
     }
+    // Migration: voiceChatDebug used to live on VoiceProfile. If the
+    // top-level field is unset, inherit from any profile that had it on
+    // (or from the legacy micPermissionDebug field name).
+    let voiceChatDebug = saved.voiceChatDebug;
+    if (voiceChatDebug === undefined) {
+      const profiles = (saved.profiles ?? []) as unknown as Array<
+        Record<string, unknown>
+      >;
+      voiceChatDebug = profiles.some((p) =>
+        p.voiceChatDebug === true || p.micPermissionDebug === true
+      );
+    }
     return {
       ...defaults,
       ...saved,
       pttEnabled,
       pttKeys: saved.pttKeys ?? defaults.pttKeys,
+      voiceChatDebug,
       // Normalize each profile so newly-added fields get defaults
       profiles: (saved.profiles ?? []).map(normalizeVoiceProfile),
     };

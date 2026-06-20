@@ -4,6 +4,22 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.6] - 2026-06-20
+
+### Added
+
+- Voice chat debug panel in Audio settings with copy/paste log capture, plus a
+  mic-permission diagnostic toggle that surfaces browser permission state via
+  on-screen toasts. Helps troubleshoot voice chat without opening devtools.
+
+### Fixed
+
+- Voice status probe used wrong URL scheme, causing the status indicator to
+  report voice chat as offline even when the server was reachable.
+- Audio settings layout on short viewports: Enable Voice Chat toggle, Hold to
+  Talk control, and Debug section moved into scrolling content so they stay
+  reachable.
+
 ## [Unreleased]
 
 ## [0.8.5] - 2026-06-19
@@ -838,6 +854,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 [0.1.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.2
 [0.1.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.1
 [0.1.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.0
+[0.8.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.6
 [0.8.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.5
 [0.8.4]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.4
 [0.8.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.3

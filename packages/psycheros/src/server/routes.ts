@@ -10367,6 +10367,7 @@ export function handleVoiceCallFragment(
     profile,
     settings.pttEnabled ?? false,
     settings.pttKeys ?? ["Space"],
+    settings.voiceChatDebug ?? false,
   );
   return new Response(html, {
     headers: { "Content-Type": "text/html; charset=utf-8" },
