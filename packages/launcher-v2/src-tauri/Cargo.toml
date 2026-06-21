@@ -1,6 +1,6 @@
 [package]
 name = "psycheros-launcher"
-version = "0.2.23"
+version = "0.2.24"
 edition = "2021"
 description = "Psycheros desktop launcher — Tauri app + OS-supervised daemon"
 license = "MIT"

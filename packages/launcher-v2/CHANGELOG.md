@@ -7,6 +7,22 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.24] - 2026-06-21
+
+### Fixed
+
+- `CaptureState` now satisfies `Send` + `Sync`. `ActiveCapture` holds objc2
+  `Retained<AVAudioEngine>` and `Retained<AVAudioFormat>`, which wrap raw ObjC
+  object pointers (`*const UnsafeCell<()>`). Rust conservatively refuses to send
+  raw pointers across threads, so `app.state::<CaptureState>()` and the async
+  command futures failed `E0277` trait bounds on macOS. Added
+  `unsafe impl Send + Sync` for `ActiveCapture` — sound because all access is
+  serialized through the `Mutex<CaptureState>` lock (the engine also manages its
+  own internal render thread for the tap block).
+- Removed an unused `use std::time::Duration;` at module scope — it was shadowed
+  by an inner import inside `request_mic_permission()` and would have failed
+  clippy under `-D warnings`.
+
 ## [0.2.23] - 2026-06-21
 
 ### Fixed

@@ -24,7 +24,6 @@
 //!   decimate-by-3 in Rust.
 
 use std::sync::Mutex;
-use std::time::Duration;
 
 use tauri::{ipc::Channel, AppHandle, Runtime, State};
 
@@ -35,6 +34,16 @@ pub struct ActiveCapture {
     engine: objc2::rc::Retained<objc2_avf_audio::AVAudioEngine>,
     _format: objc2::rc::Retained<objc2_avf_audio::AVAudioFormat>,
 }
+
+// AVAudioEngine and AVAudioFormat are ObjC objects backed by raw pointers,
+// which Rust doesn't consider Send/Sync by default. We only ever access
+// the engine from inside the CaptureState Mutex (locked in
+// platform_start_capture and platform_stop_capture), so access is
+// serialized at runtime. The engine also manages its own internal render
+// thread for the tap block. Asserting Send + Sync here is safe for our
+// mutex-guarded usage pattern.
+unsafe impl Send for ActiveCapture {}
+unsafe impl Sync for ActiveCapture {}
 
 /// Plugin state. Held in `app.state()` via `app.manage(CaptureState::default())`
 /// at plugin setup time. Mutex guards the active session.
