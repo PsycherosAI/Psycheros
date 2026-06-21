@@ -17,9 +17,18 @@ serde = "1"
 thiserror = "1"
 
 # macOS-only: AVAudioEngine + AVFoundation bindings for native mic capture.
+# Two separate Apple frameworks → two separate Rust crates:
+#   - objc2-av-foundation: AVCaptureDevice (the mic permission prompt API)
+#   - objc2-avf-audio: AVAudioEngine, AVAudioFormat, AVAudioPCMBuffer,
+#     AVAudioTime, AVAudioCommonFormat (the actual audio capture types)
+# Apple splits these into AVFoundation (camera/capture) and AVFAudio
+# (audio), and objc2 mirrors that split. Using the wrong crate gets you
+# "unresolved import" errors that don't surface locally because Linux
+# never compiles the macOS target.
 # Other platforms use the non_macos.rs stub and never touch these crates.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-av-foundation = "0.3"
+objc2-avf-audio = "0.3"
 block2 = "0.6"

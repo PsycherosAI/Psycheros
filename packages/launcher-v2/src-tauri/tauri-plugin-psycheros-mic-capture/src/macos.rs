@@ -32,8 +32,8 @@ use tauri::{ipc::Channel, AppHandle, Runtime, State};
 /// Stored as `Option<ActiveCapture>` inside `CaptureState`; `None` when
 /// capture isn't running.
 pub struct ActiveCapture {
-    engine: objc2::rc::Retained<objc2_av_foundation::AVAudioEngine>,
-    _format: objc2::rc::Retained<objc2_av_foundation::AVAudioFormat>,
+    engine: objc2::rc::Retained<objc2_avf_audio::AVAudioEngine>,
+    _format: objc2::rc::Retained<objc2_avf_audio::AVAudioFormat>,
 }
 
 /// Plugin state. Held in `app.state()` via `app.manage(CaptureState::default())`
@@ -118,15 +118,15 @@ fn build_and_start_capture(
 ) -> Result<ActiveCapture, String> {
     use std::ptr::NonNull;
 
-    use block2::Block;
-    use objc2_av_foundation::{
+    use block2::RcBlock;
+    use objc2_avf_audio::{
         AVAudioCommonFormat, AVAudioEngine, AVAudioFormat, AVAudioPCMBuffer, AVAudioTime,
     };
 
     let engine = AVAudioEngine::new();
     let input_node = engine.inputNode();
 
-    // Build a 16kHz mono Float32 format. AVAudioEngine auto-insert an
+    // Build a 16kHz mono Float32 format. AVAudioEngine auto-inserts an
     // internal converter from the hardware 48kHz — saves us manual
     // decimation.
     let format = AVAudioFormat::alloc().init_with_common_format_sample_rate_channels_interleaved(
@@ -137,8 +137,10 @@ fn build_and_start_capture(
     );
 
     // Tap block: receives (AVAudioPCMBuffer *, AVAudioTime *).
-    // Convert Float32 → Int16 PCM and ship via the channel.
-    let tap = Block::new(
+    // Convert Float32 → Int16 PCM and ship via the channel. RcBlock is
+    // heap-allocated and reference-counted — block2 0.6 has no
+    // Block::new constructor, only RcBlock::new and StackBlock::new.
+    let tap = RcBlock::new(
         move |buf: NonNull<AVAudioPCMBuffer>, _when: NonNull<AVAudioTime>| {
             let buffer = unsafe { buf.as_ref() };
             let frames = buffer.frameLength() as usize;
@@ -167,10 +169,10 @@ fn build_and_start_capture(
         engine.start().map_err(|e| format!("engine.start: {e}"))?;
     }
 
-    // Hold the tap block alive alongside the engine — the engine retains
-    // it internally via the install call, but keep an explicit reference
-    // to be safe.
-    std::mem::forget(tap);
+    // RcBlock is already reference-counted — the engine retains the block
+    // internally via installTap, and our RcBlock can be dropped on the
+    // Rust side without freeing the block. No mem::forget needed.
+    drop(tap);
 
     Ok(ActiveCapture { engine, _format: format })
 }

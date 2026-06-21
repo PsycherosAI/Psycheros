@@ -7,6 +7,25 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.23] - 2026-06-21
+
+### Fixed
+
+- Native mic-capture plugin's Rust code now compiles on macOS. The plugin
+  (introduced in 0.2.21) was importing `AVAudioEngine`, `AVAudioFormat`,
+  `AVAudioPCMBuffer`, `AVAudioTime`, and `AVAudioCommonFormat` from
+  `objc2-av-foundation`, but those types live in Apple's separate AVFAudio
+  framework — mapped by the `objc2-avf-audio` crate. Switched the imports and
+  `ActiveCapture` struct field types to `objc2-avf-audio`; the crate was already
+  in the dependency graph transitively. `AVCaptureDevice` (used by the system
+  permission prompt) stays in `objc2-av-foundation`.
+- Tap block now constructed via `RcBlock::new` instead of the nonexistent
+  `Block::new` (block2 0.6 removed the bare constructor — `Block` is an opaque
+  type; blocks are built via `RcBlock` or `StackBlock`). Matches the pattern
+  already used by `request_mic_permission()` in the same file. The now-redundant
+  `std::mem::forget(tap)` is dropped — `RcBlock` is ref-counted and the engine
+  retains the block internally.
+
 ## [0.2.22] - 2026-06-21
 
 ### Fixed
