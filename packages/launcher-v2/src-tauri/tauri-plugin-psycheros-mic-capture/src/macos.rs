@@ -141,20 +141,23 @@ fn build_and_start_capture(
     // Build a 16kHz mono Float32 format. AVAudioEngine auto-inserts an
     // internal converter from the hardware 48kHz — saves us manual
     // decimation. alloc() lives on the AnyThread trait in objc2 0.6.
-    // objc2 0.6+ preserves ObjC selector segments as CamelCase joined
-    // by underscores — `initWithCommonFormat:sampleRate:channels:interleaved:`
-    // becomes `initWithCommonFormat_sampleRate_channels_interleaved`,
-    // NOT the all-snake_case form older objc2 versions used. Returns
-    // Option<Retained<...>> (nil if params invalid); 1-channel mono
-    // won't fail but the type system needs handling.
-    let format = AVAudioFormat::alloc()
-        .initWithCommonFormat_sampleRate_channels_interleaved(
-            AVAudioCommonFormat::PCMFormatFloat32,
-            16000.0,
-            1,
-            false,
-        )
-        .ok_or("failed to create 16kHz mono AVAudioFormat")?;
+    //
+    // objc2 init methods on stable Rust are associated functions, not
+    // methods — the `this: Allocated<Self>` first parameter is a
+    // positional arg, not a `self:` receiver. So we call them as
+    // `Type::init_name(allocated, ...args)`, NOT `allocated.init_name(...)`.
+    // (Method syntax would need `unstable-arbitrary-self-types` which
+    // is nightly-only.) Returns Option<Retained<...>> (nil if params
+    // invalid); 1-channel mono won't fail but the type system needs
+    // the .ok_or() handling.
+    let format = AVAudioFormat::initWithCommonFormat_sampleRate_channels_interleaved(
+        AVAudioFormat::alloc(),
+        AVAudioCommonFormat::PCMFormatFloat32,
+        16000.0,
+        1,
+        false,
+    )
+    .ok_or("failed to create 16kHz mono AVAudioFormat")?;
 
     // Tap block: receives (AVAudioPCMBuffer *, AVAudioTime *).
     // Convert Float32 → Int16 PCM and ship via the channel. RcBlock is

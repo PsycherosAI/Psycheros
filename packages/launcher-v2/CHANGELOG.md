@@ -7,6 +7,18 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.27] - 2026-06-21
+
+### Fixed
+
+- `AVAudioFormat` initializer now called as an associated function
+  (`AVAudioFormat::initWithCommonFormat_sampleRate_channels_interleaved(alloc(), ...)`)
+  instead of method syntax (`alloc().initWith...`). objc2's generated init
+  methods take `this: Allocated<Self>` as the first positional parameter (not a
+  `self:` receiver), so on stable Rust they are associated functions — method
+  syntax only works with the nightly-only `unstable-arbitrary-self-types`
+  feature. The method existed but couldn't resolve as a chained call.
+
 ## [0.2.26] - 2026-06-21
 
 ### Fixed
