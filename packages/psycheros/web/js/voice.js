@@ -159,7 +159,7 @@ async function openVoiceChat(conversationId) {
     //
     // Browser mode (no __TAURI__) keeps the original getUserMedia path.
     const tauriInvoke = window.__TAURI__?.core?.invoke;
-    const TauriChannel = window.__TAURI__?.ipc?.Channel;
+    const TauriChannel = window.__TAURI__?.core?.Channel;
     if (tauriInvoke && TauriChannel) {
       if (earlyVoiceChatDebug && globalThis.appendVoiceDebug) {
         globalThis.appendVoiceDebug('mic-perm', 'Tauri detected — using native mic-capture plugin');

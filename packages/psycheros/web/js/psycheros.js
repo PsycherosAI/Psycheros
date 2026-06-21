@@ -6006,9 +6006,9 @@ async function runVoiceChatTest() {
   // start it, count frames for 2 seconds, then stop. Expected ~100
   // frames at 50Hz (20ms each at 16kHz mono Int16).
   const tauriInvoke = window.__TAURI__?.core?.invoke;
-  const TauriChannel = window.__TAURI__?.ipc?.Channel;
+  const TauriChannel = window.__TAURI__?.core?.Channel;
   appendVoiceDebug('mic-perm', `window.__TAURI__.core.invoke available: ${!!tauriInvoke}`);
-  appendVoiceDebug('mic-perm', `window.__TAURI__.ipc.Channel available: ${!!TauriChannel}`);
+  appendVoiceDebug('mic-perm', `window.__TAURI__.core.Channel available: ${!!TauriChannel}`);
 
   if (tauriInvoke && TauriChannel) {
     const channel = new TauriChannel('audio-frame-test');

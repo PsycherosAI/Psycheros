@@ -6,6 +6,18 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-06-20
+
+### Fixed
+
+- Native mic capture on macOS desktop (the 0.8.9 voice path) was silently dead.
+  The Tauri `Channel` constructor was looked up at
+  `window.__TAURI__.ipc.Channel`, but under `withGlobalTauri:true` in Tauri 2 it
+  actually lives at `window.__TAURI__.core.Channel` (same module as `invoke`).
+  With the wrong path always `undefined`, both the diagnostic probe and the live
+  voice path fell through to the `getUserMedia` fallback that doesn't work on
+  macOS Tahoe (26). Native mic capture now actually runs.
+
 ## [0.8.9] - 2026-06-20
 
 ### Changed
@@ -891,6 +903,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 [0.1.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.2
 [0.1.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.1
 [0.1.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.1.0
+[0.8.10]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.10
 [0.8.9]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.9
 [0.8.8]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.8
 [0.8.7]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.7
