@@ -7,6 +7,19 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.34] - 2026-06-22
+
+### Fixed
+
+- Added `com.apple.security.device.audio-input` to the app's Hardened Runtime
+  entitlements. macOS silently blocks microphone access under Hardened Runtime
+  unless this entitlement is present — `AVCaptureDevice.requestAccess` returns
+  `granted=false` immediately and the app never appears in System Settings →
+  Privacy & Security → Microphone. Entitlements are now declared in a new
+  `src-tauri/entitlements.plist` (standard Tauri 2 set for ad-hoc signed apps
+  plus audio-input), wired via `bundle.macOS.entitlements` in `tauri.conf.json`.
+  No Rust changes; purely code-sign configuration.
+
 ## [0.2.33] - 2026-06-22
 
 ### Reverted
