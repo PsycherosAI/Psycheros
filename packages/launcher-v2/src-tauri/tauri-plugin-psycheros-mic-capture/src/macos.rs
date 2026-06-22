@@ -99,65 +99,15 @@ fn request_mic_permission() -> impl std::future::Future<Output = Result<bool, St
 
     use block2::RcBlock;
     use objc2::runtime::Bool;
-    use objc2::{class, msg_send, sel};
+    use objc2::{class, msg_send};
     use objc2_foundation::NSString;
 
     async move {
-        let media_type = NSString::from_str("soun");
-
-        // First, probe the current authorization status WITHOUT triggering
-        // a prompt. macOS returns one of:
-        //   0 = notDetermined  (no prompt shown yet — requestAccess will prompt)
-        //   1 = restricted     (MDM / parental controls — can't grant)
-        //   2 = denied         (user said no, or TCC refuses to ask)
-        //   3 = authorized     (already granted)
-        //
-        // The previous code went straight to requestAccessForMediaType,
-        // which on Tahoe is returning false immediately without showing
-        // the prompt. Logging the pre-status tells us which branch we're
-        // in and lets us surface a specific error to the JS panel.
-        let pre_status: i32 = unsafe {
-            let cls = class!(AVCaptureDevice);
-            msg_send![cls, authorizationStatusForMediaType: &*media_type]
-        };
-        eprintln!(
-            "[mic-capture] AVCaptureDevice authorization status BEFORE request: {} ({})",
-            match pre_status {
-                0 => "notDetermined",
-                1 => "restricted",
-                2 => "denied",
-                3 => "authorized",
-                _ => "unknown",
-            },
-            pre_status,
-        );
-
-        if pre_status == 3 {
-            // Already authorized — no prompt needed.
-            return Ok(true);
-        }
-        if pre_status == 1 || pre_status == 2 {
-            // Restricted or already-denied. macOS won't re-prompt. Surface
-            // the exact status so the user knows where to look.
-            return Err(format!(
-                "macOS mic permission is {} ({}). Open System Settings → Privacy & Security → Microphone to allow.",
-                match pre_status {
-                    1 => "restricted (likely MDM or parental controls)",
-                    2 => "denied",
-                    _ => "blocked",
-                },
-                pre_status,
-            ));
-        }
-
-        // pre_status == 0 → notDetermined. requestAccessForMediaType will
-        // prompt the user and invoke the completion handler with the
-        // result. Block on the channel for up to 60s (user might take a
-        // while to answer).
         let (tx, rx) = mpsc::sync_channel::<bool>(1);
         let handler = RcBlock::new(move |granted: Bool| {
             let _ = tx.send(granted.as_bool());
         });
+        let media_type = NSString::from_str("soun");
         unsafe {
             let cls = class!(AVCaptureDevice);
             let _: () = msg_send![
@@ -166,31 +116,8 @@ fn request_mic_permission() -> impl std::future::Future<Output = Result<bool, St
                 completionHandler: &*handler,
             ];
         }
-        let granted = rx
-            .recv_timeout(Duration::from_secs(60))
-            .map_err(|e| format!("mic permission response timeout: {e}"))?;
-
-        // Re-probe status after the request so we can tell from the log
-        // whether macOS actually changed the TCC entry (vs returning
-        // granted=false silently without prompting).
-        let post_status: i32 = unsafe {
-            let cls = class!(AVCaptureDevice);
-            msg_send![cls, authorizationStatusForMediaType: &*media_type]
-        };
-        eprintln!(
-            "[mic-capture] AVCaptureDevice authorization status AFTER request: granted={} status={} ({})",
-            granted,
-            match post_status {
-                0 => "notDetermined",
-                1 => "restricted",
-                2 => "denied",
-                3 => "authorized",
-                _ => "unknown",
-            },
-            post_status,
-        );
-
-        Ok(granted)
+        rx.recv_timeout(Duration::from_secs(60))
+            .map_err(|e| format!("mic permission response timeout: {e}"))
     }
 }
 

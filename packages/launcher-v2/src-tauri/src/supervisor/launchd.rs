@@ -137,17 +137,11 @@ impl LaunchdSupervisor {
         ));
         if cfg.tahoe_compat {
             // --jitless: skip JIT CodeRange allocation (original Tahoe fix).
-            // --sandbox=off: V8's sandbox reserves a 1TB virtual address
-            //   range on 64-bit. Tahoe's VM subsystem can fail this even
-            //   with --jitless, producing "Failed to reserve virtual
-            //   memory for CodeRange" at startup. Sandbox is a security
-            //   feature (defense against V8 exploits); acceptable to
-            //   disable for a locally-running daemon that already has
-            //   full user-level access via `-A`.
-            env_pairs.push((
-                "DENO_V8_FLAGS".into(),
-                "--jitless,--sandbox=off".into(),
-            ));
+            // NOTE: a previous attempt added --sandbox=off here. V8 doesn't
+            // expose the sandbox as a runtime flag in this version
+            // ("V8 did not recognize flag '--sandbox=off'"), so it was
+            // removed. Sandbox is a compile-time decision in modern V8.
+            env_pairs.push(("DENO_V8_FLAGS".into(), "--jitless".into()));
         }
 
         let env_block = env_pairs
@@ -172,7 +166,7 @@ impl LaunchdSupervisor {
         };
 
         let v8_flags_arg = if cfg.tahoe_compat {
-            "        <string>--v8-flags=--jitless,--sandbox=off</string>\n"
+            "        <string>--v8-flags=--jitless</string>\n"
         } else {
             ""
         };
@@ -744,12 +738,12 @@ mod tests {
         cfg.tahoe_compat = true;
         let xml = sup.render_plist(&cfg, PlistMode::Autostart);
         assert!(
-            xml.contains("<key>DENO_V8_FLAGS</key>\n        <string>--jitless,--sandbox=off</string>"),
-            "DENO_V8_FLAGS=--jitless,--sandbox=off env var should appear when tahoe_compat is true"
+            xml.contains("<key>DENO_V8_FLAGS</key>\n        <string>--jitless</string>"),
+            "DENO_V8_FLAGS=--jitless env var should appear when tahoe_compat is true"
         );
         assert!(
-            xml.contains("<string>--v8-flags=--jitless,--sandbox=off</string>"),
-            "--v8-flags=--jitless,--sandbox=off should appear as a ProgramArgument when tahoe_compat is true"
+            xml.contains("<string>--v8-flags=--jitless</string>"),
+            "--v8-flags=--jitless should appear as a ProgramArgument when tahoe_compat is true"
         );
     }
 

@@ -7,6 +7,21 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.33] - 2026-06-22
+
+### Reverted
+
+- Reverted the `AVCaptureDevice` authorization status probes added in 0.2.31
+  (commit `ccfbb59`). The mic-capture permission code is back to the simpler
+  0.2.30 form that calls `requestAccessForMediaType` directly without
+  pre-probing. This revert was prompted by a Tahoe compatibility regression
+  reported in testing: the Tahoe compat switch (which applies `--jitless` and
+  `--sandbox=off` V8 flags to the daemon) stopped working after 0.2.31, causing
+  the V8 "Failed to reserve virtual memory for CodeRange" crash to return. The
+  mic-capture code and the Tahoe compat switch are in separate files and there
+  is no obvious code-level connection; reverting eliminates the variable to
+  confirm whether the probe code was the trigger.
+
 ## [0.2.32] - 2026-06-22
 
 ### Fixed
