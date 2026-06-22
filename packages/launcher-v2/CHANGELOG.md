@@ -7,6 +7,22 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.31] - 2026-06-21
+
+### Fixed
+
+- Added diagnostic probes for `AVCaptureDevice.authorizationStatusForMediaType`
+  _before_ calling `requestAccessForMediaType`, so the launcher log shows
+  exactly what macOS thinks the microphone permission state is. macOS returns:
+  - `notDetermined (0)` — TCC hasn't decided yet (request would prompt)
+  - `restricted (1)` — MDM/parental controls (can't grant)
+  - `denied (2)` — user denied, or TCC refused to ask
+  - `authorized (3)` — already granted This stops the guessing when the friend's
+    test hits "Microphone permission denied" without ever seeing the prompt. All
+    status output goes to stderr (visible via tray → View Logs). Not a fix yet,
+    but diagnostic groundwork — if Tahoe is genuinely denying without prompting,
+    the logs will show which code path we're in.
+
 ## [0.2.30] - 2026-06-21
 
 ### Fixed
