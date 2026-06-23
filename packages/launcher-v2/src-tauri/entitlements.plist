@@ -2,51 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!--
-    Hardened Runtime entitlements. Applied at code-sign time via
-    `tauri.conf.json > bundle.macOS.entitlements`.
-
-    Hardened Runtime is on by default for Tauri distribution builds
-    (codesign flags show `runtime`). Without these entitlements,
-    macOS silently blocks certain capabilities.
-
-    The microphone block was the bug we were chasing — without
-    `com.apple.security.device.audio-input`, macOS refuses to even
-    PROMPT for mic access when Hardened Runtime is enabled. The app
-    never appears in System Settings → Privacy & Security → Microphone.
-
-    The other four keys (allow-jit, allow-unsigned-executable-memory,
-    disable-library-validation, allow-dyld-environment-variables) are
-    the standard Tauri 2 defaults for ad-hoc signed apps — we keep
-    them so we don't regress any existing functionality.
-  -->
-
-  <!-- Allow V8 JIT compilation (used by Deno sidecar's webview). -->
   <key>com.apple.security.cs.allow-jit</key>
   <true/>
-
-  <!-- Allow mapping of unsigned memory pages as executable. Required
-       by some Rust runtime paths and FFI scenarios. -->
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
   <true/>
-
-  <!-- Allow loading of dylibs not signed by the same team. Required
-       because we're ad-hoc signed (TeamIdentifier=not set) and can't
-       validate third-party dylibs against ourselves. -->
   <key>com.apple.security.cs.disable-library-validation</key>
   <true/>
-
-  <!-- Allow DYLD_* env vars to be inherited by child processes. The
-       launcher spawns Deno and injects DENO_V8_FLAGS for the Tahoe
-       --jitless workaround; env-var passing needs this entitlement. -->
   <key>com.apple.security.cs.allow-dyld-environment-variables</key>
   <true/>
-
-  <!-- MICROPHONE ACCESS. Without this + NSMicrophoneUsageDescription
-       in Info.plist, macOS refuses to even prompt the user when
-       AVCaptureDevice.requestAccess is called. This is the fix for
-       the friend's "Microphone permission denied without prompt"
-       bug on Tahoe. -->
   <key>com.apple.security.device.audio-input</key>
   <true/>
 </dict>

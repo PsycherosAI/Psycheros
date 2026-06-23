@@ -7,6 +7,19 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.35] - 2026-06-22
+
+### Fixed
+
+- Fixed `entitlements.plist` XML syntax error that broke macOS code-signing in
+  0.2.34. The plist contained `--` (double-hyphen) inside an XML comment
+  (`--jitless`), which is illegal per the XML spec and caused
+  `AMFIUnserializeXML: syntax error near line 41` during `codesign`. The Rust
+  binary compiled fine; only the signing step failed. Comments have been
+  stripped from the entitlements file entirely — the five entitlement keys
+  (allow-jit, allow-unsigned-executable-memory, disable-library-validation,
+  allow-dyld-environment-variables, device.audio-input) are unchanged.
+
 ## [0.2.34] - 2026-06-22
 
 ### Fixed
