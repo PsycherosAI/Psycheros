@@ -213,12 +213,23 @@ fn build_and_start_capture(
 
 #[cfg(target_os = "macos")]
 fn stop_engine_and_remove_tap(active: ActiveCapture) {
-    // inputNode() is marked unsafe in objc2-avf-audio — wrap the whole
-    // teardown block so the call is inside unsafe {}.
+    // ORDER MATTERS. Stop the engine FIRST, then remove the tap.
+    //
+    // The previous order (removeTap then stop) crashes: when the engine
+    // is still running, calling removeTapOnBus can yank the tap block
+    // out from under an in-flight audio callback. The callback is
+    // mid-execution (reading samples, building the PCM Vec, calling
+    // on_frame.send) when its memory is freed — classic use-after-free.
+    //
+    // engine.stop() is synchronous — once it returns, no more audio
+    // callbacks will fire, so removing the tap is safe.
+    //
+    // inputNode() is marked unsafe in objc2-avf-audio — wrap the
+    // whole teardown block so all calls are inside unsafe {}.
     unsafe {
+        active.engine.stop();
         let input_node = active.engine.inputNode();
         input_node.removeTapOnBus(0);
-        active.engine.stop();
     }
     // ActiveCapture drops here, releasing the engine + format.
 }

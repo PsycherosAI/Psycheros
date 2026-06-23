@@ -2447,7 +2447,6 @@
       let wizardState = null;
       let dailyWindow = "all";
       let logOpen = false;
-      let editingMemory = null;
 
       const STAGES = [
         "setup",
@@ -2644,19 +2643,7 @@
             const section = document.getElementById("resume-section");
             const list = document.getElementById("resume-list");
             if (section && list) {
-              list.innerHTML = data.packages.map((p) =>
-                `<div class="wiz-resume-item">
-                <span class="wiz-resume-name">${esc(p.name)}</span>
-                <div style="display:flex;gap:var(--sp-2)">
-                  <button class="btn btn--sm btn--ghost" onclick="resumePackage('${
-                  esc(p.dir)
-                }')">Resume</button>
-                  <button class="btn btn--sm btn--danger" onclick="purgePackage('${
-                  esc(p.dir)
-                }', '${esc(p.name)}')">Purge</button>
-                </div>
-              </div>`
-              ).join("");
+              list.innerHTML = data.packages.map(packageRowHtml).join("");
               section.style.display = "block";
             }
           }
@@ -2846,6 +2833,23 @@
         }
       }
 
+      // Render a single package row for the Resume list. Paths are carried in
+      // data-* attributes (not inline onclick string literals) so backslashes
+      // in Windows paths like H:\Psycheros\... survive intact — inline JS
+      // string literals treat \ as an escape and corrupt the path before the
+      // handler ever sees it. Click handling is delegated to #resume-list.
+      function packageRowHtml(p) {
+        return `<div class="wiz-resume-item" data-dir="${
+          escAttr(p.dir)
+        }" data-name="${escAttr(p.name)}">
+            <span class="wiz-resume-name">${esc(p.name)}</span>
+            <div style="display:flex;gap:var(--sp-2)">
+              <button class="btn btn--sm btn--ghost" data-action="resume">Resume</button>
+              <button class="btn btn--sm btn--danger" data-action="purge">Purge</button>
+            </div>
+          </div>`;
+      }
+
       async function resumePackage(dir) {
         try {
           const res = await api("POST", "/api/setup/resume", {
@@ -2915,19 +2919,7 @@
           if (
             data.packages && data.packages.length > 0 && list && section
           ) {
-            list.innerHTML = data.packages.map((p) =>
-              `<div class="wiz-resume-item">
-              <span class="wiz-resume-name">${esc(p.name)}</span>
-              <div style="display:flex;gap:var(--sp-2)">
-                <button class="btn btn--sm btn--ghost" onclick="resumePackage('${
-                esc(p.dir)
-              }')">Resume</button>
-                <button class="btn btn--sm btn--danger" onclick="purgePackage('${
-                esc(p.dir)
-              }', '${esc(p.name)}')">Purge</button>
-              </div>
-            </div>`
-            ).join("");
+            list.innerHTML = data.packages.map(packageRowHtml).join("");
           } else if (list && section) {
             list.innerHTML = "";
             section.style.display = "none";
@@ -2997,6 +2989,23 @@
             handleUploads(e.dataTransfer.files);
           }
         });
+
+        // Delegated click handling for the Resume list. The list is re-rendered
+        // after every purge, so per-button listeners would need re-binding each
+        // time. Delegating to the container survives innerHTML swaps.
+        const resumeList = document.getElementById("resume-list");
+        if (resumeList) {
+          resumeList.addEventListener("click", (e) => {
+            const btn = e.target.closest("[data-action]");
+            if (!btn) return;
+            const row = btn.closest(".wiz-resume-item");
+            if (!row) return;
+            const dir = row.dataset.dir;
+            const name = row.dataset.name;
+            if (btn.dataset.action === "resume") resumePackage(dir);
+            else if (btn.dataset.action === "purge") purgePackage(dir, name);
+          });
+        }
       });
 
       async function handleUploads(files) {
@@ -3445,7 +3454,7 @@
             }')">
                 <span class="wiz-memory-name">${esc(f)}</span>
                 <div class="wiz-memory-actions">
-                  <button class="btn btn--sm btn--ghost" onclick="event.stopPropagation();editMemory('${type}','${
+                  <button class="btn btn--sm btn--ghost" onclick="event.stopPropagation();openMemoryEdit('${type}','${
               esc(f)
             }')">Edit</button>
                   <button class="btn btn--sm btn--ghost" style="color:var(--error)" onclick="event.stopPropagation();deleteMemory('${type}','${
@@ -3489,59 +3498,92 @@
         }
       }
 
-      async function editMemory(type, filename) {
-        // If already editing this memory, save it
-        if (editingMemory === `${type}:${filename}`) {
-          const textarea = document.querySelector(
-            `#mem-edit-${type}-${filename}`,
-          );
-          if (textarea) {
-            try {
-              await api(
-                "PUT",
-                `/api/memories/${type}/${encodeURIComponent(filename)}`,
-                { content: textarea.value },
-              );
-              showToast("Memory saved");
-              editingMemory = null;
-              toggleMemory(type, filename); // close
-              setTimeout(() => toggleMemory(type, filename), 50); // reopen to load fresh
-              return;
-            } catch (e) {
-              showToast("Save failed: " + e.message);
-              return;
-            }
-          }
-        }
+      function renderMemoryRead(type, filename, content) {
+        const bodyEl = document.getElementById(
+          `mem-body-${type}-${filename}`,
+        );
+        if (!bodyEl) return;
+        bodyEl.innerHTML = `
+            <div class="wiz-memory-content" id="mem-content-${type}-${filename}">${
+          esc(content)
+        }</div>
+          `;
+      }
 
-        // Load content into edit mode
+      async function openMemoryEdit(type, filename) {
+        let res;
         try {
-          const res = await api(
+          res = await api(
             "GET",
             `/api/memories/${type}/${encodeURIComponent(filename)}`,
           );
-          const item = document.getElementById(
-            `mem-${type}-${filename}`,
-          );
-          if (!item) return;
-          item.classList.add("wiz-memory-item--open");
-          const bodyEl = document.getElementById(
-            `mem-body-${type}-${filename}`,
-          );
-          bodyEl.innerHTML = `
-          <textarea class="wiz-memory-edit">${esc(res.content || "")}</textarea>
-          <div class="wiz-actions" style="border:none;margin:0">
-            <button class="btn btn--sm btn--primary" onclick="editingMemory='${type}:${filename}';editMemory('${type}','${
-            esc(filename)
-          }')">Save</button>
-            <button class="btn btn--sm btn--ghost" onclick="toggleMemory('${type}','${
-            esc(filename)
-          }')">Cancel</button>
-          </div>`;
-          editingMemory = `${type}:${filename}`;
         } catch (e) {
-          showToast("Load failed: " + e.message);
+          showToast("Load failed: " + (e?.message || String(e)));
+          return;
         }
+        if (res.error) {
+          showToast("Load failed: " + res.error);
+          return;
+        }
+        const item = document.getElementById(`mem-${type}-${filename}`);
+        if (item) item.classList.add("wiz-memory-item--open");
+        const bodyEl = document.getElementById(
+          `mem-body-${type}-${filename}`,
+        );
+        if (!bodyEl) return;
+        bodyEl.innerHTML = `
+          <textarea id="mem-edit-${type}-${filename}" class="wiz-memory-edit">${
+          esc(res.content || "")
+        }</textarea>
+          <div class="wiz-actions" style="border:none;margin:0">
+            <button class="btn btn--sm btn--primary" onclick="saveMemoryEdit('${type}','${
+          esc(filename)
+        }')">Save</button>
+            <button class="btn btn--sm btn--ghost" onclick="cancelMemoryEdit('${type}','${
+          esc(filename)
+        }')">Cancel</button>
+          </div>`;
+      }
+
+      async function saveMemoryEdit(type, filename) {
+        const textarea = document.getElementById(
+          `mem-edit-${type}-${filename}`,
+        );
+        if (!textarea) {
+          showToast("Save failed: edit element not found");
+          return;
+        }
+        let res;
+        try {
+          res = await api(
+            "PUT",
+            `/api/memories/${type}/${encodeURIComponent(filename)}`,
+            { content: textarea.value },
+          );
+        } catch (e) {
+          showToast("Save failed: " + (e?.message || String(e)));
+          return;
+        }
+        if (res.error) {
+          showToast("Save failed: " + res.error);
+          return;
+        }
+        showToast("Memory saved");
+        renderMemoryRead(type, filename, textarea.value);
+      }
+
+      async function cancelMemoryEdit(type, filename) {
+        let res;
+        try {
+          res = await api(
+            "GET",
+            `/api/memories/${type}/${encodeURIComponent(filename)}`,
+          );
+        } catch {
+          renderMemoryRead(type, filename, "(failed to load)");
+          return;
+        }
+        renderMemoryRead(type, filename, res.content || "");
       }
 
       async function deleteMemory(type, filename) {
@@ -3633,6 +3675,14 @@
         const d = document.createElement("div");
         d.appendChild(document.createTextNode(str));
         return d.innerHTML;
+      }
+
+      // Escape for double-quoted HTML attribute values. esc() only escapes
+      // text-content chars (<, >, &); attribute values quoted with " also
+      // need " escaped, otherwise paths containing " break out of the
+      // attribute. Used for data-* attributes that carry filesystem paths.
+      function escAttr(str) {
+        return esc(str).replace(/"/g, "&quot;");
       }
 
       function formatBytes(bytes) {

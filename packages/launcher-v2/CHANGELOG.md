@@ -7,6 +7,19 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.36] - 2026-06-22
+
+### Fixed
+
+- macOS audio capture no longer crashes the app when stopping. The teardown
+  order in `stop_capture` was reversed — the tap block was removed while
+  `AVAudioEngine` was still running, so an in-flight audio callback could access
+  the freed tap block (use-after-free), crashing the entire Tauri process. The
+  engine is now stopped first (`engine.stop()` is synchronous; once it returns
+  no more callbacks fire), then the tap is removed. Per Apple's `AVAudioEngine`
+  guidance. No change on Windows/Linux (function is
+  `#[cfg(target_os = "macos")]`-gated).
+
 ## [0.2.35] - 2026-06-22
 
 ### Fixed

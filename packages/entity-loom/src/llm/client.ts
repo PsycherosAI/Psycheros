@@ -30,6 +30,37 @@ export interface ChatOptions {
 }
 
 /**
+ * Detect a provider-required fixed temperature from an error body.
+ *
+ * Some OpenAI-compatible providers (e.g. Moonshot/Kimi on certain models)
+ * reject any request whose `temperature` isn't an exact provider-pinned
+ * value — typically `1`. Their error bodies look like:
+ *   `{"error":{"message":"temperature must be 1"}}`
+ *
+ * Returning a non-null number here tells the LLMClient to retry the same
+ * request with that temperature and remember it for the life of the
+ * instance, so subsequent calls don't pay the retry cost.
+ *
+ * Returns null for range errors ("temperature must be between 0 and 2")
+ * and multi-value errors ("temperature: expected one of [0, 0.7, 1]") —
+ * guessing wrong in those cases would just produce another rejection.
+ */
+export function inferRequiredTemperature(errorBody: string): number | null {
+  if (/temperature[^.\n]*between/i.test(errorBody)) return null;
+  if (/temperature[^.\n]*one\s+of/i.test(errorBody)) return null;
+  if (/temperature[^.\n]*range/i.test(errorBody)) return null;
+
+  const match = errorBody.match(
+    /\btemperature\s+(?:must|should|needs\s+to|has\s+to)\s+(?:be\s+)?([0-2](?:\.\d+)?)/i,
+  );
+  if (!match) return null;
+
+  const value = parseFloat(match[1]);
+  if (!Number.isFinite(value) || value < 0 || value > 2) return null;
+  return value;
+}
+
+/**
  * Build provider-specific caching headers.
  *
  * Different providers use different header formats for prompt caching:
@@ -68,6 +99,14 @@ function buildCachingHeaders(_baseUrl: string): Record<string, string> {
 export class LLMClient {
   private config: Required<LLMClientConfig>;
   private cachingHeaders: Record<string, string>;
+  /**
+   * Provider-required temperature learned from a prior rejection, if any.
+   * When non-null, every subsequent call that supplies a temperature uses
+   * this value instead — preserving per-task temperature where the provider
+   * allows it but falling back when the provider hard-requires a specific
+   * value. Stays null for providers that accept any temperature.
+   */
+  private requiredTemperature: number | null = null;
 
   constructor(config: LLMClientConfig) {
     this.config = {
@@ -114,6 +153,77 @@ export class LLMClient {
     } else {
       body.max_tokens = maxTokens;
     }
+  }
+
+  /**
+   * Send the chat completion request, with a one-shot retry on first
+   * fixed-temperature rejection. 429 rate-limit responses are passed through
+   * untouched — the caller owns rate-limit backoff. Non-ok responses are
+   * passed through untouched unless the error body pins the failure on a
+   * specific temperature value, in which case we learn the value, apply it,
+   * and retry the fetch once.
+   *
+   * If `requiredTemperature` was already learned from a prior call, the
+   * retry never fires — the learned value is applied on entry.
+   */
+  private async fetchChatCompletion(
+    body: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+  ): Promise<Response> {
+    const url = `${this.config.baseUrl}/chat/completions`;
+
+    // Apply learned required temperature before sending. This is the path
+    // every call takes after the first failure taught us the value.
+    if (
+      this.requiredTemperature !== null &&
+      body.temperature !== undefined
+    ) {
+      body.temperature = this.requiredTemperature;
+    }
+
+    const fetchOpts: RequestInit = {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+      signal,
+    };
+
+    let response = await fetch(url, fetchOpts);
+
+    // First-time fixed-temperature rejection: learn and retry once. We skip
+    // this branch entirely once requiredTemperature is set, so we never
+    // waste a request re-confirming what we already learned.
+    if (
+      !response.ok &&
+      response.status !== 429 &&
+      this.requiredTemperature === null &&
+      body.temperature !== undefined
+    ) {
+      const errorBody = await response.text();
+      const required = inferRequiredTemperature(errorBody);
+      if (required !== null) {
+        console.warn(
+          `[LLM] Provider requires temperature=${required} (model=${this.config.model}); retrying with that value and remembering it for this LLMClient instance`,
+        );
+        this.requiredTemperature = required;
+        body.temperature = required;
+        response = await fetch(url, {
+          method: "POST",
+          headers: this.getHeaders(),
+          body: JSON.stringify(body),
+          signal,
+        });
+      } else {
+        // Not a fixed-temperature error. Re-wrap the body so the caller's
+        // !response.ok path can still read it.
+        return new Response(errorBody, {
+          status: response.status,
+          headers: response.headers,
+        });
+      }
+    }
+
+    return response;
   }
 
   /**
@@ -174,14 +284,9 @@ export class LLMClient {
           body.response_format = { type: "json_object" };
         }
 
-        const response = await fetch(
-          `${this.config.baseUrl}/chat/completions`,
-          {
-            method: "POST",
-            headers: this.getHeaders(),
-            body: JSON.stringify(body),
-            signal: options?.signal || controller?.signal,
-          },
+        const response = await this.fetchChatCompletion(
+          body,
+          options?.signal || controller?.signal,
         );
 
         if (response.status === 429) {
@@ -244,12 +349,7 @@ export class LLMClient {
       this.applyMaxTokens(body, options.maxTokens);
     }
 
-    const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(body),
-      signal: options?.signal,
-    });
+    const response = await this.fetchChatCompletion(body, options?.signal);
 
     if (!response.ok || !response.body) {
       const errorBody = await response.text();

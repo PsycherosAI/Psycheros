@@ -63,6 +63,14 @@ Each `src/*/` has a `mod.ts` barrel.
   provider-specific headers (Anthropic prompt-caching beta, OpenRouter
   `HTTP-Referer`/`X-Title`). `modelSupportsTemperature()` guards temperature for
   models that reject it (OpenAI o-series, GPT-5.x, DeepSeek reasoner).
+  `inferRequiredTemperature()` + the per-instance `requiredTemperature` field
+  handle the opposite case — providers that hard-require a specific temperature
+  (Moonshot/Kimi on certain models). The client sends the task-specific
+  temperature first, and only if the provider rejects with a fixed-temperature
+  error does it learn the required value, retry once, and use that value for the
+  life of the instance. Per-task temperatures (0.2 / 0.3 / 0.7) are preserved
+  wherever the provider allows them — don't flatten them to a single value just
+  because one provider is picky.
 - `src/server/` — HTTP, SSE, router, logger, cost estimator, stage-lock
 - `src/stages/` — one file per wizard stage
 - `src/parsers/` — one file per platform; ChatGPT is split into a dispatcher
@@ -100,6 +108,36 @@ it doesn't.
 Memory `[via:platform]` tags come from the per-conversation source platform
 stored in this column, not the tool's instance ID. Daily memory filenames stay
 `<date>_entity-loom.md` (tool identity, not platform).
+
+## The wizard.html frontend traps
+
+Memory filenames contain `.` (e.g. `2026-06-12_entity-loom.md`,
+`2026-06-12_first-meeting.md`). Anywhere a filename ends up inside a CSS
+selector — `querySelector('#mem-edit-daily-…md')` — the `.` is parsed as a class
+selector and the lookup returns null. **Use `getElementById` instead**, which
+doesn't parse the ID string. The silent-revert bug in the memory review Save
+flow (fixed in [Unreleased]) was exactly this trap: `querySelector` returned
+null, the save branch was skipped, and the user's edits were silently discarded.
+
+The `api()` helper in `wizard.html` returns the parsed JSON body for both
+successful and failed responses — it does **not** throw on `!res.ok`. Callers
+must check `res.error` explicitly. Adding `try/catch` around an `api()` call
+will not catch server-side errors; the catch only fires on network failure. This
+is why every existing caller uses `if (res.error) { showToast(res.error); }`
+rather than try/catch.
+
+Filesystem paths rendered into inline `onclick="fn('...')"` string literals are
+corrupted on Windows — the `\` in `H:\Psycheros\...` is parsed as a JS escape
+character before the handler ever sees the value. This broke the Resume button
+on the setup screen (fixed in [Unreleased]). Carry paths in `data-*` attributes
+(which don't parse backslashes) and read them via `element.dataset` from a
+delegated click listener on the parent container. The same delegation pattern
+survives `innerHTML` re-renders without re-binding per-button listeners.
+
+The `esc()` helper escapes text-content chars only (`<`, `>`, `&`). For
+double-quoted HTML attribute values, use `escAttr()` which also escapes `"`.
+Don't put filesystem paths or other untrusted values into attributes via `esc()`
+alone — paths can contain `"`.
 
 ## Staging re-population
 

@@ -6,6 +6,53 @@ All notable changes to entity-loom are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-06-22
+
+### Fixed
+
+- Memory review UI: the Save button now persists the edited content of a daily
+  or significant memory. Previously the textarea was looked up with
+  `querySelector('#mem-edit-${type}-${filename}')` against an ID that was never
+  set and would have been parsed as a class selector anyway (filenames contain
+  `.md`). Save silently fell through to the load-from-disk branch and discarded
+  the user's edits. Save and Cancel are now separate functions; successful Save
+  re-renders read mode with the just-saved content; Cancel reloads read mode
+  from disk.
+- `PUT /api/memories/daily/:filename` and
+  `PUT /api/memories/significant/:filename` now accept empty-string content.
+  Clearing the textarea to start a memory over no longer returns 400.
+- Resume and Purge buttons on the setup screen no longer corrupt Windows paths.
+  The package directory was rendered into an inline
+  `onclick="resumePackage('${
+  dir }')"` string literal, where `\` in paths
+  like `H:\Psycheros\...` was parsed as a JS escape character, corrupting the
+  path before the handler ever saw it. Package rows now carry the dir/name in
+  `data-*` attributes (which don't parse backslashes) with click handling
+  delegated to the list container. The same render helper is now used for both
+  initial load and post-purge refresh, eliminating the duplicated row template.
+- Stale `running` checkpoint no longer bricks a resumed package. If the process
+  died mid-stage (laptop closed, terminal killed, power loss), the persisted
+  checkpoint kept `status: "running"` for the background stage even though
+  nothing was in memory — on the next resume, the UI trusted the stale value and
+  hid the Start button with no way to continue. On resume, if no stage is
+  actually running in this process, the significant/daily/graph stages are now
+  normalized to `status: "aborted"` (preserving `processedItems` and
+  `failedItems`) so the existing resumable UI path offers the Continue button.
+  Setup and convert are excluded — setup is synchronous, convert is cheap to
+  re-run.
+- LLM client now handles providers that hard-require a specific temperature
+  (e.g. Moonshot/Kimi on certain models). Previously, providers that rejected
+  any `temperature` other than a fixed value (commonly `1`) would fail every
+  request with no workaround, because entity-loom uses task-specific values (0.2
+  for graph JSON, 0.3 for significant memories, 0.7 for daily prose). The client
+  now sends the task-specific temperature first; if the provider rejects with an
+  explicit fixed-temperature error, it learns the required value, retries once
+  with it, and uses that value for the life of the `LLMClient` instance so later
+  calls don't pay the retry cost. Range errors ("temperature must be between 0
+  and 2") and multi-value errors ("temperature: expected one of [0, 0.7, 1]")
+  are not guessed — guessing wrong would just produce another rejection.
+  Task-specific temperatures are preserved for every provider that allows them.
+
 ## [0.3.7] - 2026-06-17
 
 ### Added
@@ -118,6 +165,7 @@ All notable changes to entity-loom are documented here. The format follows
   - **Kindroid / KinLog** — JSON
 - Five-stage wizard served at `http://localhost:3210`.
 
+[0.3.8]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.8
 [0.3.7]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.7
 [0.3.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.6
 [0.3.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.5

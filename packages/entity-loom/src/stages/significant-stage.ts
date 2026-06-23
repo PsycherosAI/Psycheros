@@ -467,7 +467,9 @@ export function significantRoutes(): Array<
         const packageDir = getActivePackageDir();
         if (!packageDir) return json({ error: "No active package" }, 400);
         const body = await req.json() as { content: string };
-        if (!body.content) return json({ error: "content is required" }, 400);
+        if (typeof body.content !== "string") {
+          return json({ error: "content is required" }, 400);
+        }
         try {
           await Deno.writeTextFile(
             join(packageDir, "memories", "significant", filename),

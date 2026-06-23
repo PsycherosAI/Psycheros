@@ -2871,7 +2871,7 @@ dependencies = [
 
 [[package]]
 name = "psycheros-launcher"
-version = "0.2.35"
+version = "0.2.36"
 dependencies = [
  "block2",
  "dirs 5.0.1",

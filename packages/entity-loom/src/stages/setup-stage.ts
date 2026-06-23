@@ -48,6 +48,10 @@ export function getActivePackageDir(): string | null {
   return activePackageDir;
 }
 
+export function setActivePackageDir(dir: string | null): void {
+  activePackageDir = dir;
+}
+
 /** Get active wizard config */
 export function getActiveConfig(): WizardConfig | null {
   return activeConfig;
@@ -121,6 +125,49 @@ function getStageStatuses(): Record<StageName, StageStatus> {
   };
 }
 
+/**
+ * Background stages that can be safely resumed after a crash. If the process
+ * dies mid-stage, the persisted checkpoint still says status: "running" even
+ * though nothing is in memory — on the next resume the UI would trust the
+ * stale value and hide the Start button. Flipping these to "aborted" returns
+ * them to the resumable path. Setup/convert are not in this list: setup is
+ * synchronous and convert is short enough that re-running it is cheap.
+ */
+const RESUMABLE_BACKGROUND_STAGES: StageName[] = [
+  "significant",
+  "daily",
+  "graph",
+];
+
+/**
+ * Normalize stale "running" statuses to "aborted" when no stage is actually
+ * running in memory. Returns true if the checkpoint was modified and needs
+ * saving. processedItems and failedItems are preserved so resume picks up
+ * where the crashed run left off.
+ */
+export function recoverStaleRunningStages(
+  checkpoint: CheckpointStateV2,
+): boolean {
+  // If a stage is genuinely running in this process, leave the checkpoint
+  // alone — the running stage will update it as it goes.
+  if (getRunningStage()) return false;
+
+  let recovered = false;
+  for (const stage of RESUMABLE_BACKGROUND_STAGES) {
+    const stageCheckpoint = checkpoint.stages[stage];
+    if (stageCheckpoint.status === "running") {
+      stageCheckpoint.status = "aborted";
+      stageCheckpoint.completed = false;
+      recovered = true;
+      log(
+        "warn",
+        `Recovered stale '${stage}' stage as aborted/resumable on package resume (processed=${stageCheckpoint.processedItems.length}, failed=${stageCheckpoint.failedItems.length})`,
+      );
+    }
+  }
+  return recovered;
+}
+
 /** Load a package (resume) */
 async function loadPackage(
   packageDir: string,
@@ -144,6 +191,16 @@ async function loadPackage(
     }
   } else {
     v2Checkpoint = createCheckpointV2(config, "");
+  }
+
+  // A previous process may have died mid-stage, leaving a stale "running"
+  // status in the checkpoint. If nothing is actually running in this
+  // process, flip those to "aborted" so the resume UI offers the Start
+  // button instead of hiding it.
+  if (recoverStaleRunningStages(v2Checkpoint)) {
+    await checkpointMgr.save(
+      v2Checkpoint as unknown as import("../types.ts").CheckpointState,
+    );
   }
 
   return { config, checkpoint: v2Checkpoint };

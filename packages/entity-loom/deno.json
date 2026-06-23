@@ -1,6 +1,6 @@
 {
   "name": "@entity/entity-loom",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "exports": "./src/mod.ts",
   "imports": {
     "fflate": "npm:fflate@^0.8"
@@ -8,13 +8,16 @@
   "tasks": {
     "start": "deno run -A src/main.ts",
     "dev": "deno run -A --watch src/main.ts",
-    "test": "deno test src/",
+    "test": "deno test -A src/",
     "check": "deno check src/main.ts",
     "lint": "deno lint"
   },
   "lint": {
     "rules": {
-      "exclude": ["no-slow-types", "require-await"]
+      "exclude": [
+        "no-slow-types",
+        "require-await"
+      ]
     }
   }
 }
