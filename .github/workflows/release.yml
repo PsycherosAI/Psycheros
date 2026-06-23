@@ -230,6 +230,7 @@ jobs:
     # first launch and click "More info → Run anyway." Documented in
     # the launcher-v2 README + docs/release.md.
     if: github.repository == 'PsycherosAI/Psycheros' && startsWith(github.ref_name, 'launcher-v2-v')
+    needs: launcher-v2-macos
     name: launcher-v2 (Windows)
     runs-on: windows-latest
     steps:
