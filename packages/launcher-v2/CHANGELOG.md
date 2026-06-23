@@ -7,6 +7,16 @@ cross-platform supervisors ship.
 
 ## [Unreleased]
 
+## [0.2.37] - 2026-06-23
+
+### Fixed
+
+- Added debug tracing to macOS audio capture: thread IDs, step-by-step teardown
+  logging, and completion signals for `start_capture`, `stop_capture`, and
+  `stop_engine_and_remove_tap`. Diagnoses potential tokio thread-hopping bugs
+  where `AVAudioEngine` methods are called from different threads (Apple
+  requires same-thread access). No functional change — pure diagnostic output.
+
 ## [0.2.36] - 2026-06-22
 
 ### Fixed
