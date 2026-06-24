@@ -43,6 +43,18 @@ cross-platform supervisors ship.
   sample) — same algorithm the original JS path used. Mic capture now works on
   all Macs regardless of native sample rate.
 
+## [0.2.41] - 2026-06-24
+
+### Fixed
+
+- macOS mic-capture now correctly resamples audio at any hardware sample rate,
+  not just 48kHz. The integer decimation from 0.2.40 only handled 48kHz cleanly;
+  at 24kHz (which AVAudioEngine hands out for some AirPods configurations) it
+  shipped audio at the wrong rate, which would have produced garbage
+  speech-to-text. Switched to linear interpolation with a float ratio — works
+  for 48kHz, 44.1kHz, 32kHz, 24kHz, and 16kHz hardware formats. Also adds a
+  defensive bounds check to skip empty buffers and avoid reading past the input.
+
 ## [Unreleased]
 
 ## [0.2.37] - 2026-06-23

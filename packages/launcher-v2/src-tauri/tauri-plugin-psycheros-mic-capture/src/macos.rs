@@ -203,36 +203,48 @@ fn build_and_start_capture(
         (engine, input_node, format, hw_rate)
     };
 
-    // Compute decimation ratio. If the hardware runs at 48kHz, we take
-    // every 3rd sample to get 16kHz. For other rates (44.1kHz → 2.76x,
-    // doesn't divide cleanly; we still just take floor(N/3) samples
-    // which is close enough for voice). The JS path always used 3.
-    let decim: usize = if hw_rate >= 48000.0 {
-        3
-    } else if hw_rate >= 32000.0 {
-        2
-    } else {
-        1
-    };
+    // Resampling ratio from hardware rate to the 16kHz target the
+    // daemon expects. Always floats — works for any hw_rate, including
+    // non-integer ratios like 24kHz→16kHz (1.5x) or 44.1kHz→16kHz (2.756x).
+    // The previous decimation-by-integer approach only handled 48kHz
+    // cleanly; at 24kHz it sent audio at the wrong rate and the daemon
+    // would have received 24kHz Int16 PCM labeled as 16kHz → STT garbage.
+    const TARGET_RATE: f64 = 16000.0;
+    let ratio = hw_rate / TARGET_RATE;
     log_event(format!(
-        "[mic-capture] build: decimation ratio = {} ({} → ~{}kHz)",
-        decim,
+        "[mic-capture] build: resample ratio = {:.4} ({}Hz → {}Hz)",
+        ratio,
         hw_rate as u32,
-        (hw_rate / decim as f64 / 1000.0).round() as u32
+        TARGET_RATE as u32
     ));
 
     // Tap block: receives (AVAudioPCMBuffer *, AVAudioTime *).
-    // Convert Float32 → Int16 PCM, decimate to ~16kHz, ship via channel.
+    // Linear-interpolate Float32 samples from hw_rate to 16kHz, convert
+    // to Int16 PCM, ship via channel. Slightly more compute than raw
+    // decimation but voice audio is low-volume so it's negligible.
     let tap = RcBlock::new(
         move |buf: NonNull<AVAudioPCMBuffer>, _when: NonNull<AVAudioTime>| unsafe {
             let buffer = buf.as_ref();
             let frames = buffer.frameLength() as usize;
+            if frames == 0 {
+                return;
+            }
             let ch0_ptr = *buffer.floatChannelData();
             let sample_ptr = ch0_ptr.as_ptr();
-            let out_frames = frames / decim;
+            // out_frames is the number of OUTPUT samples for 16kHz given
+            // this buffer's input frame count. floor() to avoid reading
+            // past the input buffer.
+            let out_frames = ((frames as f64) / ratio).floor() as usize;
             let mut pcm: Vec<u8> = Vec::with_capacity(out_frames * 2);
             for i in 0..out_frames {
-                let sample = *sample_ptr.add(i * decim);
+                // Position in the input buffer for output sample i.
+                let src_pos = i as f64 * ratio;
+                let idx0 = src_pos.floor() as usize;
+                let idx1 = (idx0 + 1).min(frames - 1);
+                let frac = (src_pos - idx0 as f64) as f32;
+                let s0 = *sample_ptr.add(idx0);
+                let s1 = *sample_ptr.add(idx1);
+                let sample = s0 + (s1 - s0) * frac;
                 let clamped = sample.clamp(-1.0, 1.0);
                 let int16 = (clamped * 32767.0) as i16;
                 pcm.extend_from_slice(&int16.to_le_bytes());
