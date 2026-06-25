@@ -136,6 +136,47 @@ async function openVoiceChat(conversationId) {
     }
   } catch {}
 
+  // FALLBACK: if the HTML config peek failed (STT defaulted to 'browser'),
+  // fetch from /api/voice/status which also returns sttProvider. This
+  // catches cases where the overlay HTML is malformed, the config element
+  // is missing, or JSON.parse fails — all of which would cause the voice
+  // call to skip native capture and fall through to getUserMedia (which
+  // doesn't work in WKWebView on macOS Tahoe).
+  if (earlySttProvider === 'browser') {
+    try {
+      const resp = await fetch('/api/voice/status', { headers: { 'Accept': 'application/json' } });
+      if (resp.ok) {
+        const s = await resp.json();
+        if (s.sttProvider && s.sttProvider !== 'browser') {
+          // Log the recovery so we know the peek failed and we caught it.
+          try {
+            await fetch('/api/voice/log', {
+              method: 'POST',
+              body: `HTML config peek failed — recovered STT=${s.sttProvider} from /api/voice/status`,
+            });
+          } catch {}
+          earlySttProvider = s.sttProvider;
+        }
+      }
+    } catch {}
+  }
+
+  // Unconditional diagnostic: log the voice call's critical parameters
+  // to the daemon stderr (via /api/voice/log) so we can see them in the
+  // launcher's View Logs regardless of debug flag state.
+  try {
+    await fetch('/api/voice/log', {
+      method: 'POST',
+      body: JSON.stringify({
+        event: 'openVoiceChat',
+        stt: earlySttProvider,
+        tauri: !!window.__TAURI__?.core?.invoke,
+        channel: !!window.__TAURI__?.core?.Channel,
+        debug: earlyVoiceChatDebug,
+      }),
+    });
+  } catch {}
+
   // Acquire the mic only when the stream is actually needed.
   //
   // We need getUserMedia for two things: the waveform visualizer (always,
@@ -162,7 +203,7 @@ async function openVoiceChat(conversationId) {
     const TauriChannel = window.__TAURI__?.core?.Channel;
     if (tauriInvoke && TauriChannel) {
       if (earlyVoiceChatDebug && globalThis.appendVoiceDebug) {
-        globalThis.appendVoiceDebug('mic-perm', 'Tauri detected — using native mic-capture plugin');
+        globalThis.appendVoiceDebug('mic-perm', `Tauri detected — using native mic-capture plugin (STT provider: ${earlySttProvider})`);
       }
       const channel = new TauriChannel('audio-frame');
       let nativeFrameCount = 0;
@@ -189,19 +230,34 @@ async function openVoiceChat(conversationId) {
       try {
         await tauriInvoke('plugin:psycheros-mic-capture|start_capture', { onFrame: channel });
         nativeCaptureActive = true;
+        voiceDebug('capture', 'native capture started — frames flowing to channel');
+        // Unconditional diagnostic — tells us native capture succeeded even
+        // without debug flags on. Goes to daemon stderr via /api/voice/log.
+        try {
+          await fetch('/api/voice/log', {
+            method: 'POST',
+            body: 'native capture started OK — frames flowing to channel',
+          });
+        } catch {}
         if (earlyVoiceChatDebug && globalThis.appendVoiceDebug) {
           globalThis.appendVoiceDebug('mic-perm', 'native capture started');
         }
       } catch (err) {
         const detail = err && err.message ? err.message : String(err);
         showToast(`Mic capture failed: ${detail}`, 'warning');
+        // Unconditional diagnostic — tells us WHY it failed.
+        try {
+          await fetch('/api/voice/log', {
+            method: 'POST',
+            body: `native capture FAILED: ${detail}`,
+          });
+        } catch {}
         if (earlyVoiceChatDebug && globalThis.appendVoiceDebug) {
           globalThis.appendVoiceDebug('mic-perm', `start_capture FAILED: ${detail}`);
         }
         cleanup();
         return;
       }
-      // Skip getUserMedia entirely — we have the audio stream via native.
     } else {
       if (earlyVoiceChatDebug && globalThis.appendVoiceDebug) {
         globalThis.appendVoiceDebug(

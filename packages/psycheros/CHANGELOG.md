@@ -33,6 +33,26 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.13] - 2026-06-24
+
+### Fixed
+
+- Fixed silent config fetch failure in voice chat by falling back to
+  `/api/voice/status` when the HTML config peek returns 'browser'. This recovers
+  the correct STT provider and activates native mic capture.
+- Simplified context inspector label to just the turn number instead of the
+  unreadable "Turn X / Y of Z" on conversations longer than 50 turns.
+
+### Changed
+
+- Added comprehensive diagnostics for voice calls: `POST /api/voice/log`
+  endpoint, unconditional diagnostic logs at config resolution, native capture
+  success/failure, and config peek recovery.
+- Added STT/TTS provider info to `/api/voice/status` response and voice chat
+  logs.
+- Added live-session capture event logging to prove frames route through the
+  live voice session (not the test probe).
+
 ## [0.8.11] - 2026-06-21
 
 ### Fixed

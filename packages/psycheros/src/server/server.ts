@@ -1884,6 +1884,17 @@ export class Server {
       return await handleTestTTSConnection(ctx, request);
     }
 
+    // POST /api/voice/log - Diagnostic log endpoint for voice.js.
+    // voice.js (running inside the Tauri webview) can't write to files or
+    // the terminal directly. This endpoint lets it POST diagnostic lines
+    // that get logged to the daemon's stderr, visible in the launcher's
+    // View Logs. Works unconditionally — no debug flag needed.
+    if (method === "POST" && path === "/api/voice/log") {
+      const body = await request.text();
+      console.log(`[Voice:js] ${body}`);
+      return new Response("ok", { status: 200 });
+    }
+
     // GET /api/voice/ws - WebSocket endpoint for voice chat
     if (method === "GET" && path.match(/^\/api\/voice\/ws/)) {
       return handleVoiceWebSocket(ctx, request);

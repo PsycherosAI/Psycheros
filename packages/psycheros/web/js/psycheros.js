@@ -3764,7 +3764,7 @@ function renderContextInspector() {
       label.textContent = 'No data';
     } else {
       const snap = contextSnapshots[selectedSnapshotIdx];
-      label.textContent = `Turn ${snap.turnIndex} / ${selectedSnapshotIdx + 1} of ${contextSnapshots.length}`;
+      label.textContent = `Turn ${snap.turnIndex}`;
     }
   }
 
@@ -5113,6 +5113,7 @@ function closeLightbox() {
   if (overlay) overlay.remove();
   document.removeEventListener('keydown', closeLightboxOnEsc);
 }
+globalThis.closeLightbox = closeLightbox;
 
 function closeLightboxOnEsc(e) {
   if (e.key === 'Escape') closeLightbox();

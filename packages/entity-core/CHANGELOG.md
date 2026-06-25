@@ -6,6 +6,15 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-06-24
+
+### Fixed
+
+- Fixed orphaned `vec_graph_nodes` entries that appeared after prune/merge
+  phases. `verifyVectorTableSync` now removes orphans on startup instead of just
+  warning; `consolidateGraph` adds a Phase 5 sweep that removes vec entries for
+  any soft-deleted node.
+
 ## [0.4.3] - 2026-06-18
 
 ### Fixed

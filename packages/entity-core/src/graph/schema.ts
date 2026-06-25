@@ -262,7 +262,11 @@ export function getVecVersion(db: Database): string | null {
 
 /**
  * Verify that the vector table is in sync with the nodes table.
- * If out of sync, clear the vector table to force re-indexing.
+ * Removes orphaned vector entries (their corresponding node is soft-deleted
+ * or missing). Orphans accumulate when nodes are soft-deleted through paths
+ * that don't clean vec_graph_nodes inline — historically the consolidator's
+ * prune/merge phases, now patched but defensive cleanup stays for any
+ * future drift.
  *
  * @param db - The SQLite database instance
  */
@@ -279,8 +283,14 @@ export function verifyVectorTableSync(db: Database): void {
       .get<{ count: number }>()?.count ?? 0;
 
     if (nodesWithVec !== vecCount) {
+      const cleaned = db
+        .prepare(
+          "DELETE FROM vec_graph_nodes WHERE rowid NOT IN (SELECT rowid FROM graph_nodes WHERE deleted = 0)",
+        )
+        .run();
+
       console.warn(
-        `[Graph] Vector table mismatch: embedded_nodes=${nodesWithVec}, vec_entries=${vecCount}. Vector search may be incomplete.`,
+        `[Graph] Vector table mismatch: embedded_nodes=${nodesWithVec}, vec_entries=${vecCount}. Removed ${cleaned} orphaned vector entries.`,
       );
     }
   } catch {

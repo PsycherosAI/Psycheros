@@ -50,6 +50,20 @@ export function consolidateGraph(dataDir: string): ConsolidationResult {
     const mergedCount = mergeDuplicates(db);
     // Edges re-parented by merging don't count as removed
 
+    // Phase 5: Clean up orphaned vector entries for nodes soft-deleted by
+    // phases 1-4. pruneIsolatedNodes, pruneGenericNodes, and mergeDuplicates
+    // all soft-delete via raw UPDATE on graph_nodes (bypassing
+    // GraphStore.deleteNode, which cleans vec entries inline). Without this
+    // sweep, vec_graph_nodes drifts out of sync and triggers
+    // verifyVectorTableSync's warning on every boot.
+    try {
+      db.prepare(
+        "DELETE FROM vec_graph_nodes WHERE rowid IN (SELECT rowid FROM graph_nodes WHERE deleted = 1)",
+      ).run();
+    } catch {
+      // vec_graph_nodes may not exist on this database
+    }
+
     console.error(
       `[Graph] Consolidation: removed ${nodesRemoved} nodes, ${edgesRemoved} edges, merged ${mergedCount} nodes`,
     );

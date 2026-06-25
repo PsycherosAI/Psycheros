@@ -10168,11 +10168,18 @@ export function handleGetVoiceStatus(ctx: RouteContext): Response {
   const settings = ctx.getVoiceSettings();
   const sessionManager = getVoiceSessionManager();
 
+  // Include active profile's STT/TTS providers for diagnostics.
+  const profile =
+    settings.profiles.find((p) => p.id === settings.activeProfileId) ??
+      settings.profiles[0];
+
   return new Response(
     JSON.stringify({
       enabled: settings.enabled,
       activeProfileId: settings.activeProfileId,
       activeSessions: sessionManager.activeSessionCount,
+      sttProvider: profile?.providerSettings.stt.provider ?? "unknown",
+      ttsProvider: profile?.providerSettings.tts.provider ?? "unknown",
     }),
     { headers: { "Content-Type": "application/json" } },
   );
