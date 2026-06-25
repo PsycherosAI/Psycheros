@@ -33,6 +33,19 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.14] - 2026-06-25
+
+### Fixed
+
+- Voice WebSocket now connects before mic capture starts, preventing race
+  conditions where audio frames arrive before the WebSocket is ready.
+- Added JS-side Voice Activity Detection (VAD) for the native capture path,
+  improving silence detection and audio cutoff behavior.
+
+### Changed
+
+- Trimmed verbose comments in voice.js for improved readability.
+
 ## [0.8.13] - 2026-06-24
 
 ### Fixed
