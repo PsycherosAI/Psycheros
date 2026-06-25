@@ -203,6 +203,7 @@ async function openVoiceChat(conversationId) {
             sumSq += n * n;
           }
           nativeRms = Math.sqrt(sumSq / Math.max(sampleCount, 1));
+          nativePeakRms = Math.max(nativePeakRms, nativeRms);
         }
 
         if (earlyVoiceChatDebug && globalThis.appendVoiceDebug) {
@@ -1043,7 +1044,8 @@ function startSilenceDetector() {
 
     let rms;
     if (nativeCaptureActive) {
-      rms = nativeRms;
+      rms = nativePeakRms;
+      nativePeakRms = 0;
     } else {
       if (!analyserNode) return;
       const bufferLength = analyserNode.frequencyBinCount;
@@ -1283,6 +1285,10 @@ let nativeCaptureActive = false;
 
 // RMS from most recent native capture frame. Used by VAD when nativeCaptureActive.
 let nativeRms = 0;
+// Peak RMS since last VAD check. VAD reads every 100ms but frames arrive
+// every ~50ms — if we only track the last frame, a brief speech spike can
+// be overwritten by a silence frame before VAD sees it.
+let nativePeakRms = 0;
 
 function queueAudioFrame(frame) {
   if (isDeafened) return;

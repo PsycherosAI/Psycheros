@@ -41,6 +41,8 @@ follows [Semantic Versioning](https://semver.org/).
   conditions where audio frames arrive before the WebSocket is ready.
 - Added JS-side Voice Activity Detection (VAD) for the native capture path,
   improving silence detection and audio cutoff behavior.
+- VAD now uses peak RMS from the audio frame window instead of the last-frame
+  value, reducing false positives on brief silence drops during speech.
 
 ### Changed
 
