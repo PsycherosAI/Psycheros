@@ -1061,7 +1061,10 @@ function startSilenceDetector() {
       rms = nativePeakRms;
       nativePeakRms = 0;
     } else {
-      if (!analyserNode) return;
+      if (!analyserNode) {
+        setTimeout(check, VAD_CHECK_INTERVAL_MS);
+        return;
+      }
       const bufferLength = analyserNode.frequencyBinCount;
       if (silenceLevel.length !== bufferLength) {
         silenceLevel = new Uint8Array(bufferLength);
@@ -1076,17 +1079,16 @@ function startSilenceDetector() {
     }
 
     if (rms > SILENCE_THRESHOLD) {
-      // Voice activity — recording in progress
       if (!isRecording) {
         isRecording = true;
+        try { fetch('/api/voice/log', { method: 'POST', body: `VAD: speech detected, RMS=${rms.toFixed(4)}, native=${nativeCaptureActive}` }); } catch {}
       }
-      // Cancel any pending silence timer
       if (silenceTimer) {
         clearTimeout(silenceTimer);
         silenceTimer = null;
       }
     } else if (isRecording && !silenceTimer && !isMuted) {
-      // Silence after speech — start the turn-end timer
+      try { fetch('/api/voice/log', { method: 'POST', body: `VAD: silence after speech (RMS=${rms.toFixed(4)}), starting ${endOfTurnSilence}s timer` }); } catch {}
       silenceTimer = setTimeout(() => {
         // Defensive: if PTT was toggled on while we were waiting, bail.
         // The user now controls turn end via button release. (check()
@@ -1098,6 +1100,7 @@ function startSilenceDetector() {
         }
         if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
           voiceWs.send(JSON.stringify({ type: 'user_silence' }));
+          try { fetch('/api/voice/log', { method: 'POST', body: 'VAD: user_silence sent' }); } catch {}
         }
         isRecording = false;
         silenceTimer = null;

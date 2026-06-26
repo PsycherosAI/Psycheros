@@ -4,6 +4,21 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.16] - 2026-06-25
+
+### Fixed
+
+- Silence detector check loop no longer dies when `analyserNode` isn't ready
+  yet. An early `return` cancelled rescheduling, leaving VAD dead for the entire
+  call — same bug class as the WS-connect race fixed in 0.8.15, now also fixed
+  for the browser-STT audio-analysis path.
+
+### Changed
+
+- Added VAD state-transition diagnostic logging: speech detected (with RMS +
+  capture source), silence-after-speech (with timer duration), and
+  `user_silence` sent. Visible in the voice debug panel and `/api/voice/log`.
+
 ## [0.8.15] - 2026-06-25
 
 ### Fixed
@@ -988,6 +1003,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 - Entity identity and memory served by the sibling `entity-core` MCP server,
   spawned as a subprocess when `PSYCHEROS_MCP_ENABLED=true`.
 
+[0.8.16]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.16
 [0.8.15]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.15
 [0.4.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.1
 [0.4.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.0
