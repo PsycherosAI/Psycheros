@@ -475,7 +475,7 @@ export class WalkieTalkieSession {
     this.setState("idle");
   }
 
-  private setState(state: WalkieTalkieState): void {
+  public setState(state: WalkieTalkieState): void {
     if (this._stopped) return;
     if (this._state === state) return;
     this._state = state;

@@ -48,6 +48,8 @@ export interface VoiceSession {
   pttHolding: boolean;
   /** Global PTT toggle from VoiceSettings (set at session creation). */
   pttEnabled: boolean;
+  /** Track PTT vs vanilla mode ('ptt' or 'vanilla'). */
+  pttMode: "ptt" | "vanilla";
   /**
    * True when the browser has detected the start of user speech but the
    * corresponding finalized transcript hasn't arrived yet. Used to defer
@@ -153,6 +155,7 @@ export class VoiceSessionManager {
       muted: false,
       pttHolding: false,
       pttEnabled: pttEnabled,
+      pttMode: pttEnabled ? "ptt" : "vanilla",
       userSpeaking: false,
       pendingPulses: [],
       idleTimer: null,

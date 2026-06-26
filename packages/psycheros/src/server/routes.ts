@@ -10381,7 +10381,6 @@ export function handleVoiceCallFragment(
   const html = renderVoiceCallView(
     conversationId,
     profile,
-    false,
     settings.pttKeys ?? ["Space"],
     settings.voiceChatDebug ?? false,
   );

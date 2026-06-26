@@ -4,6 +4,20 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.17] - 2026-06-26
+
+### Fixed
+
+- PTT mode: gate audio frame sending and server-side audio on pttHolding to
+  prevent spurious RECORDING state
+- PTT mode: remove global pttEnabled, make PTT per-call only
+- PTT mode: add session.pttMode to track PTT vs vanilla mode
+- UI state: always show 'Listening' for idle state regardless of PTT mode
+- UI state: show 'Listening' not 'Recording' in vanilla mode
+- STT provider: fix module-level sttProvider in fallback path
+- VAD: reset nativePeakRms in browser VAD
+- VAD: send user_speech_start when VAD detects speech (server STT)
+
 ## [0.8.16] - 2026-06-25
 
 ### Fixed
