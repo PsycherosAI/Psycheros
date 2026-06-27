@@ -334,7 +334,7 @@ export class VoiceSessionManager {
           // Without this gate, frames arriving before ptt_start (e.g. during
           // the async config load race) push the pipeline into RECORDING state
           // immediately on call start.
-          if (session.pttMode && !session.pttHolding) {
+          if (session.pttMode === "ptt" && !session.pttHolding) {
             // Still reset idle timer so the session doesn't time out.
             session.lastActivityAt = Date.now();
             this.resetIdleTimer(session, profile);

@@ -4,6 +4,18 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.18] - 2026-06-26
+
+### Fixed
+
+- Voice WebSocket: 25s ping heartbeat prevents Deno from killing the connection
+  during long thinking periods (tool calls, LLM round-trips).
+- Vanilla (continuous) voice mode: `pttMode` is now compared as `"ptt"` instead
+  of truthy, so non-PTT mode no longer blocks audio frame sending at call start.
+- Tauri 2.x desktop: native mic capture delivers frames as `ArrayBuffer`, not
+  `Array`. Both shapes are now handled in the voice WebSocket send path and the
+  mic test diagnostic.
+
 ## [0.8.17] - 2026-06-26
 
 ### Fixed
@@ -1017,6 +1029,8 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 - Entity identity and memory served by the sibling `entity-core` MCP server,
   spawned as a subprocess when `PSYCHEROS_MCP_ENABLED=true`.
 
+[0.8.18]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.18
+[0.8.17]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.17
 [0.8.16]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.16
 [0.8.15]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.15
 [0.4.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.4.1

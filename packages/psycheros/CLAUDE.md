@@ -157,16 +157,24 @@ Browser (Web Speech API or PCM capture)
     cumulative session text. If new transcript starts with the joined buffer,
     REPLACE instead of append (otherwise snowballs).
   - `sttDebug` profile flag (default off) gates diagnostic toasts.
-- **Global PTT settings** — `VoiceSettings.pttEnabled` (boolean) and `pttKeys`
-  (string array of `KeyboardEvent.code` or `MediaSession:action` or
-  `Mouse3`/`Mouse4`). Per-conversation toggle in the voice overlay, persists
-  across calls. MediaSession bindings toggle (single-press); keyboard/mouse
-  bindings hold (keydown/keyup). Four load-bearing PTT subtleties —
-  silence-detector must re-check `pttEnabled` every iteration (toggle-on
-  mid-call), browser-STT `onend` must restart recognition if still holding,
-  phrase buffer must not flush mid-hold, and `endPTT` flush must defer to
-  `onend` (Chrome emits a trailing final between `stop()` and `onend`). See
-  `docs/VOICE_CHAT_UX.md` "Subtle PTT behaviors" for the full rationale.
+- **PTT settings** — `VoiceSettings.pttKeys` (string array of
+  `KeyboardEvent.code` or `MediaSession:action` or `Mouse3`/`Mouse4`) is the
+  only global PTT config. PTT enable/disable is per-call — toggled from the
+  voice overlay, initialized from `VoiceProfile.pushToTalk`, tracked in voice.js
+  module-local `pttEnabled` and server-side `session.pttMode`
+  (`"ptt" | "vanilla"` literal — see below). MediaSession bindings toggle
+  (single-press); keyboard/mouse bindings hold (keydown/keyup). Four
+  load-bearing PTT subtleties — silence-detector must re-check `pttEnabled`
+  every iteration (toggle-on mid-call), browser-STT `onend` must restart
+  recognition if still holding, phrase buffer must not flush mid-hold, and
+  `endPTT` flush must defer to `onend` (Chrome emits a trailing final between
+  `stop()` and `onend`). See `docs/VOICE_CHAT_UX.md` "Subtle PTT behaviors" for
+  the full rationale.
+- **Server-side audio gate** (`session-manager.ts` binary-frame handler) — gates
+  on `session.pttMode === "ptt" && !session.pttHolding`. Must be a literal
+  compare: `pttMode` is typed `"ptt" | "vanilla"`, both strings are truthy, so a
+  bare `if (session.pttMode)` silently drops all audio in vanilla mode. Same
+  trap applies to any union-of-string-literals field used as a flag.
 - **Yin Yang mode** — toggle button (☯) in the voice overlay switches from voice
   input to text input mid-call. Typed text uses the same
   `{type:

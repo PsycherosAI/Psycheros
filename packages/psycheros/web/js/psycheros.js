@@ -6015,10 +6015,46 @@ async function runVoiceChatTest() {
     const channel = new TauriChannel('audio-frame-test');
     let frameCount = 0;
     let firstFrameBytes = 0;
+    let firstFrameShape = 'unknown';
+    let maxRms = 0;
+    let minRms = -1;
     channel.onmessage = (message) => {
       frameCount++;
-      if (frameCount === 1) {
-        firstFrameBytes = Array.isArray(message) ? message.length : 0;
+      let bytes = null;
+      if (message instanceof ArrayBuffer) {
+        bytes = new Uint8Array(message);
+        if (frameCount === 1) {
+          firstFrameBytes = message.byteLength;
+          firstFrameShape = 'ArrayBuffer';
+        }
+      } else if (Array.isArray(message)) {
+        bytes = new Uint8Array(message);
+        if (frameCount === 1) {
+          firstFrameBytes = message.length;
+          firstFrameShape = 'Array';
+        }
+      } else if (message && typeof message.length === 'number') {
+        bytes = message;
+        if (frameCount === 1) {
+          firstFrameBytes = message.length;
+          firstFrameShape = message.constructor?.name || 'TypedArray';
+        }
+      } else if (frameCount === 1) {
+        firstFrameBytes = 0;
+        firstFrameShape = typeof message;
+      }
+      if (bytes && bytes.length >= 2) {
+        let sumSq = 0;
+        const sampleCount = bytes.length >> 1;
+        for (let j = 0; j < bytes.length - 1; j += 2) {
+          let val = bytes[j] | (bytes[j + 1] << 8);
+          if (val > 32767) val -= 65536;
+          const n = val / 32768;
+          sumSq += n * n;
+        }
+        const rms = Math.sqrt(sumSq / Math.max(sampleCount, 1));
+        if (rms > maxRms) maxRms = rms;
+        if (rms < minRms || minRms < 0) minRms = rms;
       }
     };
     appendVoiceDebug('mic-perm', "Calling invoke('plugin:psycheros-mic-capture|start_capture')...");
@@ -6029,7 +6065,7 @@ async function runVoiceChatTest() {
       await tauriInvoke('plugin:psycheros-mic-capture|stop_capture');
       appendVoiceDebug(
         'mic-perm',
-        `native capture OK — ${frameCount} frames in 2s (first frame: ${firstFrameBytes} bytes)`,
+        `native capture OK — ${frameCount} frames in 2s (first frame: ${firstFrameBytes} bytes, shape: ${firstFrameShape}, RMS range: ${minRms.toFixed(4)}–${maxRms.toFixed(4)})`,
       );
     } catch (err) {
       const detail = err && err.message ? err.message : String(err);

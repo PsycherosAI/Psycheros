@@ -22,6 +22,7 @@
 // =============================================================================
 
 let voiceWs = null;
+let voiceWsHeartbeat = null;
 let audioContext = null;
 let mediaStream = null;
 let sourceNode = null;
@@ -200,14 +201,21 @@ async function openVoiceChat(conversationId) {
           }
           return;
         }
-        voiceWs.send(new Uint8Array(message).buffer);
+        // Tauri 2.x Channel<Vec<u8>> uses IpcResponse::Raw → arrives as ArrayBuffer.
+        // Fall through to plain Array handling for older Tauri or non-binary paths.
+        const frameBytes = message instanceof ArrayBuffer
+          ? new Uint8Array(message)
+          : (Array.isArray(message) ? new Uint8Array(message) : null);
+        if (frameBytes) {
+          voiceWs.send(frameBytes.buffer);
+        }
 
         // RMS for JS-side VAD (no analyserNode in native capture path).
-        if (Array.isArray(message)) {
+        if (frameBytes && frameBytes.length >= 2) {
           let sumSq = 0;
-          const sampleCount = message.length >> 1;
-          for (let j = 0; j < message.length - 1; j += 2) {
-            let val = message[j] | (message[j + 1] << 8);
+          const sampleCount = frameBytes.length >> 1;
+          for (let j = 0; j < frameBytes.length - 1; j += 2) {
+            let val = frameBytes[j] | (frameBytes[j + 1] << 8);
             if (val > 32767) val -= 65536;
             const n = val / 32768;
             sumSq += n * n;
@@ -218,8 +226,9 @@ async function openVoiceChat(conversationId) {
 
         if (earlyVoiceChatDebug && globalThis.appendVoiceDebug) {
           if (nativeFrameCount === 1) {
-            const bytes = Array.isArray(message) ? message.length : 0;
-            globalThis.appendVoiceDebug('tts', `first frame sent to WS: ${bytes} bytes`);
+            const bytes = frameBytes ? frameBytes.length : 0;
+            const shape = message instanceof ArrayBuffer ? 'ArrayBuffer' : (Array.isArray(message) ? 'Array' : typeof message);
+            globalThis.appendVoiceDebug('tts', `first frame sent to WS: ${bytes} bytes (${shape})`);
           } else if (nativeFrameCount % 50 === 0) {
             globalThis.appendVoiceDebug('tts', `${nativeFrameCount} frames sent to WS (${nativeDroppedCount} dropped)`);
           }
@@ -509,6 +518,10 @@ function cleanup() {
     recognition = null;
   }
 
+  if (voiceWsHeartbeat) {
+    clearInterval(voiceWsHeartbeat);
+    voiceWsHeartbeat = null;
+  }
   if (voiceWs) {
     try { voiceWs.close(); } catch {}
     voiceWs = null;
@@ -1051,6 +1064,9 @@ let silenceDetectorStarted = false;
 function startSilenceDetector() {
   if (silenceDetectorStarted) return;
   silenceDetectorStarted = true;
+  try { fetch('/api/voice/log', { method: 'POST', body: `VAD: silence detector started (native=${nativeCaptureActive}, sttProvider=${sttProvider})` }); } catch {}
+  let vadCheckCount = 0;
+  let lastLoggedRms = -1;
   const check = () => {
     if (!voiceWs || voiceWs.readyState !== WebSocket.OPEN) {
       setTimeout(check, VAD_CHECK_INTERVAL_MS);
@@ -1091,6 +1107,20 @@ function startSilenceDetector() {
         sumSq += v * v;
       }
       rms = Math.sqrt(sumSq / silenceLevel.length);
+    }
+
+    // Periodic VAD heartbeat so we can confirm the loop is running and see
+    // what RMS values it's computing. Logged every 20 checks (≈2s), or when
+    // RMS crosses the threshold (so we never miss the speech-on transition).
+    vadCheckCount++;
+    if (rms > SILENCE_THRESHOLD) {
+      if (lastLoggedRms <= SILENCE_THRESHOLD) {
+        try { fetch('/api/voice/log', { method: 'POST', body: `VAD: rms crossed threshold, RMS=${rms.toFixed(4)} (was ${lastLoggedRms.toFixed(4)})` }); } catch {}
+      }
+    }
+    lastLoggedRms = rms;
+    if (vadCheckCount % 20 === 0) {
+      try { fetch('/api/voice/log', { method: 'POST', body: `VAD: heartbeat check=${vadCheckCount} RMS=${rms.toFixed(4)} peak=${nativePeakRms.toFixed(4)} native=${nativeCaptureActive} rec=${isRecording}` }); } catch {}
     }
 
     if (rms > SILENCE_THRESHOLD) {
@@ -1442,6 +1472,14 @@ function connectVoiceWs(conversationId) {
   voiceWs.onopen = () => {
     voiceDebug('ws', `connected → ${fullUrl}`);
     updateConnectionStatus('active', pttEnabled ? 'PTT ready' : 'Listening');
+    // Heartbeat: send ping every 25s to keep the WebSocket alive during
+    // long thinking periods (tool calls + LLM round-trips). Without this,
+    // Deno's WebSocket layer kills the connection after ~60s of no PONG.
+    voiceWsHeartbeat = setInterval(() => {
+      if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+        voiceWs.send(JSON.stringify({ type: 'ping' }));
+      }
+    }, 25000);
   };
 
   voiceWs.onmessage = (event) => {
@@ -1455,6 +1493,10 @@ function connectVoiceWs(conversationId) {
 
   voiceWs.onclose = (event) => {
     voiceDebug('ws', `closed code=${event.code} reason="${event.reason || ''}" clean=${event.wasClean}`);
+    if (voiceWsHeartbeat) {
+      clearInterval(voiceWsHeartbeat);
+      voiceWsHeartbeat = null;
+    }
     updateConnectionStatus('error', 'Disconnected');
     cleanup();
   };
