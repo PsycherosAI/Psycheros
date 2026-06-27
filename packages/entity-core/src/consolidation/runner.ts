@@ -195,16 +195,30 @@ export class ConsolidationRunner {
    * Rewrite any `running` rows from a previous boot to `error`. With
    * `maxAttempts=1` there's no retry, but resetting the status keeps
    * the table honest for debugging.
+   *
+   * Wrapped in try/catch — a "database is locked" here crashes the
+   * daemon uncaught (the original Windows bug). The GraphStore sets
+   * `PRAGMA busy_timeout = 5000` so transient contention from another
+   * entity-core process resolves on its own; this catch only fires
+   * when a zombie is genuinely wedged, in which case the stale
+   * `running` row is cosmetic damage, not a crash-worthy fault.
    */
   private reclaimRunningOnBoot(): void {
-    this.db.exec(
-      `UPDATE consolidation_runs
-       SET status = 'error',
-           completed_at = ?,
-           error = COALESCE(error, 'Reclaimed after worker crash')
-       WHERE status = 'running'`,
-      [nowIso()],
-    );
+    try {
+      this.db.exec(
+        `UPDATE consolidation_runs
+         SET status = 'error',
+             completed_at = ?,
+             error = COALESCE(error, 'Reclaimed after worker crash')
+         WHERE status = 'running'`,
+        [nowIso()],
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[ConsolidationRunner] reclaimRunningOnBoot failed (continuing): ${msg}`,
+      );
+    }
   }
 
   /**

@@ -1064,7 +1064,9 @@ let silenceDetectorStarted = false;
 function startSilenceDetector() {
   if (silenceDetectorStarted) return;
   silenceDetectorStarted = true;
-  try { fetch('/api/voice/log', { method: 'POST', body: `VAD: silence detector started (native=${nativeCaptureActive}, sttProvider=${sttProvider})` }); } catch {}
+  if (voiceChatDebug) {
+    try { fetch('/api/voice/log', { method: 'POST', body: `VAD: silence detector started (native=${nativeCaptureActive}, sttProvider=${sttProvider})` }); } catch {}
+  }
   let vadCheckCount = 0;
   let lastLoggedRms = -1;
   const check = () => {
@@ -1112,16 +1114,19 @@ function startSilenceDetector() {
     // Periodic VAD heartbeat so we can confirm the loop is running and see
     // what RMS values it's computing. Logged every 20 checks (≈2s), or when
     // RMS crosses the threshold (so we never miss the speech-on transition).
+    // Gated on voiceChatDebug — these are pure diagnostics, not transitions.
     vadCheckCount++;
-    if (rms > SILENCE_THRESHOLD) {
-      if (lastLoggedRms <= SILENCE_THRESHOLD) {
-        try { fetch('/api/voice/log', { method: 'POST', body: `VAD: rms crossed threshold, RMS=${rms.toFixed(4)} (was ${lastLoggedRms.toFixed(4)})` }); } catch {}
+    if (voiceChatDebug) {
+      if (rms > SILENCE_THRESHOLD) {
+        if (lastLoggedRms <= SILENCE_THRESHOLD) {
+          try { fetch('/api/voice/log', { method: 'POST', body: `VAD: rms crossed threshold, RMS=${rms.toFixed(4)} (was ${lastLoggedRms.toFixed(4)})` }); } catch {}
+        }
+      }
+      if (vadCheckCount % 20 === 0) {
+        try { fetch('/api/voice/log', { method: 'POST', body: `VAD: heartbeat check=${vadCheckCount} RMS=${rms.toFixed(4)} peak=${nativePeakRms.toFixed(4)} native=${nativeCaptureActive} rec=${isRecording}` }); } catch {}
       }
     }
     lastLoggedRms = rms;
-    if (vadCheckCount % 20 === 0) {
-      try { fetch('/api/voice/log', { method: 'POST', body: `VAD: heartbeat check=${vadCheckCount} RMS=${rms.toFixed(4)} peak=${nativePeakRms.toFixed(4)} native=${nativeCaptureActive} rec=${isRecording}` }); } catch {}
-    }
 
     if (rms > SILENCE_THRESHOLD) {
       if (!isRecording) {

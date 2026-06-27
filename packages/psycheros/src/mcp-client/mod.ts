@@ -167,6 +167,14 @@ export class MCPClient {
   private reconnectBaseDelayMs = 5_000; // doubles each attempt
   private isReconnecting = false;
   /**
+   * In-flight restart promise. Both the scheduled-reconnect timer and any
+   * direct `restart()` caller share this so we never spawn two entity-core
+   * subprocesses at once — that race was the root cause of the Windows
+   * "database is locked" crash (two StdioClientTransport children opening
+   * the same graph.db). Subsequent callers await the existing promise.
+   */
+  private restartInProgress: Promise<boolean> | null = null;
+  /**
    * Number of MCP tool calls currently in flight. Used to suppress health-ping
    * reconnects — if a tool call is pending, entity-core is alive but busy.
    */
@@ -280,26 +288,14 @@ export class MCPClient {
     // and a different install dir's entity-core could legitimately exist on
     // the same machine. We match on the entity-core entry-point path that
     // was in our spawn args, falling back to a substring of "entity-core"
-    // only when we can't derive a more specific marker.
+    // only when we can't derive a more specific marker. Path-separator-
+    // agnostic so Windows backslash paths match too.
     const entityCoreScript = this.config.args?.find((a) =>
-      a.endsWith("/mod.ts") || a.endsWith("/src/mod.ts")
+      a.endsWith("/mod.ts") || a.endsWith("\\mod.ts") ||
+      a.endsWith("/src/mod.ts") || a.endsWith("\\src\\mod.ts")
     );
     const marker = entityCoreScript ?? "entity-core";
-    let isOurs = false;
-    try {
-      const ps = new Deno.Command("ps", {
-        args: ["-o", "command=", "-p", pid.toString()],
-        stdout: "piped",
-        stderr: "null",
-      });
-      const { code, stdout } = await ps.output();
-      if (code === 0) {
-        const cmdline = new TextDecoder().decode(stdout);
-        isOurs = cmdline.includes(marker);
-      }
-    } catch {
-      // ps not available — best-effort skip.
-    }
+    const isOurs = await this.orphanBelongsToUs(pid, marker);
 
     if (isOurs) {
       try {
@@ -311,6 +307,49 @@ export class MCPClient {
     }
 
     await Deno.remove(pidFile).catch(() => {});
+  }
+
+  /**
+   * Cross-platform "is this PID our entity-core?" check. POSIX uses `ps`,
+   * Windows uses PowerShell's CIM provider (`ps` doesn't exist there, so
+   * the previous Unix-only path silently skipped orphans on Windows and
+   * let them hold SQLite locks forever).
+   */
+  private async orphanBelongsToUs(
+    pid: number,
+    marker: string,
+  ): Promise<boolean> {
+    try {
+      if (Deno.build.os === "windows") {
+        const cmd = new Deno.Command("powershell.exe", {
+          args: [
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CommandLine`,
+          ],
+          stdout: "piped",
+          stderr: "null",
+        });
+        const { code, stdout } = await cmd.output();
+        if (code !== 0) return false;
+        const cmdline = new TextDecoder().decode(stdout).trim();
+        if (!cmdline) return false; // PID not found
+        return cmdline.includes(marker);
+      }
+      const ps = new Deno.Command("ps", {
+        args: ["-o", "command=", "-p", pid.toString()],
+        stdout: "piped",
+        stderr: "null",
+      });
+      const { code, stdout } = await ps.output();
+      if (code !== 0) return false;
+      const cmdline = new TextDecoder().decode(stdout);
+      return cmdline.includes(marker);
+    } catch {
+      // Inspection tool unavailable — don't kill a PID we can't verify.
+      return false;
+    }
   }
 
   private async writeChildPid(): Promise<void> {
@@ -452,9 +491,30 @@ export class MCPClient {
    * Restart the MCP server connection with updated environment variables.
    * Disconnects (with sync), updates env vars, and reconnects.
    *
+   * Mutex-guarded: if a restart is already in flight (scheduled reconnect
+   * or another caller), awaits and returns its result instead of spawning
+   * a second entity-core subprocess.
+   *
    * @param newEnv - Environment variables to merge into the existing config
    */
   async restart(newEnv?: Record<string, string>): Promise<boolean> {
+    if (this.restartInProgress) {
+      // Another caller beat us to it. Merge any new env into the in-flight
+      // restart's config — disconnect already ran, so the merge takes
+      // effect on the next connect cycle if one follows.
+      if (newEnv) this.config.env = { ...this.config.env, ...newEnv };
+      return this.restartInProgress;
+    }
+    const p = this.doRestart(newEnv);
+    this.restartInProgress = p;
+    try {
+      return await p;
+    } finally {
+      this.restartInProgress = null;
+    }
+  }
+
+  private async doRestart(newEnv?: Record<string, string>): Promise<boolean> {
     console.log("[MCP] Restarting entity-core connection...");
 
     // Manual restart always gets a fresh attempt budget.

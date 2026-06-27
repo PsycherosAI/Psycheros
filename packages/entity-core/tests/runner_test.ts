@@ -233,6 +233,68 @@ Deno.test("reclaim-on-boot rewrites running rows to error", async () => {
   }
 });
 
+/**
+ * Regression for the Windows "database is locked" crash. When a zombie
+ * entity-core is holding graph.db, reclaim-on-boot's UPDATE throws
+ * synchronously. Before the fix, that escaped uncaught and killed the
+ * daemon. After the fix, it's logged and start() completes normally.
+ *
+ * Simulates the locked DB with a tiny stand-in that handles the
+ * constructor's schema exec but throws on the reclaim UPDATE.
+ */
+Deno.test("reclaim-on-boot swallows db lock instead of crashing start()", async () => {
+  const { store, graphStore, cleanup } = await makeFixture();
+  // Wrap an in-memory DB so we can intercept the reclaim UPDATE.
+  const real = new Database(":memory:");
+  real.exec(`
+    CREATE TABLE consolidation_runs (
+      period TEXT NOT NULL,
+      scheduled_for TEXT NOT NULL,
+      status TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      result TEXT,
+      error TEXT,
+      PRIMARY KEY (period, scheduled_for)
+    );
+    INSERT INTO consolidation_runs
+      (period, scheduled_for, status, started_at)
+    VALUES ('weekly', '2026-01-01T05:00:00.000Z', 'running', '2026-01-01T05:00:01.000Z');
+  `);
+  // Stand-in that throws specifically on the reclaim UPDATE — emulating
+  // "database is locked" from a concurrent holder.
+  const throwingDb = {
+    exec: (sql: string | string[], ..._rest: unknown[]) => {
+      if (
+        typeof sql === "string" &&
+        sql.includes("SET status = 'error'")
+      ) {
+        throw new Error("database is locked");
+      }
+      // Delegate schema/claim/insert execs to the real handle.
+      // (ConsolidationRunner's constructor runs SCHEMA_SQL here; that
+      // hits the IF NOT EXISTS branches and is a no-op.)
+    },
+    prepare: () => ({
+      get: () => undefined,
+      all: () => [],
+      finalize: () => {},
+    }),
+  };
+  const runner = new ConsolidationRunner(
+    throwingDb as unknown as Database,
+    store,
+    graphStore,
+    { tickIntervalMs: 60_000 },
+  );
+  // start() must not throw — reclaim is now wrapped.
+  runner.start();
+  await new Promise((r) => setTimeout(r, 50));
+  runner.stop();
+  real.close();
+  await cleanup();
+});
+
 Deno.test("replaceDatabase swaps the handle and applies schema to the new one", async () => {
   const { db, store, graphStore, cleanup } = await makeFixture();
   const secondDb = new Database(":memory:");

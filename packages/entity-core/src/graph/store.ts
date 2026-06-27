@@ -59,6 +59,11 @@ export class GraphStore {
     // Open database (creates if not exists)
     this.db = new Database(this.dbPath);
     this.db.exec("PRAGMA foreign_keys = ON");
+    // Wait up to 5s on lock contention instead of erroring immediately.
+    // Without this, a concurrent entity-core process (orphan from a
+    // psycheros restart race) holding graph.db makes the consolidation
+    // runner's reclaim-on-boot UPDATE throw "database is locked" uncaught.
+    this.db.exec("PRAGMA busy_timeout = 5000");
     this.vectorAvailable = false;
   }
 
@@ -167,6 +172,7 @@ export class GraphStore {
     }
     this.db = new Database(this.dbPath);
     this.db.exec("PRAGMA foreign_keys = ON");
+    this.db.exec("PRAGMA busy_timeout = 5000");
     this.initialized = false;
   }
 

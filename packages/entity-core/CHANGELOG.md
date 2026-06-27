@@ -6,6 +6,29 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- _No unreleased changes yet._
+
+## [0.4.5] - 2026-06-27
+
+### Fixed
+
+- `LLMClient` now retries on HTTP 200 responses with null/empty completion
+  content instead of throwing on the first attempt. Some upstreams
+  intermittently emit `reasoning_content` with no answer text; previously this
+  surfaced as a sticky "Empty completion content" error in extraction health
+  (and any other caller) until the next successful call or process restart. The
+  empty-content case now uses the same exponential backoff already applied to
+  429/5xx/network failures, bounded by `maxRetries`.
+
+- `GraphStore` now sets `PRAGMA busy_timeout = 5000`, so transient SQLite lock
+  contention from a concurrent process resolves automatically instead of
+  throwing "database is locked" immediately.
+- `ConsolidationRunner.reclaimRunningOnBoot()` is now wrapped in try/catch. A
+  genuinely wedged lock no longer crashes the daemon uncaught — the stale
+  `running` row is logged as a warning and startup completes normally.
+
 ## [0.4.4] - 2026-06-24
 
 ### Fixed
@@ -289,6 +312,7 @@ All notable changes to entity-core are documented here. The format follows
 - Knowledge graph (people, places, relationships) backed by SQLite + sqlite-vec.
 - Snapshot system: pre-destructive-operation snapshots for recovery.
 
+[0.4.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.5
 [0.4.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.3
 [0.4.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.2
 [0.4.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.1

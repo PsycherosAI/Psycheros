@@ -94,6 +94,13 @@ The consolidator module is `src/consolidation/`:
 If you change consolidation cadence or grouping, **check `periods.ts`** — the
 ISO-week boundary math is the most common breakage point.
 
+`reclaimRunningOnBoot` in `runner.ts` is wrapped in try/catch — a
+`database is locked` failure (concurrent process holding `graph.db`) must not
+crash the daemon uncaught. `GraphStore` sets `PRAGMA busy_timeout = 5000` so
+transient contention resolves; only a genuinely wedged lock hits the catch.
+Don't strip either as defensive bloat — both are load-bearing on Windows where
+orphan entity-core subprocesses can outlive their psycheros parent.
+
 Significant memories sit alongside the hierarchy and are never folded into a
 higher tier. They're surfaced separately by RAG.
 

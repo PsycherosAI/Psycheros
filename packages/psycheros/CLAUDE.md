@@ -447,7 +447,7 @@ context, thinking, content, tool_call, metrics, done) and its retry sibling
 `POST /api/chat/retry`. `GET /api/events` is the persistent channel for
 background updates and Pulse streaming.
 
-## Concurrency: two locks to know about
+## Concurrency: three locks to know about
 
 - **Tool execution mutex** — `ToolRegistry.executeAll()` serializes tool
   execution across concurrent turns. Without this, two turns racing on the
@@ -459,6 +459,13 @@ background updates and Pulse streaming.
   conversation. Any new code that writes to chat persistence for a specific
   conversation must take this lock — otherwise role alternation corrupts when a
   Pulse and a chat turn touch the same DM thread.
+- **MCP restart mutex** — `MCPClient.restart()` is promise-guarded. The
+  scheduled-reconnect timer (set by `scheduleReconnect` when a health ping
+  fails) and any direct caller (e.g. `entity-data.ts` export retry) share a
+  single in-flight restart. Without this, two `StdioClientTransport` children
+  spawn concurrently and race for entity-core's `graph.db` — the root cause of
+  the Windows "database is locked" crash. Any new "restart MCP because X" path
+  must call `mcp.restart()`, not spawn its own transport.
 
 ## User data and runtime state
 

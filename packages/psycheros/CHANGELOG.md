@@ -4,6 +4,23 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.19] - 2026-06-27
+
+### Fixed
+
+- MCP: concurrent `restart()` calls no longer spawn two entity-core
+  subprocesses. A scheduled-reconnect timer and a direct caller (e.g. export
+  retry) racing on restart was the root cause of the Windows "database is
+  locked" crash — each spawned a fresh `StdioClientTransport` that opened
+  `graph.db` at the same time. `restart()` is now mutex-guarded; subsequent
+  callers await the in-flight restart.
+- MCP: orphan-PID detection now works on Windows (PowerShell CIM provider) in
+  addition to POSIX (`ps`). Previously, orphaned entity-core processes were
+  never reaped on Windows and could hold SQLite locks indefinitely.
+- Voice: VAD diagnostic logs (silence-detector heartbeat, threshold crossings)
+  are now gated behind `voiceChatDebug` instead of always-on, reducing log noise
+  for end users.
+
 ## [0.8.18] - 2026-06-26
 
 ### Fixed
@@ -1029,6 +1046,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 - Entity identity and memory served by the sibling `entity-core` MCP server,
   spawned as a subprocess when `PSYCHEROS_MCP_ENABLED=true`.
 
+[0.8.19]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.19
 [0.8.18]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.18
 [0.8.17]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.17
 [0.8.16]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.16
