@@ -1174,7 +1174,7 @@ Hub.
 **Source files:** `src/server/templates.ts` (`renderDiscordChannelView`,
 `formatDiscordMessageContent`, `renderThinkingSection`, `renderToolCard`),
 `src/server/routes.ts` (`handleClearConversationContext`), `src/db/client.ts`
-(`insertSystemMessage`, `listWebConversations`), `web/js/psycheros.js`
+(`insertSystemMessage`, `listSidebarConversations`), `web/js/psycheros.js`
 (Discord-aware `startMessageEdit`/`saveMessageEdit`, `loadContextSnapshots`),
 `web/css/discord.css` (`.discord-channel-header`, `.discord-msg-text`,
 `.discord-msg-edit-btn`, `.discord-context-divider`, `.discord-mention`)

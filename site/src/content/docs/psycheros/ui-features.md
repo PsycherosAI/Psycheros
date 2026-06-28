@@ -1052,7 +1052,7 @@ Hub.
 **Source files:** `src/server/templates.ts` (`renderDiscordChannelView`,
 `formatDiscordMessageContent`), `src/server/routes.ts`
 (`handleClearConversationContext`), `src/db/client.ts` (`insertSystemMessage`,
-`listWebConversations`), `web/js/psycheros.js` (conversation ID fallback in
+`listSidebarConversations`), `web/js/psycheros.js` (conversation ID fallback in
 `saveMessageEdit`, `loadContextSnapshots`), `web/css/discord.css`
 (`.discord-channel-header`, `.discord-msg-edit-btn`, `.discord-context-divider`,
 `.discord-mention`)

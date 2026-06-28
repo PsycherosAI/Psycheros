@@ -434,7 +434,7 @@ export function handleIndex(_ctx: RouteContext): Response {
  * @returns HTTP Response with JSON array of conversations
  */
 export function handleListConversations(ctx: RouteContext): Response {
-  const conversations = ctx.db.listWebConversations();
+  const conversations = ctx.db.listSidebarConversations();
 
   return new Response(JSON.stringify(conversations), {
     headers: {
@@ -654,7 +654,7 @@ export async function handleMessagesPaginated(
  * @returns HTTP Response with conversation list HTML fragment
  */
 export function handleConversationListFragment(ctx: RouteContext): Response {
-  const conversations = ctx.db.listWebConversations();
+  const conversations = ctx.db.listSidebarConversations();
 
   // Build set of conversation IDs that have active pulses
   const allPulses = ctx.db.listPulses({ enabled: true });

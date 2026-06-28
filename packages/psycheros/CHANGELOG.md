@@ -4,6 +4,18 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.20] - 2026-06-27
+
+### Fixed
+
+- Sidebar conversation list now uses a single shared query across all render
+  paths (HTMX fragments, JSON API, and state-change renders). Previously,
+  imported chats flickered in the sidebar and Discord conversations leaked into
+  the main UI because the HTMX/JSON paths used `listWebConversations` (web/null
+  only) while state-change renders used `listConversations` (everything). Both
+  paths now share `listSidebarConversations` (web/null + imported, Discord
+  excluded).
+
 ## [0.8.19] - 2026-06-27
 
 ### Fixed
@@ -1046,6 +1058,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 - Entity identity and memory served by the sibling `entity-core` MCP server,
   spawned as a subprocess when `PSYCHEROS_MCP_ENABLED=true`.
 
+[0.8.20]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.20
 [0.8.19]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.19
 [0.8.18]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.18
 [0.8.17]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.17

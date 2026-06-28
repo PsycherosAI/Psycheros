@@ -256,13 +256,14 @@ export class DBClient {
   }
 
   /**
-   * Lists web conversations only (excludes Discord and Pulse).
+   * Lists conversations shown in the main Psycheros sidebar — web/null plus
+   * entity-loom imports. Discord conversations live in their own hub.
    */
-  listWebConversations(): Conversation[] {
+  listSidebarConversations(): Conversation[] {
     const stmt = this.db.prepare(
       `SELECT id, title, created_at, updated_at, source_type, source_server_id, source_server_name, source_channel_id, source_channel_name
        FROM conversations
-       WHERE source_type IS NULL OR source_type = 'web'
+       WHERE source_type IS NULL OR source_type IN ('web', 'import')
        ORDER BY updated_at DESC`,
     );
 

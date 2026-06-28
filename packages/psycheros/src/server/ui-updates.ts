@@ -91,7 +91,7 @@ function renderRegion(
 ): string | null {
   switch (region) {
     case "conv-list": {
-      const conversations = db.listConversations();
+      const conversations = db.listSidebarConversations();
       const allPulses = db.listPulses({ enabled: true });
       const pulseConversationIds = new Set<string>();
       for (const pulse of allPulses) {
