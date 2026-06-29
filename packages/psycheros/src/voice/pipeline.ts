@@ -107,6 +107,12 @@ export class WalkieTalkieSession {
   /** Append audio data to the recording buffer (server-side STT only). */
   pushAudio(audio: Uint8Array): void {
     if (this._stopped) return;
+    // Drop frames while the entity is mid-response. TTS audio leaking back
+    // into the mic (imperfect echo cancellation) would otherwise accumulate
+    // in the buffer and get processed after the entity finishes — letting
+    // the entity respond to its own echo. The walkie-talkie model is non-
+    // interruptible: anything spoken during the entity's turn is ignored.
+    if (this._state === "processing" || this._state === "speaking") return;
     // Buffer frames even before state transitions (e.g. VAD latency).
     // State is set explicitly by ptt_start or user_speech_start.
     // Don't auto-transition on first frame — that causes "Recording" UI

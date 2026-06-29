@@ -175,6 +175,15 @@ Browser (Web Speech API or PCM capture)
   compare: `pttMode` is typed `"ptt" | "vanilla"`, both strings are truthy, so a
   bare `if (session.pttMode)` silently drops all audio in vanilla mode. Same
   trap applies to any union-of-string-literals field used as a flag.
+- **Mid-response audio gate** (`pipeline.ts` `pushAudio` + `session-manager.ts`
+  `user_speech_start` handler) — TTS audio leaking back into the mic triggers
+  the browser VAD during speaking. Both call sites must check pipeline state
+  before acting: `pushAudio` drops frames while `processing`/`speaking`;
+  `user_speech_start` still sets `userSpeaking` (Pulse draining needs it) but
+  must NOT call `setState("recording")`. Otherwise state jumps `speaking` →
+  `recording`, `isEntityMidResponse()` then returns false, and the next
+  `user_silence` runs `processAudioTurn` on top of the in-flight turn — firing
+  the "sent" tone mid-speaking and letting the entity respond to its own echo.
 - **Yin Yang mode** — toggle button (☯) in the voice overlay switches from voice
   input to text input mid-call. Typed text uses the same
   `{type:

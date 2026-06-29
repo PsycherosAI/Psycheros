@@ -209,6 +209,18 @@ handle legacy data and LLM parrots that slip through.
   restart recognition (Chrome VAD fired mid-hold); (3) non-PTT path → restart
   with 300ms delay. Out-of-order checks cause either infinite restart loops or
   lost speech.
+- **Mid-response audio + `user_speech_start` must respect pipeline state.** TTS
+  audio leaking back into the mic (imperfect echo cancellation) triggers the
+  browser VAD during the entity's turn. Two server-side guards prevent the
+  walkie-talkie state machine from corrupting: `pipeline.pushAudio()` drops
+  frames while `processing`/`speaking` (so echo audio doesn't accumulate and get
+  processed after the entity finishes); and the `user_speech_start` handler in
+  `session-manager.ts` still sets `userSpeaking` (Pulse draining needs it) but
+  skips `setState("recording")` when the entity is mid-response. Without either
+  guard, state would jump `speaking` → `recording`, `isEntityMidResponse()`
+  would return false on the next `user_silence`, and `processAudioTurn` would
+  run `setState("processing")` on top of the in-flight turn — firing the "sent"
+  tone mid-speaking and potentially having the entity respond to its own echo.
 
 ## Open work
 

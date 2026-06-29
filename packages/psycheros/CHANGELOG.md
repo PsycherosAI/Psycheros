@@ -4,6 +4,26 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.8.21] - 2026-06-29
+
+### Fixed
+
+- Voice: stop the "sent" cue tone firing mid-speaking in vanilla mode. TTS audio
+  leaking back into the mic triggered the browser VAD during the entity's turn,
+  which forced the pipeline state to `recording` mid-response and let the next
+  `user_silence` run a new turn on top of the in-flight one. `pushAudio` now
+  drops frames while the entity is `processing`/`speaking`, and the
+  `user_speech_start` handler keeps the `userSpeaking` flag (Pulse draining) but
+  no longer transitions state out of a mid-response turn.
+- Voice (playback): TTS chunk scheduling moved off the JS event loop. Each chunk
+  now starts at a tracked `nextStartTime` (sample-accurate via
+  `source.start(nextStartTime)`) instead of waiting for the previous source's
+  `onended`, which fires 1–5ms late and produced a click at every chunk boundary
+  — audible as "crackling fire" on Bluetooth headsets and small-chunk providers
+  like ElevenLabs.
+
 ## [0.8.20] - 2026-06-27
 
 ### Fixed
@@ -1058,6 +1078,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 - Entity identity and memory served by the sibling `entity-core` MCP server,
   spawned as a subprocess when `PSYCHEROS_MCP_ENABLED=true`.
 
+[0.8.21]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.21
 [0.8.20]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.20
 [0.8.19]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.19
 [0.8.18]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.18

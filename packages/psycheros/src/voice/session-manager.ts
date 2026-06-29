@@ -440,10 +440,22 @@ export class VoiceSessionManager {
         break;
 
       case "user_speech_start":
-        // Browser detected the start of user speech. Transition to recording
-        // state and set the flag so Pulse drainer defer — see maybeDrainPulse.
-        session.pipeline.setState("recording");
+        // Browser detected the start of user speech. Set the flag so Pulse
+        // drainer defers — see maybeDrainPulse. But DON'T transition to
+        // recording if the entity is mid-response: TTS audio leaking back
+        // into the mic (imperfect echo cancellation) triggers the browser
+        // VAD during speaking, and forcing state to recording would let
+        // the subsequent user_silence run processAudioTurn on top of the
+        // in-flight turn — firing the "sent" tone mid-speaking and letting
+        // the entity respond to its own echo. pushAudio also drops frames
+        // during mid-response, so any echo audio is discarded.
         session.userSpeaking = true;
+        if (
+          session.pipeline.state !== "processing" &&
+          session.pipeline.state !== "speaking"
+        ) {
+          session.pipeline.setState("recording");
+        }
         break;
 
       default:

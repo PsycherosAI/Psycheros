@@ -555,6 +555,8 @@ function cleanup() {
   pendingBytes = null;
   sawFirstTtsFrame = false;
   ttsFrameCount = 0;
+  nextStartTime = 0;
+  activeSourceCount = 0;
 
   const transcriptEl = document.getElementById('voice-transcript');
   if (transcriptEl) transcriptEl.innerHTML = '';
@@ -1342,6 +1344,16 @@ function endPTT() {
 
 let playbackBuffer = [];
 let playbackPlaying = false;
+// Gapless-playback scheduling state. nextStartTime is the AudioContext
+// time at which the next chunk should begin, tracked across drain calls.
+// activeSourceCount is the number of scheduled-but-not-yet-ended buffer
+// sources. Together they move chunk-boundary timing off the JS event
+// loop: source.start(nextStartTime) lets the audio thread schedule
+// precisely even when onended fires 1–5ms late (which otherwise produces
+// a click at every chunk boundary — audible as "crackling fire" on
+// Bluetooth headsets and small-chunk providers like ElevenLabs).
+let nextStartTime = 0;
+let activeSourceCount = 0;
 // Set when the daemon signals speaking → idle. The your-turn cue waits
 // here until the playback queue actually drains — otherwise it fires
 // underneath the tail of the entity's TTS audio and gets masked.
@@ -1399,50 +1411,88 @@ function queueAudioFrame(frame) {
   }
   pendingBytes = evenLength < merged.byteLength ? merged.slice(evenLength) : null;
   playbackBuffer.push(merged.slice(0, evenLength).buffer);
-  if (!playbackPlaying) {
-    drainPlaybackBuffer();
-  }
+  // Always pump. drain schedules up to a lookahead cap, so calling it on
+  // every frame keeps the audio thread fed ahead of the JS event loop
+  // instead of waiting for the previous source's onended (which fires
+  // 1–5ms late and leaks a click at every chunk boundary).
+  drainPlaybackBuffer();
 }
 
 function drainPlaybackBuffer() {
-  if (playbackBuffer.length === 0) {
-    playbackPlaying = false;
-    // Playback just finished. If the entity is done speaking (state idle)
-    // and we have a pending cue, fire it now — the user will hear it clearly
-    // because nothing else is playing.
-    if (pendingYourTurnCue) {
-      pendingYourTurnCue = false;
-      playYourTurnCue();
-    }
-    // Also refresh the display — if pipeline state was idle but we were
-    // holding the UI in "Speaking..." because audio was still playing,
-    // now we can finally show "Listening".
-    refreshDisplayState();
-    return;
-  }
-  playbackPlaying = true;
-
   const ctx = audioContext;
-  if (!ctx) return;
+  if (!ctx || !playbackGain) return;
 
-  try {
+  // Lookahead cap: never schedule more than this far ahead of currentTime.
+  // 150ms is enough slack to absorb JS event loop jitter (each frame's
+  // onended, GC pauses, htmx swaps) without buffer underruns, while
+  // keeping end-to-end TTS latency bounded.
+  const LOOKAHEAD_SEC = 0.15;
+  const now = ctx.currentTime;
+
+  // If the chain lapped real time (fresh start, underrun, or post-utterance
+  // reset), snap to now. Otherwise nextStartTime is already exactly where
+  // the next chunk should pick up gaplessly after the prior one.
+  if (nextStartTime < now) {
+    nextStartTime = now;
+  }
+
+  // Schedule every available chunk up to the lookahead cap. Each chunk's
+  // start time is the tracked nextStartTime, not currentTime — that's the
+  // whole fix. The audio thread fires sample-accurate; onended firing late
+  // no longer creates a gap because the next source is already scheduled.
+  while (
+    playbackBuffer.length > 0 &&
+    (nextStartTime - now) <= LOOKAHEAD_SEC
+  ) {
     const chunk = playbackBuffer.shift();
-    if (chunk.byteLength < 2) return drainPlaybackBuffer();
-    const float32 = int16ToFloat32(new Int16Array(chunk));
-    if (float32.length === 0) return drainPlaybackBuffer();
-    const buffer = ctx.createBuffer(1, float32.length, SAMPLE_RATE);
-    buffer.getChannelData(0).set(float32);
+    if (!chunk || chunk.byteLength < 2) continue;
+
+    let buffer;
+    try {
+      const float32 = int16ToFloat32(new Int16Array(chunk));
+      if (float32.length === 0) continue;
+      buffer = ctx.createBuffer(1, float32.length, SAMPLE_RATE);
+      buffer.getChannelData(0).set(float32);
+    } catch (e) {
+      console.error('[Voice] Playback decode error:', e);
+      continue;
+    }
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    // playbackGain is created upfront in setupAudioCapture, connected
-    // through the voice effect chain if configured.
     source.connect(playbackGain);
-    source.onended = () => drainPlaybackBuffer();
-    source.start();
-  } catch (e) {
-    console.error('[Voice] Playback error:', e);
-    drainPlaybackBuffer();
+
+    try {
+      source.start(nextStartTime);
+    } catch (e) {
+      console.error('[Voice] Playback start error:', e);
+      continue;
+    }
+
+    nextStartTime += buffer.duration;
+    activeSourceCount++;
+    playbackPlaying = true;
+
+    source.onended = () => {
+      activeSourceCount--;
+      if (activeSourceCount === 0 && playbackBuffer.length === 0) {
+        // Utterance finished: nothing scheduled, nothing queued. This is
+        // the only path that fires the your-turn cue + display refresh —
+        // doing it on every buffer-empty would race with mid-utterance
+        // underruns.
+        playbackPlaying = false;
+        nextStartTime = 0;
+        if (pendingYourTurnCue) {
+          pendingYourTurnCue = false;
+          playYourTurnCue();
+        }
+        refreshDisplayState();
+      } else {
+        // Lookahead cap may have left chunks unscheduled; try again now
+        // that a slot opened up. No-op if buffer's empty.
+        drainPlaybackBuffer();
+      }
+    };
   }
 }
 
