@@ -215,8 +215,8 @@ export interface ServerConfig {
    */
   graphStore?: import("./graph/mod.ts").GraphStore;
   /**
-   * Optional shared EmbeddingCache. Pass one when plugin services and MCP
-   * memory tools should use the same sqlite-vec connection during startup.
+   * Optional shared EmbeddingCache. I use this when plugin services and MCP
+   * memory tools share the same sqlite-vec connection during startup.
    */
   embeddingCache?: import("./embeddings/mod.ts").EmbeddingCache;
   /**
@@ -226,7 +226,7 @@ export interface ServerConfig {
    * keep using a stale (closed) connection.
    */
   consolidationRunner?: import("./consolidation/runner.ts").ConsolidationRunner;
-  /** Trusted local plugins prepared before the MCP transport connects */
+  /** Trusted local plugins I prepare before my MCP transport connects */
   pluginManager?: import("./plugins/mod.ts").EntityCorePluginManager;
   /** Minimum score threshold for RAG retrieval */
   ragMinScore?: number;

@@ -743,7 +743,7 @@ export function renderSettingsHub(): string {
         </div>
         <div class="settings-hub-card-body">
           <span class="settings-hub-card-title">Plugins</span>
-          <span class="settings-hub-card-desc">Review trusted local extensions and their runtime status</span>
+          <span class="settings-hub-card-desc">Inspect my trusted local extensions and runtime status</span>
         </div>
         <svg class="settings-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="9 18 15 12 9 6"/>

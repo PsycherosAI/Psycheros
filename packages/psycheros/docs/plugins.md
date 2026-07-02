@@ -104,8 +104,9 @@ export default {
 ```
 
 Each prompt hook defaults to a 15-second timeout and a 12,000-character output
-limit. A failed hook is skipped and I receive a sanitized system note so I can
-mention the degraded integration naturally.
+limit. Hooks should return first-person context I can internalize, not
+instructions addressed to me. A failed hook is skipped and I receive a sanitized
+system note so I can mention the degraded integration naturally.
 
 ## Entity-Core Entrypoint
 

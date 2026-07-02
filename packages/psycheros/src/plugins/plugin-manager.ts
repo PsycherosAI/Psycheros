@@ -40,6 +40,7 @@ export interface PluginPromptHook {
   priority?: number;
   timeoutMs?: number;
   maxChars?: number;
+  /** Return first-person context I can internalize during this turn. */
   run: (context: PluginPromptContext) => Promise<string | undefined>;
 }
 

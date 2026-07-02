@@ -942,9 +942,9 @@
 
       <h1>Manage my data.</h1>
       <p class="detail">
-        Back ups go to your <code>Downloads</code> folder. Restore reads a zip
-        you previously exported and overwrites my current state with it. Wipe
-        and Re-init are destructive — wipe clears my memories/identity/vault;
+        Backups go to the <code>Downloads</code> folder. Restore reads a zip I
+        previously exported and overwrites my current state with it. Wipe and
+        Re-init are destructive — wipe clears my memories/identity/vault;
         re-init reclones source and templates fresh identity.
       </p>
 
@@ -957,7 +957,7 @@
             <span class="data-action__detail">
               Exports a snapshot of my entity data (memories, vault, identity,
               settings, generated images, and trusted local plugins) as a zip in
-              your Downloads folder. Daemon must be running.
+              the Downloads folder. My daemon must be running.
             </span>
           </div>
           <button type="button" id="data-backup" class="primary">
@@ -970,7 +970,7 @@
             <strong>Restore</strong>
             <span class="data-action__detail">
               Reads a previously-exported zip and replaces my current data with
-              what's inside it. Daemon must be running; I'll restart
+              what's inside it. My daemon must be running; I'll restart
               automatically when the import finishes. Restored plugins are
               executable local code and may contain secrets.
             </span>
@@ -986,8 +986,8 @@
             <span class="data-action__detail">
               Clears my memories, identity files, vault docs, and database. The
               OS service registration stays — first-run will template fresh
-              identity files on next launch. Cannot be undone unless you've
-              backed up first.
+              identity files on next launch. Cannot be undone unless a backup
+              exists.
             </span>
           </div>
           <button type="button" id="data-wipe" class="danger">
@@ -1000,9 +1000,9 @@
             <strong>Re-init</strong>
             <span class="data-action__detail">
               Stops the daemon, deletes my source clone + identity dir,
-              uninstalls the OS service. You'll go through the first-run wizard
-              again to re-bootstrap. Memories and vault content survive this —
-              only identity is reset.
+              uninstalls the OS service. The first-run wizard runs again to
+              re-bootstrap me. Memories and vault content survive this — only
+              identity is reset.
             </span>
           </div>
           <button type="button" id="data-reinit" class="danger">
@@ -1041,7 +1041,7 @@
       <p class="detail">
         These are the values psycheros boots with. Edits happen inside
         psycheros's own UI — the values below are pulled fresh from
-        <code>general-settings.json</code> each time you open this card.
+        <code>general-settings.json</code> each time this card opens.
       </p>
 
       <section class="info-grid" id="settings-body" aria-busy="true">
@@ -1069,7 +1069,7 @@
 
       <h1>What I know about myself.</h1>
       <p class="detail">
-        Read-only snapshot. Use the Reveal buttons to open paths in your file
+        Read-only snapshot. Use the Reveal buttons to open paths in the file
         manager. Refresh re-walks the disk and re-queries the supervisor —
         useful after a daemon restart.
       </p>

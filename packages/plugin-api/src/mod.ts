@@ -87,7 +87,8 @@ export function isSafePluginId(id: string): boolean {
  * Validate a path declared by a plugin manifest.
  *
  * Manifest paths are always relative to the plugin directory. Requiring a
- * leading "./" makes that boundary visible to plugin authors and reviewers.
+ * leading "./" keeps the boundary around my plugin directory visible during
+ * review.
  */
 export function validatePluginRelativePath(path: string): string {
   requireString(path, "plugin path");
