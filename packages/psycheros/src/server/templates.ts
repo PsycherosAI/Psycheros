@@ -47,6 +47,7 @@ import { pulseIconSvg } from "../pulse/templates.ts";
 import type { ExtractionHealth } from "../mcp-client/mod.ts";
 import { getWearableConnectionManager } from "../wearable/mod.ts";
 import type { PluginStatus } from "../../../plugin-api/src/mod.ts";
+import type { UnmanagedCustomTool } from "../plugins/mod.ts";
 
 // =============================================================================
 // Utilities
@@ -743,7 +744,7 @@ export function renderSettingsHub(): string {
         </div>
         <div class="settings-hub-card-body">
           <span class="settings-hub-card-title">Plugins</span>
-          <span class="settings-hub-card-desc">Inspect my trusted local extensions and runtime status</span>
+          <span class="settings-hub-card-desc">Inspect trusted local extensions and runtime status</span>
         </div>
         <svg class="settings-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="9 18 15 12 9 6"/>
@@ -794,9 +795,9 @@ export function renderSettingsHub(): string {
 </div>`;
 }
 
-export function renderPluginsSettings(statuses: PluginStatus[]): string {
+export function renderPluginsSettingsLegacy(statuses: PluginStatus[]): string {
   const rows = statuses.length === 0
-    ? `<p class="settings-note">I do not have any local plugins installed.</p>`
+    ? `<p class="settings-note">No local plugins installed.</p>`
     : statuses.map((status) => {
       const state = status.degraded
         ? "Degraded"
@@ -837,13 +838,220 @@ export function renderPluginsSettings(statuses: PluginStatus[]): string {
         ${renderSettingsBackButton()}
         <div>
           <h1 class="settings-title">Plugins</h1>
-          <p class="settings-desc">Trusted local extensions loaded from my persistent data directory</p>
+          <p class="settings-desc">Trusted local extensions loaded from the persistent data directory</p>
         </div>
       </div>
     </div>
     <div class="settings-content" id="settings-content">
-      <p class="settings-note">Plugins run as trusted local code. They can access my filesystem, network, services, and local secrets. Portable exports do not include my plugin-secrets directory. Changes take effect after I restart.</p>
+      <p class="settings-note">Plugins run as trusted local code. They can access the local filesystem, network, services, and plugin secrets. Portable exports do not include the plugin-secrets directory. Changes take effect after restart.</p>
       ${rows}
+    </div>
+  </div>`;
+}
+
+function renderPluginBadge(label: string, kind: string): string {
+  return `<span class="badge ${kind}">${escapeHtml(label)}</span>`;
+}
+
+function formatPluginCapabilities(status: PluginStatus): string {
+  return Object.entries(status.capabilities)
+    .filter(([, count]) => count > 0)
+    .map(([name, count]) => `${name}: ${count}`)
+    .join(", ") || "No loaded runtime capabilities for this plugin";
+}
+
+function renderPluginWarnings(warnings?: string[]): string {
+  if (!warnings || warnings.length === 0) return "";
+  return `<ul class="settings-note" style="margin-top:var(--sp-2);padding-left:var(--sp-5);">${
+    warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")
+  }</ul>`;
+}
+
+function renderPluginRecord(
+  label: string,
+  record?: object,
+): string {
+  if (!record || Object.keys(record).length === 0) return "";
+  const values = Object.entries(record)
+    .filter(([, value]) => value !== undefined)
+    .map(([name, value]) => `${name}: ${String(value)}`)
+    .join(", ");
+  if (!values) return "";
+  return `<p class="settings-note">${escapeHtml(label)}: ${
+    escapeHtml(values)
+  }</p>`;
+}
+
+function renderPluginUpdate(status: PluginStatus): string {
+  if (!status.update || Object.keys(status.update).length === 0) return "";
+  const values = [
+    status.update.repoUrl ? `repo ${status.update.repoUrl}` : "",
+    status.update.tagPrefix ? `tag prefix ${status.update.tagPrefix}` : "",
+  ].filter(Boolean).join(", ");
+  return `<p class="settings-note">Update metadata: ${
+    escapeHtml(values || "declared")
+  }. Displayed for review only; plugin updates are not checked or applied yet.</p>`;
+}
+
+function renderPluginStatusBadges(status: PluginStatus): string {
+  const badges: string[] = [];
+  if (status.pendingAction === "install") {
+    badges.push(renderPluginBadge("Pending install", "badge-info"));
+  } else if (status.pendingAction === "remove") {
+    badges.push(renderPluginBadge("Pending removal", "badge-error"));
+  } else if (status.degraded) {
+    badges.push(renderPluginBadge("Degraded", "badge-error"));
+  } else if (status.active) {
+    badges.push(renderPluginBadge("Loaded", "badge-success"));
+  } else if (status.enabled) {
+    badges.push(renderPluginBadge("Installed", "badge-secondary"));
+  } else {
+    badges.push(renderPluginBadge("Disabled", "badge-muted"));
+  }
+  if (status.restartRequired) {
+    badges.push(renderPluginBadge("Restart required", "badge-primary"));
+  }
+  if ((status.warnings ?? []).length > 0) {
+    badges.push(renderPluginBadge("Warnings", "badge-error"));
+  }
+  return `<div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;">${
+    badges.join("")
+  }</div>`;
+}
+
+function renderPluginRows(statuses: PluginStatus[]): string {
+  if (statuses.length === 0) {
+    return `<p class="settings-note">No local plugins installed.</p>`;
+  }
+  return statuses.map((status) => {
+    return `<section class="theme-section">
+      <div style="display:flex;justify-content:space-between;gap:var(--sp-3);align-items:flex-start;flex-wrap:wrap;">
+        <div>
+          <h3 class="theme-section-title">${escapeHtml(status.name)} <code>${
+      escapeHtml(status.version)
+    }</code></h3>
+          <p class="theme-section-desc">${
+      status.description
+        ? escapeHtml(status.description)
+        : escapeHtml(formatPluginCapabilities(status))
+    }</p>
+        </div>
+        ${renderPluginStatusBadges(status)}
+      </div>
+      ${
+      status.description
+        ? `<p class="settings-note">${
+          escapeHtml(formatPluginCapabilities(status))
+        }</p>`
+        : ""
+    }
+      <p class="settings-note">Psycheros entrypoint: ${
+      status.entrypoints.psycheros ? "yes" : "no"
+    } &middot; Entity-core entrypoint: ${
+      status.entrypoints.entityCore ? "yes" : "no"
+    }</p>
+      ${
+      status.lastError
+        ? `<p class="settings-note">Last error: ${
+          escapeHtml(status.lastError)
+        }</p>`
+        : ""
+    }
+      ${renderPluginWarnings(status.warnings)}
+      ${renderPluginRecord("Compatibility", status.compatibility)}
+      ${renderPluginRecord("Dependencies", status.dependencies)}
+      ${
+      status.homepageUrl
+        ? `<p class="settings-note">Homepage: <a href="${
+          escapeHtml(status.homepageUrl)
+        }" target="_blank" rel="noopener" style="color:var(--c-accent);">${
+          escapeHtml(status.homepageUrl)
+        }</a></p>`
+        : ""
+    }
+      ${renderPluginUpdate(status)}
+      ${
+      status.pendingAction === "remove"
+        ? `<p class="settings-note">Plugin secrets remain available for reinstall until removed manually.</p>`
+        : `<button type="button" class="btn btn--danger btn--sm" data-plugin-id="${
+          escapeHtml(status.id)
+        }" onclick="removePlugin(this.dataset.pluginId)">Remove</button>`
+    }
+    </section>`;
+  }).join("");
+}
+
+function renderUnmanagedCustomTools(tools: UnmanagedCustomTool[]): string {
+  const body = tools.length === 0
+    ? `<p class="settings-note">No loose custom tool files installed.</p>`
+    : `<div style="display:flex;flex-direction:column;gap:var(--sp-2);">${
+      tools.map((tool) =>
+        `<div style="display:flex;justify-content:space-between;gap:var(--sp-3);align-items:center;">
+          <code>${escapeHtml(tool.filename)}</code>
+          ${renderPluginBadge("Unmanaged", "badge-muted")}
+        </div>`
+      ).join("")
+    }</div>`;
+
+  return `<section class="theme-section">
+    <h3 class="theme-section-title">Loose Custom Tools</h3>
+    <p class="theme-section-desc">Files in <code>.psycheros/custom-tools/*.js</code> still load normally, but they do not carry plugin manifest metadata.</p>
+    ${body}
+  </section>`;
+}
+
+export function renderPluginsSettings(
+  statuses: PluginStatus[],
+  unmanagedTools: UnmanagedCustomTool[] = [],
+): string {
+  return `<div class="settings-view">
+    <div class="settings-header">
+      <div class="settings-header-row">
+        ${renderSettingsBackButton()}
+        <div>
+          <h1 class="settings-title">Plugins</h1>
+          <p class="settings-desc">Trusted local extensions loaded from the persistent data directory</p>
+        </div>
+      </div>
+    </div>
+    <div class="settings-content" id="settings-content">
+      <section class="theme-section">
+        <h3 class="theme-section-title">Install Plugin</h3>
+        <p class="theme-section-desc">Stage a plugin from a local zip or Git repository, review what it declares, then install it.</p>
+        <p class="settings-note">Plugins run as trusted local code. Install code only from trusted sources because plugins can access the local filesystem, network, services, and plugin secrets. Portable exports do not include the plugin-secrets directory. Changes take effect after restart.</p>
+
+        <div class="llm-fields">
+          <form onsubmit="inspectPluginZip(event)" style="display:flex;gap:var(--sp-3);align-items:flex-end;flex-wrap:wrap;">
+            <div class="llm-field" style="min-width:220px;">
+              <label for="plugin-zip-input">Plugin zip</label>
+              <input type="file" id="plugin-zip-input" class="input-field llm-input" accept=".zip,application/zip">
+            </div>
+            <button type="submit" class="btn btn--primary">Inspect Zip</button>
+          </form>
+
+          <form onsubmit="inspectPluginGit(event)" style="display:flex;gap:var(--sp-3);align-items:flex-end;flex-wrap:wrap;">
+            <div class="llm-field" style="min-width:260px;flex:1;">
+              <label for="plugin-git-url">Git repository URL</label>
+              <input type="url" id="plugin-git-url" class="input-field llm-input" placeholder="https://github.com/author/plugin">
+            </div>
+            <div class="llm-field" style="min-width:160px;">
+              <label for="plugin-git-ref">Branch or tag</label>
+              <input type="text" id="plugin-git-ref" class="input-field llm-input" placeholder="default">
+            </div>
+            <button type="submit" class="btn btn--primary">Inspect Git</button>
+          </form>
+        </div>
+
+        <div id="plugin-manager-review" style="display:none;margin-top:var(--sp-4);"></div>
+      </section>
+
+      <section class="theme-section">
+        <h3 class="theme-section-title">Installed Plugins</h3>
+        <p class="theme-section-desc">Loaded, degraded, compatibility-warning, pending-install, and pending-removal states appear here.</p>
+        ${renderPluginRows(statuses)}
+      </section>
+
+      ${renderUnmanagedCustomTools(unmanagedTools)}
     </div>
   </div>`;
 }

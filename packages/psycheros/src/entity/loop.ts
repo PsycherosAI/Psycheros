@@ -23,7 +23,13 @@
  * data integrity, with the assumption that DB failures are rare and transient.
  */
 
-import type { ChatMessage, LLMClient, StreamChunk } from "../llm/mod.ts";
+import type {
+  ChatContent,
+  ChatImageUrlPart,
+  ChatMessage,
+  LLMClient,
+  StreamChunk,
+} from "../llm/mod.ts";
 import type { WebSearchSettings } from "../llm/web-search-settings.ts";
 import type { DiscordSettings } from "../llm/discord-settings.ts";
 import type { HomeSettings } from "../llm/home-settings.ts";
@@ -67,6 +73,22 @@ import type { PluginManager } from "../plugins/mod.ts";
 function escapeXml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function renderChatContentForSnapshot(content: ChatContent): string {
+  if (typeof content === "string") return content;
+  return content.map((part) => {
+    if (part.type === "text") return part.text;
+    return "[transient vision image]";
+  }).join("\n");
+}
+
+function estimateChatContentChars(content: ChatContent): number {
+  if (typeof content === "string") return content.length;
+  return content.reduce((sum, part) => {
+    if (part.type === "text") return sum + part.text.length;
+    return sum + 1200;
+  }, 0);
 }
 
 /**
@@ -206,6 +228,8 @@ export interface ProcessOptions {
   skipUserPersist?: boolean;
   /** Device type of the user for this turn (from frontend detection) */
   deviceType?: "desktop" | "mobile";
+  /** Transient images I send to the LLM for this turn without saving them in chat history */
+  visionImages?: ChatImageUrlPart[];
   /** When true, sticky lorebook entries are not decremented.
    *  Set automatically for Pulse turns so automated messages
    *  don't consume sticky duration earned by real user conversation. */
@@ -989,6 +1013,7 @@ Discord interaction:
         displayContent,
         shouldPersist,
         toolDefinitions,
+        options?.visionImages,
       );
 
       // Create and yield context snapshot for debugging
@@ -1011,7 +1036,7 @@ Discord interaction:
         pluginContent,
         messages: messages.slice(1).map((msg) => ({
           role: msg.role,
-          content: msg.content,
+          content: renderChatContentForSnapshot(msg.content),
           toolCalls: msg.tool_calls,
           toolCallId: msg.tool_call_id,
         })),
@@ -1022,7 +1047,8 @@ Discord interaction:
           estimatedTokens: this.lastBudgetResult?.estimatedTotalTokens ??
             Math.ceil(systemMessage.length / 4) +
               messages.reduce(
-                (acc, m) => acc + Math.ceil((m.content?.length || 0) / 4),
+                (acc, m) =>
+                  acc + Math.ceil(estimateChatContentChars(m.content) / 4),
                 0,
               ),
           contextLength: this.config.contextLength,
@@ -1646,6 +1672,7 @@ Discord interaction:
     userMessage: string,
     appendUserMessage: boolean = true,
     toolDefinitions?: ToolDefinition[],
+    visionImages?: ChatImageUrlPart[],
   ): ChatMessage[] {
     const messages: ChatMessage[] = [];
 
@@ -1706,9 +1733,12 @@ Discord interaction:
     // Add the new user message with timestamp (skip on retry — it's already in history)
     if (appendUserMessage) {
       const now = formatMessageTimestamp(new Date());
+      const content = `${now} ${userMessage}`;
       messages.push({
         role: "user",
-        content: `${now} ${userMessage}`,
+        content: visionImages?.length
+          ? [{ type: "text", text: content }, ...visionImages]
+          : content,
       });
     }
 

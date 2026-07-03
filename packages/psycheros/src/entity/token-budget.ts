@@ -8,7 +8,7 @@
  * history messages are trimmed, keeping the most recent ones.
  */
 
-import type { ChatMessage } from "../llm/mod.ts";
+import type { ChatContent, ChatMessage } from "../llm/mod.ts";
 import type { ToolDefinition } from "../types.ts";
 
 /**
@@ -59,12 +59,23 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
+function estimateContentTokens(content: ChatContent): number {
+  if (typeof content === "string") return estimateTokens(content);
+  return content.reduce((sum, part) => {
+    if (part.type === "text") return sum + estimateTokens(part.text);
+    // Multimodal providers account for images separately. I reserve a
+    // conservative image budget while keeping transient data URL bytes out of
+    // the text-token estimate.
+    return sum + 1200;
+  }, 0);
+}
+
 /**
  * Estimate the token cost of a single ChatMessage, including tool_calls
  * and tool_call_id overhead.
  */
 function estimateMessageTokens(msg: ChatMessage): number {
-  let tokens = estimateTokens(msg.content);
+  let tokens = estimateContentTokens(msg.content);
   if (msg.tool_calls && msg.tool_calls.length > 0) {
     tokens += estimateTokens(JSON.stringify(msg.tool_calls));
   }

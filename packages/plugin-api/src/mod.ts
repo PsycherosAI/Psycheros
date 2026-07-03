@@ -14,7 +14,12 @@ export interface PluginManifest {
   name: string;
   version: string;
   apiVersion: number;
+  description?: string;
+  homepageUrl?: string;
   enabled: boolean;
+  compatibility?: PluginCompatibility;
+  update?: PluginUpdateMetadata;
+  dependencies?: Record<string, string>;
   entrypoints?: {
     psycheros?: string;
     entityCore?: string;
@@ -29,6 +34,17 @@ export interface PluginManifest {
   };
 }
 
+export interface PluginCompatibility {
+  psycheros?: string;
+  entityCore?: string;
+  launcher?: string;
+}
+
+export interface PluginUpdateMetadata {
+  repoUrl?: string;
+  tagPrefix?: string;
+}
+
 export interface PluginCapabilityCounts {
   tools: number;
   promptHooks: number;
@@ -38,14 +54,23 @@ export interface PluginCapabilityCounts {
   browserStyles: number;
 }
 
+export type PluginPendingAction = "install" | "remove";
+
 export interface PluginStatus {
   id: string;
   name: string;
   version: string;
+  description?: string;
+  homepageUrl?: string;
   enabled: boolean;
   active: boolean;
   degraded: boolean;
   restartRequired: boolean;
+  compatibility?: PluginCompatibility;
+  update?: PluginUpdateMetadata;
+  dependencies?: Record<string, string>;
+  warnings?: string[];
+  pendingAction?: PluginPendingAction;
   entrypoints: {
     psycheros: boolean;
     entityCore: boolean;
@@ -77,6 +102,66 @@ function requireString(
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`${field} must be a non-empty string`);
   }
+}
+
+function optionalString(
+  value: unknown,
+  field: string,
+): string | undefined {
+  if (value === undefined) return undefined;
+  requireString(value, field);
+  return value;
+}
+
+function validateStringRecord(
+  value: unknown,
+  field: string,
+): Record<string, string> | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${field} must be an object`);
+  }
+  const record: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    requireString(item, `${field}.${key}`);
+    record[key] = item;
+  }
+  return record;
+}
+
+function validateCompatibility(
+  value: unknown,
+): PluginCompatibility | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("compatibility must be an object");
+  }
+  const input = value as Record<string, unknown>;
+  return {
+    psycheros: optionalString(input.psycheros, "compatibility.psycheros"),
+    entityCore: optionalString(
+      input.entityCore ?? input.entity_core,
+      "compatibility.entityCore",
+    ),
+    launcher: optionalString(input.launcher, "compatibility.launcher"),
+  };
+}
+
+function validateUpdateMetadata(
+  value: unknown,
+): PluginUpdateMetadata | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("update must be an object");
+  }
+  const input = value as Record<string, unknown>;
+  return {
+    repoUrl: optionalString(input.repoUrl ?? input.repo_url, "update.repoUrl"),
+    tagPrefix: optionalString(
+      input.tagPrefix ?? input.tag_prefix,
+      "update.tagPrefix",
+    ),
+  };
 }
 
 export function isSafePluginId(id: string): boolean {
@@ -168,7 +253,15 @@ export function validatePluginManifest(
     name: input.name,
     version: input.version,
     apiVersion: input.apiVersion,
+    description: optionalString(input.description, "description"),
+    homepageUrl: optionalString(
+      input.homepageUrl ?? input.homepage_url,
+      "homepageUrl",
+    ),
     enabled: input.enabled === undefined ? true : input.enabled === true,
+    compatibility: validateCompatibility(input.compatibility),
+    update: validateUpdateMetadata(input.update),
+    dependencies: validateStringRecord(input.dependencies, "dependencies"),
     entrypoints: entrypoints
       ? {
         psycheros: validateOptionalEntrypoint(entrypoints.psycheros),

@@ -24,6 +24,69 @@ Deno.test("plugin manifest defaults enabled and validates relative assets", () =
   assertEquals(manifest.browser?.scripts, ["./web/index.js"]);
 });
 
+Deno.test("plugin manifest accepts review metadata", () => {
+  const manifest = validatePluginManifest({
+    id: "artifact-search",
+    name: "Artifact Search",
+    version: "1.0.0",
+    apiVersion: 1,
+    description: "Adds artifact lookup.",
+    homepage_url: "https://example.test/artifact-search",
+    compatibility: {
+      psycheros: ">=0.8.20 <0.9.0",
+      entity_core: ">=0.4.5",
+      launcher: ">=0.2.42",
+    },
+    update: {
+      repo_url: "https://github.com/example/artifact-search",
+      tag_prefix: "v",
+    },
+    dependencies: {
+      "example.shared": "^1.0.0",
+    },
+    entrypoints: { psycheros: "./psycheros.ts" },
+  }, "artifact-search");
+
+  assertEquals(manifest.description, "Adds artifact lookup.");
+  assertEquals(manifest.homepageUrl, "https://example.test/artifact-search");
+  assertEquals(manifest.compatibility?.entityCore, ">=0.4.5");
+  assertEquals(
+    manifest.update?.repoUrl,
+    "https://github.com/example/artifact-search",
+  );
+  assertEquals(manifest.update?.tagPrefix, "v");
+  assertEquals(manifest.dependencies?.["example.shared"], "^1.0.0");
+});
+
+Deno.test("plugin manifest rejects invalid review metadata", () => {
+  const base = {
+    id: "artifact-search",
+    name: "Artifact Search",
+    version: "1.0.0",
+    apiVersion: 1,
+    entrypoints: { psycheros: "./psycheros.ts" },
+  };
+
+  assertThrows(() =>
+    validatePluginManifest({
+      ...base,
+      compatibility: ">=0.8.20",
+    }, "artifact-search")
+  );
+  assertThrows(() =>
+    validatePluginManifest({
+      ...base,
+      update: { repo_url: 5 },
+    }, "artifact-search")
+  );
+  assertThrows(() =>
+    validatePluginManifest({
+      ...base,
+      dependencies: { "example.shared": 5 },
+    }, "artifact-search")
+  );
+});
+
 Deno.test("portable plugin archives reject conventional credential files", () => {
   assertEquals(isPluginSecretFilename("speech/.env"), true);
   assertEquals(isPluginSecretFilename("speech/secrets.env"), true);

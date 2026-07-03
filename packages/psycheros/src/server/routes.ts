@@ -11,6 +11,7 @@
 import type { SSEEvent, TurnMetrics } from "../types.ts";
 import type { DBClient } from "../db/mod.ts";
 import type {
+  ChatImageUrlPart,
   LLMClient,
   LLMConnectionProfile,
   LLMProfileSettings,
@@ -1118,7 +1119,56 @@ interface ChatRequestBody {
   conversationId: string;
   message: string;
   attachmentId?: string;
+  visionImages?: unknown;
   deviceType?: "desktop" | "mobile";
+}
+
+const MAX_TRANSIENT_VISION_IMAGES = 4;
+const MAX_TRANSIENT_VISION_IMAGE_CHARS = 8_000_000;
+const TRANSIENT_IMAGE_DATA_URL_PATTERN =
+  /^data:image\/(?:jpeg|jpg|png|webp);base64,[a-z0-9+/=\r\n]+$/i;
+
+function parseTransientVisionImages(input: unknown): ChatImageUrlPart[] {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input)) {
+    throw new Error("visionImages must be an array");
+  }
+  if (input.length > MAX_TRANSIENT_VISION_IMAGES) {
+    throw new Error(
+      `visionImages supports up to ${MAX_TRANSIENT_VISION_IMAGES} images`,
+    );
+  }
+
+  return input.map((item, index) => {
+    if (!item || typeof item !== "object") {
+      throw new Error(`visionImages[${index}] must be an object`);
+    }
+    const record = item as Record<string, unknown>;
+    const dataUrl = record.dataUrl;
+    if (typeof dataUrl !== "string") {
+      throw new Error(`visionImages[${index}].dataUrl must be a string`);
+    }
+    if (dataUrl.length > MAX_TRANSIENT_VISION_IMAGE_CHARS) {
+      throw new Error(`visionImages[${index}] is too large`);
+    }
+    if (!TRANSIENT_IMAGE_DATA_URL_PATTERN.test(dataUrl)) {
+      throw new Error(
+        `visionImages[${index}] must be a jpeg, png, or webp data URL`,
+      );
+    }
+
+    const detail = record.detail;
+    const image: ChatImageUrlPart = {
+      type: "image_url",
+      image_url: {
+        url: dataUrl.replace(/\r?\n/g, ""),
+      },
+    };
+    if (detail === "low" || detail === "high" || detail === "auto") {
+      image.image_url.detail = detail;
+    }
+    return image;
+  });
 }
 
 /**
@@ -1222,6 +1272,7 @@ export async function handleChat(
 ): Promise<Response> {
   // Parse and validate request body
   let body: ChatRequestBody;
+  let visionImages: ChatImageUrlPart[] = [];
   try {
     body = await request.json();
     if (!body.conversationId || typeof body.conversationId !== "string") {
@@ -1230,10 +1281,13 @@ export async function handleChat(
     if (!body.message || typeof body.message !== "string") {
       throw new Error("Missing or invalid message");
     }
+    visionImages = parseTransientVisionImages(body.visionImages);
   } catch (error) {
     console.error("[Routes] handleChat parse error:", error);
     return new Response(
-      JSON.stringify({ error: "Invalid request body" }),
+      JSON.stringify({
+        error: error instanceof Error ? error.message : "Invalid request body",
+      }),
       {
         status: 400,
         headers: {
@@ -1364,6 +1418,7 @@ export async function handleChat(
         for await (
           const chunk of turn.process(body.conversationId, userMessage, {
             deviceType: body.deviceType,
+            visionImages: visionImages.length > 0 ? visionImages : undefined,
           })
         ) {
           if (signal.aborted) {

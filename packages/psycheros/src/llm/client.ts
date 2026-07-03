@@ -9,6 +9,7 @@
 import type { ToolDefinition } from "../types.ts";
 import type { LLMConnectionProfile } from "./provider-presets.ts";
 import type {
+  ChatContent,
   ChatMessage,
   ChatRequest,
   ChatResponseChunk,
@@ -82,6 +83,16 @@ function buildProviderHeaders(baseUrl: string): Record<string, string> {
   return headers;
 }
 
+function estimateContentChars(content: ChatContent): number {
+  if (typeof content === "string") return content.length;
+  return content.reduce((sum, part) => {
+    if (part.type === "text") return sum + part.text.length;
+    // Image tokens vary by provider and resolution. I keep this conservative
+    // for request logging without pretending data URL bytes are prompt text.
+    return sum + 1200;
+  }, 0);
+}
+
 /**
  * Client for communicating with the LLM API.
  */
@@ -124,7 +135,7 @@ export class LLMClient {
     const messageCount = messages.length;
     // Rough token estimate: ~4 chars per token across all message content + tool defs
     const payloadChars =
-      messages.reduce((acc, m) => acc + (m.content?.length || 0), 0) +
+      messages.reduce((acc, m) => acc + estimateContentChars(m.content), 0) +
       (tools ? JSON.stringify(tools).length : 0);
     const estimatedTokens = Math.ceil(payloadChars / 4);
     console.log(

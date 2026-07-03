@@ -91,7 +91,11 @@ import {
 } from "../discord/mod.ts";
 import { join } from "@std/path";
 import { MAX_REQUEST_BODY_SIZE, MAX_UPLOAD_BODY_SIZE } from "../constants.ts";
-import { createPluginManager, type PluginManager } from "../plugins/mod.ts";
+import {
+  createPluginManager,
+  PluginInstaller,
+  type PluginManager,
+} from "../plugins/mod.ts";
 import type { PluginStatus } from "../../../plugin-api/src/mod.ts";
 import {
   callTTS,
@@ -326,6 +330,12 @@ import {
   handleAdminLogsFragment,
 } from "./admin-routes.ts";
 import { setServerStartTime } from "./diagnostics.ts";
+import {
+  handleInspectPluginGit,
+  handleInspectPluginZip,
+  handleInstallPluginDraft,
+  handleRemoveInstalledPlugin,
+} from "./plugin-manager-routes.ts";
 
 /**
  * Server configuration options.
@@ -405,6 +415,7 @@ export class Server {
   private entityCoreLLMSettings: EntityCoreLLMSettings;
   private customTools: Record<string, import("../tools/types.ts").Tool>;
   private pluginManager: PluginManager;
+  private pluginInstaller: PluginInstaller;
   private pulseEngine: PulseEngine | null = null;
   private scheduler: Scheduler | null = null;
   private eventRulesEngine: EventRulesEngine | null = null;
@@ -478,6 +489,7 @@ export class Server {
       join(config.dataRoot, ".psycheros", "plugins"),
       () => this.llm,
     );
+    this.pluginInstaller = new PluginInstaller(config.dataRoot);
 
     // Initialize voice settings (will be reloaded from settings in init())
     this.voiceSettings = getDefaultVoiceSettings();
@@ -1691,7 +1703,7 @@ export class Server {
       });
     }
 
-    return [...statuses.values()].sort((a, b) => a.id.localeCompare(b.id));
+    return await this.pluginInstaller.enrichStatuses([...statuses.values()]);
   }
 
   /**
@@ -1834,6 +1846,7 @@ export class Server {
         const size = parseInt(contentLength);
         const isUpload = path === "/api/backgrounds" ||
           path === "/api/chat-attachments" || path === "/api/anchor-images" ||
+          path === "/api/plugin-manager/inspect-zip" ||
           path === "/api/admin/data-migration/memories" ||
           path === "/api/admin/data-migration/chats" ||
           path === "/api/admin/data-migration/graph" ||
@@ -2010,6 +2023,28 @@ export class Server {
 
     if (method === "GET" && path === "/api/plugins") {
       return Response.json(await this.getPluginStatuses());
+    }
+
+    if (method === "POST" && path === "/api/plugin-manager/inspect-zip") {
+      return await handleInspectPluginZip(this.pluginInstaller, request);
+    }
+
+    if (method === "POST" && path === "/api/plugin-manager/inspect-git") {
+      return await handleInspectPluginGit(this.pluginInstaller, request);
+    }
+
+    if (method === "POST" && path === "/api/plugin-manager/install-draft") {
+      return await handleInstallPluginDraft(this.pluginInstaller, request);
+    }
+
+    const pluginManagerRemoveMatch = path.match(
+      /^\/api\/plugin-manager\/plugins\/([^/]+)$/,
+    );
+    if (method === "DELETE" && pluginManagerRemoveMatch) {
+      return await handleRemoveInstalledPlugin(
+        this.pluginInstaller,
+        pluginManagerRemoveMatch[1],
+      );
     }
 
     const pluginApiMatch = path.match(/^\/api\/plugins\/([^/]+)(\/.*)?$/);
@@ -3430,7 +3465,10 @@ export class Server {
     if (path === "/fragments/settings/plugins") {
       const { renderPluginsSettings } = await import("./templates.ts");
       return new Response(
-        renderPluginsSettings(await this.getPluginStatuses()),
+        renderPluginsSettings(
+          await this.getPluginStatuses(),
+          await this.pluginInstaller.listUnmanagedCustomTools(),
+        ),
         { headers: { "Content-Type": "text/html; charset=utf-8" } },
       );
     }
