@@ -210,6 +210,7 @@ All notable changes to entity-loom are documented here. The format follows
   - **Kindroid / KinLog** — JSON
 - Five-stage wizard served at `http://localhost:3210`.
 
+[0.3.9]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.9
 [0.3.8]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.8
 [0.3.7]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.7
 [0.3.6]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.6

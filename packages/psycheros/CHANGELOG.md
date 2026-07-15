@@ -4,6 +4,14 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.24] - 2026-07-15
+
+### Fixed
+
+- WebSocket idleTimeout raised to 3600s for long-lived streams
+- Pulse engine now passes bleSettings to EntityConfig
+- Skipped Pulse ticks no longer log by default
+
 ## [Unreleased]
 
 ## [0.8.23] - 2026-07-02
@@ -169,6 +177,14 @@ follows [Semantic Versioning](https://semver.org/).
 - Restored the macOS mic permission check (authorizationStatus) before calling
   `requestAccess` to skip redundant permission prompts on subsequent voice
   calls.
+
+## [0.8.24] - 2026-07-15
+
+### Fixed
+
+- WebSocket idleTimeout raised to 3600s for long-lived streams
+- Pulse engine now passes bleSettings to EntityConfig
+- Skipped Pulse ticks no longer log by default
 
 ## [Unreleased]
 
@@ -731,6 +747,14 @@ follows [Semantic Versioning](https://semver.org/).
   from scratch. Both are accessible from Settings > Entity Core > Maintenance in
   the web UI.
 
+## [0.8.24] - 2026-07-15
+
+### Fixed
+
+- WebSocket idleTimeout raised to 3600s for long-lived streams
+- Pulse engine now passes bleSettings to EntityConfig
+- Skipped Pulse ticks no longer log by default
+
 ## [Unreleased]
 
 ## [0.4.6] - 2026-05-26
@@ -1109,6 +1133,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 - Entity identity and memory served by the sibling `entity-core` MCP server,
   spawned as a subprocess when `PSYCHEROS_MCP_ENABLED=true`.
 
+[0.8.24]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.24
 [0.8.23]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.23
 [0.8.22]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.22
 [0.8.21]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.21
