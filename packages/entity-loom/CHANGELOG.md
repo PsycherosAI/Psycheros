@@ -6,6 +6,8 @@ All notable changes to entity-loom are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-07-15
+
 ### Fixed
 
 - Updated same-thread reimports are no longer treated as duplicates. The convert
