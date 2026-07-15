@@ -7,7 +7,12 @@
  * @module
  */
 
-import type { PulseRow, PulseRunRow, PulseStats } from "../types.ts";
+import type {
+  PulseLogFilter,
+  PulseRow,
+  PulseRunRow,
+  PulseStats,
+} from "../types.ts";
 
 /**
  * Callable that returns derived run statistics for a pulse. The route
@@ -791,10 +796,16 @@ export function renderPulseLog(
   runs: PulseRunRow[],
   total: number,
   page: number,
+  activeFilters: Set<PulseLogFilter>,
 ): string {
+  const filterBar = renderPulseLogFilters(activeFilters);
+
   if (runs.length === 0) {
-    return `<div class="empty-state">
-      <p>No Pulse executions yet. Runs will appear here after Pulses fire.</p>
+    return `<div class="pulse-log">
+      ${filterBar}
+      <div class="empty-state">
+        <p>No Pulse runs match the current filters.</p>
+      </div>
     </div>`;
   }
 
@@ -827,7 +838,12 @@ export function renderPulseLog(
   const totalPages = Math.ceil(total / pageSize);
   const hasMore = page < totalPages - 1;
 
+  // Preserve the active filter selection across pagination — without this,
+  // "Load more" would reset to the default fired+error view.
+  const showParam = filtersToShowParam(activeFilters);
+
   return `<div class="pulse-log">
+    ${filterBar}
     <div class="log-header">
       <span>${total} total run(s)</span>
     </div>
@@ -848,7 +864,7 @@ export function renderPulseLog(
     ${
     hasMore
       ? `<div class="log-more"
-      hx-get="/fragments/settings/pulse/log?page=${page + 1}"
+      hx-get="/fragments/settings/pulse/log?page=${page + 1}&show=${showParam}"
       hx-trigger="click"
       hx-swap="outerHTML"
       hx-target="closest .pulse-log">
@@ -857,4 +873,46 @@ export function renderPulseLog(
       : ""
   }
   </div>`;
+}
+
+/**
+ * Render the three filter pills above the run table. Each pill is an HTMX
+ * anchor that reloads the whole `.pulse-log` fragment with the toggled
+ * filter set. Defaults to fired+error (skipped hidden) when no filters are
+ * active — matches the route-side default in `parsePulseLogFilters`.
+ */
+function renderPulseLogFilters(active: Set<PulseLogFilter>): string {
+  const filters: { label: PulseLogFilter; label_text: string }[] = [
+    { label: "fired", label_text: "Fired" },
+    { label: "error", label_text: "Errors" },
+    { label: "skipped", label_text: "Skipped ticks" },
+  ];
+  const pills = filters.map(({ label, label_text }) => {
+    const isActive = active.has(label);
+    const next = new Set(active);
+    if (isActive) next.delete(label);
+    else next.add(label);
+    // Empty selection is encoded as `?show=` (present-but-empty) so the
+    // route renders the empty state rather than silently reverting to the
+    // default fired+error view.
+    const href = `/fragments/settings/pulse/log?show=${
+      filtersToShowParam(next)
+    }`;
+    return `<button type="button"
+      class="log-filter-pill ${isActive ? "log-filter-pill-active" : ""}"
+      hx-get="${href}"
+      hx-trigger="click"
+      hx-target="closest .pulse-log"
+      hx-swap="outerHTML">
+      ${label_text}
+    </button>`;
+  }).join("\n");
+  return `<div class="log-filters">${pills}</div>`;
+}
+
+/** Serialize the active filter set into a comma-joined `show=` param value. */
+function filtersToShowParam(filters: Set<PulseLogFilter>): string {
+  return ["fired", "error", "skipped"]
+    .filter((f): f is PulseLogFilter => filters.has(f as PulseLogFilter))
+    .join(",");
 }

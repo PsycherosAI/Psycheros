@@ -88,6 +88,22 @@ This stage has two parts: upload/parse, and the staging area.
 3. Click **Convert All** to parse all queued files. Parsed conversations
    automatically populate the staging area.
 
+**Re-uploading is safe.** If you upload a file with the same name and same
+content as one already in the queue, the existing entry is replaced — your
+upload count won't inflate. If you upload a file with the same name but
+different content (for example, two different ChatGPT accounts that both export
+`conversations.json`), the second one is stored under a disambiguated name like
+`conversations.1.json` so both coexist on disk.
+
+**Re-importing a thread that grew.** If you already imported a ChatGPT thread
+and later export the same thread again after more messages have accrued, just
+upload the new export and convert — Entity Loom detects the content change and
+replaces the previously-stored snapshot of that conversation with the updated
+one. The entity's memory of that conversation will reflect the full thread, not
+just the first-import slice. (Already- generated significant memories for the
+prior snapshot are cleared for re-processing on the next Significant run; daily
+and graph memories are left as-is and only refresh if you re-run those stages.)
+
 ### The staging area
 
 After parsing, a staging area appears below the upload queue. This is a review

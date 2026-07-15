@@ -342,6 +342,13 @@ export interface PulseRunRow {
   createdAt: string;
 }
 
+/**
+ * Pulse log filter labels — the three category pills shown above the run
+ * table. Each maps to one or more `job_runs` statuses (`fired` → `success`,
+ * `error` → `error`+`dead`, `skipped` → `skipped`).
+ */
+export type PulseLogFilter = "fired" | "error" | "skipped";
+
 /** Input for creating a new Pulse. */
 export interface CreatePulseInput {
   name: string;

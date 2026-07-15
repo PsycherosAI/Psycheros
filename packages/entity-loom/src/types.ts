@@ -20,6 +20,16 @@ export interface UploadEntry {
   uploadedAt: string;
   status: "queued" | "parsed" | "stored" | "error";
   error?: string;
+  /**
+   * SHA-256 of the uploaded file content. Used to distinguish a true reupload
+   * (same name, same bytes — replace the existing entry) from a different
+   * file that happens to share a name (e.g. two ChatGPT accounts both
+   * exporting `conversations.json` — disambiguate the stored filename
+   * instead of clobbering). Optional because older manifests predate the
+   * field; missing hash is treated as "unknown" and falls back to the
+   * filename-only behavior.
+   */
+  contentHash?: string;
 }
 
 /** A single message from an external platform, normalized for import */

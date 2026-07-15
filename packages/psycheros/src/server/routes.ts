@@ -2150,7 +2150,13 @@ export function handleWearableStream(
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const { response, socket } = Deno.upgradeWebSocket(request);
+  const { response, socket } = Deno.upgradeWebSocket(request, {
+    // Long-lived mobile ingest stream. The client's 30s app-heartbeat stalls
+    // during Android Doze (screen off), so Deno's default 120s idle-ping would
+    // close the socket with 1001 "No response from ping frame." Raise the window
+    // so brief heartbeat stalls don't kill an otherwise-healthy stream.
+    idleTimeout: 3600, // seconds (was Deno default: 120)
+  });
   const manager = getWearableConnectionManager();
 
   // Optional: extract device_id from query params for early registration
@@ -10241,7 +10247,12 @@ export function handleVoiceWebSocket(
     );
   }
 
-  const { response, socket } = Deno.upgradeWebSocket(request);
+  const { response, socket } = Deno.upgradeWebSocket(request, {
+    // Long-lived voice chat session. Users can pause speaking for > 120s,
+    // and Deno's default idle-ping would drop the socket mid-conversation.
+    // Raise to match wearable stream headroom.
+    idleTimeout: 3600, // seconds (was Deno default: 120)
+  });
   const sessionManager = getVoiceSessionManager();
 
   socket.onopen = async () => {

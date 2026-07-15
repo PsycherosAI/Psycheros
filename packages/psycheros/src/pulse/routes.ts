@@ -9,6 +9,7 @@
 
 import type { RouteContext } from "../server/routes.ts";
 import type { PulseEngine } from "./engine.ts";
+import type { PulseLogFilter } from "../types.ts";
 import {
   renderPulseEditor,
   renderPulseList,
@@ -266,17 +267,56 @@ export function handlePulseEditFragment(
 
 /**
  * Handle GET /fragments/settings/pulse/log — Execution log.
+ *
+ * Filter pills (Fired / Errors / Skipped) are driven by the `?show=` param —
+ * a comma-separated list of category labels. Defaults to hiding `skipped`
+ * ticks since inactivity pulses fire every minute and routine "below
+ * threshold" skips otherwise drown the log.
  */
 export function handlePulseLogFragment(ctx: RouteContext, url: URL): Response {
   const page = parseInt(url.searchParams.get("page") ?? "0");
+  const activeFilters = parsePulseLogFilters(url);
   const { runs, total } = ctx.db.listPulseRuns({
     limit: 50,
     offset: page * 50,
+    statuses: activeFiltersToStatuses(activeFilters),
   });
-  const html = renderPulseLog(runs, total, page);
+  const html = renderPulseLog(runs, total, page, activeFilters);
   return new Response(html, {
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });
+}
+
+/**
+ * Parse `?show=` into a set of category labels. Unknown labels are dropped.
+ *
+ * - Absent param → default to fired+error (skipped hidden).
+ * - Present but empty (`?show=`) → empty set (user has unchecked all pills;
+ *   the table renders an empty state).
+ * - Otherwise → the listed labels.
+ */
+function parsePulseLogFilters(url: URL): Set<PulseLogFilter> {
+  if (!url.searchParams.has("show")) {
+    return new Set<PulseLogFilter>(["fired", "error"]);
+  }
+  const raw = url.searchParams.get("show") ?? "";
+  const out = new Set<PulseLogFilter>();
+  for (const token of raw.split(",")) {
+    const trimmed = token.trim();
+    if (trimmed === "fired" || trimmed === "error" || trimmed === "skipped") {
+      out.add(trimmed);
+    }
+  }
+  return out;
+}
+
+/** Map filter labels to the underlying job_runs statuses they represent. */
+function activeFiltersToStatuses(filters: Set<PulseLogFilter>): string[] {
+  const statuses: string[] = [];
+  if (filters.has("fired")) statuses.push("success");
+  if (filters.has("error")) statuses.push("error", "dead");
+  if (filters.has("skipped")) statuses.push("skipped");
+  return statuses;
 }
 
 /**

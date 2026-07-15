@@ -718,6 +718,7 @@ export class PulseEngine {
       imageGenSettings: this.config.imageGenSettings?.(),
       lovenseSettings: this.config.lovenseSettings?.(),
       buttplugSettings: this.config.buttplugSettings?.(),
+      bleSettings: this.config.bleSettings?.(),
       deviceStatusCache: this.config.deviceStatusCache?.(),
       contextLength: this.config.contextLength?.(),
       maxTokens: this.config.maxTokens?.(),

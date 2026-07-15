@@ -1788,6 +1788,35 @@
   margin-bottom: var(--sp-2);
 }
 
+.log-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.log-filter-pill {
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  background: transparent;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.log-filter-pill:hover {
+  color: var(--c-fg);
+  border-color: var(--c-fg-muted);
+}
+
+.log-filter-pill-active {
+  color: var(--c-fg);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--c-fg-muted);
+}
+
 .log-more {
   text-align: center;
   padding: var(--sp-3);

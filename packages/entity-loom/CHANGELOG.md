@@ -6,6 +6,51 @@ All notable changes to entity-loom are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Updated same-thread reimports are no longer treated as duplicates. The convert
+  stage skipped any conversation whose ID was in `processedItems` before
+  checking content hash, and the DB writer used `INSERT OR IGNORE` on both the
+  conversation row and messages — so a ChatGPT thread imported at 5 messages
+  stayed frozen at 5 messages forever, even if the user re-imported the same
+  thread after it grew. Parse now computes the hash first; a same-ID +
+  different-hash conversation is treated as an updated reimport, included in the
+  preview, and committed via `ON CONFLICT DO
+  UPDATE`. The DB writer clears
+  prior messages for the conversation before re-inserting, so the new message
+  list fully replaces the stale snapshot. Message timestamps round-trip exactly
+  as the import supplied them (`msg.createdAt.toISOString()`) — daily-memory
+  grouping depends on them. For updated conversations, the significant stage's
+  `processedItems` entry is cleared so a future Significant run picks up the new
+  content. Entries in `raw/_loom_conversations.json` are also replaced (not just
+  appended), so subsequent runs hash against the most recent committed version.
+- Post-finalize commits no longer crash on the missing `platform` column.
+  `DBWriter.writeConversation()` unconditionally wrote to
+  `conversations.platform`; after finalize the column is dropped to match the
+  Psycheros schema, so any post-finalize commit failed with
+  `table conversations has no column named platform`. `DBWriter` now detects
+  column presence via `pragma_table_info` and branches the upsert
+  (with-or-without platform). `stripPlatformColumn()` is also idempotent now,
+  and `getConversationPlatform()` returns `null` instead of throwing when the
+  column is gone. Without this, #14's updated-reimport path couldn't write to a
+  finalized package.
+- Upload dedup now keys on content hash, not filename alone. Re-uploading a file
+  with the same name and same bytes still replaces the manifest entry in place
+  (no inflation of the upload count). But two genuinely different files that
+  happen to share a name — for example, two ChatGPT accounts both exporting
+  `conversations.json` — now coexist on disk under disambiguated names
+  (`conversations.json`, `conversations.1.json`, ...) instead of the second
+  upload silently clobbering the first. Manifest entries record the SHA-256 of
+  the bytes so the true-reupload check is exact.
+- Staged message IDs are now scoped as `${conversationId}:${rawId}`. ChatGPT
+  exports can reuse the same `message_id` across different conversations in the
+  same export; using the raw ID directly as `staged_messages.id` (the global
+  primary key) crashed the second insert with
+  `UNIQUE constraint failed: staged_messages.id` and silently stalled the
+  import. The scoped form preserves the source ID inside the key while
+  guaranteeing global uniqueness across staged conversations. Re-populating the
+  same conversation produces the same scoped IDs (idempotent).
+
 ## [0.3.8] - 2026-06-22
 
 ### Fixed

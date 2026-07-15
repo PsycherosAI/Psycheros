@@ -1784,6 +1784,9 @@ export class DBClient {
   listPulseRuns(filter?: {
     pulseId?: string;
     status?: string;
+    // Inclusion list of statuses. Takes precedence over `status` when set.
+    // Used by the Pulse Logs UI to hide `skipped` ticks by default.
+    statuses?: string[];
     limit?: number;
     offset?: number;
   }): { runs: PulseRunRow[]; total: number } {
@@ -1796,7 +1799,17 @@ export class DBClient {
       where.push("json_extract(payload_json, '$.pulseId') = ?");
       params.push(filter.pulseId);
     }
-    if (filter?.status) {
+    if (filter?.statuses && filter.statuses.length > 0) {
+      where.push(
+        `status IN (${filter.statuses.map(() => "?").join(", ")})`,
+      );
+      params.push(...filter.statuses);
+    } else if (filter?.statuses && filter.statuses.length === 0) {
+      // Explicitly-empty inclusion list — user has cleared every filter
+      // pill. Match nothing rather than falling through to "no status
+      // filter" (which would return every run).
+      where.push("1 = 0");
+    } else if (filter?.status) {
       where.push("status = ?");
       params.push(filter.status);
     }

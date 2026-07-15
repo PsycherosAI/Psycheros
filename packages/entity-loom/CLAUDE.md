@@ -101,13 +101,40 @@ panel (purge deletes the entire package directory).
 
 `chats.db` carries a `conversations.platform` column **during processing** so
 memory writers can emit `[via:platform]` tags. **Finalize strips this column**
-to match the Psycheros schema exactly. If you query `chats.db` from elsewhere,
-branch on whether the column is present — pre-finalize it exists, post-finalize
-it doesn't.
+to match the Psycheros schema exactly. Code in `DBWriter` detects column
+presence via `pragma_table_info` and branches its upserts accordingly — don't
+write to `conversations.platform` from anywhere else without the same guard,
+because a post-finalize database will reject it with
+`table conversations has no column named platform`.
 
 Memory `[via:platform]` tags come from the per-conversation source platform
 stored in this column, not the tool's instance ID. Daily memory filenames stay
 `<date>_entity-loom.md` (tool identity, not platform).
+
+## Reimport path — replace, don't append
+
+`DBWriter.writeConversation()` uses `INSERT … ON CONFLICT DO UPDATE` for the
+conversation row and `DELETE FROM messages WHERE conversation_id = ?` before
+re-inserting messages. This is deliberate: when a user re-imports the same
+ChatGPT thread after it has grown on the source platform, the entity's memory of
+that conversation needs to refresh, not stay frozen at the first-import
+snapshot. Convert-stage parses compute a content hash **before** checking
+`processedItems` and skip only on (same ID + same hash); a changed hash is
+treated as an updated reimport.
+
+Message timestamps (`msg.createdAt.toISOString()`) are written exactly as the
+import supplied them. Don't normalize, re-stamp, or sort by anything other than
+the import's own ordering — daily-memory grouping and ChatRAG temporal recall
+depend on the original timestamps surviving the round trip. There is a
+regression test in `src/writers/db-writer.test.ts` that round-trips a thread
+through import → reimport with new messages and asserts each message kept its
+exact timestamp. Don't break it.
+
+For updated conversations, convert-stage also clears the entry from
+`checkpoint.stages.significant.processedItems` so a future Significant stage run
+will re-process the thread. Daily and Graph reset are intentionally not done in
+the same pass — each has its own regeneration semantics and deserves a separate
+design decision.
 
 ## The wizard.html frontend traps
 
@@ -146,6 +173,26 @@ alone — paths can contain `"`.
 **not skipped** — their content is updated if changed, and `included` is always
 reset to `1`. This prevents stale exclusion state from a prior session from
 hiding conversations.
+
+## Upload dedup is keyed on (filename, contentHash)
+
+Two of the same name doesn't mean two of the same file. The upload handler
+hashes incoming bytes and compares against the existing manifest entry's
+`contentHash`: same name + same hash is a true reupload (replace in place), same
+name + different hash is a different file that happens to share a name (two
+ChatGPT accounts both exporting `conversations.json` is the canonical case) —
+the second one gets a disambiguated stored name like `conversations.1.json` so
+both coexist on disk. Don't reach for filename-only dedup anywhere else in the
+pipeline; it silently clobbers in the dual-account case.
+
+## Staged message IDs are scoped as `${conversationId}:${rawId}`
+
+Source platforms (especially ChatGPT) reuse `message_id` across conversations in
+the same export. `staged_messages.id` is a global primary key, so using the raw
+ID directly crashes the second insert. The scoped form preserves the source ID
+inside the key while guaranteeing global uniqueness across staged conversations.
+Anywhere that joins against `staged_messages.id` (e.g. `message_edits`) needs to
+use the scoped form, not the raw source ID.
 
 ## Staging vs. chats DB
 

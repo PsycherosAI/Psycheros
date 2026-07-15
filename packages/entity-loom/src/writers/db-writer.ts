@@ -65,6 +65,12 @@ const SCHEMA_SQL = `
 export class DBWriter {
   private db: Database;
   private dbPath: string;
+  /**
+   * Cached result of the conversations-table schema probe. Null until
+   * probed on first need, then sticky for the life of this DBWriter.
+   * Pre-finalize databases have the column; finalized ones don't.
+   */
+  private hasPlatformColumnCache: boolean | null = null;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -85,30 +91,91 @@ export class DBWriter {
   }
 
   /**
-   * Write a conversation and its messages to the database.
+   * Detect whether the `conversations` table currently has a `platform`
+   * column. Pre-finalize databases do (entity-loom's schema creates it so
+   * memory writers can emit `[via:platform]` tags); post-finalize databases
+   * don't (stripPlatformColumn drops it to match the Psycheros schema
+   * exactly). Result is cached per DBWriter instance.
+   */
+  hasPlatformColumn(): boolean {
+    if (this.hasPlatformColumnCache !== null) {
+      return this.hasPlatformColumnCache;
+    }
+    const rows = this.db.prepare(
+      "SELECT name FROM pragma_table_info('conversations') WHERE name = ?",
+    ).all("platform") as Array<{ name: string }>;
+    this.hasPlatformColumnCache = rows.length > 0;
+    return this.hasPlatformColumnCache;
+  }
+
+  /**
+   * Write a conversation and its messages to the database, replacing any
+   * prior rows for the same conversation id.
+   *
+   * Replacing (not just INSERT OR IGNORE) is required so an updated reimport
+   * of the same thread — same ID, more messages accrued since the first
+   * export — actually refreshes the stored row and message list. Otherwise
+   * the entity's view of that conversation is frozen at whatever the
+   * first-import snapshot contained.
+   *
+   * Message timestamps are written exactly as the import supplied them
+   * (`msg.createdAt.toISOString()`). Daily-memory grouping depends on these
+   * timestamps; if a reimport round-trip mutated them, the entity's
+   * "what happened on date X" view would silently shift.
+   *
    * Returns the number of messages written.
    */
   writeConversation(conv: ImportedConversation): number {
     const createdAt = conv.createdAt.toISOString();
     const updatedAt = conv.updatedAt.toISOString();
 
-    // Upsert conversation
+    // Upsert conversation row. ON CONFLICT refreshes title/updated_at/
+    // platform so an updated reimport overwrites the stale snapshot rather
+    // than being silently ignored.
+    if (this.hasPlatformColumn()) {
+      this.db.prepare(
+        `INSERT INTO conversations (id, title, created_at, updated_at, platform)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           title = excluded.title,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at,
+           platform = excluded.platform`,
+      ).run(
+        conv.id,
+        conv.title || null,
+        createdAt,
+        updatedAt,
+        conv.platform || null,
+      );
+    } else {
+      this.db.prepare(
+        `INSERT INTO conversations (id, title, created_at, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           title = excluded.title,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`,
+      ).run(
+        conv.id,
+        conv.title || null,
+        createdAt,
+        updatedAt,
+      );
+    }
+
+    // Clear any prior messages for this conversation before re-inserting.
+    // Safe for first-write (no rows match) and required for reimport (so
+    // stale messages don't linger alongside the new ones). Foreign keys
+    // are ON; the message_edits and FVT triggers cascade-clean.
     this.db.prepare(
-      `INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at, platform)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(
-      conv.id,
-      conv.title || null,
-      createdAt,
-      updatedAt,
-      conv.platform || null,
-    );
+      "DELETE FROM messages WHERE conversation_id = ?",
+    ).run(conv.id);
 
     let messageCount = 0;
 
-    // Insert messages (skip system and tool messages)
     const insertMsg = this.db.prepare(
-      `INSERT OR IGNORE INTO messages (id, conversation_id, role, content, reasoning_content, created_at, is_voice)
+      `INSERT INTO messages (id, conversation_id, role, content, reasoning_content, created_at, is_voice)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
 
@@ -207,8 +274,9 @@ export class DBWriter {
     return rows[0]?.title || null;
   }
 
-  /** Get conversation platform by ID */
+  /** Get conversation platform by ID. Returns null post-finalize. */
   getConversationPlatform(convId: string): string | null {
+    if (!this.hasPlatformColumn()) return null;
     const rows = this.db.prepare(
       "SELECT platform FROM conversations WHERE id = ?",
     ).all(convId) as Array<{ platform: string }>;
@@ -223,8 +291,12 @@ export class DBWriter {
    *  enables PRAGMA foreign_keys by default (unlike vanilla SQLite). Without
    *  this guard, `DROP TABLE conversations` cascades and wipes every message
    *  in the final package.
+   *
+   *  No-op if the column has already been stripped (e.g. committing an
+   *  updated reimport into a finalized package).
    */
   stripPlatformColumn(): void {
+    if (!this.hasPlatformColumn()) return;
     this.db.exec(`
       PRAGMA foreign_keys=OFF;
       CREATE TABLE IF NOT EXISTS conversations_clean (
@@ -239,6 +311,8 @@ export class DBWriter {
       ALTER TABLE conversations_clean RENAME TO conversations;
       PRAGMA foreign_keys=ON;
     `);
+    // Invalidate the cache — the column is gone now.
+    this.hasPlatformColumnCache = false;
   }
 
   /** Close the database connection */

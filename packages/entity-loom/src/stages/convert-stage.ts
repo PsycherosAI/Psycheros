@@ -19,7 +19,7 @@ import {
   detectPlatform,
   getRegisteredPlatforms,
 } from "../parsers/mod.ts";
-import { hashConversation } from "../dedup/content-hash.ts";
+import { hashConversation, sha256Hex } from "../dedup/content-hash.ts";
 import { CheckpointManager } from "../dedup/checkpoint.ts";
 import { DBWriter } from "../writers/db-writer.ts";
 import {
@@ -106,6 +106,32 @@ async function writeUploadManifest(
   await Deno.writeTextFile(manifestPath, JSON.stringify(entries, null, 2));
 }
 
+/**
+ * Pick a non-conflicting filename when two different uploaded files share
+ * the same original name. Inserts a numeric suffix before the extension:
+ * `conversations.json` → `conversations.1.json`, `conversations.2.json`, ...
+ *
+ * Used when content hash differs but filename matches an existing entry —
+ * common when a user has two ChatGPT accounts whose exports are both named
+ * `conversations.json`. Without this, the second upload would silently
+ * overwrite the first file on disk.
+ */
+function disambiguateFilename(
+  original: string,
+  taken: Set<string>,
+): string {
+  if (!taken.has(original)) return original;
+  const dot = original.lastIndexOf(".");
+  const stem = dot > 0 ? original.slice(0, dot) : original;
+  const ext = dot > 0 ? original.slice(dot) : "";
+  for (let i = 1; i < 1000; i++) {
+    const candidate = `${stem}.${i}${ext}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  // Pathological fallback — 999 collisions on the same stem.
+  return `${stem}-${Date.now()}${ext}`;
+}
+
 export function convertRoutes(): Array<
   { method: string; pattern: string | RegExp; handler: Handler }
 > {
@@ -129,22 +155,47 @@ export function convertRoutes(): Array<
         const rawDir = join(packageDir, "raw");
         await Deno.mkdir(rawDir, { recursive: true });
 
-        const filePath = join(rawDir, file.name);
         const bytes = new Uint8Array(await file.arrayBuffer());
+        const contentHash = await sha256Hex(bytes);
 
-        // Check for duplicate filename — allow re-upload by resetting status
+        // Dedupe by (filename, contentHash). Three cases:
+        //   1. Same filename + same hash → true reupload. Replace the entry
+        //      in place and overwrite the file (same bytes anyway).
+        //   2. Same filename + different hash → different file that happens
+        //      to share a name (e.g. two ChatGPT accounts both exporting
+        //      `conversations.json`). Pick a disambiguated stored filename
+        //      so both files coexist on disk.
+        //   3. No filename match → fresh upload.
         const existingEntries = await readUploadManifest(packageDir);
-        const existingIdx = existingEntries.findIndex((e) =>
+        const takenFilenames = new Set(existingEntries.map((e) => e.filename));
+        const sameNameIdx = existingEntries.findIndex((e) =>
           e.filename === file.name
         );
-        if (existingIdx !== -1) {
-          existingEntries[existingIdx].status = "queued";
-          existingEntries[existingIdx].error = undefined;
-          existingEntries[existingIdx].size = bytes.length;
-          existingEntries[existingIdx].uploadedAt = new Date().toISOString();
-          log("info", `Re-uploading existing file: ${file.name}`);
+        const sameNameEntry = sameNameIdx !== -1
+          ? existingEntries[sameNameIdx]
+          : null;
+        const isTrueReupload = sameNameEntry !== null &&
+          sameNameEntry.contentHash === contentHash;
+
+        let storedFilename: string;
+        let replaceIdx: number | null;
+        if (sameNameEntry === null) {
+          storedFilename = file.name;
+          replaceIdx = null;
+        } else if (isTrueReupload) {
+          storedFilename = file.name;
+          replaceIdx = sameNameIdx;
+          log("info", `Re-uploading identical file: ${file.name}`);
+        } else {
+          storedFilename = disambiguateFilename(file.name, takenFilenames);
+          replaceIdx = null;
+          log(
+            "info",
+            `Name "${file.name}" already used by different content — storing as ${storedFilename}`,
+          );
         }
 
+        const filePath = join(rawDir, storedFilename);
         await Deno.writeFile(filePath, bytes);
 
         // Auto-detect platform if not specified
@@ -161,15 +212,19 @@ export function convertRoutes(): Array<
           }, 400);
         }
 
-        // Add to manifest
         const entry: UploadEntry = {
-          filename: file.name,
+          filename: storedFilename,
           platform,
           size: bytes.length,
           uploadedAt: new Date().toISOString(),
           status: "queued",
+          contentHash,
         };
-        existingEntries.push(entry);
+        if (replaceIdx !== null) {
+          existingEntries[replaceIdx] = entry;
+        } else {
+          existingEntries.push(entry);
+        }
         await writeUploadManifest(packageDir, existingEntries);
 
         // Clear cached preview (new data available)
@@ -351,6 +406,25 @@ export function convertRoutes(): Array<
           const allConversations: ImportedConversation[] = [];
           const convIds = new Set<string>();
 
+          // Load previously-committed raw conversations so we can hash a
+          // new export of an already-imported thread and tell "unchanged
+          // duplicate" from "updated reimport". Without this, the ID-only
+          // skip below would freeze the entity's memory of any thread at
+          // whatever the first-import snapshot contained.
+          const previousRawByConvId = new Map<
+            string,
+            ImportedConversation
+          >();
+          try {
+            const rawText = await Deno.readTextFile(
+              join(packageDir, "raw", "_loom_conversations.json"),
+            );
+            const prior = JSON.parse(rawText) as ImportedConversation[];
+            for (const c of prior) previousRawByConvId.set(c.id, c);
+          } catch {
+            // No prior raw file — first import through this package.
+          }
+
           for (const entry of queuedEntries) {
             const filePath = join(packageDir, "raw", entry.filename);
 
@@ -360,21 +434,38 @@ export function convertRoutes(): Array<
               let skipped = 0;
 
               for (const conv of parsed) {
-                // Skip already-processed conversations
+                // Compute hash BEFORE the processed-ID check. Same ID +
+                // different content means the thread grew on the source
+                // platform and the user is re-importing an updated export —
+                // we want to replace, not skip.
+                const hash = await hashConversation(conv);
+                const prior = previousRawByConvId.get(conv.id);
+                const isUnchanged = prior !== undefined &&
+                  prior.metadata?._hash === hash;
+
                 if (
-                  checkpoint.stages.convert.processedItems.includes(conv.id)
+                  checkpoint.stages.convert.processedItems.includes(conv.id) &&
+                  isUnchanged
                 ) {
+                  // True duplicate — same ID, same content. Skip.
                   skipped++;
                   continue;
                 }
-                // Skip duplicates within this batch
+                // Skip duplicates within this batch (same conv appears in
+                // two uploaded files, or twice in one file).
                 if (convIds.has(conv.id)) {
                   skipped++;
                   continue;
                 }
-                const hash = await hashConversation(conv);
                 conv.metadata = conv.metadata || {};
                 conv.metadata["_hash"] = hash;
+                if (prior !== undefined && !isUnchanged) {
+                  conv.metadata["_updated_reimport"] = "true";
+                  log(
+                    "info",
+                    `Updated reimport for conversation ${conv.id} (hash changed) — will replace on commit`,
+                  );
+                }
                 convIds.add(conv.id);
                 allConversations.push(conv);
               }
@@ -481,26 +572,60 @@ export function convertRoutes(): Array<
           const db = new DBWriter(dbPath);
           db.init();
 
-          const existingIds = db.getExistingConversationIds();
           let conversationsStored = 0;
           let messagesStored = 0;
+          const updatedConvIds: string[] = [];
 
           for (const conv of cachedConversations) {
-            if (
-              existingIds.has(conv.id) ||
-              checkpoint.stages.convert.processedItems.includes(conv.id)
-            ) {
-              continue;
-            }
+            const wasAlreadyProcessed = checkpoint.stages.convert.processedItems
+              .includes(conv.id);
+            const isMarkedUpdate =
+              conv.metadata?.["_updated_reimport"] === "true";
+
+            // db.writeConversation() handles both insert and replace via
+            // ON CONFLICT — we don't gate on existingIds anymore. A conv
+            // that's already in chats.db with the same content was already
+            // filtered out at parse time, so anything reaching here is
+            // either fresh or a content-updated reimport.
             const msgCount = db.writeConversation(conv);
             conversationsStored++;
             messagesStored += msgCount;
-            checkpoint.stages.convert.processedItems.push(conv.id);
+
+            if (wasAlreadyProcessed) {
+              // Tracking: this is a replace of a previously-stored conv.
+              if (isMarkedUpdate) updatedConvIds.push(conv.id);
+              // Don't push the ID again — it's already in processedItems.
+            } else {
+              checkpoint.stages.convert.processedItems.push(conv.id);
+            }
           }
 
           db.close();
 
-          // Merge raw conversations (accumulate across batches)
+          // For any conversation we just replaced, drop it from the
+          // significant stage's processedItems so a future Significant run
+          // picks up the new content. The entity's existing significant
+          // memory for that thread may be stale; re-running the stage is
+          // the user's call, but we make sure the stage will actually
+          // re-process if invoked.
+          if (updatedConvIds.length > 0) {
+            const sigSet = new Set(updatedConvIds);
+            const before = checkpoint.stages.significant.processedItems.length;
+            checkpoint.stages.significant.processedItems = checkpoint.stages
+              .significant.processedItems.filter((id) => !sigSet.has(id));
+            const removed = before -
+              checkpoint.stages.significant.processedItems.length;
+            if (removed > 0) {
+              log(
+                "info",
+                `Reset ${removed} significant-stage processed entries for re-imported conversations`,
+              );
+            }
+          }
+
+          // Replace any updated raw conversations in _loom_conversations.json
+          // (not just append — the old snapshot is stale once we have a new
+          // export with different content).
           const rawPath = join(packageDir, "raw", "_loom_conversations.json");
           let existingRaw: ImportedConversation[] = [];
           try {
@@ -509,13 +634,13 @@ export function convertRoutes(): Array<
           } catch {
             // File doesn't exist yet — first batch
           }
-          const rawIds = new Set(existingRaw.map((c) => c.id));
-          const mergedRaw = [...existingRaw];
-          for (const conv of cachedConversations) {
-            if (!rawIds.has(conv.id)) {
-              mergedRaw.push(conv);
-            }
-          }
+          // Replace any existing raw entry with the same ID, then append
+          // truly new ones. A reimport with changed content needs to
+          // overwrite the stale snapshot so future runs hash against the
+          // most recent committed version.
+          const incomingIds = new Set(cachedConversations.map((c) => c.id));
+          const mergedRaw = existingRaw.filter((c) => !incomingIds.has(c.id));
+          mergedRaw.push(...cachedConversations);
           await Deno.writeTextFile(rawPath, JSON.stringify(mergedRaw));
 
           // Mark all parsed uploads as stored

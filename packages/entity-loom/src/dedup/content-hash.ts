@@ -23,13 +23,17 @@ export async function hashConversation(
 }
 
 /**
- * Compute a SHA-256 hex digest.
+ * Compute a SHA-256 hex digest. Accepts either a string (UTF-8 encoded) or
+ * raw bytes (Uint8Array / ArrayBuffer) — the bytes form is used for hashing
+ * uploaded file content without forcing a string round-trip.
  */
-export async function sha256Hex(text: string): Promise<string> {
-  const hash = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
+export async function sha256Hex(
+  input: string | BufferSource,
+): Promise<string> {
+  const data = typeof input === "string"
+    ? new TextEncoder().encode(input)
+    : input;
+  const hash = await crypto.subtle.digest("SHA-256", data);
   return Array.from(new Uint8Array(hash))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");

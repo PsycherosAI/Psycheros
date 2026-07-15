@@ -18,6 +18,31 @@ import type {
 } from "../types.ts";
 import { hashConversation, sha256Hex } from "../dedup/content-hash.ts";
 
+/**
+ * Build a staging-local primary key for a message.
+ *
+ * Source platforms (especially ChatGPT) can reuse the same `message_id`
+ * across different conversations in the same export. If we used the raw ID
+ * directly as `staged_messages.id`, the second conversation to land would
+ * crash with `UNIQUE constraint failed: staged_messages.id` and the import
+ * would silently stall. Scoping the ID as `${conversationId}:${rawId}`
+ * keeps source IDs visible inside the scoped key while guaranteeing global
+ * uniqueness across staged conversations.
+ *
+ * Idempotent: if the raw ID is already scoped to this conversation (e.g.
+ * re-populate path), it's returned unchanged.
+ */
+function stagingMessageId(
+  conversationId: string,
+  rawId: string | undefined,
+  index: number,
+): string {
+  const fallback = `message-${index}`;
+  const raw = rawId || fallback;
+  if (raw.startsWith(`${conversationId}:`)) return raw;
+  return `${conversationId}:${raw}`;
+}
+
 const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS staged_conversations (
     id TEXT PRIMARY KEY,
@@ -208,8 +233,9 @@ export class StagingWriter {
     for (let i = 0; i < conv.messages.length; i++) {
       const msg = conv.messages[i];
       if (msg.role === "system" || msg.role === "tool") continue;
+      const stagedId = stagingMessageId(conv.id, msg.id, i);
       insertMsg.run(
-        msg.id,
+        stagedId,
         conv.id,
         msg.role,
         msg.content,

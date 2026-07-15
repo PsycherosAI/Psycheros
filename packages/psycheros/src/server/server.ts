@@ -3377,7 +3377,10 @@ export class Server {
 
     // GET /fragments/settings/pulse/log - Execution log
     if (path === "/fragments/settings/pulse/log") {
-      return handlePulseLogFragment(ctx, new URL(`http://localhost${path}`));
+      return handlePulseLogFragment(
+        ctx,
+        url ?? new URL(`http://localhost${path}`),
+      );
     }
 
     // GET /fragments/settings/pulse/list - Prompt list partial
