@@ -4,6 +4,17 @@ All notable changes to entity-loom are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and this package follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-07-16
+
+### Added
+
+- Loom Standard import format for unsupported platforms (new parser, tests,
+  docs)
+
+### Fixed
+
+- macOS `__dirname` resolution via `fromFileUrl`
+
 ## [Unreleased]
 
 ## [0.3.9] - 2026-07-15

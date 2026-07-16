@@ -4,6 +4,17 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.25] - 2026-07-16
+
+### Fixed
+
+- Lovense toy status coercion now handles numeric API responses (was treating
+  all responses as strings)
+
+### Added
+
+- Audio/Voice Chat section in user guide
+
 ## [0.8.24] - 2026-07-15
 
 ### Fixed
