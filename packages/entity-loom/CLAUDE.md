@@ -91,6 +91,16 @@ Each `src/*/` has a `mod.ts` barrel.
 All parsers use `buildTitle()` from `src/parsers/title-utils.ts` for consistent
 `[platform] Title` formatting with date-range fallback.
 
+**Alternative: Loom Standard format.** For platforms that change frequently or
+aren't worth a dedicated parser, users can convert their export into the Loom
+Standard format (see `docs/loom-standard-format.md`) and upload it directly. The
+`LoomStandardParser` reads pre-converted JSON files. It is registered first in
+the detection order because its `"format": "loom-standard"` marker is
+unambiguous. The `originPlatform` field on `ImportedConversation` carries the
+real source platform name — the DB and staging writers use it in preference to
+`platform` for the platform column, so memory tags and titles say "ChatGPT" or
+"Replika", not "loom-standard".
+
 ## Checkpoint / resume
 
 `CheckpointStateV2` is canonical. v1 packages migrate automatically — old pass

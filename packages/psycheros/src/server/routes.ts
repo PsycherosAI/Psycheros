@@ -6537,7 +6537,8 @@ export async function handleTestLovenseConnection(
       string,
       {
         id: string;
-        status: string;
+        // iOS Lovense Connect returns a number; Android/desktop return a string.
+        status: string | number;
         name: string;
         battery: number;
         nickName: string;
@@ -6549,7 +6550,7 @@ export async function handleTestLovenseConnection(
       name: t.name,
       nickname: t.nickName || "",
       battery: t.battery,
-      connected: t.status === "1",
+      connected: String(t.status) === "1",
     }));
 
     return new Response(
@@ -6648,14 +6649,17 @@ export async function handleLovenseStatus(
       string,
       {
         id: string;
-        status: string;
+        // iOS Lovense Connect returns a number; Android/desktop return a string.
+        status: string | number;
         name: string;
         battery: number;
         nickName: string;
       }
     >;
 
-    const connected = Object.values(toysMap).find((t) => t.status === "1");
+    const connected = Object.values(toysMap).find((t) =>
+      String(t.status) === "1"
+    );
     if (!connected) {
       return new Response(
         JSON.stringify({ connected: false }),

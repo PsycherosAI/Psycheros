@@ -132,6 +132,14 @@ export class DBWriter {
     // Upsert conversation row. ON CONFLICT refreshes title/updated_at/
     // platform so an updated reimport overwrites the stale snapshot rather
     // than being silently ignored.
+    //
+    // originPlatform takes precedence over platform for the column value:
+    // Loom Standard imports set originPlatform to the real source (e.g.,
+    // "ChatGPT") so memory tags and titles reflect where conversations
+    // came from, not the transport format. Built-in parsers don't set
+    // originPlatform and fall through to conv.platform unchanged.
+    const platformValue = conv.originPlatform ?? conv.platform ?? null;
+
     if (this.hasPlatformColumn()) {
       this.db.prepare(
         `INSERT INTO conversations (id, title, created_at, updated_at, platform)
@@ -146,7 +154,7 @@ export class DBWriter {
         conv.title || null,
         createdAt,
         updatedAt,
-        conv.platform || null,
+        platformValue,
       );
     } else {
       this.db.prepare(

@@ -1,9 +1,11 @@
 # Entity Loom — User Guide
 
 Entity Loom is a tool that converts your old AI companion chat histories into a
-package Psycheros can use. It parses exports from ChatGPT, Claude, SillyTavern,
-Kindroid, and Letta, then generates daily summaries, picks out significant
-memories, and builds a knowledge graph. Everything runs in your browser.
+package Psycheros can use. It natively parses exports from ChatGPT, Claude,
+SillyTavern, Kindroid, and Letta, and can also accept any platform's export via
+the Loom Standard format (see below). It then generates daily summaries, picks
+out significant memories, and builds a knowledge graph. Everything runs in your
+browser.
 
 ## What you need before you start
 
@@ -27,6 +29,17 @@ memories, and builds a knowledge graph. Everything runs in your browser.
    - **Kindroid**: Export your chat logs as JSON from the Kindroid dashboard
      (one file per character is fine).
    - **Letta**: Export your agent's chat log as a JSON file.
+
+**Other platforms (Loom Standard format):** If your platform isn't listed above,
+or a format change has broken the native parser, you can convert your export
+into the Loom Standard format — a simple JSON structure that Entity Loom reads
+directly. You can use an AI coding agent (like Codex or Claude Code) to do the
+conversion: hand it the [format specification](loom-standard-format.md) along
+with your platform's export file, and it will produce a compatible JSON. Upload
+the result like any other export file. When the platform dropdown is set to
+"Loom Standard," an origin platform field appears where you can type the real
+platform name (e.g., "Replika", "Character.AI") so memories and titles reflect
+where the chats came from.
 
 **Important: Run all platforms together.** If you have chat histories from
 multiple platforms that overlap in time (e.g., you used both ChatGPT and

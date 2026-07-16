@@ -5,7 +5,7 @@
  * Replaces the CLI entry point with a web-first architecture.
  */
 
-import { dirname, join } from "@std/path";
+import { dirname, fromFileUrl, join } from "@std/path";
 import { sse } from "./sse.ts";
 import { closeLogger, initLogger, log } from "./logger.ts";
 import { Router } from "./router.ts";
@@ -18,7 +18,7 @@ import { graphRoutes } from "../stages/graph-stage.ts";
 import { abortRunningStage } from "./stage-lock.ts";
 import { getVersionPayload, injectVersionChip } from "./version-chip.ts";
 
-const __dirname = dirname(new URL(import.meta.url).pathname);
+const __dirname = dirname(fromFileUrl(import.meta.url));
 const ROOT_DIR = join(__dirname, "..", "..");
 
 export interface Handler {

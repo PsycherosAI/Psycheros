@@ -314,6 +314,143 @@ you like.
 
 View the images uploaded and generated.
 
+## Audio
+
+Voice Chat lets you talk to the entity out loud, like a phone call. You speak,
+the entity responds by voice, and the whole thing flows right into your existing
+conversation. Voice Chat messages show up with a `[Voice Chat]` prefix in
+context.
+
+### Getting Started
+
+1. Go to **Settings > Audio** and toggle **Enable voice chat** on.
+2. Click **Add Profile** and give it a name (e.g. "Daily Driver").
+3. Set up a **TTS provider** (this is the entity's voice) and an **STT
+   provider** (this is how it hears you).
+4. Hit **Save Profile**, then make sure it's set as **Active**.
+5. A phone-call button will appear in any open conversation — tap it to start
+   talking.
+
+One important thing up front: **depending on your OS, your browser needs to
+consider Psycheros a "secure" site before it'll let the mic work.** That means
+one of: `http://localhost:3000`, any `https://` address (like a Tailscale or
+Cloudflare tunnel), or the desktop app. If you open Psycheros over plain
+`http://<your-LAN-ip>:3000` from another computer, the browser may silently
+refuse mic access — no prompt, no error, just nothing. If the call button
+doesn't seem to do anything, this is the first thing to check.
+
+### Voice Profiles
+
+You can have multiple voice profiles. Only one profile is **Active** at a time,
+and that's the one a voice call uses. You can switch which is active from the
+profile's page (the **Set as Active** button) or by opening the profile card
+marked Active.
+
+### TTS Provider
+
+**T**ext-**t**o-**S**peech is what synthesizes the entity's speech.
+
+- **Minimax**: needs an API Key, (optional) Group ID, and Voice ID. Note:
+  Minimax deletes voices that haven't been used in 7 days; see **TTS
+  Keep-Alive** below if you go this route; also Minimax is confusing af with
+  their documentation and UI, API voice cloning is what you want.
+- **ElevenLabs**: needs an API Key, Voice ID, and a Model (defaults to
+  `eleven_multilingual_v2`, which is solid).
+- **OpenAI**: needs an API Key, Base URL, Model (defaults to `tts-1`), and a
+  Voice name (like `alloy` or `nova`). Works with any OpenAI-compatible endpoint
+  if you change the Base URL.
+- **Custom (OpenAI-compatible)**: point this at any server that speaks the
+  `/audio/speech` shape. Great for self-hosted TTS like Kokoro or Chatterbox.
+  Put in the Base URL (your server's address, usually something like
+  `http://localhost:8000/v1`), and the voice/model your server expects.
+
+There's a **Test TTS** button on every profile so you can make sure the
+connection works.
+
+### STT Provider
+
+**S**peech-**t**o-**t**ext is how the entity hears you.
+
+- **Browser-native (Web Speech API)** — free, no API key, and your audio never
+  leaves the browser. The catch: it relies on your browser vendor's cloud
+  service under the hood, which **censors swear words** on Chrome, and it can be
+  a bit flaky on Android. Fine for trying things out, less ideal for daily use.
+- **Deepgram** — recommended for reliability. Real-time streaming, no
+  censorship, generous free tier. Needs an API Key; model defaults to `nova-2`.
+- **OpenAI** — uses Whisper. A touch slower than Deepgram but very accurate.
+  Needs an API Key and Base URL; model defaults to `whisper-1`.
+- **Custom (OpenAI-compatible)** — point at any server speaking the
+  `/audio/transcriptions` shape, like a self-hosted Whisper instance.
+
+### Behavior
+
+These tune how a voice call actually feels. The defaults are sensible; you
+probably won't need to touch most of them.
+
+- **Context Window (tokens)**: how much conversation the entity "remembers"
+  mid-call. Default 64k. Lower if you want faster calls; raise if the entity
+  starts losing the thread in long chats.
+- **VAD Threshold**: how sensitive the silence detector is. Higher means the
+  entity needs a clearer pause before it assumes you're done talking (good for
+  noisy rooms). Lower is more responsive but may cut you off mid-thought.
+  Default is 0.5.
+- **End-of-turn silence (seconds)**: how long a pause counts as "they're done."
+  Default 1.5s. Server-side STT only.
+- **Phrase debounce (milliseconds)**: only matters with Browser STT, which fires
+  a "final" result at every natural breath. This batches those fragments into
+  one utterance so you don't get sent off mid-sentence. Default 1200ms.
+- **Idle Timeout (seconds)**: the call auto-ends after this much silence.
+  Default 5 minutes.
+- **Disable LLM reasoning/thinking** — on by default, reduces latency.
+- **Voice effects**: a couple of easy voice-effects to add in case you're stuck
+  with a low-quality TTS; sometimes it sounds better to lean into it than try to
+  make it crisp.
+- **Custom Instructions**: anything you want the entity to know only during
+  voice calls (from the entity's perspective, e.g. "I should speak in shorter
+  sentences on Voice Chat.").
+
+### TTS Pronunciation
+
+For difficulties with pronunciation, add entries to map the written word to a
+phonetic spelling so the TTS engine gets it right — for example, "Psycheros" →
+"sy-KEH-ros".
+
+### STT Corrections
+
+When speech-to-text consistently mishears a word, this maps the misheard version
+to the correct one; helpful for spoken names.
+
+### TTS Keep-Alive
+
+Some providers (Minimax in particular) delete voices that go unused for about a
+week. If you set a keep-alive interval (in days), Psycheros pings the voice on
+schedule so it sticks around. Leave at 0 (disabled) if your provider doesn't do
+this.
+
+### Debug
+
+If something's not working — no audio, garbled sound, the call won't start —
+turn on the **voice chat debug panel** here. It captures the whole pipeline (mic
+permission, connection events, state changes, TTS frame arrival) into a
+copy-paste-friendly log. Great for support threads.
+
+### Hold to Talk (Push-to-Talk)
+
+By default, voice chat is hands-free. However, if you'd rather control when your
+speech is heard, turn on Hold to Talk by pressing 🎙️ during a call, then press
+the **HOLD TO TALK** button while speaking, and release to send your message.
+
+You can configure additional keys in **Settings > Audio > Hold to Talk > Key
+bindings**. The default is Space.
+
+### Yin Yang Mode
+
+_~~hey how you doin lil mama let me whisper in ya ear~~_
+
+During a call, the ☯ button switches to **typing instead of speaking**, in case
+you would like to type but still have the entity use their voice. Helpful in
+quiet situations when you're wearing headphones.
+
 ## Pulse
 
 Pulses are autonomous prompts sent to the entity to trigger inference. Since

@@ -212,6 +212,10 @@ export function convertRoutes(): Array<
           }, 400);
         }
 
+        // For Loom Standard uploads, capture the origin platform name
+        // (the real source like "ChatGPT" or "Replika") if provided.
+        const originPlatform = formData.get("originPlatform") as string | null;
+
         const entry: UploadEntry = {
           filename: storedFilename,
           platform,
@@ -219,6 +223,7 @@ export function convertRoutes(): Array<
           uploadedAt: new Date().toISOString(),
           status: "queued",
           contentHash,
+          ...(originPlatform ? { originPlatform } : {}),
         };
         if (replaceIdx !== null) {
           existingEntries[replaceIdx] = entry;
@@ -301,7 +306,10 @@ export function convertRoutes(): Array<
         if (!packageDir) return json({ error: "No active package" }, 400);
 
         const filename = decodeURIComponent(ctx.params.param1);
-        const body = await req.json() as { platform?: PlatformType };
+        const body = await req.json() as {
+          platform?: PlatformType;
+          originPlatform?: string;
+        };
         if (!body.platform) {
           return json({ error: "Platform is required" }, 400);
         }
@@ -313,6 +321,9 @@ export function convertRoutes(): Array<
         }
 
         entry.platform = body.platform;
+        if (body.originPlatform !== undefined) {
+          entry.originPlatform = body.originPlatform || undefined;
+        }
         await writeUploadManifest(packageDir, entries);
 
         return json({ success: true, entry });
@@ -432,6 +443,19 @@ export function convertRoutes(): Array<
               const parser = createParser(entry.platform);
               const parsed = await parser.parse(filePath);
               let skipped = 0;
+
+              // For Loom Standard uploads, inject the user-provided origin
+              // platform when the file itself didn't specify one. The file's
+              // own originPlatform (set by the conversion agent) takes
+              // precedence — it knows the source better than the user typing
+              // a fallback in the wizard.
+              if (entry.originPlatform) {
+                for (const conv of parsed) {
+                  if (!conv.originPlatform) {
+                    conv.originPlatform = entry.originPlatform;
+                  }
+                }
+              }
 
               for (const conv of parsed) {
                 // Compute hash BEFORE the processed-ID check. Same ID +

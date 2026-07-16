@@ -112,7 +112,8 @@ function createLovenseClient(settings: LovenseSettings) {
           string,
           {
             id: string;
-            status: string;
+            // iOS Lovense Connect returns a number; Android/desktop return a string.
+            status: string | number;
             name: string;
             battery: number;
             nickName: string;
@@ -123,7 +124,7 @@ function createLovenseClient(settings: LovenseSettings) {
           id: t.id,
           name: t.name,
           battery: t.battery,
-          status: t.status === "1",
+          status: String(t.status) === "1",
           nickname: t.nickName || "",
         }));
 

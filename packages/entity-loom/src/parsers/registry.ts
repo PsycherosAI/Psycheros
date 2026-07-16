@@ -11,9 +11,19 @@ import { ClaudeParser } from "./claude.ts";
 import { SillyTavernParser } from "./sillytavern.ts";
 import { KindroidParser } from "./kindroid.ts";
 import { LettaParser } from "./letta.ts";
+import { LoomStandardParser } from "./loom-standard.ts";
 
-/** Registry mapping platform types to parser constructors */
+/**
+ * Registry mapping platform types to parser constructors.
+ *
+ * Loom Standard is registered FIRST because it relies on an explicit
+ * `"format": "loom-standard"` marker rather than structural heuristics.
+ * Native parsers (ChatGPT, Claude, etc.) detect by shape and could
+ * theoretically false-positive on a standard-format file, so checking
+ * the marker before anything else eliminates ambiguity.
+ */
 const registry = new Map<PlatformType, PlatformParserConstructor>([
+  ["loom-standard", LoomStandardParser],
   ["chatgpt", ChatGPTParser],
   ["claude", ClaudeParser],
   ["sillytavern", SillyTavernParser],

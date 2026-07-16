@@ -204,6 +204,12 @@ export class StagingWriter {
 
     const importedAt = new Date().toISOString();
 
+    // originPlatform takes precedence for the same reason as db-writer:
+    // Loom Standard imports carry the real source platform name, which
+    // makes the staging platform filter show "ChatGPT", "Replika", etc.
+    // instead of the transport format name.
+    const platformValue = conv.originPlatform ?? conv.platform;
+
     this.db.prepare(
       `INSERT OR REPLACE INTO staged_conversations
         (id, title, platform, created_at, updated_at, message_count, content_hash, included, imported_at, source_file)
@@ -211,7 +217,7 @@ export class StagingWriter {
     ).run(
       conv.id,
       conv.title || null,
-      conv.platform,
+      platformValue,
       conv.createdAt.toISOString(),
       conv.updatedAt.toISOString(),
       conv.messages.length,

@@ -5,11 +5,11 @@
  * and provides REST API endpoints for reading/writing graph.db directly.
  */
 
-import { dirname, join } from "@std/path";
+import { dirname, fromFileUrl, join } from "@std/path";
 import { Database } from "@db/sqlite";
 import { injectVersionChip } from "../server/version-chip.ts";
 
-const __dirname = dirname(new URL(import.meta.url).pathname);
+const __dirname = dirname(fromFileUrl(import.meta.url));
 
 interface GraphNode {
   id: string;

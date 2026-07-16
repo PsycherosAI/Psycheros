@@ -2468,7 +2468,20 @@
         "sillytavern",
         "kindroid",
         "letta",
+        "loom-standard",
       ];
+
+      /**
+       * Display labels for the platform dropdown. Most platform keys are
+       * already human-readable, but "loom-standard" should show as
+       * "Loom Standard" to users.
+       */
+      const PLATFORM_LABELS = {
+        "loom-standard": "Loom Standard",
+      };
+      function platformLabel(key) {
+        return PLATFORM_LABELS[key] || key;
+      }
 
       // Debounced memory list refresh — avoids DOM rebuild on every item_completed
       const _memoryRefreshTimers = {};
@@ -3094,17 +3107,33 @@
           let platformHtml;
           if (isEditable) {
             let opts = PLATFORMS.map((p) =>
-              `<option value="${p}"${
-                p === entry.platform ? " selected" : ""
-              }>${p}</option>`
+              `<option value="${p}"${p === entry.platform ? " selected" : ""}>${
+                platformLabel(p)
+              }</option>`
             ).join("");
             platformHtml =
               `<select class="wiz-upload-queue-select" data-filename="${
                 esc(entry.filename)
               }">${opts}</select>`;
+            // For Loom Standard, show an origin platform input so the user
+            // can specify where the chats came from (ChatGPT, Replika, etc.).
+            // This is a fallback — the file's own originPlatform (set by the
+            // conversion agent) takes precedence at parse time.
+            if (entry.platform === "loom-standard") {
+              platformHtml +=
+                `<input type="text" class="wiz-upload-queue-origin" ` +
+                `placeholder="Origin (e.g. ChatGPT)" ` +
+                `data-filename="${esc(entry.filename)}" ` +
+                `value="${esc(entry.originPlatform || "")}" ` +
+                `style="margin-top:4px;font-size:11px;width:100%;` +
+                `background:var(--bg-elevated);border:1px solid var(--border);` +
+                `border-radius:4px;padding:2px 6px;color:var(--fg)" />`;
+            }
           } else {
+            // For non-editable entries, show the origin platform if set
+            // (e.g., "ChatGPT" instead of "loom-standard")
             platformHtml = `<div class="wiz-upload-queue-badge">${
-              esc(entry.platform)
+              esc(entry.originPlatform || entry.platform)
             }</div>`;
           }
 
@@ -3143,6 +3172,18 @@
           const sel = e.target.closest(".wiz-upload-queue-select");
           if (sel) {
             changePlatform(sel.dataset.filename, sel.value);
+            // Re-render to show/hide origin platform input
+            loadUploadQueue();
+            return;
+          }
+          const originInput = e.target.closest(
+            ".wiz-upload-queue-origin",
+          );
+          if (originInput) {
+            changeOriginPlatform(
+              originInput.dataset.filename,
+              originInput.value.trim(),
+            );
             return;
           }
         };
@@ -3189,6 +3230,18 @@
         } catch (e) {
           showToast("Failed to update platform: " + e.message);
           await loadUploadQueue();
+        }
+      }
+
+      async function changeOriginPlatform(filename, value) {
+        try {
+          await api(
+            "PATCH",
+            `/api/convert/uploads/${encodeURIComponent(filename)}`,
+            { platform: "loom-standard", originPlatform: value },
+          );
+        } catch (e) {
+          showToast("Failed to update origin platform: " + e.message);
         }
       }
 

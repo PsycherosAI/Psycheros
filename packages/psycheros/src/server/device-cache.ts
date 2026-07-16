@@ -196,7 +196,8 @@ export class DeviceStatusCache {
         string,
         {
           id: string;
-          status: string;
+          // iOS Lovense Connect returns a number; Android/desktop return a string.
+          status: string | number;
           name: string;
           battery: number;
           nickName: string;
@@ -205,7 +206,7 @@ export class DeviceStatusCache {
 
       // Collect ALL connected toys (not just the first)
       const connectedToys = Object.values(toysMap)
-        .filter((t) => t.status === "1")
+        .filter((t) => String(t.status) === "1")
         .map((t) => ({
           name: t.name,
           battery: t.battery,
