@@ -131,6 +131,7 @@ export interface PulseEngineConfig {
     | undefined;
   contextLength?: () => number | undefined;
   maxTokens?: () => number | undefined;
+  pluginManager?: import("../plugins/mod.ts").PluginManager;
 }
 
 // =============================================================================
@@ -721,6 +722,7 @@ export class PulseEngine {
       deviceStatusCache: this.config.deviceStatusCache?.(),
       contextLength: this.config.contextLength?.(),
       maxTokens: this.config.maxTokens?.(),
+      pluginManager: this.config.pluginManager,
     };
 
     const turn = new EntityTurn(

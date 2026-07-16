@@ -60,9 +60,25 @@ export interface LLMConfig {
 /**
  * Message format for chat requests.
  */
+export interface ChatTextPart {
+  type: "text";
+  text: string;
+}
+
+export interface ChatImageUrlPart {
+  type: "image_url";
+  image_url: {
+    url: string;
+    detail?: "auto" | "low" | "high";
+  };
+}
+
+export type ChatContentPart = ChatTextPart | ChatImageUrlPart;
+export type ChatContent = string | ChatContentPart[];
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  content: ChatContent;
   tool_call_id?: string;
   tool_calls?: ToolCall[];
 }

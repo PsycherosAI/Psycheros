@@ -67,6 +67,10 @@ import type { ServerConfig } from "./types.ts";
 import { DEFAULT_SERVER_CONFIG } from "./types.ts";
 import { cleanupOldSnapshots } from "./snapshot/mod.ts";
 import { EmbeddingCache } from "./embeddings/mod.ts";
+import {
+  createEntityCorePluginManager,
+  type EntityCorePluginManager,
+} from "./plugins/mod.ts";
 
 /**
  * Create and configure the MCP server.
@@ -85,7 +89,9 @@ export function createServer(
     new GraphStore(fullConfig.dataDir);
 
   // Initialize embedding cache (shares graph.db for sqlite-vec)
-  const embeddingCache = new EmbeddingCache(fullConfig.dataDir);
+  const embeddingCache = fullConfig.embeddingCache ??
+    new EmbeddingCache(fullConfig.dataDir);
+  const pluginManager = fullConfig.pluginManager;
 
   // Create MCP server
   const server = new McpServer({
@@ -106,7 +112,13 @@ export function createServer(
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(result, null, 2),
+            text: JSON.stringify(
+              pluginManager
+                ? await pluginManager.decorate("identity_get_all", result)
+                : result,
+              null,
+              2,
+            ),
           },
         ],
       };
@@ -130,7 +142,13 @@ export function createServer(
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(result, null, 2),
+            text: JSON.stringify(
+              pluginManager
+                ? await pluginManager.decorate("identity_write", result)
+                : result,
+              null,
+              2,
+            ),
           },
         ],
       };
@@ -154,7 +172,13 @@ export function createServer(
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(result, null, 2),
+            text: JSON.stringify(
+              pluginManager
+                ? await pluginManager.decorate("identity_append", result)
+                : result,
+              null,
+              2,
+            ),
           },
         ],
       };
@@ -444,7 +468,13 @@ export function createServer(
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(result, null, 2),
+            text: JSON.stringify(
+              pluginManager
+                ? await pluginManager.decorate("memory_search", result)
+                : result,
+              null,
+              2,
+            ),
           },
         ],
       };
@@ -1356,6 +1386,20 @@ export function createServer(
     },
   );
 
+  server.tool(
+    "plugin_status",
+    "I use this to inspect the trusted local extensions available to my core.",
+    {},
+    () => ({
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify(pluginManager?.getStatuses() ?? [], null, 2),
+      }],
+    }),
+  );
+
+  pluginManager?.registerTools(server);
+
   return { server, embeddingCache };
 }
 
@@ -1366,8 +1410,40 @@ export async function startServer(
   config: Partial<ServerConfig> = {},
 ): Promise<void> {
   const fullConfig: ServerConfig = { ...DEFAULT_SERVER_CONFIG, ...config };
-  const { server, embeddingCache } = createServer(config);
+  let pluginManager: EntityCorePluginManager | undefined =
+    fullConfig.pluginManager;
+  const store = fullConfig.store ?? new FileStore(fullConfig.dataDir);
+  const graphStore = fullConfig.graphStore ??
+    new GraphStore(fullConfig.dataDir);
+  const embeddingCache = fullConfig.embeddingCache ??
+    new EmbeddingCache(fullConfig.dataDir);
+
+  if (!pluginManager) {
+    pluginManager = createEntityCorePluginManager(
+      Deno.env.get("PSYCHEROS_PLUGIN_DIR") ??
+        `${fullConfig.dataDir}/../.psycheros/plugins`,
+      {
+        dataDir: fullConfig.dataDir,
+        store,
+        graphStore,
+        embeddingCache,
+        log: (...args) => console.error("[Plugins]", ...args),
+      },
+    );
+    await pluginManager.load();
+  }
+
+  const { server } = createServer({
+    ...config,
+    store,
+    graphStore,
+    embeddingCache,
+    pluginManager,
+  });
   const transport = new StdioServerTransport();
+  transport.onclose = () => {
+    void pluginManager?.stop();
+  };
 
   // Connect the transport first so the MCP handshake completes before any
   // potentially slow startup work (e.g. embedding rebuilds). Otherwise the

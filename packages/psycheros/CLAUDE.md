@@ -451,6 +451,17 @@ Custom tools don't need any of the registry wiring above.
 
 The custom-tool loader is in `src/tools/custom-loader.ts`.
 
+## Trusted local plugins
+
+Broader extensions live under `dataRoot/.psycheros/plugins/<id>/`. The Psycheros
+manager is `src/plugins/`; it loads only at startup, merges plugin tools into
+the normal registry, runs prompt hooks after built-in retrieval, and mounts
+plugin routes/assets under namespaced paths. See `docs/plugins.md`. My
+plugin-owned credentials live under
+`dataRoot/.psycheros/plugin-secrets/<id>.env`, outside portable exports. I
+should use `PSYCHEROS_PLUGIN_<ID>_*` names because my trusted plugins share
+process environment.
+
 ## Reactive UI: state-changes
 
 UI updates flow through state-change functions in `src/server/state-changes.ts`.

@@ -218,6 +218,8 @@ export interface LLMContextSnapshot {
   vaultContent?: string;
   /** Situational awareness content injected into context */
   situationalAwarenessContent?: string;
+  /** Trusted local plugin context I add to my prompt */
+  pluginContent?: string;
   /** The messages array sent to the LLM (excluding system) */
   messages: Array<{
     role: string;

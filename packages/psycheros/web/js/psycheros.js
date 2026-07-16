@@ -5003,6 +5003,229 @@ globalThis.Psycheros = {
   startVoiceCall,
 };
 
+// Plugin manager functions stay global for my HTMX fragments.
+function pluginManagerEscape(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function pluginManagerBadge(label, kind) {
+  return '<span class="badge ' + kind + '">' + pluginManagerEscape(label) + '</span>';
+}
+
+function pluginManagerRecord(label, record) {
+  if (!record || Object.keys(record).length === 0) return '';
+  const values = Object.entries(record).map(function(entry) {
+    return entry[0] + ': ' + entry[1];
+  }).join(', ');
+  return '<p class="settings-note"><strong>' + pluginManagerEscape(label) + ':</strong> ' + pluginManagerEscape(values) + '</p>';
+}
+
+function pluginManagerList(items) {
+  if (!items || items.length === 0) return '';
+  return '<ul class="settings-note" style="margin-top:var(--sp-2);padding-left:var(--sp-5);">' +
+    items.map(function(item) { return '<li>' + pluginManagerEscape(item) + '</li>'; }).join('') +
+    '</ul>';
+}
+
+function pluginManagerCapabilities(capabilities) {
+  if (!capabilities) return 'No browser changes declared';
+  const labels = {
+    browserScripts: 'Browser behavior',
+    browserStyles: 'Browser styling',
+    tools: 'Tools',
+    promptHooks: 'Prompt context',
+    routes: 'Local routes',
+  };
+  const entries = Object.entries(capabilities).filter(function(entry) {
+    return Number(entry[1]) > 0;
+  });
+  return entries.length
+    ? entries.map(function(entry) { return (labels[entry[0]] || entry[0]) + ': ' + entry[1]; }).join(', ')
+    : 'No browser changes declared';
+}
+
+function pluginManagerSourceLabel(source) {
+  if (!source) return 'Unknown source';
+  if (source.type === 'git') {
+    return 'Git: ' + source.repoUrl + (source.ref ? ' @ ' + source.ref : ' @ default branch');
+  }
+  return 'Zip: ' + (source.fileName || 'uploaded package');
+}
+
+async function pluginManagerJson(url, options) {
+  const response = await fetch(url, options);
+  const body = await response.json().catch(function() { return {}; });
+  if (!response.ok || body.success === false) {
+    throw new Error(body.error || 'Plugin manager request failed');
+  }
+  return body;
+}
+
+function renderPluginInstallReview(preview) {
+  const target = document.getElementById('plugin-manager-review');
+  if (!target) return;
+  const manifest = preview.manifest || {};
+  const entrypoints = manifest.entrypoints || {};
+  const browser = manifest.browser || {};
+  const warnings = preview.warnings || [];
+  const existing = preview.existing
+    ? '<p class="settings-note"><strong>Existing install:</strong> The current install will be backed up before replacing ' +
+      pluginManagerEscape(preview.existing.name) + ' ' +
+      pluginManagerEscape(preview.existing.version) + '.</p>'
+    : '';
+  const homepage = manifest.homepageUrl
+    ? '<p class="settings-note"><strong>Homepage:</strong> <a href="' +
+      pluginManagerEscape(manifest.homepageUrl) +
+      '" target="_blank" rel="noopener" style="color:var(--c-accent);">' +
+      pluginManagerEscape(manifest.homepageUrl) + '</a></p>'
+    : '';
+  const update = manifest.update && Object.keys(manifest.update).length
+    ? pluginManagerRecord('Update info', manifest.update) +
+      '<p class="settings-note">Update metadata is shown for review only. Plugin updates are not checked or applied yet.</p>'
+    : '';
+
+  target.innerHTML = '<section class="theme-section" style="margin-bottom:0;">' +
+    '<div style="display:flex;justify-content:space-between;gap:var(--sp-3);align-items:flex-start;flex-wrap:wrap;">' +
+    '<div><h3 class="theme-section-title">Review ' + pluginManagerEscape(manifest.name || manifest.id || 'Plugin') +
+    ' <code>' + pluginManagerEscape(manifest.version || 'unknown') + '</code></h3>' +
+    '<p class="theme-section-desc">' + pluginManagerEscape(manifest.description || 'A plugin manifest was found and staged for review.') + '</p></div>' +
+    '<div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;">' +
+    pluginManagerBadge('Restart required', 'badge-primary') +
+    (warnings.length ? pluginManagerBadge('Warnings', 'badge-error') : pluginManagerBadge('Ready to install', 'badge-success')) +
+    '</div></div>' +
+    '<p class="settings-note"><strong>Source:</strong> ' + pluginManagerEscape(pluginManagerSourceLabel(preview.source)) + '</p>' +
+    '<p class="settings-note"><strong>Internal ID:</strong> <code>' + pluginManagerEscape(manifest.id || '') + '</code></p>' +
+    '<p class="settings-note"><strong>How it connects:</strong> Psycheros app hook ' + (entrypoints.psycheros ? 'yes' : 'no') +
+    ', entity-core runtime ' + (entrypoints.entityCore ? 'yes' : 'no') +
+    ', browser behavior files ' + ((browser.scripts || []).length) +
+    ', browser style files ' + ((browser.styles || []).length) + '.</p>' +
+    '<p class="settings-note"><strong>Detected changes:</strong> ' + pluginManagerEscape(pluginManagerCapabilities(preview.capabilities)) + '</p>' +
+    existing +
+    homepage +
+    pluginManagerRecord('Compatibility', manifest.compatibility) +
+    pluginManagerRecord('Dependencies', preview.dependencies) +
+    update +
+    pluginManagerList(warnings) +
+    '<p class="settings-note">Plugins are trusted local code. Code should only be installed from trusted sources because plugins can access the local filesystem, network, services, and plugin secrets.</p>' +
+    '<div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3);">' +
+    '<button type="button" class="btn btn--primary" data-draft-id="' + pluginManagerEscape(preview.draftId) + '" onclick="installPluginDraft(this.dataset.draftId)">Install</button>' +
+    '<button type="button" class="btn btn--ghost" onclick="document.getElementById(\'plugin-manager-review\').style.display=\'none\'">Cancel</button>' +
+    '</div></section>';
+  target.style.display = 'block';
+}
+
+async function inspectPluginZip(event) {
+  event.preventDefault();
+  const input = document.getElementById('plugin-zip-input');
+  const button = event.submitter;
+  const file = input && input.files ? input.files[0] : null;
+  if (!file) {
+    showToast('Select a plugin zip file to inspect');
+    return;
+  }
+  const originalText = button ? button.textContent : '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Inspecting...';
+  }
+  try {
+    const formData = new FormData();
+    formData.append('plugin', file);
+    const result = await pluginManagerJson('/api/plugin-manager/inspect-zip', {
+      method: 'POST',
+      body: formData,
+    });
+    renderPluginInstallReview(result.preview);
+  } catch (error) {
+    showToast(error.message || 'Could not inspect that plugin zip');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+async function inspectPluginGit(event) {
+  event.preventDefault();
+  const repoUrl = document.getElementById('plugin-git-url')?.value || '';
+  const ref = document.getElementById('plugin-git-ref')?.value || '';
+  const button = event.submitter;
+  const originalText = button ? button.textContent : '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Inspecting...';
+  }
+  try {
+    const result = await pluginManagerJson('/api/plugin-manager/inspect-git', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoUrl, ref }),
+    });
+    renderPluginInstallReview(result.preview);
+  } catch (error) {
+    showToast(error.message || 'Could not inspect that plugin repository');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+function refreshPluginSettings() {
+  if (globalThis.htmx) {
+    htmx.ajax('GET', '/fragments/settings/plugins', { target: '#chat', swap: 'innerHTML' });
+    return;
+  }
+  fetch('/fragments/settings/plugins').then(function(response) {
+    return response.text();
+  }).then(function(html) {
+    const chat = document.getElementById('chat');
+    if (chat) chat.innerHTML = html;
+  });
+}
+
+async function installPluginDraft(draftId) {
+  try {
+    await pluginManagerJson('/api/plugin-manager/install-draft', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draftId }),
+    });
+    showToast('Plugin installed. Restart Psycheros before the change takes effect.');
+    refreshPluginSettings();
+  } catch (error) {
+    showToast(error.message || 'Could not install that plugin');
+  }
+}
+
+async function removePlugin(id) {
+  if (!id) return;
+  if (!confirm('Remove this plugin? Its code and state will be moved to plugin-backups. Plugin secrets remain available for reinstall until removed manually.')) {
+    return;
+  }
+  try {
+    await pluginManagerJson('/api/plugin-manager/plugins/' + encodeURIComponent(id), {
+      method: 'DELETE',
+    });
+    showToast('Plugin removed. Restart Psycheros before the change takes effect.');
+    refreshPluginSettings();
+  } catch (error) {
+    showToast(error.message || 'Could not remove that plugin');
+  }
+}
+
+globalThis.inspectPluginZip = inspectPluginZip;
+globalThis.inspectPluginGit = inspectPluginGit;
+globalThis.installPluginDraft = installPluginDraft;
+globalThis.removePlugin = removePlugin;
+
 // Show voice call button only inside an open conversation — voice needs a
 // conversationId, and the button has no business on settings or other
 // non-chat views. `#messages` is the conversation-view signal: it only
