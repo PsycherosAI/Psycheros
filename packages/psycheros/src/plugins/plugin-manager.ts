@@ -284,7 +284,7 @@ export class PluginManager {
       const maxChars = hook.maxChars ??
         plugin.manifest.promptHookDefaults?.maxChars ??
         DEFAULT_PROMPT_HOOK_MAX_CHARS;
-      let timeoutId: number | undefined;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
         const output = await Promise.race([
           hook.run({
