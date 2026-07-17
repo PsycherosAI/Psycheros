@@ -23,7 +23,13 @@
  * data integrity, with the assumption that DB failures are rare and transient.
  */
 
-import type { ChatMessage, LLMClient, StreamChunk } from "../llm/mod.ts";
+import type {
+  ChatContent,
+  ChatImageUrlPart,
+  ChatMessage,
+  LLMClient,
+  StreamChunk,
+} from "../llm/mod.ts";
 import type { WebSearchSettings } from "../llm/web-search-settings.ts";
 import type { DiscordSettings } from "../llm/discord-settings.ts";
 import type { HomeSettings } from "../llm/home-settings.ts";
@@ -59,6 +65,7 @@ import { acquireLock } from "../utils/conversation-lock.ts";
 import { createCollector, finalize, setFinishReason } from "../metrics/mod.ts";
 import { getWearableDataCache } from "../wearable/cache.ts";
 import { formatWearableData } from "./sa-formatters.ts";
+import type { PluginManager } from "../plugins/mod.ts";
 
 /**
  * Escape special XML characters in a string.
@@ -66,6 +73,22 @@ import { formatWearableData } from "./sa-formatters.ts";
 function escapeXml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function renderChatContentForSnapshot(content: ChatContent): string {
+  if (typeof content === "string") return content;
+  return content.map((part) => {
+    if (part.type === "text") return part.text;
+    return "[transient vision image]";
+  }).join("\n");
+}
+
+function estimateChatContentChars(content: ChatContent): number {
+  if (typeof content === "string") return content.length;
+  return content.reduce((sum, part) => {
+    if (part.type === "text") return sum + part.text.length;
+    return sum + 1200;
+  }, 0);
 }
 
 /**
@@ -205,6 +228,8 @@ export interface ProcessOptions {
   skipUserPersist?: boolean;
   /** Device type of the user for this turn (from frontend detection) */
   deviceType?: "desktop" | "mobile";
+  /** Transient images I send to the LLM for this turn without saving them in chat history */
+  visionImages?: ChatImageUrlPart[];
   /** When true, sticky lorebook entries are not decremented.
    *  Set automatically for Pulse turns so automated messages
    *  don't consume sticky duration earned by real user conversation. */
@@ -304,6 +329,8 @@ export interface EntityConfig {
   contextLength?: number;
   /** Maximum tokens reserved for the response (from active LLM profile) */
   maxTokens?: number;
+  /** Trusted local plugins that can contribute prompt-time context */
+  pluginManager?: PluginManager;
 }
 
 /**
@@ -864,6 +891,22 @@ Discord interaction:
       discordChannelContent = parts.join("\n");
     }
 
+    const pluginContent = await this.config.pluginManager?.buildPromptContent({
+      conversationId,
+      sourceType: options?.sourceType ?? (options?.pulseId ? "pulse" : "web"),
+      userMessage,
+      sections: {
+        memories: memoriesContent,
+        chatHistory: chatHistoryContent,
+        lorebook: lorebookContent,
+        graph: graphContent,
+        vault: vaultContent,
+        situationalAwareness: saContent,
+        discord: discordChannelContent,
+      },
+      mcpClient: this.config.mcpClient,
+    }, this.computePluginContextBudget());
+
     const systemMessage = buildSystemMessage(
       baseInstructions,
       selfContent,
@@ -878,6 +921,7 @@ Discord interaction:
       imageGenContent,
       saContent,
       discordChannelContent,
+      pluginContent,
     ) + (options?.systemPromptSuffix ?? "");
 
     // Get conversation history from DB
@@ -969,6 +1013,7 @@ Discord interaction:
         displayContent,
         shouldPersist,
         toolDefinitions,
+        options?.visionImages,
       );
 
       // Create and yield context snapshot for debugging
@@ -988,9 +1033,10 @@ Discord interaction:
         graphContent,
         vaultContent,
         situationalAwarenessContent: saContent,
+        pluginContent,
         messages: messages.slice(1).map((msg) => ({
           role: msg.role,
-          content: msg.content,
+          content: renderChatContentForSnapshot(msg.content),
           toolCalls: msg.tool_calls,
           toolCallId: msg.tool_call_id,
         })),
@@ -1001,12 +1047,17 @@ Discord interaction:
           estimatedTokens: this.lastBudgetResult?.estimatedTotalTokens ??
             Math.ceil(systemMessage.length / 4) +
               messages.reduce(
-                (acc, m) => acc + Math.ceil((m.content?.length || 0) / 4),
+                (acc, m) =>
+                  acc + Math.ceil(estimateChatContentChars(m.content) / 4),
                 0,
               ),
           contextLength: this.config.contextLength,
           budgetAvailable: this.lastBudgetResult?.availableBudget,
           messagesTruncated: this.lastBudgetResult?.messagesRemoved,
+          pluginBudgetUsed: this.config.pluginManager?.getLastBudgetReport()
+            ?.used,
+          pluginBudgetMax: this.config.pluginManager?.getLastBudgetReport()
+            ?.cap,
         },
       };
 
@@ -1625,6 +1676,7 @@ Discord interaction:
     userMessage: string,
     appendUserMessage: boolean = true,
     toolDefinitions?: ToolDefinition[],
+    visionImages?: ChatImageUrlPart[],
   ): ChatMessage[] {
     const messages: ChatMessage[] = [];
 
@@ -1685,9 +1737,12 @@ Discord interaction:
     // Add the new user message with timestamp (skip on retry — it's already in history)
     if (appendUserMessage) {
       const now = formatMessageTimestamp(new Date());
+      const content = `${now} ${userMessage}`;
       messages.push({
         role: "user",
-        content: `${now} ${userMessage}`,
+        content: visionImages?.length
+          ? [{ type: "text", text: content }, ...visionImages]
+          : content,
       });
     }
 
@@ -1711,5 +1766,28 @@ Discord interaction:
     }
 
     return messages;
+  }
+
+  /**
+   * Compute the aggregate prompt-hook context budget for this turn.
+   *
+   * Returns undefined when the LLM profile's context window is unknown, in
+   * which case the plugin manager falls back to its built-in default. When
+   * known, the budget is 15% of (contextLength - maxTokens), clamped to
+   * [4_000, 60_000] chars. The floor keeps plugin context meaningful on
+   * small-context models; the ceiling prevents plugin context from
+   * dominating on huge-context models.
+   */
+  private computePluginContextBudget():
+    | { maxTotalChars: number }
+    | undefined {
+    const { contextLength, maxTokens } = this.config;
+    if (!contextLength || !maxTokens) return undefined;
+    const usable = contextLength - maxTokens;
+    if (usable <= 0) return { maxTotalChars: 4_000 };
+    const computed = Math.floor(usable * 0.15);
+    return {
+      maxTotalChars: Math.max(4_000, Math.min(60_000, computed)),
+    };
   }
 }

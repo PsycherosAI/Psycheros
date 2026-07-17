@@ -142,6 +142,7 @@ if (mcpEnabled) {
     instanceId: mcpInstance,
     env: {
       ENTITY_CORE_DATA_DIR: entityCoreDataDir,
+      PSYCHEROS_PLUGIN_DIR: join(config.dataRoot, ".psycheros", "plugins"),
       // Entity-core LLM settings — prefer entity-core override, then active profile, then ZAI_* vars
       ENTITY_CORE_LLM_API_KEY: Deno.env.get("ENTITY_CORE_LLM_API_KEY") ||
         activeProfile?.apiKey || Deno.env.get("ZAI_API_KEY") || "",
@@ -198,7 +199,7 @@ async function shutdown() {
     await mcpClient.disconnect();
   }
 
-  server.stop();
+  await server.stop();
   Deno.exit(0);
 }
 

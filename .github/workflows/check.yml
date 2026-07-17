@@ -58,7 +58,8 @@ jobs:
             packages/entity-core/src/mod.ts \
             packages/entity-loom/src/main.ts \
             packages/psycheros/src/main.ts \
-            packages/launcher/dashboard.ts
+            packages/launcher/dashboard.ts \
+            packages/plugin-api/src/mod.ts
 
       - name: Lint all packages
         run: deno lint

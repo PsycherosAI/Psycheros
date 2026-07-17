@@ -4042,6 +4042,7 @@ function renderMetricsTab(snap) {
     { name: 'Lorebook', text: snap.lorebookContent },
     { name: 'Data Vault', text: snap.vaultContent },
     { name: 'Knowledge Graph', text: snap.graphContent },
+    { name: 'Plugin Context', text: snap.pluginContent },
   ];
 
   const totalSystemChars = metrics.systemMessageLength || (snap.systemMessage || '').length;
@@ -4051,6 +4052,25 @@ function renderMetricsTab(snap) {
   const utilizationPct = Math.min(100, Math.round((estimatedTotal / contextWindow) * 100));
   const contextLabel = (contextWindow / 1000).toFixed(0) + 'k';
   const tokenLabel = tokenizerReady ? '' : ' (est.)';
+
+  // Plugin context budget meter — only renders when the snapshot captured it
+  // (post-plugin-surface turns). Historical snapshots from before this field
+  // existed just skip the row.
+  let pluginBudgetRow = '';
+  if (typeof metrics.pluginBudgetMax === 'number' && typeof metrics.pluginBudgetUsed === 'number') {
+    const pct = metrics.pluginBudgetMax > 0
+      ? Math.min(100, Math.round((metrics.pluginBudgetUsed / metrics.pluginBudgetMax) * 100))
+      : 0;
+    const meterColor = pct >= 90 ? 'var(--c-danger, #ff6b6b)' : (pct >= 70 ? 'var(--c-warning, #f0ad4e)' : 'var(--c-accent)');
+    pluginBudgetRow = `
+      <div class="context-utilization" style="margin-top:var(--sp-2);">
+        <div class="context-utilization-label">Plugin Context Budget</div>
+        <div class="context-utilization-bar">
+          <div class="context-utilization-fill" style="width: ${pct}%;background:${meterColor};"></div>
+        </div>
+        <div class="context-utilization-pct">${pct}% &mdash; ${metrics.pluginBudgetUsed.toLocaleString()} / ${metrics.pluginBudgetMax.toLocaleString()} chars</div>
+      </div>`;
+  }
 
   let html = `
     <div class="context-metrics-overview">
@@ -4073,6 +4093,7 @@ function renderMetricsTab(snap) {
         </div>
         <div class="context-utilization-pct">${utilizationPct}%</div>
       </div>
+      ${pluginBudgetRow}
     </div>
     <h3 class="context-metrics-heading">Section Breakdown</h3>
     <div class="context-section-grid">
@@ -5002,6 +5023,687 @@ globalThis.Psycheros = {
   // Voice chat
   startVoiceCall,
 };
+
+// Plugin manager functions stay global for my HTMX fragments.
+function pluginManagerEscape(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function pluginManagerBadge(label, kind) {
+  return '<span class="badge ' + kind + '">' + pluginManagerEscape(label) + '</span>';
+}
+
+function pluginManagerRecord(label, record) {
+  if (!record || Object.keys(record).length === 0) return '';
+  const values = Object.entries(record).map(function(entry) {
+    return entry[0] + ': ' + entry[1];
+  }).join(', ');
+  return '<p class="settings-note"><strong>' + pluginManagerEscape(label) + ':</strong> ' + pluginManagerEscape(values) + '</p>';
+}
+
+function pluginManagerList(items) {
+  if (!items || items.length === 0) return '';
+  return '<ul class="settings-note" style="margin-top:var(--sp-2);padding-left:var(--sp-5);">' +
+    items.map(function(item) { return '<li>' + pluginManagerEscape(item) + '</li>'; }).join('') +
+    '</ul>';
+}
+
+function pluginManagerCapabilities(capabilities) {
+  if (!capabilities) return 'No browser changes declared';
+  const labels = {
+    browserScripts: 'Browser behavior',
+    browserStyles: 'Browser styling',
+    tools: 'Tools',
+    promptHooks: 'Prompt context',
+    routes: 'Local routes',
+  };
+  const entries = Object.entries(capabilities).filter(function(entry) {
+    return Number(entry[1]) > 0;
+  });
+  return entries.length
+    ? entries.map(function(entry) { return (labels[entry[0]] || entry[0]) + ': ' + entry[1]; }).join(', ')
+    : 'No browser changes declared';
+}
+
+function pluginManagerSourceLabel(source) {
+  if (!source) return 'Unknown source';
+  if (source.type === 'git') {
+    return 'Git: ' + source.repoUrl + (source.ref ? ' @ ' + source.ref : ' @ default branch');
+  }
+  return 'Zip: ' + (source.fileName || 'uploaded package');
+}
+
+async function pluginManagerJson(url, options) {
+  const response = await fetch(url, options);
+  const body = await response.json().catch(function() { return {}; });
+  if (!response.ok || body.success === false) {
+    throw new Error(body.error || 'Plugin manager request failed');
+  }
+  return body;
+}
+
+function renderPluginInstallReview(preview) {
+  const target = document.getElementById('plugin-manager-review');
+  if (!target) return;
+  const manifest = preview.manifest || {};
+  const caps = preview.capabilities || {};
+  const warnings = preview.warnings || [];
+  const existing = preview.existing;
+  const pluginId = manifest.id || '';
+  const pluralize = function(n, singular) {
+    return n + ' ' + singular + (n === 1 ? '' : 's');
+  };
+
+  // === Capability-salience translation (Shape A) ===
+  // Lead with high-stakes capabilities (prompt hooks shape what the entity
+  // thinks; browser scripts can see what you type), then medium, then
+  // lower-stakes. Each line is "operational language (technical detail)"
+  // so a non-technical operator gets the impact and a technical one gets
+  // the count.
+  const stakeItems = [];
+  if ((caps.promptHooks || 0) > 0) {
+    stakeItems.push({
+      kind: 'high',
+      html: '<strong>shape what the entity thinks each turn</strong> (' +
+        pluralize(caps.promptHooks, 'prompt hook') + ')',
+    });
+  }
+  if ((caps.browserScripts || 0) > 0) {
+    stakeItems.push({
+      kind: 'high',
+      html: '<strong>see what you type and modify what you see</strong> in this page (' +
+        pluralize(caps.browserScripts, 'browser script') + ')',
+    });
+  }
+  if ((caps.tools || 0) > 0) {
+    stakeItems.push({
+      kind: 'medium',
+      html: 'be called by the entity to take actions (' +
+        pluralize(caps.tools, 'tool') + ')',
+    });
+  }
+  if ((caps.routes || 0) > 0) {
+    stakeItems.push({
+      kind: 'low',
+      html: 'be reachable from the browser at <code>/api/plugins/' +
+        pluginManagerEscape(pluginId) + '/...</code> (' +
+        pluralize(caps.routes, 'route') + ')',
+    });
+  }
+  if ((caps.browserStyles || 0) > 0) {
+    stakeItems.push({
+      kind: 'low',
+      html: 'restyle parts of this page (' +
+        pluralize(caps.browserStyles, 'stylesheet') + ')',
+    });
+  }
+
+  // Reassuring absences — only call out high-stakes things this plugin
+  // does NOT do, so the operator knows at a glance when the risk profile
+  // is lower than the worst case.
+  const absent = [];
+  if ((caps.promptHooks || 0) === 0) {
+    absent.push('cannot shape what the entity thinks (no prompt hooks)');
+  }
+  if ((caps.browserScripts || 0) === 0) {
+    absent.push('cannot see what you type or modify what you see (no browser scripts)');
+  }
+
+  // === Update diff (Shape C) ===
+  // Only manifest-declared fields are diffable here. Runtime capabilities
+  // (tools/hooks/routes) for the *existing* install aren't available
+  // without importing its entrypoint, which is too heavy for inspect.
+  // Surface that limit honestly in the diff section.
+  let diffHtml = '';
+  if (existing) {
+    const rows = [];
+    rows.push({
+      label: 'Version',
+      value: '<code>' + pluginManagerEscape(existing.version) + '</code> → <code>' +
+        pluginManagerEscape(manifest.version || '?') + '</code>',
+    });
+    const oldScripts = existing.browserScripts ?? 0;
+    const newScripts = caps.browserScripts ?? 0;
+    if (oldScripts !== newScripts) {
+      const delta = newScripts - oldScripts;
+      const sign = delta > 0 ? '+' : '';
+      rows.push({
+        label: 'Browser scripts',
+        value: oldScripts + ' → ' + newScripts + ' <strong>(' + sign + delta + ')</strong>',
+      });
+    }
+    const oldStyles = existing.browserStyles ?? 0;
+    const newStyles = caps.browserStyles ?? 0;
+    if (oldStyles !== newStyles) {
+      const delta = newStyles - oldStyles;
+      const sign = delta > 0 ? '+' : '';
+      rows.push({
+        label: 'Browser styles',
+        value: oldStyles + ' → ' + newStyles + ' <strong>(' + sign + delta + ')</strong>',
+      });
+    }
+    const oldDeps = existing.dependencies || {};
+    const newDeps = preview.dependencies || {};
+    const oldDepKeys = new Set(Object.keys(oldDeps));
+    const newDepKeys = new Set(Object.keys(newDeps));
+    const added = [...newDepKeys].filter(function(k) { return !oldDepKeys.has(k); });
+    const removed = [...oldDepKeys].filter(function(k) { return !newDepKeys.has(k); });
+    if (added.length || removed.length) {
+      const bits = [];
+      if (added.length) bits.push('+' + added.join(', +'));
+      if (removed.length) bits.push('-' + removed.join(', -'));
+      rows.push({ label: 'Dependencies', value: bits.join(' · ') });
+    }
+    diffHtml =
+      '<div style="margin-top:var(--sp-4);padding-top:var(--sp-3);border-top:1px solid var(--c-border);">' +
+      '<p class="settings-note" style="margin-bottom:var(--sp-2);"><strong>Replacing existing install of ' +
+      pluginManagerEscape(existing.name) + '.</strong> The current version will be backed up before replace.</p>' +
+      '<div class="context-section-grid">' +
+      rows.map(function(r) {
+        return '<div class="context-metrics-row"><span>' + pluginManagerEscape(r.label) +
+          '</span><span>' + r.value + '</span></div>';
+      }).join('') +
+      '</div>' +
+      '<p class="settings-note" style="font-size:var(--font-size-xs);margin-top:var(--sp-2);">' +
+      'Manifest-field diff only. To see tool / hook / route changes, compare the plugin source between versions.</p>' +
+      '</div>';
+  }
+
+  // === Source / metadata (kept but smaller) ===
+  const sourceRow = '<p class="settings-note"><strong>Source:</strong> ' +
+    pluginManagerEscape(pluginManagerSourceLabel(preview.source)) +
+    ' · <strong>Internal ID:</strong> <code>' + pluginManagerEscape(pluginId) + '</code></p>';
+  const homepageRow = manifest.homepageUrl
+    ? '<p class="settings-note"><strong>Homepage:</strong> <a href="' +
+      pluginManagerEscape(manifest.homepageUrl) +
+      '" target="_blank" rel="noopener" style="color:var(--c-accent);">' +
+      pluginManagerEscape(manifest.homepageUrl) + '</a></p>'
+    : '';
+  const compatRow = pluginManagerRecord('Compatibility', manifest.compatibility);
+  const depsRow = pluginManagerRecord('Dependencies', preview.dependencies);
+  const updateRow = manifest.update && Object.keys(manifest.update).length
+    ? pluginManagerRecord('Update metadata', manifest.update)
+    : '';
+
+  // === Compose ===
+  target.innerHTML = '<section class="theme-section" style="margin-bottom:0;">' +
+    '<div style="display:flex;justify-content:space-between;gap:var(--sp-3);align-items:flex-start;flex-wrap:wrap;">' +
+    '<div><h3 class="theme-section-title">Review ' + pluginManagerEscape(manifest.name || pluginId || 'Plugin') +
+    ' <code>' + pluginManagerEscape(manifest.version || 'unknown') + '</code></h3>' +
+    '<p class="theme-section-desc">' + pluginManagerEscape(manifest.description || 'A plugin manifest was found and staged for review.') + '</p></div>' +
+    '<div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;">' +
+    pluginManagerBadge('Restart required', 'badge-primary') +
+    (warnings.length ? pluginManagerBadge('Warnings', 'badge-error') : pluginManagerBadge('Ready to install', 'badge-success')) +
+    '</div></div>' +
+
+    // Capability summary — the main UX win
+    '<div style="margin-top:var(--sp-3);">' +
+    '<p class="settings-note" style="margin-bottom:var(--sp-1);"><strong>If installed, this plugin will:</strong></p>' +
+    '<ul class="settings-note" style="margin:0 0 var(--sp-3);padding-left:var(--sp-5);">' +
+    (stakeItems.length
+      ? stakeItems.map(function(item) {
+        return '<li>' + item.html + '</li>';
+      }).join('')
+      : '<li>declare itself but contribute no active capabilities</li>') +
+    '</ul>' +
+    (absent.length
+      ? '<p class="settings-note" style="margin-bottom:var(--sp-1);"><strong>This plugin will not:</strong></p>' +
+      '<ul class="settings-note" style="margin:0 0 var(--sp-3);padding-left:var(--sp-5);">' +
+      absent.map(function(line) { return '<li>' + pluginManagerEscape(line) + '</li>'; }).join('') +
+      '</ul>'
+      : '') +
+    '</div>' +
+
+    // Update diff (only when replacing)
+    diffHtml +
+
+    // Source / metadata
+    '<div style="margin-top:var(--sp-4);padding-top:var(--sp-3);border-top:1px solid var(--c-border);">' +
+    sourceRow +
+    homepageRow +
+    compatRow +
+    depsRow +
+    updateRow +
+    (warnings.length ? pluginManagerList(warnings) : '') +
+    '</div>' +
+
+    '<p class="settings-note" style="margin-top:var(--sp-3);">Plugins are trusted local code with full access to the entity\'s identity, memory, vault, and network. Only install if you have vetted the source.</p>' +
+    '<div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3);">' +
+    '<button type="button" class="btn btn--primary" data-draft-id="' + pluginManagerEscape(preview.draftId) + '" onclick="installPluginDraft(this.dataset.draftId)">Install</button>' +
+    '<button type="button" class="btn btn--ghost" onclick="document.getElementById(\'plugin-manager-review\').style.display=\'none\'">Cancel</button>' +
+    '</div></section>';
+  target.style.display = 'block';
+}
+
+async function inspectPluginZip(event) {
+  event.preventDefault();
+  const input = document.getElementById('plugin-zip-input');
+  const button = event.submitter;
+  const file = input && input.files ? input.files[0] : null;
+  if (!file) {
+    showToast('Select a plugin zip file to inspect');
+    return;
+  }
+  const originalText = button ? button.textContent : '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Inspecting...';
+  }
+  try {
+    const formData = new FormData();
+    formData.append('plugin', file);
+    const result = await pluginManagerJson('/api/plugin-manager/inspect-zip', {
+      method: 'POST',
+      body: formData,
+    });
+    renderPluginInstallReview(result.preview);
+  } catch (error) {
+    showToast(error.message || 'Could not inspect that plugin zip');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+async function inspectPluginGit(event) {
+  event.preventDefault();
+  const repoUrl = document.getElementById('plugin-git-url')?.value || '';
+  const ref = document.getElementById('plugin-git-ref')?.value || '';
+  const button = event.submitter;
+  const originalText = button ? button.textContent : '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Inspecting...';
+  }
+  try {
+    const result = await pluginManagerJson('/api/plugin-manager/inspect-git', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoUrl, ref }),
+    });
+    renderPluginInstallReview(result.preview);
+  } catch (error) {
+    showToast(error.message || 'Could not inspect that plugin repository');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+function refreshPluginSettings() {
+  if (globalThis.htmx) {
+    htmx.ajax('GET', '/fragments/settings/plugins', { target: '#chat', swap: 'innerHTML' });
+    return;
+  }
+  fetch('/fragments/settings/plugins').then(function(response) {
+    return response.text();
+  }).then(function(html) {
+    const chat = document.getElementById('chat');
+    if (chat) chat.innerHTML = html;
+  });
+}
+
+async function installPluginDraft(draftId) {
+  try {
+    await pluginManagerJson('/api/plugin-manager/install-draft', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draftId }),
+    });
+    showToast('Plugin installed. Restart Psycheros before the change takes effect.');
+    refreshPluginSettings();
+  } catch (error) {
+    showToast(error.message || 'Could not install that plugin');
+  }
+}
+
+async function removePlugin(id) {
+  if (!id) return;
+  if (!confirm('Remove this plugin? Its code and state will be moved to plugin-backups. Plugin secrets remain available for reinstall until removed manually.')) {
+    return;
+  }
+  try {
+    await pluginManagerJson('/api/plugin-manager/plugins/' + encodeURIComponent(id), {
+      method: 'DELETE',
+    });
+    showToast('Plugin removed. Restart Psycheros before the change takes effect.');
+    refreshPluginSettings();
+  } catch (error) {
+    showToast(error.message || 'Could not remove that plugin');
+  }
+}
+
+globalThis.inspectPluginZip = inspectPluginZip;
+globalThis.inspectPluginGit = inspectPluginGit;
+globalThis.installPluginDraft = installPluginDraft;
+globalThis.removePlugin = removePlugin;
+
+// =============================================================================
+// Plugin Health card + per-plugin Recent Activity panel
+// =============================================================================
+// These load lazily after the Plugins Settings fragment swaps in. Health is
+// fetched once per page render; per-plugin activity is fetched on first
+// expand. No polling — refresh happens by reloading the page.
+
+const PLUGIN_ACTIVITY_STATE = {
+  // pluginId -> { filter: 'all'|'warn'|'error', lastEvents: [...] }
+};
+
+async function loadPluginHealth() {
+  const target = document.getElementById('plugin-health-card');
+  if (!target) return;
+  let body;
+  try {
+    body = await pluginManagerJson('/api/plugin-manager/health');
+  } catch (error) {
+    target.innerHTML = '<p class="settings-note">Could not load plugin health: ' +
+      pluginManagerEscape(error.message || 'unknown error') + '</p>';
+    return;
+  }
+  const counts = body.counts || {};
+  const budget = body.lastBudget;
+  const denied = body.deniedEnvVars || [];
+
+  const countRow = function(label, n, badgeKind) {
+    if (!n) return '';
+    return '<span style="display:inline-flex;align-items:center;gap:var(--sp-1);margin-right:var(--sp-3);">' +
+      pluginManagerBadge(String(n), badgeKind) +
+      '<span style="color:var(--c-fg-muted);">' + pluginManagerEscape(label) + '</span></span>';
+  };
+
+  let budgetHtml = '';
+  if (budget && typeof budget.cap === 'number') {
+    const pct = budget.cap > 0 ? Math.min(100, Math.round((budget.used / budget.cap) * 100)) : 0;
+    const meterColor = pct >= 90 ? 'var(--c-danger, #ff6b6b)' : (pct >= 70 ? 'var(--c-warning, #f0ad4e)' : 'var(--c-accent)');
+    budgetHtml =
+      '<div class="context-utilization" style="margin-top:var(--sp-3);">' +
+        '<div class="context-utilization-label">Plugin context budget (last turn)</div>' +
+        '<div class="context-utilization-bar"><div class="context-utilization-fill" style="width:' + pct + '%;background:' + meterColor + ';"></div></div>' +
+        '<div class="context-utilization-pct">' + pct + '% &mdash; ' +
+          budget.used.toLocaleString() + ' / ' + budget.cap.toLocaleString() + ' chars</div>' +
+      '</div>';
+  }
+
+  let deniedHtml = '';
+  if (denied.length) {
+    deniedHtml = '<p class="settings-note" style="margin-top:var(--sp-3);"><strong>Refused env vars:</strong> ' +
+      pluginManagerEscape(denied.map(function(d) { return d.pluginId + ' (' + d.names.join(', ') + ')'; }).join('; ')) +
+      '</p>';
+  }
+
+  if (counts.total === 0) {
+    target.innerHTML = '<p class="settings-note">No plugins installed.</p>';
+    return;
+  }
+
+  target.innerHTML =
+    '<div>' +
+      countRow('Active', counts.active, 'badge-success') +
+      countRow('Degraded', counts.degraded, 'badge-error') +
+      countRow('Pending restart', counts.pendingRestart, 'badge-primary') +
+      countRow('Disabled', counts.disabled, 'badge-muted') +
+      '<span style="color:var(--c-fg-muted);">of ' + counts.total + ' total</span>' +
+    '</div>' +
+    budgetHtml +
+    deniedHtml;
+}
+
+function loadPluginVettingGuide() {
+  // Retained as a no-op — the vetting guide moved to the User Guide at
+  // site/src/content/docs/psycheros/user-guide.md and is linked from the
+  // safety banner at the top of this page. This function is kept so the
+  // afterSwap lifecycle hook below doesn't need to know whether client-side
+  // vetting content exists; remove freely if the lifecycle hook is
+  // simplified later.
+}
+
+async function togglePluginActivity(pluginId, button) {
+  const container = document.getElementById('plugin-activity-' + pluginId);
+  if (!container) return;
+  const isExpanded = container.style.display !== 'none';
+  if (isExpanded) {
+    container.style.display = 'none';
+    if (button) button.textContent = 'Show recent activity';
+    return;
+  }
+  container.style.display = 'block';
+  if (button) button.textContent = 'Hide recent activity';
+  // Lazy-load on first expand; afterwards the cached render stays until
+  // the user collapses/re-expands (then we re-fetch).
+  if (!PLUGIN_ACTIVITY_STATE[pluginId]) {
+    PLUGIN_ACTIVITY_STATE[pluginId] = { filter: 'warn' };
+  }
+  await loadPluginEvents(pluginId, container, PLUGIN_ACTIVITY_STATE[pluginId].filter);
+}
+
+async function loadPluginEvents(pluginId, container, filter) {
+  const state = PLUGIN_ACTIVITY_STATE[pluginId] || (PLUGIN_ACTIVITY_STATE[pluginId] = { filter: 'warn' });
+  state.filter = filter || 'warn';
+  container.innerHTML = '<p class="settings-note">Loading…</p>';
+  let body;
+  try {
+    body = await pluginManagerJson('/api/plugin-manager/plugins/' + encodeURIComponent(pluginId) + '/events?limit=200');
+  } catch (error) {
+    container.innerHTML = '<p class="settings-note">Could not load activity: ' +
+      pluginManagerEscape(error.message || 'unknown error') + '</p>';
+    return;
+  }
+  renderPluginActivity(pluginId, container, body.events || [], body.logPath || '', state.filter);
+}
+
+function renderPluginActivity(pluginId, container, events, logPath, filter) {
+  const filtered = events.filter(function(e) {
+    if (filter === 'all') return true;
+    if (filter === 'warn') return e.level === 'warn' || e.level === 'error';
+    if (filter === 'error') return e.level === 'error';
+    return true;
+  }).slice(-200).reverse(); // newest first
+
+  const levelKind = function(level) {
+    if (level === 'error') return 'badge-error';
+    if (level === 'warn') return 'badge-primary';
+    return 'badge-muted';
+  };
+
+  const eventRows = filtered.length
+    ? filtered.map(function(e) {
+        const ts = e.timestamp ? e.timestamp.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : '';
+        return '<div class="context-metrics-row" style="gap:var(--sp-2);align-items:flex-start;">' +
+          '<code style="font-size:var(--font-size-xs);color:var(--c-fg-muted);white-space:nowrap;">' + pluginManagerEscape(ts) + '</code>' +
+          pluginManagerBadge(e.level || '?', levelKind(e.level)) +
+          '<code style="font-size:var(--font-size-xs);color:var(--c-fg-muted);">' + pluginManagerEscape(e.category) + '</code>' +
+          '<span style="flex:1;word-break:break-word;">' + pluginManagerEscape(e.message || '') + '</span>' +
+        '</div>';
+      }).join('')
+    : '<p class="settings-note">No events at this filter level.</p>';
+
+  const filterOptions = ['warn', 'all', 'error'].map(function(value) {
+    const labels = { warn: 'WARN+', all: 'All levels', error: 'ERROR only' };
+    const selected = filter === value ? ' selected' : '';
+    return '<option value="' + value + '"' + selected + '>' + labels[value] + '</option>';
+  }).join('');
+
+  container.innerHTML =
+    '<div style="display:flex;justify-content:space-between;gap:var(--sp-2);flex-wrap:wrap;align-items:center;margin-bottom:var(--sp-2);">' +
+      '<div style="display:flex;gap:var(--sp-2);align-items:center;">' +
+        '<label style="font-size:var(--font-size-xs);color:var(--c-fg-muted);">Filter</label>' +
+        '<select class="input-field" style="width:auto;padding:var(--sp-1);" onchange="setPluginActivityFilter(\'' +
+          pluginManagerEscape(pluginId).replace(/'/g, "\\'") + '\', this.value)">' + filterOptions + '</select>' +
+      '</div>' +
+      '<div style="display:flex;gap:var(--sp-2);">' +
+        '<button type="button" class="btn btn--ghost btn--sm" onclick="copyPluginEvents(\'' +
+          pluginManagerEscape(pluginId).replace(/'/g, "\\'") + '\')">Copy</button>' +
+        '<a class="btn btn--ghost btn--sm" href="/api/plugin-manager/plugins/' + encodeURIComponent(pluginId) + '/log" target="_blank" rel="noopener">Download log</a>' +
+      '</div>' +
+    '</div>' +
+    '<p class="settings-note" style="font-size:var(--font-size-xs);">File on disk: <code>' + pluginManagerEscape(logPath) + '</code></p>' +
+    '<div class="context-section-grid">' + eventRows + '</div>';
+}
+
+function setPluginActivityFilter(pluginId, filter) {
+  const container = document.getElementById('plugin-activity-' + pluginId);
+  if (!container) return;
+  loadPluginEvents(pluginId, container, filter);
+}
+
+async function copyPluginEvents(pluginId) {
+  let body;
+  try {
+    body = await pluginManagerJson('/api/plugin-manager/plugins/' + encodeURIComponent(pluginId) + '/events?limit=200');
+  } catch (error) {
+    showToast(error.message || 'Could not load events');
+    return;
+  }
+  // Render to the same one-line-per-event text format the file uses, so a
+  // paste into a support chat looks identical to downloading the file.
+  const text = (body.events || []).map(function(e) {
+    const ts = e.timestamp || '';
+    const level = (e.level || '').toUpperCase();
+    const cat = e.category || '';
+    const details = e.details && Object.keys(e.details).length ? ' ' + JSON.stringify(e.details) : '';
+    return '[' + ts + '] [' + level + '] [' + cat + '] ' + (e.message || '') + details;
+  }).join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Copied ' + (body.events || []).length + ' events');
+  } catch {
+    showToast('Clipboard blocked — use Download log instead');
+  }
+}
+
+// =============================================================================
+// Plugin updater — manual check + apply, no scheduler yet (v1.1 will add a
+// daily task; for now operators click "Check for updates" per plugin).
+// =============================================================================
+
+async function checkPluginUpdate(pluginId, button) {
+  const target = document.getElementById('plugin-update-result-' + pluginId);
+  if (!target) return;
+  const originalText = button ? button.textContent : '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Checking…';
+  }
+  target.innerHTML = '<p class="settings-note">Checking GitHub for newer tags…</p>';
+  try {
+    const body = await pluginManagerJson(
+      '/api/plugin-manager/plugins/' + encodeURIComponent(pluginId) + '/check-update',
+      { method: 'POST' },
+    );
+    renderPluginUpdateResult(pluginId, target, body.result || {});
+  } catch (error) {
+    target.innerHTML = '<p class="settings-note">Update check failed: ' +
+      pluginManagerEscape(error.message || 'unknown error') + '</p>';
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+function renderPluginUpdateResult(pluginId, target, result) {
+  // Failures come back with a `reason` field — render those distinctly so
+  // the operator can tell "no update available" from "check didn't run."
+  if (result.reason) {
+    const reasonLabel = {
+      'not-configured': 'Update check not configured',
+      'unsupported-host': 'Unsupported repository host',
+      'network': 'Network error',
+      'rate-limited': 'Rate-limited by GitHub',
+      'no-valid-tags': 'No version tags found',
+    }[result.reason] || 'Update check failed';
+    target.innerHTML =
+      '<p class="settings-note"><strong>' + pluginManagerEscape(reasonLabel) +
+      ':</strong> ' + pluginManagerEscape(result.message || '') + '</p>';
+    return;
+  }
+  if (!result.updateAvailable) {
+    target.innerHTML =
+      '<p class="settings-note">Up to date at <code>' +
+      pluginManagerEscape(result.currentVersion || '?') + '</code>' +
+      (result.latestVersion ? ' (latest tag: <code>' + pluginManagerEscape(result.latestVersion) + '</code>)' : '') +
+      '.</p>';
+    return;
+  }
+  // Update available — render the apply button inline. The tag + repoUrl
+  // travel through data-attrs on the button so applyPluginUpdate has what
+  // it needs without re-checking.
+  target.innerHTML =
+    '<div style="display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;">' +
+      pluginManagerBadge('Update available', 'badge-primary') +
+      '<span class="settings-note" style="margin:0;">' +
+        '<code>' + pluginManagerEscape(result.currentVersion || '?') + '</code> → <code>' +
+        pluginManagerEscape(result.latestVersion || '?') + '</code>' +
+      '</span>' +
+      '<button type="button" class="btn btn--primary btn--sm"' +
+        ' data-plugin-id="' + pluginManagerEscape(pluginId) + '"' +
+        ' data-tag="' + pluginManagerEscape(result.latestTag || '') + '"' +
+        ' data-repo-url="' + pluginManagerEscape(result.repoUrl || '') + '"' +
+        ' onclick="applyPluginUpdate(this.dataset.pluginId, this.dataset.tag, this.dataset.repoUrl, this)">' +
+        'Update to ' + pluginManagerEscape(result.latestVersion || 'latest') +
+      '</button>' +
+    '</div>';
+}
+
+async function applyPluginUpdate(pluginId, tag, repoUrl, button) {
+  if (!confirm('Apply update to ' + pluginId + ' at tag ' + tag + '?\n\nThe current install will be backed up. Psycheros will need a restart for the new version to load.')) {
+    return;
+  }
+  const originalText = button ? button.textContent : '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Applying…';
+  }
+  try {
+    await pluginManagerJson(
+      '/api/plugin-manager/plugins/' + encodeURIComponent(pluginId) + '/update',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag, repoUrl }),
+      },
+    );
+    showToast('Plugin updated. Restart Psycheros for the new version to take effect.');
+    refreshPluginSettings();
+  } catch (error) {
+    showToast(error.message || 'Update failed');
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+globalThis.togglePluginActivity = togglePluginActivity;
+globalThis.setPluginActivityFilter = setPluginActivityFilter;
+globalThis.copyPluginEvents = copyPluginEvents;
+globalThis.checkPluginUpdate = checkPluginUpdate;
+globalThis.applyPluginUpdate = applyPluginUpdate;
+
+// Auto-load the health card and vetting guide whenever the Plugins Settings
+// fragment is in the DOM. Re-runs on every HTMX swap of #chat (settings nav,
+// sidebar, etc.) — loadPluginHealth/loadPluginVettingGuide early-return when
+// their targets aren't present, so this is cheap when the user is elsewhere.
+function initPluginsSettingsLifecycle() {
+  loadPluginHealth();
+  loadPluginVettingGuide();
+}
+initPluginsSettingsLifecycle();
+document.body.addEventListener('htmx:afterSwap', function(e) {
+  if (e.detail.target && e.detail.target.id === 'chat') {
+    initPluginsSettingsLifecycle();
+  }
+});
 
 // Show voice call button only inside an open conversation — voice needs a
 // conversationId, and the button has no business on settings or other

@@ -574,6 +574,92 @@ make it safer.
 You can theoretically write custom tools for the entity, though this hasn't been
 tested much yet.
 
+## Plugins
+
+Plugins are local code that extends what the entity can do — new tools, new
+prompt-time context, browser behavior, internal HTTP endpoints. They live under
+`<dataRoot>/.psycheros/plugins/<id>/` and load once at startup, so any change
+requires restarting Psycheros.
+
+Plugins are trusted local code. They run inside the Psycheros process with full
+access to the entity's identity, memories, vault, and network. Prompt hooks can
+shape what the entity thinks each turn. There is no sandbox between a plugin and
+the entity — the only meaningful defense is refusing to install code you have
+not checked.
+
+The Plugins Settings page shows a health card (how many plugins are active,
+degraded, or pending restart; how much of the per-turn context budget plugins
+consumed last turn), an install form (zip or git URL), a list of installed
+plugins each with their own recent-activity log and a download-log button for
+support chats, and per-plugin update checking.
+
+### How to vet a plugin before you install
+
+Vetting is your job. The five checks below are what a careful operator does
+before letting a plugin near the entity.
+
+**1. Provenance.** Know where the plugin came from. A git repository you can
+read and trace beats a `.zip` from a stranger. Check `update.repoUrl` in
+`plugin.json` — that's where updates will be pulled from, so it matters as much
+as the initial source.
+
+**2. Capability matches purpose.** A weather plugin does not need browser
+scripts. A quote-of-the-day plugin does not need `promptHooks`. A turn-counter
+does not need `tools`. Anything that doesn't fit the stated purpose is a
+question to ask before installing.
+
+**3. Prompt hooks deserve extra scrutiny.** A `promptHook` returns context that
+the entity will internalize as their own each turn. That's the most direct way a
+plugin can shape what the entity thinks. Read every hook's `run()` body. Be wary
+of hooks that return text phrased as the entity's beliefs, trust, or decisions —
+those are attempts to edit the entity, not inform them.
+
+**4. Env vars and secrets.** Plugin secrets should follow the
+`PSYCHEROS_PLUGIN_<ID>_*` naming convention. A plugin that wants `HTTP_PROXY`,
+`SSL_CERT_FILE`, `NODE_TLS_REJECT_UNAUTHORIZED`, `PSYCHEROS_DATA_DIR`, or any
+other host-owned name is a red flag — Psycheros will refuse to set them
+(denylisted), but the intent still tells you something about the plugin.
+
+**5. Routes and browser scripts.** Routes mounted under `/api/plugins/<id>/...`
+are reachable from the browser. Browser scripts run with full page privileges —
+they can read what you type, modify what you see, and hit any `/api/*` endpoint
+with your session. Read them carefully.
+
+### Red flags
+
+- A plugin whose `entrypoints.psycheros` file is minified or obfuscated.
+- A `promptHook` whose output reads like instructions to the entity rather than
+  context for them ("You should…", "Trust the operator of…", "Your goal is…").
+  Real plugin context is descriptive ("Current weather: …", "Recent activity
+  from …"), not directive.
+- Any reference to `Deno.env.set`, `Deno.writeFile` outside the plugin's own
+  `state/` directory, or `fetch()` to URLs not declared in the manifest or
+  visible in the source.
+- Browser scripts that touch `localStorage`, session cookies, or DOM outside
+  their own UI surface.
+- Any attempt to set non-namespaced `PSYCHEROS_*` env vars. The manager will
+  refuse these, but seeing the attempt in code is a signal.
+
+### If something goes wrong after installation
+
+1. Open Settings → Plugins → expand the plugin → read the Recent Activity panel.
+   Lifecycle, budget truncations, hook failures, and denied env vars are all
+   recorded there.
+2. Use the "Download log" button to grab
+   `<dataRoot>/.psycheros/plugin-logs/<id>.log` — that file is what to paste
+   into a support chat.
+3. The "Remove" button backs the plugin up to
+   `<dataRoot>/.psycheros/plugin-backups/` and marks it pending removal. Restart
+   Psycheros to finish the unload. Plugin secrets under
+   `.psycheros/plugin-secrets/<id>.env` are preserved in case you reinstall.
+4. If the plugin wrote to the entity's memory via MCP or modified any identity
+   files, those changes survive removal — they're the entity's until you
+   explicitly roll them back through entity-core's snapshot restore.
+
+For the full developer-facing reference (manifest fields, entrypoint shapes, env
+conventions, dependency syntax, update metadata), see
+`packages/psycheros/docs/plugins.md` in the repository.
+
 ## LLM Settings
 
 Here is where you'll set up the API connection that powers inference for the

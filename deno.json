@@ -3,11 +3,12 @@
     "./packages/psycheros",
     "./packages/entity-core",
     "./packages/entity-loom",
-    "./packages/launcher"
+    "./packages/launcher",
+    "./packages/plugin-api"
   ],
   "nodeModulesDir": "auto",
   "tasks": {
-    "test": "deno test -A packages/psycheros/tests/ packages/entity-core/tests/",
+    "test": "deno test -A packages/psycheros/tests/ packages/entity-core/tests/ packages/plugin-api/tests/",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check"
   },
@@ -17,6 +18,7 @@
     "@std/dotenv": "jsr:@std/dotenv@^0.225",
     "@std/fs": "jsr:@std/fs@^1",
     "@std/assert": "jsr:@std/assert@^1",
+    "@std/semver": "jsr:@std/semver@^1",
     "@db/sqlite": "jsr:@db/sqlite@^0.12",
     "@xenova/transformers": "npm:@huggingface/transformers@3.3.1",
     "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@^1",

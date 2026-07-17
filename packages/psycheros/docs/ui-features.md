@@ -1205,3 +1205,59 @@ overrides so input labels are prominent and field hints are small and muted. The
 channel name resolution), `src/discord/router.ts` (`getChannelNameForChannel`),
 `web/css/discord.css` (`.discord-server-card`, `.discord-server-card-row`,
 `.field-hint`, `.discord-settings-page`)
+
+## Plugins Settings
+
+Trusted-local-plugin management surface. Access via Settings > Plugins in the
+sidebar. Renders five regions inside the standard `.settings-view` shell:
+
+1. **Safety banner** (top) — short trust-model reminder linking to the User
+   Guide's Plugins section for the full vetting walkthrough. The vetting content
+   itself does not live in this page — keep UI copy minimal and point operators
+   at the docs.
+2. **Plugin Health card** (`#plugin-health-card`, lazy-loaded by
+   `loadPluginHealth()` in `web/js/psycheros.js`) — pulls
+   `GET /api/plugin-manager/health` after fragment swap, renders aggregate
+   counts (active / degraded / pending-restart / disabled) + last-turn
+   prompt-hook budget meter from `getLastBudgetReport()` + denied env vars
+   across all plugins.
+3. **Install Plugin** — zip upload + git URL/ref forms. Both feed
+   `handleInspectPluginZip` / `handleInspectPluginGit`, which stage a draft and
+   return a preview that `renderPluginInstallReview` renders into
+   `#plugin-manager-review`.
+4. **Installed Plugins** — one `.theme-section` per plugin via
+   `renderPluginRows`. Each row has Remove, Show recent activity, and Check for
+   updates buttons. The Recent Activity panel lazy-loads
+   `GET /api/plugin-manager/plugins/<id>/events`, supports a level filter (WARN+
+   by default, dropdown to flip), Copy (renders events in the same
+   one-line-per-event text format the file uses), and Download log (direct link
+   to `GET .../<id>/log` with `Content-Disposition:
+   attachment`). Check for
+   updates calls `POST .../check-update`, renders result inline; when an update
+   is available, an apply button calls `POST .../<id>/update`.
+5. **Loose custom tools** — unmanaged `.psycheros/custom-tools/*.js` files
+   surfaced for migration awareness. The custom-tools system predates the plugin
+   surface and is unchanged.
+
+**Install-review modal** — capability-salience redesign. Leads with "If
+installed, this plugin will:" translating capabilities to operational language
+("shape what the entity thinks each turn" rather than "1 prompt hook").
+Reassuring "This plugin will not:" section appears when high-stakes capabilities
+(prompt hooks, browser scripts) are absent. Update diff (version arrow,
+browser-asset deltas, dependency adds/removes) renders when `preview.existing`
+is populated — manifest-field diff only; tool/hook/route deltas between versions
+require source comparison.
+
+**Context Inspector integration:** the Metrics tab reads
+`metrics.pluginBudgetUsed` and `metrics.pluginBudgetMax` (added to
+`LLMContextSnapshot.metrics` in `src/entity/loop.ts`) and renders a meter when
+both are present. Plugin Context is included in the per-section breakdown. Both
+fields persist per-turn through the snapshots DB's `metrics_json` column, so
+historical turns show their plugin budget too.
+
+**Source files:** `src/server/templates.ts` (`renderPluginsSettings`,
+`renderPluginRows`, `renderUnmanagedCustomTools`),
+`src/server/plugin-manager-routes.ts` (all `/api/plugin-manager/*` handlers),
+`src/plugins/plugin-manager.ts` (status + last-budget-report + event log
+registry), `web/js/psycheros.js` (lines 5006+: all `pluginManager*` helpers,
+`loadPluginHealth`, activity panel, updater UI).

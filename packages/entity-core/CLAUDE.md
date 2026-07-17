@@ -36,6 +36,15 @@ full schemas are in [`docs/mcp-tools.md`](docs/mcp-tools.md).
 2. Register it in `src/tools/mod.ts`.
 3. Write the description in first person ("I use this to…").
 
+## Trusted local plugins
+
+Entity-core loads optional plugin entrypoints from `PSYCHEROS_PLUGIN_DIR` before
+MCP connects. The manager in `src/plugins/` registers additional MCP tools and
+additive result decorators. Decorators run after core handlers and cannot
+overwrite core fields. My plugin-owned credentials live beside the shared plugin
+directory under `.psycheros/plugin-secrets/<id>.env`. I apply them before import
+and keep them out of portable entity exports.
+
 ## Storage layout
 
 All persistent state lives in `data/`:
