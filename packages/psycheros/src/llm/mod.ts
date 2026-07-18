@@ -7,7 +7,15 @@
  */
 
 // Re-export types (only those used externally)
-export type { ChatMessage, LLMConfig, StreamChunk } from "./types.ts";
+export type {
+  ChatContent,
+  ChatContentPart,
+  ChatImageUrlPart,
+  ChatMessage,
+  ChatTextPart,
+  LLMConfig,
+  StreamChunk,
+} from "./types.ts";
 
 export { LLMError } from "./types.ts";
 

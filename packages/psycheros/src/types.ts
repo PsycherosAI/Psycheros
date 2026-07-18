@@ -218,6 +218,8 @@ export interface LLMContextSnapshot {
   vaultContent?: string;
   /** Situational awareness content injected into context */
   situationalAwarenessContent?: string;
+  /** Trusted local plugin context I add to my prompt */
+  pluginContent?: string;
   /** The messages array sent to the LLM (excluding system) */
   messages: Array<{
     role: string;
@@ -238,6 +240,21 @@ export interface LLMContextSnapshot {
     budgetAvailable?: number;
     /** Number of oldest messages removed by context budget trimming */
     messagesTruncated?: number;
+    /**
+     * Plugin prompt-hook context budget consumed on this turn, in chars.
+     * Set when a plugin manager is configured and buildPromptContent ran.
+     * Includes the `<plugin_context>` wrapper bytes, so this slightly
+     * overestimates the pure payload — matches how the cap is enforced
+     * (the cap also counts wrappers).
+     */
+    pluginBudgetUsed?: number;
+    /**
+     * Aggregate plugin prompt-hook context cap that was in effect on this
+     * turn, in chars. Pairs with pluginBudgetUsed for the
+     * "X / Y chars (Z%)" meter in the Context Inspector and the Plugins
+     * Settings health card.
+     */
+    pluginBudgetMax?: number;
   };
 }
 

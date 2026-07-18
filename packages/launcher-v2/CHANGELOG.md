@@ -5,6 +5,14 @@ format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/). It is pre-1.0 until
 cross-platform supervisors ship.
 
+## [0.2.43] - 2026-07-16
+
+### Changed
+
+- Data management copy now consistently uses first-person entity voice and
+  mentions trusted local plugins in backup/restore descriptions.
+- Backup snapshot tests now cover plugin data directories.
+
 ## [0.2.38] - 2026-06-23
 
 ### Fixed

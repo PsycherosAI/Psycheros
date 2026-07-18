@@ -8,7 +8,9 @@
 
 import type { ToolDefinition } from "../types.ts";
 import type { LLMConnectionProfile } from "./provider-presets.ts";
+import { inferProvider, LLM_PROVIDER_PRESETS } from "./provider-presets.ts";
 import type {
+  ChatContent,
   ChatMessage,
   ChatRequest,
   ChatResponseChunk,
@@ -82,6 +84,16 @@ function buildProviderHeaders(baseUrl: string): Record<string, string> {
   return headers;
 }
 
+function estimateContentChars(content: ChatContent): number {
+  if (typeof content === "string") return content.length;
+  return content.reduce((sum, part) => {
+    if (part.type === "text") return sum + part.text.length;
+    // Image tokens vary by provider and resolution. I keep this conservative
+    // for request logging without pretending data URL bytes are prompt text.
+    return sum + 1200;
+  }, 0);
+}
+
 /**
  * Client for communicating with the LLM API.
  */
@@ -93,6 +105,16 @@ export class LLMClient {
   constructor(config: LLMConfig) {
     this.config = config;
     this.providerHeaders = buildProviderHeaders(config.baseUrl);
+  }
+
+  /**
+   * Whether I carry my reasoning_content back to the next inference call
+   * within one entity turn. Exposed so callers (EntityTurn construction in
+   * routes.ts) can pass the resolved value through to EntityConfig without
+   * re-implementing the tri-state resolution.
+   */
+  get persistentReasoningIntraTurn(): boolean {
+    return this.config.persistentReasoningIntraTurn;
   }
 
   /**
@@ -124,7 +146,7 @@ export class LLMClient {
     const messageCount = messages.length;
     // Rough token estimate: ~4 chars per token across all message content + tool defs
     const payloadChars =
-      messages.reduce((acc, m) => acc + (m.content?.length || 0), 0) +
+      messages.reduce((acc, m) => acc + estimateContentChars(m.content), 0) +
       (tools ? JSON.stringify(tools).length : 0);
     const estimatedTokens = Math.ceil(payloadChars / 4);
     console.log(
@@ -449,8 +471,15 @@ export class LLMClient {
         provider === "zai" || provider === "nanogpt" ||
         baseUrl.includes("api.z.ai") || baseUrl.includes("nano-gpt")
       ) {
-        // Z.ai / NanoGPT: use the thinking parameter to enable reasoning
+        // Z.ai / NanoGPT: use the thinking parameter to enable reasoning.
+        // When I carry my reasoning_content back to subsequent inference
+        // calls (intra-turn persistence), Z.ai's Preserved Thinking needs
+        // clear_thinking: false so the API doesn't wipe reasoning between
+        // iterations of my agent loop.
         request.thinking = { type: "enabled" };
+        if (this.config.persistentReasoningIntraTurn) {
+          request.thinking.clear_thinking = false;
+        }
       } else if (
         provider === "openrouter" || baseUrl.includes("openrouter.ai")
       ) {
@@ -831,6 +860,7 @@ export function createDefaultClient(
       apiKey: "",
       model: "",
       thinkingEnabled: false,
+      persistentReasoningIntraTurn: false,
       provider: "custom",
     });
   }
@@ -842,6 +872,8 @@ export function createDefaultClient(
     apiKey,
     model: options?.model || Deno.env.get("ZAI_MODEL") || "glm-4.7",
     thinkingEnabled: options?.thinkingEnabled ?? true,
+    persistentReasoningIntraTurn: options?.persistentReasoningIntraTurn ??
+      false,
     provider: options?.provider ?? "custom",
     ...parseTimeoutEnvVars(options),
   };
@@ -868,6 +900,7 @@ export function createWorkerClient(
       apiKey: "",
       model: "",
       thinkingEnabled: false,
+      persistentReasoningIntraTurn: false,
       provider: "custom",
     });
   }
@@ -879,6 +912,8 @@ export function createWorkerClient(
     apiKey,
     model: options?.model || Deno.env.get("ZAI_WORKER_MODEL") || "GLM-4.5-Air",
     thinkingEnabled: options?.thinkingEnabled ?? false, // Worker model doesn't need thinking
+    persistentReasoningIntraTurn: options?.persistentReasoningIntraTurn ??
+      false,
     ...parseTimeoutEnvVars(options),
   };
 
@@ -892,11 +927,16 @@ export function createWorkerClient(
  * @param options - Optional overrides:
  *   - useWorker: Use the profile's workerModel instead of the main model
  *   - thinkingEnabled: Override the profile's thinking setting
+ *   - persistentReasoningIntraTurn: Override the profile's persistent-reasoning setting
  * @throws LLMError if the profile has no API key
  */
 export function createClientFromProfile(
   profile: LLMConnectionProfile,
-  options?: { useWorker?: boolean; thinkingEnabled?: boolean },
+  options?: {
+    useWorker?: boolean;
+    thinkingEnabled?: boolean;
+    persistentReasoningIntraTurn?: boolean;
+  },
 ): LLMClient {
   if (!profile.apiKey) {
     throw new LLMError(
@@ -913,6 +953,10 @@ export function createClientFromProfile(
       : profile.model,
     thinkingEnabled: options?.thinkingEnabled ??
       (options?.useWorker ? false : profile.thinkingEnabled),
+    persistentReasoningIntraTurn: resolvePersistentReasoningIntraTurn(
+      profile,
+      options,
+    ),
     provider: profile.provider,
     temperature: profile.temperature,
     topP: profile.topP,
@@ -924,6 +968,62 @@ export function createClientFromProfile(
   };
 
   return new LLMClient(config);
+}
+
+/**
+ * Resolve the profile's `persistentReasoningIntraTurn` tri-state to a boolean
+ * for use on `LLMConfig`.
+ *
+ * Resolution order:
+ *  1. If thinking is disabled (voice mode, worker clients), persistent
+ *     reasoning is forced off — there's nothing to persist if no reasoning
+ *     is being emitted.
+ *  2. An explicit override (`options.persistentReasoningIntraTurn`) wins.
+ *  3. Otherwise, the profile's tri-state decides:
+ *     - `"on"`  — unconditional enable, regardless of provider.
+ *     - `"off"` — unconditional disable.
+ *     - `"auto"` — enable iff the provider's preset advertises
+ *       `supportsPersistentReasoning`.
+ *
+ * The `"on"` override is load-bearing — it's the escape hatch for custom
+ * endpoints (Venice, Together, self-hosted vLLM) and OpenRouter backing
+ * models that accept `reasoning_content` even though we haven't verified
+ * them. No preset flag can disable it.
+ */
+function resolvePersistentReasoningIntraTurn(
+  profile: LLMConnectionProfile,
+  options?: {
+    useWorker?: boolean;
+    thinkingEnabled?: boolean;
+    persistentReasoningIntraTurn?: boolean;
+  },
+): boolean {
+  const thinkingEnabled = options?.thinkingEnabled ??
+    (options?.useWorker ? false : profile.thinkingEnabled);
+  if (!thinkingEnabled) return false;
+  if (options?.persistentReasoningIntraTurn !== undefined) {
+    return options.persistentReasoningIntraTurn;
+  }
+  switch (profile.persistentReasoningIntraTurn) {
+    case "on":
+      return true;
+    case "off":
+      return false;
+    case "auto":
+    default: {
+      // For "custom" endpoints, the preset is generic and advertises no
+      // special capabilities — but the endpoint may be pointed at a known
+      // provider (e.g. Z.ai via the /coding/paas path). Infer the effective
+      // provider from the baseUrl so URL-routed custom endpoints pick up the
+      // same supportsPersistentReasoning flag as their first-class siblings.
+      // First-class providers (zai, openrouter, etc.) pass through unchanged.
+      const effectiveProvider = profile.provider === "custom"
+        ? inferProvider(profile.baseUrl)
+        : profile.provider;
+      return LLM_PROVIDER_PRESETS[effectiveProvider]
+        ?.supportsPersistentReasoning === true;
+    }
+  }
 }
 
 /**

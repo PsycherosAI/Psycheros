@@ -92,6 +92,12 @@ import {
 import { join } from "@std/path";
 import { MAX_REQUEST_BODY_SIZE, MAX_UPLOAD_BODY_SIZE } from "../constants.ts";
 import {
+  createPluginManager,
+  PluginInstaller,
+  type PluginManager,
+} from "../plugins/mod.ts";
+import type { PluginStatus } from "../../../plugin-api/src/mod.ts";
+import {
   callTTS,
   handleBatchDeleteConversations,
   handleButtplugStatus,
@@ -324,6 +330,17 @@ import {
   handleAdminLogsFragment,
 } from "./admin-routes.ts";
 import { setServerStartTime } from "./diagnostics.ts";
+import {
+  handleInspectPluginGit,
+  handleInspectPluginZip,
+  handleInstallPluginDraft,
+  handlePluginApplyUpdate,
+  handlePluginCheckUpdate,
+  handlePluginEvents,
+  handlePluginLogDownload,
+  handlePluginManagerHealth,
+  handleRemoveInstalledPlugin,
+} from "./plugin-manager-routes.ts";
 
 /**
  * Server configuration options.
@@ -402,6 +419,8 @@ export class Server {
   private toolSettings: ToolsSettings;
   private entityCoreLLMSettings: EntityCoreLLMSettings;
   private customTools: Record<string, import("../tools/types.ts").Tool>;
+  private pluginManager: PluginManager;
+  private pluginInstaller: PluginInstaller;
   private pulseEngine: PulseEngine | null = null;
   private scheduler: Scheduler | null = null;
   private eventRulesEngine: EventRulesEngine | null = null;
@@ -471,6 +490,11 @@ export class Server {
 
     // Initialize custom tools (will be loaded in init())
     this.customTools = {};
+    this.pluginManager = createPluginManager(
+      join(config.dataRoot, ".psycheros", "plugins"),
+      () => this.llm,
+    );
+    this.pluginInstaller = new PluginInstaller(config.dataRoot);
 
     // Initialize voice settings (will be reloaded from settings in init())
     this.voiceSettings = getDefaultVoiceSettings();
@@ -543,6 +567,7 @@ export class Server {
     this.toolSettings = await loadToolsSettings(this.config.dataRoot);
     this.customTools = await loadCustomTools(this.config.dataRoot);
     this.voiceSettings = await loadVoiceSettings(this.config.dataRoot);
+    await this.pluginManager.load();
     this.reloadLLMClient();
     this.reloadToolRegistry();
 
@@ -917,6 +942,7 @@ export class Server {
         deviceStatusCache: this.deviceCache,
         contextLength: activeProfile?.contextLength,
         maxTokens: activeProfile?.maxTokens,
+        pluginManager: this.pluginManager,
       },
     );
 
@@ -1164,6 +1190,7 @@ export class Server {
     const allTools: Record<string, import("../tools/types.ts").Tool> = {
       ...AVAILABLE_TOOLS,
       ...this.customTools,
+      ...this.pluginManager.getTools(),
     };
     const allNames = Object.keys(allTools);
 
@@ -1581,7 +1608,10 @@ export class Server {
         imageGenSettings: () => this.imageGenSettings,
         contextLength: () => this.getActiveLLMProfile()?.contextLength,
         maxTokens: () => this.getActiveLLMProfile()?.maxTokens,
+        persistentReasoningInterTurns: () =>
+          this.getActiveLLMProfile()?.persistentReasoningInterTurns,
         deviceStatusCache: () => this.deviceCache,
+        pluginManager: this.pluginManager,
       },
     );
     this.pulseEngine.start();
@@ -1644,11 +1674,51 @@ export class Server {
   }
 
   /**
+   * Merge activation state from my embodiment and my canonical core.
+   */
+  private async getPluginStatuses(): Promise<PluginStatus[]> {
+    const statuses = new Map(
+      this.pluginManager.getStatuses().map((status) => [status.id, status]),
+    );
+    const coreStatuses = await this.mcpClient?.getPluginStatuses() ?? [];
+
+    for (const coreStatus of coreStatuses) {
+      const localStatus = statuses.get(coreStatus.id);
+      if (!localStatus) {
+        statuses.set(coreStatus.id, coreStatus);
+        continue;
+      }
+      statuses.set(coreStatus.id, {
+        ...localStatus,
+        active: localStatus.active || coreStatus.active,
+        degraded: localStatus.degraded || coreStatus.degraded,
+        lastError: localStatus.lastError ?? coreStatus.lastError,
+        capabilities: {
+          tools: localStatus.capabilities.tools +
+            coreStatus.capabilities.tools,
+          promptHooks: localStatus.capabilities.promptHooks +
+            coreStatus.capabilities.promptHooks,
+          routes: localStatus.capabilities.routes +
+            coreStatus.capabilities.routes,
+          resultDecorators: localStatus.capabilities.resultDecorators +
+            coreStatus.capabilities.resultDecorators,
+          browserScripts: localStatus.capabilities.browserScripts +
+            coreStatus.capabilities.browserScripts,
+          browserStyles: localStatus.capabilities.browserStyles +
+            coreStatus.capabilities.browserStyles,
+        },
+      });
+    }
+
+    return await this.pluginInstaller.enrichStatuses([...statuses.values()]);
+  }
+
+  /**
    * Stop the server gracefully.
    *
    * Aborts the server, clears the keepalive timer, and closes the database connection.
    */
-  stop(): void {
+  async stop(): Promise<void> {
     console.log("Stopping Psycheros server...");
 
     // Stop Discord Gateway
@@ -1666,6 +1736,7 @@ export class Server {
 
     // Stop device status cache refresh
     this.deviceCache.stop();
+    await this.pluginManager.stop();
 
     // Close device bridge WebSocket connections
     getDeviceBridge().closeAll();
@@ -1749,6 +1820,7 @@ export class Server {
       },
       getVoiceSettings: () => this.voiceSettings,
       updateVoiceSettings: (settings) => this.updateVoiceSettings(settings),
+      pluginManager: this.pluginManager,
     };
   }
 
@@ -1781,6 +1853,7 @@ export class Server {
         const size = parseInt(contentLength);
         const isUpload = path === "/api/backgrounds" ||
           path === "/api/chat-attachments" || path === "/api/anchor-images" ||
+          path === "/api/plugin-manager/inspect-zip" ||
           path === "/api/admin/data-migration/memories" ||
           path === "/api/admin/data-migration/chats" ||
           path === "/api/admin/data-migration/graph" ||
@@ -1953,6 +2026,91 @@ export class Server {
         return await handleUpdateEventRule(ctx, request, ruleId);
       }
       if (method === "DELETE") return await handleDeleteEventRule(ctx, ruleId);
+    }
+
+    if (method === "GET" && path === "/api/plugins") {
+      return Response.json(await this.getPluginStatuses());
+    }
+
+    if (method === "POST" && path === "/api/plugin-manager/inspect-zip") {
+      return await handleInspectPluginZip(this.pluginInstaller, request);
+    }
+
+    if (method === "POST" && path === "/api/plugin-manager/inspect-git") {
+      return await handleInspectPluginGit(this.pluginInstaller, request);
+    }
+
+    if (method === "POST" && path === "/api/plugin-manager/install-draft") {
+      return await handleInstallPluginDraft(this.pluginInstaller, request);
+    }
+
+    const pluginManagerRemoveMatch = path.match(
+      /^\/api\/plugin-manager\/plugins\/([^/]+)$/,
+    );
+    if (method === "DELETE" && pluginManagerRemoveMatch) {
+      return await handleRemoveInstalledPlugin(
+        this.pluginInstaller,
+        pluginManagerRemoveMatch[1],
+      );
+    }
+
+    // Per-plugin event log + plain-text log download. Must be matched
+    // before the catch-all plugin-route regex below, which would otherwise
+    // swallow /api/plugin-manager/plugins/<id>/... paths into the plugin
+    // route handler and return 404.
+    const pluginManagerEventsMatch = path.match(
+      /^\/api\/plugin-manager\/plugins\/([^/]+)\/events$/,
+    );
+    if (method === "GET" && pluginManagerEventsMatch) {
+      return handlePluginEvents(
+        this.pluginManager,
+        pluginManagerEventsMatch[1],
+        new URL(request.url),
+      );
+    }
+
+    const pluginManagerLogMatch = path.match(
+      /^\/api\/plugin-manager\/plugins\/([^/]+)\/log$/,
+    );
+    if (method === "GET" && pluginManagerLogMatch) {
+      return await handlePluginLogDownload(
+        this.pluginManager,
+        pluginManagerLogMatch[1],
+      );
+    }
+
+    if (method === "GET" && path === "/api/plugin-manager/health") {
+      return handlePluginManagerHealth(this.pluginManager);
+    }
+
+    const pluginManagerCheckUpdateMatch = path.match(
+      /^\/api\/plugin-manager\/plugins\/([^/]+)\/check-update$/,
+    );
+    if (method === "POST" && pluginManagerCheckUpdateMatch) {
+      return await handlePluginCheckUpdate(
+        join(this.config.dataRoot, ".psycheros", "plugins"),
+        pluginManagerCheckUpdateMatch[1],
+      );
+    }
+
+    const pluginManagerApplyUpdateMatch = path.match(
+      /^\/api\/plugin-manager\/plugins\/([^/]+)\/update$/,
+    );
+    if (method === "POST" && pluginManagerApplyUpdateMatch) {
+      return await handlePluginApplyUpdate(
+        this.pluginInstaller,
+        pluginManagerApplyUpdateMatch[1],
+        request,
+      );
+    }
+
+    const pluginApiMatch = path.match(/^\/api\/plugins\/([^/]+)(\/.*)?$/);
+    if (pluginApiMatch) {
+      return await this.pluginManager.handleApiRoute(
+        pluginApiMatch[1],
+        pluginApiMatch[2] ?? "/",
+        request,
+      );
     }
 
     // GET /api/conversations - List conversations (JSON)
@@ -3361,6 +3519,17 @@ export class Server {
       return handleToolsSettingsFragment(ctx);
     }
 
+    if (path === "/fragments/settings/plugins") {
+      const { renderPluginsSettings } = await import("./templates.ts");
+      return new Response(
+        renderPluginsSettings(
+          await this.getPluginStatuses(),
+          await this.pluginInstaller.listUnmanagedCustomTools(),
+        ),
+        { headers: { "Content-Type": "text/html; charset=utf-8" } },
+      );
+    }
+
     // ========================================
     // Pulse Fragment Routes
     // ========================================
@@ -3458,6 +3627,14 @@ export class Server {
     if (path.startsWith("/backgrounds/")) {
       const filename = path.replace("/backgrounds/", "");
       return await handleServeBackground(ctx, filename);
+    }
+
+    const pluginAssetMatch = path.match(/^\/plugins\/([^/]+)\/(.+)$/);
+    if (pluginAssetMatch) {
+      return await this.pluginManager.serveAsset(
+        pluginAssetMatch[1],
+        pluginAssetMatch[2],
+      );
     }
 
     // Serve static files from web/ directory

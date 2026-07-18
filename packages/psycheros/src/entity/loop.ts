@@ -23,7 +23,13 @@
  * data integrity, with the assumption that DB failures are rare and transient.
  */
 
-import type { ChatMessage, LLMClient, StreamChunk } from "../llm/mod.ts";
+import type {
+  ChatContent,
+  ChatImageUrlPart,
+  ChatMessage,
+  LLMClient,
+  StreamChunk,
+} from "../llm/mod.ts";
 import type { WebSearchSettings } from "../llm/web-search-settings.ts";
 import type { DiscordSettings } from "../llm/discord-settings.ts";
 import type { HomeSettings } from "../llm/home-settings.ts";
@@ -59,6 +65,7 @@ import { acquireLock } from "../utils/conversation-lock.ts";
 import { createCollector, finalize, setFinishReason } from "../metrics/mod.ts";
 import { getWearableDataCache } from "../wearable/cache.ts";
 import { formatWearableData } from "./sa-formatters.ts";
+import type { PluginManager } from "../plugins/mod.ts";
 
 /**
  * Escape special XML characters in a string.
@@ -66,6 +73,22 @@ import { formatWearableData } from "./sa-formatters.ts";
 function escapeXml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function renderChatContentForSnapshot(content: ChatContent): string {
+  if (typeof content === "string") return content;
+  return content.map((part) => {
+    if (part.type === "text") return part.text;
+    return "[transient vision image]";
+  }).join("\n");
+}
+
+function estimateChatContentChars(content: ChatContent): number {
+  if (typeof content === "string") return content.length;
+  return content.reduce((sum, part) => {
+    if (part.type === "text") return sum + part.text.length;
+    return sum + 1200;
+  }, 0);
 }
 
 /**
@@ -205,6 +228,8 @@ export interface ProcessOptions {
   skipUserPersist?: boolean;
   /** Device type of the user for this turn (from frontend detection) */
   deviceType?: "desktop" | "mobile";
+  /** Transient images I send to the LLM for this turn without saving them in chat history */
+  visionImages?: ChatImageUrlPart[];
   /** When true, sticky lorebook entries are not decremented.
    *  Set automatically for Pulse turns so automated messages
    *  don't consume sticky duration earned by real user conversation. */
@@ -304,6 +329,22 @@ export interface EntityConfig {
   contextLength?: number;
   /** Maximum tokens reserved for the response (from active LLM profile) */
   maxTokens?: number;
+  /**
+   * Whether I carry my reasoning_content back to the next inference call
+   * within one entity turn (between tool-call iterations). Resolved from
+   * the active profile's `persistentReasoningIntraTurn` tri-state. When
+   * undefined, treated as false (preserves existing behavior for voice
+   * and pulse paths that don't set it).
+   */
+  persistentReasoningIntraTurn?: boolean;
+  /**
+   * How many of my prior entity turns I attach reasoning_content from when
+   * building context for a new user message. 0 or undefined disables.
+   * Counted in user-visible turns, not DB rows.
+   */
+  persistentReasoningInterTurns?: number;
+  /** Trusted local plugins that can contribute prompt-time context */
+  pluginManager?: PluginManager;
 }
 
 /**
@@ -864,6 +905,22 @@ Discord interaction:
       discordChannelContent = parts.join("\n");
     }
 
+    const pluginContent = await this.config.pluginManager?.buildPromptContent({
+      conversationId,
+      sourceType: options?.sourceType ?? (options?.pulseId ? "pulse" : "web"),
+      userMessage,
+      sections: {
+        memories: memoriesContent,
+        chatHistory: chatHistoryContent,
+        lorebook: lorebookContent,
+        graph: graphContent,
+        vault: vaultContent,
+        situationalAwareness: saContent,
+        discord: discordChannelContent,
+      },
+      mcpClient: this.config.mcpClient,
+    }, this.computePluginContextBudget());
+
     const systemMessage = buildSystemMessage(
       baseInstructions,
       selfContent,
@@ -878,6 +935,7 @@ Discord interaction:
       imageGenContent,
       saContent,
       discordChannelContent,
+      pluginContent,
     ) + (options?.systemPromptSuffix ?? "");
 
     // Get conversation history from DB
@@ -969,6 +1027,7 @@ Discord interaction:
         displayContent,
         shouldPersist,
         toolDefinitions,
+        options?.visionImages,
       );
 
       // Create and yield context snapshot for debugging
@@ -988,9 +1047,10 @@ Discord interaction:
         graphContent,
         vaultContent,
         situationalAwarenessContent: saContent,
+        pluginContent,
         messages: messages.slice(1).map((msg) => ({
           role: msg.role,
-          content: msg.content,
+          content: renderChatContentForSnapshot(msg.content),
           toolCalls: msg.tool_calls,
           toolCallId: msg.tool_call_id,
         })),
@@ -1001,12 +1061,17 @@ Discord interaction:
           estimatedTokens: this.lastBudgetResult?.estimatedTotalTokens ??
             Math.ceil(systemMessage.length / 4) +
               messages.reduce(
-                (acc, m) => acc + Math.ceil((m.content?.length || 0) / 4),
+                (acc, m) =>
+                  acc + Math.ceil(estimateChatContentChars(m.content) / 4),
                 0,
               ),
           contextLength: this.config.contextLength,
           budgetAvailable: this.lastBudgetResult?.availableBudget,
           messagesTruncated: this.lastBudgetResult?.messagesRemoved,
+          pluginBudgetUsed: this.config.pluginManager?.getLastBudgetReport()
+            ?.used,
+          pluginBudgetMax: this.config.pluginManager?.getLastBudgetReport()
+            ?.cap,
         },
       };
 
@@ -1470,6 +1535,18 @@ Discord interaction:
           content: `${assistantTimestamp} ${cleanAssistantContent}`,
           tool_calls: toolCalls,
         };
+        // Scope 1: thread my reasoning_content back to the next inference
+        // call within this entity turn (between tool iterations). Required
+        // by DeepSeek's spec on tool-call turns and essential for Z.ai's
+        // Preserved Thinking coherence on multi-step tool chains. The
+        // .trim() guard prevents sending an empty string, which some
+        // providers (DeepSeek) reject with a 400.
+        if (
+          this.config.persistentReasoningIntraTurn &&
+          assistantReasoning.trim()
+        ) {
+          assistantMsg.reasoning_content = assistantReasoning;
+        }
         messages.push(assistantMsg);
 
         // Add tool results to messages for next LLM call
@@ -1610,6 +1687,41 @@ Discord interaction:
   }
 
   /**
+   * Select which historical assistant messages should carry their
+   * `reasoning_content` into the outgoing context.
+   *
+   * Walks history newest→oldest, treating each `user` message as a turn
+   * boundary. Collects assistant message IDs from the last `n` entity
+   * turns (one entity turn = one user message + all the assistant and
+   * tool messages that followed it before the next user message). Tool
+   * messages never carry reasoning_content; only assistant rows do.
+   *
+   * The current user message — passed separately to `buildMessages` —
+   * is not in `history` and so is never counted as a turn boundary
+   * here. On the retry path, the last user message IS in history and
+   * correctly counts as the most recent turn boundary.
+   */
+  private selectReasoningEligibleHistory(
+    history: Message[],
+    n: number,
+  ): Set<string> {
+    if (n <= 0) return new Set();
+    const eligible = new Set<string>();
+    let turnsSeen = 0;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const msg = history[i];
+      if (msg.role === "user") {
+        if (turnsSeen >= n) break;
+        turnsSeen++;
+      }
+      if (msg.role === "assistant" && msg.reasoningContent) {
+        eligible.add(msg.id);
+      }
+    }
+    return eligible;
+  }
+
+  /**
    * Build the messages array for the LLM request.
    * Each message includes a timestamp prefix for temporal awareness.
    *
@@ -1625,6 +1737,7 @@ Discord interaction:
     userMessage: string,
     appendUserMessage: boolean = true,
     toolDefinitions?: ToolDefinition[],
+    visionImages?: ChatImageUrlPart[],
   ): ChatMessage[] {
     const messages: ChatMessage[] = [];
 
@@ -1636,6 +1749,12 @@ Discord interaction:
 
     // Add history with timestamps (convert from DB format to LLM format)
     const fadeMap = this.buildFadeMap(history);
+    // Scope 2: pick which assistant messages carry their reasoning_content
+    // into this request. Empty when persistent reasoning is off (n=0).
+    const reasoningEligible = this.selectReasoningEligibleHistory(
+      history,
+      this.config.persistentReasoningInterTurns ?? 0,
+    );
     for (const msg of history) {
       // Skip system messages in history — LLM APIs only allow system role at position 0
       if (msg.role === "system") continue;
@@ -1679,15 +1798,30 @@ Discord interaction:
         chatMsg.tool_calls = fadeToolCallArguments(msg.toolCalls);
       }
 
+      // Scope 2: attach my reasoning_content from prior entity turns so
+      // my thinking carries forward across conversational beats. Only
+      // fires for assistant messages in the eligible window AND only
+      // when reasoning content actually exists on the row.
+      if (
+        msg.role === "assistant" &&
+        msg.reasoningContent &&
+        reasoningEligible.has(msg.id)
+      ) {
+        chatMsg.reasoning_content = msg.reasoningContent;
+      }
+
       messages.push(chatMsg);
     }
 
     // Add the new user message with timestamp (skip on retry — it's already in history)
     if (appendUserMessage) {
       const now = formatMessageTimestamp(new Date());
+      const content = `${now} ${userMessage}`;
       messages.push({
         role: "user",
-        content: `${now} ${userMessage}`,
+        content: visionImages?.length
+          ? [{ type: "text", text: content }, ...visionImages]
+          : content,
       });
     }
 
@@ -1700,16 +1834,43 @@ Discord interaction:
         this.config.maxTokens,
       );
       this.lastBudgetResult = result;
-      if (result.truncated) {
+      if (result.truncated || result.reasoningStripped > 0) {
         console.log(
           `[Context] Truncated ${result.messagesRemoved} oldest messages — ` +
             `~${result.estimatedTotalTokens}/${result.contextLength} tokens ` +
-            `(system: ~${result.systemMessageTokens}, tools: ~${result.toolTokens}, history: ~${result.historyTokens})`,
+            `(system: ~${result.systemMessageTokens}, tools: ~${result.toolTokens}, history: ~${result.historyTokens}` +
+            (result.reasoningStripped > 0 || result.reasoningRetained > 0
+              ? `, reasoning: ${result.reasoningRetained} retained / ${result.reasoningStripped} stripped`
+              : "") +
+            `)`,
         );
       }
       return result.messages;
     }
 
     return messages;
+  }
+
+  /**
+   * Compute the aggregate prompt-hook context budget for this turn.
+   *
+   * Returns undefined when the LLM profile's context window is unknown, in
+   * which case the plugin manager falls back to its built-in default. When
+   * known, the budget is 15% of (contextLength - maxTokens), clamped to
+   * [4_000, 60_000] chars. The floor keeps plugin context meaningful on
+   * small-context models; the ceiling prevents plugin context from
+   * dominating on huge-context models.
+   */
+  private computePluginContextBudget():
+    | { maxTotalChars: number }
+    | undefined {
+    const { contextLength, maxTokens } = this.config;
+    if (!contextLength || !maxTokens) return undefined;
+    const usable = contextLength - maxTokens;
+    if (usable <= 0) return { maxTotalChars: 4_000 };
+    const computed = Math.floor(usable * 0.15);
+    return {
+      maxTotalChars: Math.max(4_000, Math.min(60_000, computed)),
+    };
   }
 }

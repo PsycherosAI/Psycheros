@@ -25,6 +25,14 @@ export interface LLMConfig {
   /** Whether to enable chain-of-thought reasoning */
   thinkingEnabled: boolean;
   /**
+   * Whether I thread my reasoning_content back to the next inference call
+   * within one entity turn (between tool-call iterations). Resolved from the
+   * profile's `persistentReasoningIntraTurn` tri-state — `"auto"` uses the
+   * preset's `supportsPersistentReasoning` flag plus `thinkingEnabled`.
+   * Voice and worker clients force this to false.
+   */
+  persistentReasoningIntraTurn: boolean;
+  /**
    * Provider type. Used to gate provider-specific request parameters:
    * - "zai" / "nanogpt": send `thinking: { type: "enabled" }`
    * - "openrouter": send `reasoning: {}`
@@ -60,11 +68,36 @@ export interface LLMConfig {
 /**
  * Message format for chat requests.
  */
+export interface ChatTextPart {
+  type: "text";
+  text: string;
+}
+
+export interface ChatImageUrlPart {
+  type: "image_url";
+  image_url: {
+    url: string;
+    detail?: "auto" | "low" | "high";
+  };
+}
+
+export type ChatContentPart = ChatTextPart | ChatImageUrlPart;
+export type ChatContent = string | ChatContentPart[];
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  content: ChatContent;
   tool_call_id?: string;
   tool_calls?: ToolCall[];
+  /**
+   * Chain-of-thought reasoning attached to an outbound assistant message.
+   * I carry my own thinking forward across inference calls — both within one
+   * entity turn (between tool-call iterations) and, when configured, across
+   * prior entity turns. Honored by Z.ai (Preserved Thinking), DeepSeek
+   * (required on tool-call turns), and any OpenAI-compatible endpoint that
+   * accepts this field. Providers that don't recognize it ignore it silently.
+   */
+  reasoning_content?: string;
 }
 
 /**
@@ -76,7 +109,16 @@ export interface ChatRequest {
   messages: ChatMessage[];
   stream: boolean;
   /** Z.ai / NanoGPT: enables chain-of-thought reasoning */
-  thinking?: { type: "enabled" | "disabled" };
+  thinking?: {
+    type: "enabled" | "disabled";
+    /**
+     * Z.ai Preserved Thinking. When false, I retain my reasoning_content
+     * across turns rather than having the API clear it between iterations.
+     * Sent only when persistentReasoningIntraTurn is on; only meaningful
+     * with type: "enabled".
+     */
+    clear_thinking?: boolean;
+  };
   /** OpenRouter: controls reasoning token behavior */
   reasoning?: {
     enabled?: boolean;

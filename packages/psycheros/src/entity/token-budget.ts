@@ -8,7 +8,7 @@
  * history messages are trimmed, keeping the most recent ones.
  */
 
-import type { ChatMessage } from "../llm/mod.ts";
+import type { ChatContent, ChatMessage } from "../llm/mod.ts";
 import type { ToolDefinition } from "../types.ts";
 
 /**
@@ -49,6 +49,15 @@ export interface BudgetResult {
   availableBudget: number;
   /** The full context window size */
   contextLength: number;
+  /**
+   * How many assistant messages had their reasoning_content stripped to
+   * fit budget (the message itself was retained). Surfaces in the
+   * Context Inspector so a user who enabled persistent reasoning can
+   * see when budget pressure is silently undoing their preference.
+   */
+  reasoningStripped: number;
+  /** How many assistant messages retained their reasoning_content. */
+  reasoningRetained: number;
 }
 
 /**
@@ -59,12 +68,46 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
+function estimateContentTokens(content: ChatContent): number {
+  if (typeof content === "string") return estimateTokens(content);
+  return content.reduce((sum, part) => {
+    if (part.type === "text") return sum + estimateTokens(part.text);
+    // Multimodal providers account for images separately. I reserve a
+    // conservative image budget while keeping transient data URL bytes out of
+    // the text-token estimate.
+    return sum + 1200;
+  }, 0);
+}
+
 /**
- * Estimate the token cost of a single ChatMessage, including tool_calls
- * and tool_call_id overhead.
+ * Estimate the token cost of a single ChatMessage, including tool_calls,
+ * tool_call_id overhead, and any reasoning_content attached to outbound
+ * assistant messages.
  */
 function estimateMessageTokens(msg: ChatMessage): number {
-  let tokens = estimateTokens(msg.content);
+  let tokens = estimateContentTokens(msg.content);
+  if (msg.reasoning_content) {
+    tokens += estimateTokens(msg.reasoning_content);
+  }
+  if (msg.tool_calls && msg.tool_calls.length > 0) {
+    tokens += estimateTokens(JSON.stringify(msg.tool_calls));
+  }
+  if (msg.tool_call_id) {
+    tokens += estimateTokens(msg.tool_call_id);
+  }
+  tokens += MESSAGE_OVERHEAD_TOKENS;
+  return tokens;
+}
+
+/**
+ * Same as `estimateMessageTokens` but excludes any reasoning_content.
+ * Used by the two-pass trim: when a message doesn't fit with reasoning
+ * intact, we check whether it fits without — and if so, keep the message
+ * while stripping its reasoning_content from the outgoing payload.
+ */
+function estimateMessageTokensWithoutReasoning(msg: ChatMessage): number {
+  let tokens = estimateContentTokens(msg.content);
+  // Intentionally skip msg.reasoning_content
   if (msg.tool_calls && msg.tool_calls.length > 0) {
     tokens += estimateTokens(JSON.stringify(msg.tool_calls));
   }
@@ -204,6 +247,8 @@ export function applyContextBudget(
         historyTokens: lastMessageTokens,
         availableBudget,
         contextLength,
+        reasoningStripped: 0,
+        reasoningRetained: 0,
       };
     }
     // Last message isn't user (shouldn't happen in normal flow) — keep it anyway
@@ -218,24 +263,51 @@ export function applyContextBudget(
       historyTokens: lastMessageTokens,
       availableBudget,
       contextLength,
+      reasoningStripped: 0,
+      reasoningRetained: 0,
     };
   }
 
   // Walk from newest to oldest, accumulating tokens until budget is full.
-  // The last message (current user message) is always kept regardless of budget.
+  // Two-pass trim: when a message with reasoning_content doesn't fit as-is,
+  // retry without its reasoning_content before dropping it outright. This
+  // preserves conversational continuity (the visible turn) when reasoning
+  // alone was the budget offender — otherwise a single 5k-token reasoning
+  // block could cascade into dropping a whole turn plus its preceding user
+  // message via sanitization.
   const historyMessages = allMessages.slice(1);
   let historyTokens = 0;
   let fitCount = 0;
+  const strippedIndices = new Set<number>();
 
   for (let i = historyMessages.length - 1; i >= 0; i--) {
-    // Always keep the last message (current user input)
     const isLastMessage = i === historyMessages.length - 1;
-    const msgTokens = estimateMessageTokens(historyMessages[i]);
-    if (!isLastMessage && historyTokens + msgTokens > availableBudget) {
-      break;
+    const msg = historyMessages[i];
+    const fullTokens = estimateMessageTokens(msg);
+    if (isLastMessage) {
+      // Always keep the last message (current user input) regardless.
+      historyTokens += fullTokens;
+      fitCount++;
+      continue;
     }
-    historyTokens += msgTokens;
-    fitCount++;
+    if (historyTokens + fullTokens <= availableBudget) {
+      // Fits with reasoning intact.
+      historyTokens += fullTokens;
+      fitCount++;
+      continue;
+    }
+    // Doesn't fit with reasoning — try without.
+    if (msg.reasoning_content) {
+      const strippedTokens = estimateMessageTokensWithoutReasoning(msg);
+      if (historyTokens + strippedTokens <= availableBudget) {
+        strippedIndices.add(i);
+        historyTokens += strippedTokens;
+        fitCount++;
+        continue;
+      }
+    }
+    // Doesn't fit even without reasoning — stop walking.
+    break;
   }
 
   // Build trimmed array: system + last `fitCount` history messages
@@ -243,6 +315,23 @@ export function applyContextBudget(
   const trimmedHistory = startIdx > 0
     ? historyMessages.slice(startIdx)
     : historyMessages;
+
+  // Apply reasoning_content stripping to messages that fit only by strip.
+  // Track the stripped object references so the final counts can be
+  // recomputed accurately after sanitization drops some of them.
+  const strippedMsgRefs = new Set<ChatMessage>();
+  if (strippedIndices.size > 0) {
+    for (let i = 0; i < trimmedHistory.length; i++) {
+      if (strippedIndices.has(startIdx + i)) {
+        const stripped: ChatMessage = {
+          ...trimmedHistory[i],
+          reasoning_content: undefined,
+        };
+        trimmedHistory[i] = stripped;
+        strippedMsgRefs.add(stripped);
+      }
+    }
+  }
 
   // Drop leading non-user messages to ensure a valid message sequence.
   // APIs require the first message after system to be "user". After FIFO
@@ -268,6 +357,20 @@ export function applyContextBudget(
     historyTokens += estimateMessageTokens(sanitizedMessages[i]);
   }
 
+  // Recompute reasoning strip/retain counts from the final sanitized
+  // output — sanitization may have dropped messages that were originally
+  // counted in either bucket, leaving the pre-sanitize counts stale.
+  let reasoningStripped = 0;
+  let reasoningRetained = 0;
+  for (const m of sanitizedMessages) {
+    if (m.role !== "assistant") continue;
+    if (strippedMsgRefs.has(m)) {
+      reasoningStripped++;
+    } else if (m.reasoning_content) {
+      reasoningRetained++;
+    }
+  }
+
   const budgetDropped = historyMessages.length - fitCount;
   const totalRemoved = budgetDropped + cleanupDropped + sanitizeDropped;
   const estimatedTotalTokens = systemMessageTokens + historyTokens + toolTokens;
@@ -282,5 +385,7 @@ export function applyContextBudget(
     historyTokens,
     availableBudget,
     contextLength,
+    reasoningStripped,
+    reasoningRetained,
   };
 }

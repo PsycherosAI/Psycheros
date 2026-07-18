@@ -9,6 +9,7 @@
  */
 
 import JSZip from "jszip";
+import { isPluginSecretFilename } from "../../../plugin-api/src/mod.ts";
 import { isAbsolute, join } from "@std/path";
 import { ensureDir } from "@std/fs";
 import type { RouteContext } from "./routes.ts";
@@ -50,6 +51,8 @@ export interface ImportResult {
       vault_documents_restored?: number;
       images_restored?: number;
       anchor_images_restored?: number;
+      plugins_restored?: number;
+      plugin_restart_required?: boolean;
     };
     entity_core?: {
       success: boolean;
@@ -86,6 +89,42 @@ function execSql(
   } else {
     ctx.db.getRawDb().exec(sql, params);
   }
+}
+
+function isSafeArchivePath(path: string): boolean {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.length > 0 &&
+    !normalized.startsWith("/") &&
+    !normalized.split("/").some((part) => part === ".." || part === "");
+}
+
+async function addDirectoryToZip(
+  zip: JSZip,
+  sourceDir: string,
+  archivePrefix: string,
+  includeFile: (path: string) => boolean = () => true,
+): Promise<number> {
+  let count = 0;
+  try {
+    for await (const entry of Deno.readDir(sourceDir)) {
+      const diskPath = join(sourceDir, entry.name);
+      const archivePath = `${archivePrefix}/${entry.name}`;
+      if (entry.isDirectory) {
+        count += await addDirectoryToZip(
+          zip,
+          diskPath,
+          archivePath,
+          includeFile,
+        );
+      } else if (entry.isFile && includeFile(archivePath)) {
+        zip.file(archivePath, await Deno.readFile(diskPath));
+        count++;
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
+  return count;
 }
 
 /**
@@ -213,6 +252,7 @@ export async function exportEntityData(
   let lorebookEntryCount = 0;
   let vaultDocCount = 0;
   let imageCount = 0;
+  let pluginFileCount = 0;
 
   // Conversations + messages
   const conversations = queryAll<
@@ -426,6 +466,13 @@ export async function exportEntityData(
     // generated-images directory absent — nothing to export
   }
 
+  pluginFileCount = await addDirectoryToZip(
+    zip,
+    join(ctx.dataRoot, ".psycheros", "plugins"),
+    "psycheros/plugins",
+    (path) => !isPluginSecretFilename(path),
+  );
+
   // Build manifest
   const manifest: Record<string, unknown> = {
     schema_version: 1,
@@ -440,6 +487,7 @@ export async function exportEntityData(
         lorebooks: true,
         vault: true,
         images: true,
+        plugins: true,
       },
     },
     counts: {
@@ -450,6 +498,7 @@ export async function exportEntityData(
       lorebook_entries: lorebookEntryCount,
       vault_documents: vaultDocCount,
       images: imageCount,
+      plugin_files: pluginFileCount,
     },
   };
 
@@ -949,6 +998,37 @@ export async function importEntityData(
 
         details.psycheros.anchor_images_restored = anchors.length;
       }
+    }
+
+    if (psycherosParts.plugins) {
+      const pluginsPrefix = "psycheros/plugins/";
+      const pluginsDir = join(ctx.dataRoot, ".psycheros", "plugins");
+      await progress({
+        phase: "plugins",
+        status: "Restoring trusted local plugins...",
+      });
+      await Deno.remove(pluginsDir, { recursive: true }).catch((error) => {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+      });
+      await ensureDir(pluginsDir);
+
+      let pluginFileCount = 0;
+      for (const [filename, file] of Object.entries(zip.files)) {
+        if (file.dir || !filename.startsWith(pluginsPrefix)) continue;
+        const relative = filename.slice(pluginsPrefix.length);
+        if (!isSafeArchivePath(relative)) {
+          return {
+            success: false,
+            error: `Invalid plugin archive path: ${filename}`,
+          };
+        }
+        const destination = join(pluginsDir, ...relative.split("/"));
+        await ensureDir(join(destination, ".."));
+        await Deno.writeFile(destination, await file.async("uint8array"));
+        pluginFileCount++;
+      }
+      details.psycheros.plugins_restored = pluginFileCount;
+      details.psycheros.plugin_restart_required = pluginFileCount > 0;
     }
 
     // --- Import entity-core data via MCP ---

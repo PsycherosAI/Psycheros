@@ -374,11 +374,46 @@ Mistral, Kimi, and Gemma — including OpenRouter-prefixed names like
 **Reasoning parameters** are gated on provider in `buildRequest()`:
 
 - **Z.ai / NanoGPT**: sends `thinking: { type: "enabled" }` — enables Z.ai's
-  chain-of-thought return.
+  chain-of-thought return. When persistent reasoning is on (intra-turn), also
+  sends `clear_thinking: false` so Z.ai's Preserved Thinking retains reasoning
+  across iterations of the agent loop instead of wiping it.
 - **OpenRouter**: sends `reasoning: {}` — tells OpenRouter to return reasoning
   tokens (ignored without it).
 - **Other providers**: no parameter sent; reasoning tokens returned
   automatically if the model supports them.
+
+**Persistent reasoning** (two scopes, both opt-in per LLM profile):
+
+- **Intra-turn** (`persistentReasoningIntraTurn: "auto" | "on" | "off"` on
+  `LLMConnectionProfile`): threads `reasoning_content` back to the next
+  inference call within one entity turn — between tool-call iterations. Required
+  by DeepSeek's spec on tool-call turns and essential for Z.ai Preserved
+  Thinking coherence on multi-step tool chains. Without it, the agent loop at
+  `loop.ts:1519` would push assistant messages without their reasoning, and
+  DeepSeek would 400 on the next call. `"auto"` resolves to
+  `preset.supportsPersistentReasoning && thinkingEnabled` in
+  `createClientFromProfile`; `"on"` is an unconditional override for unverified
+  endpoints (Venice, Together, self-hosted vLLM, OpenRouter backing models known
+  to honor the field). Voice and worker clients force it off via
+  `createClientFromProfile`'s options override.
+- **Inter-turn** (`persistentReasoningInterTurns: number`): how many past entity
+  turns carry their `reasoning_content` into the next request. Counted in
+  user-visible turns (user→entity exchanges), not DB rows — each turn may
+  contribute multiple assistant rows from its agent loop.
+  `selectReasoningEligibleHistory()` in `loop.ts` walks newest→oldest treating
+  each user message as a turn boundary. 0 disables.
+
+**Token-budget two-pass trim** (`token-budget.ts`): when reasoning replay is
+enabled, a single assistant message can carry 1–5k tokens of reasoning
+(DeepSeek-R1 can hit 10k+). Naive FIFO would drop the whole turn plus cascade
+via sanitization (orphaned tool_calls). The walk does three branches per
+message: fits-with-reasoning → keep; fits-without-reasoning → strip
+`reasoning_content` and keep; fits-neither → break. Stripped messages get a
+fresh object with `reasoning_content: undefined` so input data isn't mutated.
+`BudgetResult.reasoningStripped` / `reasoningRetained` are recomputed after
+sanitization (the sanitizer may drop messages that were originally counted in
+either bucket). Both surface in the Context Inspector Metrics tab and the
+`[Context] Truncated` log line.
 
 **Reasoning response parsing** in `processChunk()` checks four SSE delta fields
 in priority order: `reasoning_content` (Z.ai), `reasoning`
@@ -450,6 +485,78 @@ Custom tools don't need any of the registry wiring above.
 3. Toggle it on.
 
 The custom-tool loader is in `src/tools/custom-loader.ts`.
+
+## Trusted local plugins
+
+`src/plugins/` is the trusted-plugin harness — a multi-capability extension
+surface (tools, prompt hooks, HTTP routes, browser assets, entity-core MCP
+decorators) for code that's more than a single tool. Plugin authors write a
+manifest + entrypoints; the manager loads them at daemon startup. The canonical
+authoring guide is [`docs/plugins.md`](docs/plugins.md); the operator-facing
+vetting guide lives in the User Guide at
+`site/src/content/docs/psycheros/user-guide.md`.
+
+**Module layout:**
+
+- `plugin-manager.ts` — `PluginManager` singleton: discover → resolve → load
+  lifecycle, prompt-hook execution with per-hook + aggregate budget caps, route
+  dispatch, asset serving, status reporting. Holds the event log registry.
+- `installer.ts` — `PluginInstaller`: zip + git inspection, draft staging,
+  atomic install-with-backup, removal. The auto-updater chains `inspectGit` →
+  `installDraft` rather than duplicating the replace path.
+- `event-log.ts` — `PluginEventLog` (per-plugin in-memory ring buffer +
+  plain-text file at `.psycheros/plugin-logs/<id>.log` with 5 MB rotation) +
+  `PluginEventLogRegistry` (per-plugin lookup, global enable/disable). One-line
+  text format optimized for support-chat paste.
+- `dependency-resolver.ts` — pure function: topological sort with `@std/semver`
+  range checks, cycle detection, alphabetical tie-breaking.
+- `updater.ts` — GitHub tag-API checker + apply-via-installer.
+- `mod.ts` — barrel.
+
+**Three load-bearing invariants:**
+
+1. **Aggregate prompt-hook budget.** `buildPromptContent()` accepts
+   `{ maxTotalChars }` from the host. The entity loop computes it as
+   `(contextLength - maxTokens) * 0.15` clamped to `[4_000, 60_000]`. Hooks run
+   in priority order (lower number = preserved under pressure); over- budget
+   hooks are truncated (with marker) or skipped, both setting `degraded`.
+   Without this, N plugins × 12k chars each could blow the context window — the
+   system message is never trimmed.
+2. **Env-var denylist.** `isDeniedPluginEnvVar()` in
+   `packages/plugin-api/src/mod.ts` blocks ~26 process-global names (proxy, TLS,
+   native injection, identity, runtime) plus `PSYCHEROS_*` and `ENTITY_CORE_*`
+   prefix blocks. `applyPluginEnv` enforces it; the manager surfaces refused
+   vars in `PluginStatus.warnings`. Note: this only covers the env-file path. A
+   plugin calling `Deno.env.set(...)` from its own code bypasses the denylist —
+   closing that needs Workers isolation (v1.1+).
+3. **Load order = dependency order.** `load()` is split into discover → resolve
+   → load phases specifically so resolution can topologically sort before any
+   `start()` runs. A plugin whose dep failed resolution never imports — its
+   `start()` cannot run before the dep it needs.
+
+**Surfacing in the UI and Context Inspector:**
+
+- Plugins Settings page at `/fragments/settings/plugins` — safety banner, health
+  card (counts + last-turn budget meter via `getLastBudgetReport()`), install
+  form, per-plugin rows with Recent Activity panel + Download log + Check for
+  updates, install-review modal.
+- Context Inspector Metrics tab — `pluginBudgetUsed` / `pluginBudgetMax` on
+  `LLMContextSnapshot.metrics`. Plugin Context added to the section breakdown.
+  Both persist per-turn via the `metrics_json` column.
+- API endpoints under `/api/plugin-manager/*`: health, events, log download,
+  check-update, apply-update, plus the original inspect/install /remove set.
+
+Plugin-owned credentials live under
+`dataRoot/.psycheros/plugin-secrets/<id>.env`, outside portable exports. Use
+`PSYCHEROS_PLUGIN_<ID>_*` names because trusted plugins share the process
+environment.
+
+**v1.1 deferred:** entity-core plugin events aren't surfaced in the UI (the
+event-log class lives in `packages/psycheros/src/plugins/`; moving it to
+`packages/plugin-api/src/` would let both hosts share one log file per plugin).
+Auto-updater has no scheduler integration. Install-review diff is manifest-field
+only — runtime capability diffs (tools/hooks/ routes between versions) require
+source comparison.
 
 ## Reactive UI: state-changes
 
@@ -551,6 +658,7 @@ handlers, and operational details.
 | API endpoints, SSE architecture   | [docs/api-reference.md](docs/api-reference.md)     |
 | Durable scheduler                 | [docs/scheduler.md](docs/scheduler.md)             |
 | Security audit                    | [docs/security-audit.md](docs/security-audit.md)   |
+| Trusted plugins (authoring)       | [docs/plugins.md](docs/plugins.md)                 |
 
 External Connections (Discord, web search, home, intimacy), Vision (image gen,
 captioning, gallery), Situational Awareness, and Pulse all have their feature

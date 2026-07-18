@@ -11,6 +11,7 @@
 import type { SSEEvent, TurnMetrics } from "../types.ts";
 import type { DBClient } from "../db/mod.ts";
 import type {
+  ChatImageUrlPart,
   LLMClient,
   LLMConnectionProfile,
   LLMProfileSettings,
@@ -178,6 +179,7 @@ import { getServerStartTime } from "./diagnostics.ts";
 import entityCoreDenoJson from "../../../entity-core/deno.json" with {
   type: "json",
 };
+import type { PluginManager } from "../plugins/mod.ts";
 
 /**
  * Context passed to route handlers containing dependencies.
@@ -297,6 +299,8 @@ export interface RouteContext {
   /** Voice chat settings */
   getVoiceSettings: () => VoiceSettings;
   updateVoiceSettings: (settings: VoiceSettings) => Promise<void>;
+  /** Trusted local plugin harness */
+  pluginManager: PluginManager;
 }
 
 /**
@@ -415,8 +419,8 @@ function normalizePath(path: string): string {
  * @param _ctx - Route context (unused, kept for consistency)
  * @returns HTTP Response with the app shell HTML
  */
-export function handleIndex(_ctx: RouteContext): Response {
-  const html = renderAppShell();
+export function handleIndex(ctx: RouteContext): Response {
+  const html = renderAppShell(ctx.pluginManager.getBrowserHeadHtml());
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -519,7 +523,7 @@ export function handleConversationView(
 
   // Always return the full app shell
   // Frontend JS will load the conversation content via /fragments/chat/:id
-  const html = renderAppShell();
+  const html = renderAppShell(ctx.pluginManager.getBrowserHeadHtml());
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -1115,7 +1119,56 @@ interface ChatRequestBody {
   conversationId: string;
   message: string;
   attachmentId?: string;
+  visionImages?: unknown;
   deviceType?: "desktop" | "mobile";
+}
+
+const MAX_TRANSIENT_VISION_IMAGES = 4;
+const MAX_TRANSIENT_VISION_IMAGE_CHARS = 8_000_000;
+const TRANSIENT_IMAGE_DATA_URL_PATTERN =
+  /^data:image\/(?:jpeg|jpg|png|webp);base64,[a-z0-9+/=\r\n]+$/i;
+
+function parseTransientVisionImages(input: unknown): ChatImageUrlPart[] {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input)) {
+    throw new Error("visionImages must be an array");
+  }
+  if (input.length > MAX_TRANSIENT_VISION_IMAGES) {
+    throw new Error(
+      `visionImages supports up to ${MAX_TRANSIENT_VISION_IMAGES} images`,
+    );
+  }
+
+  return input.map((item, index) => {
+    if (!item || typeof item !== "object") {
+      throw new Error(`visionImages[${index}] must be an object`);
+    }
+    const record = item as Record<string, unknown>;
+    const dataUrl = record.dataUrl;
+    if (typeof dataUrl !== "string") {
+      throw new Error(`visionImages[${index}].dataUrl must be a string`);
+    }
+    if (dataUrl.length > MAX_TRANSIENT_VISION_IMAGE_CHARS) {
+      throw new Error(`visionImages[${index}] is too large`);
+    }
+    if (!TRANSIENT_IMAGE_DATA_URL_PATTERN.test(dataUrl)) {
+      throw new Error(
+        `visionImages[${index}] must be a jpeg, png, or webp data URL`,
+      );
+    }
+
+    const detail = record.detail;
+    const image: ChatImageUrlPart = {
+      type: "image_url",
+      image_url: {
+        url: dataUrl.replace(/\r?\n/g, ""),
+      },
+    };
+    if (detail === "low" || detail === "high" || detail === "auto") {
+      image.image_url.detail = detail;
+    }
+    return image;
+  });
 }
 
 /**
@@ -1219,6 +1272,7 @@ export async function handleChat(
 ): Promise<Response> {
   // Parse and validate request body
   let body: ChatRequestBody;
+  let visionImages: ChatImageUrlPart[] = [];
   try {
     body = await request.json();
     if (!body.conversationId || typeof body.conversationId !== "string") {
@@ -1227,10 +1281,13 @@ export async function handleChat(
     if (!body.message || typeof body.message !== "string") {
       throw new Error("Missing or invalid message");
     }
+    visionImages = parseTransientVisionImages(body.visionImages);
   } catch (error) {
     console.error("[Routes] handleChat parse error:", error);
     return new Response(
-      JSON.stringify({ error: "Invalid request body" }),
+      JSON.stringify({
+        error: error instanceof Error ? error.message : "Invalid request body",
+      }),
       {
         status: 400,
         headers: {
@@ -1348,6 +1405,10 @@ export async function handleChat(
             deviceStatusCache: ctx.getDeviceStatusCache(),
             contextLength: activeProfile?.contextLength,
             maxTokens: activeProfile?.maxTokens,
+            persistentReasoningIntraTurn: ctx.llm.persistentReasoningIntraTurn,
+            persistentReasoningInterTurns: activeProfile
+              ?.persistentReasoningInterTurns,
+            pluginManager: ctx.pluginManager,
           },
         );
 
@@ -1360,6 +1421,7 @@ export async function handleChat(
         for await (
           const chunk of turn.process(body.conversationId, userMessage, {
             deviceType: body.deviceType,
+            visionImages: visionImages.length > 0 ? visionImages : undefined,
           })
         ) {
           if (signal.aborted) {
@@ -1557,6 +1619,10 @@ export async function handleChatRetry(
             deviceStatusCache: ctx.getDeviceStatusCache(),
             contextLength: retryProfile?.contextLength,
             maxTokens: retryProfile?.maxTokens,
+            persistentReasoningIntraTurn: ctx.llm.persistentReasoningIntraTurn,
+            persistentReasoningInterTurns: retryProfile
+              ?.persistentReasoningInterTurns,
+            pluginManager: ctx.pluginManager,
           },
         );
 
@@ -10285,12 +10351,15 @@ export function handleVoiceWebSocket(
     // Two voice-specific overrides:
     //   1. Voice profile's disableReasoning flips thinkingEnabled on the
     //      LLM client. Latency matters more than reasoning for voice, so
-    //      default is to disable.
+    //      default is to disable. Persistent reasoning is forced off for
+    //      the same reason — voice doesn't want the extra token cost or
+    //      latency of threading reasoning through tool iterations.
     //   2. Voice profile's contextWindowSize overrides the LLM profile's
     //      contextLength. Users may want a tighter context window for
     //      voice to improve latency (cut off older history).
     const voiceLlm = createClientFromProfile(activeProfile, {
       thinkingEnabled: !profile.disableReasoning,
+      persistentReasoningIntraTurn: false,
     });
     const entityTurn = new EntityTurn(
       voiceLlm,

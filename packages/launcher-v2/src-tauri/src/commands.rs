@@ -2553,8 +2553,10 @@ mod tests {
         // <launcher_dir>/data per the env override.
         let psy_dir = launcher_dir.path().join("data").join(".psycheros");
         std::fs::create_dir_all(psy_dir.join("vault/documents")).unwrap();
+        std::fs::create_dir_all(psy_dir.join("plugins/example/state")).unwrap();
         std::fs::write(psy_dir.join("settings.json"), br#"{"ok":true}"#).unwrap();
         std::fs::write(psy_dir.join("vault/documents/note.md"), b"hello").unwrap();
+        std::fs::write(psy_dir.join("plugins/example/state/cache.json"), b"{}").unwrap();
 
         let snapshot_id = create_pre_update_snapshot()
             .expect("snapshot should succeed against a populated data dir");
@@ -2573,6 +2575,10 @@ mod tests {
         assert_eq!(
             std::fs::read(snap_root.join("vault/documents/note.md")).unwrap(),
             b"hello"
+        );
+        assert_eq!(
+            std::fs::read(snap_root.join("plugins/example/state/cache.json")).unwrap(),
+            b"{}"
         );
     }
 

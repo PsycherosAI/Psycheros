@@ -60,6 +60,22 @@ export interface LLMConnectionProfile {
   contextLength: number;
   /** Whether chain-of-thought reasoning is enabled */
   thinkingEnabled: boolean;
+  /**
+   * Whether I carry my reasoning_content back to the next inference call
+   * within one entity turn (between tool-call iterations). `"auto"` resolves
+   * per provider using the preset's supportsPersistentReasoning flag;
+   * `"on"` is an unconditional override for endpoints we haven't verified
+   * (Venice.ai, Together, self-hosted vLLM, OpenRouter backing models
+   * known to honor the field); `"off"` disables outright.
+   */
+  persistentReasoningIntraTurn: "auto" | "on" | "off";
+  /**
+   * How many of my prior entity turns I attach reasoning_content from when
+   * building context for a new user message. 0 disables. Each entity turn
+   * may contribute multiple assistant rows (one per tool iteration); the
+   * count is in user-visible turns, not DB rows.
+   */
+  persistentReasoningInterTurns: number;
 }
 
 /**
@@ -90,6 +106,14 @@ export interface LLMProviderPreset {
   defaultWorkerModel: string;
   /** Whether the provider's default model supports the thinking parameter */
   supportsThinking: boolean;
+  /**
+   * Whether the provider's default model accepts `reasoning_content` on
+   * inbound assistant messages and does something useful with it (uses it
+   * for coherence on subsequent turns). Distinct from supportsThinking —
+   * a provider may emit reasoning without honoring it on input. Only
+   * controls the "auto" default; the profile's "on" override always wins.
+   */
+  supportsPersistentReasoning: boolean;
 }
 
 // =============================================================================
@@ -107,6 +131,7 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
     defaultModel: "glm-4.7",
     defaultWorkerModel: "GLM-4.5-Air",
     supportsThinking: true,
+    supportsPersistentReasoning: true,
   },
   openrouter: {
     label: "OpenRouter",
@@ -114,6 +139,7 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
     defaultModel: "z-ai/glm-4.7",
     defaultWorkerModel: "GLM-4.5-Air",
     supportsThinking: true,
+    supportsPersistentReasoning: false,
   },
   openai: {
     label: "OpenAI",
@@ -121,6 +147,7 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
     defaultModel: "gpt-4o",
     defaultWorkerModel: "gpt-4o-mini",
     supportsThinking: false,
+    supportsPersistentReasoning: false,
   },
   alibaba: {
     label: "Alibaba / Qwen",
@@ -129,6 +156,7 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
     defaultModel: "qwen-max",
     defaultWorkerModel: "qwen-turbo",
     supportsThinking: false,
+    supportsPersistentReasoning: false,
   },
   nanogpt: {
     label: "NanoGPT",
@@ -136,6 +164,7 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
     defaultModel: "glm-4.7",
     defaultWorkerModel: "GLM-4.5-Air",
     supportsThinking: true,
+    supportsPersistentReasoning: true,
   },
   custom: {
     label: "Custom Endpoint",
@@ -143,6 +172,7 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
     defaultModel: "",
     defaultWorkerModel: "",
     supportsThinking: false,
+    supportsPersistentReasoning: false,
   },
 };
 
@@ -210,6 +240,8 @@ export function createDefaultProfile(): LLMConnectionProfile {
       contextLength: 128000,
       thinkingEnabled: provider === "zai" || provider === "openrouter" ||
         provider === "nanogpt" || provider === "custom",
+      persistentReasoningIntraTurn: "auto",
+      persistentReasoningInterTurns: 0,
     };
   }
 
@@ -230,5 +262,7 @@ export function createDefaultProfile(): LLMConnectionProfile {
     maxTokens: 4096,
     contextLength: 128000,
     thinkingEnabled: true,
+    persistentReasoningIntraTurn: "auto",
+    persistentReasoningInterTurns: 0,
   };
 }

@@ -11,6 +11,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { join } from "@std/path";
 import type { Granularity } from "../memory/types.ts";
 import { getBroadcaster } from "../server/broadcaster.ts";
+import type { PluginStatus } from "../../../plugin-api/src/mod.ts";
 
 /**
  * Read the entity-core child's PID out of the MCP SDK's StdioClientTransport.
@@ -1890,6 +1891,22 @@ export class MCPClient {
     } catch (error) {
       console.error("[MCP] Get extraction health failed:", error);
       return null;
+    }
+  }
+
+  /**
+   * Get trusted local plugin activation status from entity-core.
+   */
+  async getPluginStatuses(): Promise<PluginStatus[]> {
+    if (!this.client) return [];
+
+    try {
+      const result = await this.callToolWithTimeout("plugin_status", {});
+      const textContent = extractTextContent(result);
+      return textContent ? JSON.parse(textContent) : [];
+    } catch (error) {
+      console.error("[MCP] Get plugin status failed:", error);
+      return [];
     }
   }
 

@@ -466,6 +466,7 @@ export function buildSystemMessage(
   imageGenContent?: string,
   situationalAwarenessContent?: string,
   discordChannelContent?: string,
+  pluginContent?: string,
 ): string {
   // Build sections — base instructions always first
   const sections: string[] = [];
@@ -517,6 +518,14 @@ ${situationalAwarenessContent}`);
     sections.push(`---
 
 ${discordChannelContent}`);
+  }
+
+  if (pluginContent?.trim()) {
+    sections.push(`---
+
+My plugin context:
+
+${pluginContent}`);
   }
 
   // Add lorebook-triggered content if present

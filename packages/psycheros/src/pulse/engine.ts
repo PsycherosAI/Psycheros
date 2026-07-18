@@ -131,6 +131,14 @@ export interface PulseEngineConfig {
     | undefined;
   contextLength?: () => number | undefined;
   maxTokens?: () => number | undefined;
+  /**
+   * Getter for the active profile's inter-turn persistent reasoning
+   * setting. Mirrors contextLength/maxTokens — pulses run with the
+   * currently active profile, not the one that existed when the pulse
+   * was scheduled.
+   */
+  persistentReasoningInterTurns?: () => number | undefined;
+  pluginManager?: import("../plugins/mod.ts").PluginManager;
 }
 
 // =============================================================================
@@ -722,6 +730,10 @@ export class PulseEngine {
       deviceStatusCache: this.config.deviceStatusCache?.(),
       contextLength: this.config.contextLength?.(),
       maxTokens: this.config.maxTokens?.(),
+      persistentReasoningIntraTurn: this.getLlm().persistentReasoningIntraTurn,
+      persistentReasoningInterTurns: this.config
+        .persistentReasoningInterTurns?.(),
+      pluginManager: this.config.pluginManager,
     };
 
     const turn = new EntityTurn(

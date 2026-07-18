@@ -6,9 +6,20 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
-### Fixed
+## [0.5.0] - 2026-07-16
 
-- _No unreleased changes yet._
+### Added
+
+- **Trusted local plugin harness** (`src/plugins/plugin-manager.ts`): loads
+  optional plugin entrypoints from `PSYCHEROS_PLUGIN_DIR` before MCP connects.
+  Plugins can register additional MCP tools and additive result decorators.
+  Decorators run after core handlers and cannot overwrite core fields.
+- **`plugin_status` MCP tool**: surfaces loaded plugin statuses to the entity.
+- **ServerConfig** gains optional `embeddingCache?` and `pluginManager?` fields
+  for dependency injection during startup and testing.
+
+_**Note:** The plugin surface is a work in progress. The manifest format,
+capability APIs, and security model may change between releases before 1.0._
 
 ## [0.4.5] - 2026-06-27
 

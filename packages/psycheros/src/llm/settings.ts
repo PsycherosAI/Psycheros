@@ -200,6 +200,8 @@ function migrateLegacySettings(
     maxTokens: old.maxTokens ?? FALLBACK_DEFAULTS.maxTokens,
     contextLength: old.contextLength ?? FALLBACK_DEFAULTS.contextLength,
     thinkingEnabled: old.thinkingEnabled ?? FALLBACK_DEFAULTS.thinkingEnabled,
+    persistentReasoningIntraTurn: "auto",
+    persistentReasoningInterTurns: 0,
   };
 
   console.log(
@@ -252,6 +254,19 @@ export async function loadProfileSettings(
           "[LLM Settings] activeProfileId not found, falling back to first profile",
         );
         settings.activeProfileId = settings.profiles[0].id;
+      }
+      // Backfill fields added after the profile-format migration. Existing
+      // files saved before each field was introduced load with `undefined`
+      // despite the TS type requiring the field — apply defaults here so
+      // runtime behavior matches the type contract. Add new fields here as
+      // they're introduced.
+      for (const profile of settings.profiles) {
+        if (profile.persistentReasoningIntraTurn === undefined) {
+          profile.persistentReasoningIntraTurn = "auto";
+        }
+        if (profile.persistentReasoningInterTurns === undefined) {
+          profile.persistentReasoningInterTurns = 0;
+        }
       }
       return settings;
     }

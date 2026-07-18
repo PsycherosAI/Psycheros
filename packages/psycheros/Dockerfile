@@ -97,10 +97,12 @@ COPY packages/psycheros/deno.json /app/packages/psycheros/deno.json
 COPY packages/entity-core/deno.json /app/packages/entity-core/deno.json
 COPY packages/entity-loom/deno.json /app/packages/entity-loom/deno.json
 COPY packages/launcher/deno.json /app/packages/launcher/deno.json
+COPY packages/plugin-api/deno.json /app/packages/plugin-api/deno.json
 
 # Source for the packages that run in (or are imported by) this image
 COPY packages/psycheros /app/packages/psycheros/
 COPY packages/entity-core /app/packages/entity-core/
+COPY packages/plugin-api /app/packages/plugin-api/
 
 # Entrypoint script — co-located with the psycheros package
 RUN chmod +x /app/packages/psycheros/entrypoint.sh
