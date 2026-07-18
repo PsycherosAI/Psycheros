@@ -99,9 +99,16 @@ export class MessageRouter {
         this.handleGuildCreate(data);
       }
     });
-    // Prune stale message timestamps every 5 minutes to prevent unbounded growth
+    // Prune stale message timestamps every 5 minutes to prevent unbounded growth.
+    // Wrap in try/catch so an error inside the (best-effort) prune routine
+    // can never take down the whole daemon — an uncaught throw inside a
+    // setInterval callback kills the Deno process.
     this.pruneInterval = setInterval(() => {
-      this.pruneStaleTimestamps();
+      try {
+        this.pruneStaleTimestamps();
+      } catch (error) {
+        console.error("[Discord] prune timer error (non-fatal):", error);
+      }
     }, 5 * 60 * 1000);
     console.log("[Discord] Message router started");
   }
@@ -640,6 +647,18 @@ export class MessageRouter {
 
   private pruneStaleTimestamps(): void {
     const tierConfig = this.deps.config.activeModeTiers;
+    // Defensive guard: if activeModeTiers is missing or malformed (e.g. a
+    // stale discord-gateway.json from before this field existed, or a config
+    // that hasn't been deep-merged against current defaults), bail out
+    // rather than crash the daemon. The prune timer is best-effort cleanup;
+    // skipping a cycle just means timestamps grow a little longer until the
+    // config is repaired.
+    if (!tierConfig || typeof tierConfig.rateWindowMinutes !== "number") {
+      console.warn(
+        "[Discord] Skipping stale-timestamp prune: activeModeTiers.rateWindowMinutes missing or invalid",
+      );
+      return;
+    }
     const cutoff = Date.now() - (tierConfig.rateWindowMinutes * 60 * 1000);
 
     for (const [channelId, timestamps] of this.messageTimestamps) {

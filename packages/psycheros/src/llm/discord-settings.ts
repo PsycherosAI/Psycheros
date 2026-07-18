@@ -133,6 +133,58 @@ export function getDefaultDiscordGatewayConfig(): DiscordGatewayConfig {
 }
 
 // =============================================================================
+// Helpers — Load / Save
+// =============================================================================
+
+/**
+ * Recursively merge a saved (possibly partial) config over defaults.
+ *
+ * Psycheros's config files are nested objects (e.g. DiscordGatewayConfig has
+ * an activeModeTiers sub-object). A shallow `{ ...defaults, ...saved }` merge
+ * replaces top-level keys wholesale: if a saved file was written by an older
+ * Psycheros version whose nested object had a different shape (or lacked
+ * fields added later), the saved nested object overwrites the default one
+ * entirely — and downstream code dereferences fields that don't exist, which
+ * can crash the daemon. Deep-merging per key means saved values win where
+ * present, but new default fields survive even when the saved file predates
+ * them.
+ *
+ * Arrays and primitives from `saved` always replace `defaults` (no element-
+ * level merge — that would surprise users who explicitly removed a list
+ * entry). Only plain objects recurse.
+ */
+function deepMerge<T>(defaults: T, saved: Partial<T> | undefined): T {
+  if (saved === undefined || saved === null) return defaults;
+  if (typeof defaults !== "object" || defaults === null) return saved as T;
+  if (Array.isArray(defaults)) return saved as T;
+
+  const result: Record<string, unknown> = {
+    ...defaults as Record<string, unknown>,
+  };
+  for (
+    const [key, savedValue] of Object.entries(saved as Record<string, unknown>)
+  ) {
+    const defaultValue = (defaults as Record<string, unknown>)[key];
+    if (
+      savedValue !== null &&
+      typeof savedValue === "object" &&
+      !Array.isArray(savedValue) &&
+      typeof defaultValue === "object" &&
+      defaultValue !== null &&
+      !Array.isArray(defaultValue)
+    ) {
+      result[key] = deepMerge(
+        defaultValue as Record<string, unknown>,
+        savedValue as Record<string, unknown>,
+      );
+    } else if (savedValue !== undefined) {
+      result[key] = savedValue;
+    }
+  }
+  return result as T;
+}
+
+// =============================================================================
 // Load / Save — Base Settings
 // =============================================================================
 
@@ -145,7 +197,7 @@ export async function loadDiscordSettings(
   try {
     const text = await Deno.readTextFile(settingsPath);
     const saved = JSON.parse(text) as Partial<DiscordSettings>;
-    return { ...defaults, ...saved };
+    return deepMerge(defaults, saved);
   } catch {
     return defaults;
   }
@@ -187,7 +239,7 @@ export async function loadDiscordGatewayConfig(
   try {
     const text = await Deno.readTextFile(settingsPath);
     const saved = JSON.parse(text) as Partial<DiscordGatewayConfig>;
-    return { ...defaults, ...saved };
+    return deepMerge(defaults, saved);
   } catch {
     return defaults;
   }

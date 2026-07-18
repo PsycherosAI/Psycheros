@@ -6,6 +6,20 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-18
+
+### Fixed
+
+- **Daemon crash on stale Discord gateway config:** a config file saved by an
+  older Psycheros version (predating the `activeModeTiers` field-shape overhaul)
+  could crash the daemon every 5 minutes via an uncaught `TypeError` in the
+  Discord message router's stale-timestamp prune timer. For launchd-supervised
+  installs this presented as an endless restart loop; for Manual-mode users it
+  looked like the daemon hung on startup. Fixed with a deep-merge config loader
+  (nested defaults survive even when the saved file predates them), a defensive
+  null-guard in the prune routine, and a `try/catch` around the timer callback
+  so no background-timer error can take down the daemon.
+
 ## [0.9.0] - 2026-07-16
 
 ### Added
@@ -1230,6 +1244,8 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 - Entity identity and memory served by the sibling `entity-core` MCP server,
   spawned as a subprocess when `PSYCHEROS_MCP_ENABLED=true`.
 
+[0.9.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.9.1
+[0.9.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.9.0
 [0.8.24]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.24
 [0.8.23]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.23
 [0.8.22]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.22
