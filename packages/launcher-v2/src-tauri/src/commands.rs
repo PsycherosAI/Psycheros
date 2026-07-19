@@ -541,6 +541,13 @@ const SOURCE_REPO_URL: &str = "https://github.com/PsycherosAI/Psycheros";
 /// path can vary by user choice.
 const SOURCE_TAG_PREFIX: &str = "psycheros-v";
 
+/// Tag prefix for the launcher app's own releases. Used by the launcher
+/// self-update check (`check_for_launcher_update`) to discover new
+/// launcher versions — separate from daemon source updates, since the
+/// launcher is a compiled binary that users download manually (no
+/// in-app auto-update yet).
+const LAUNCHER_TAG_PREFIX: &str = "launcher-v2-v";
+
 /// The currently-configured update channel's tag prefix. Resolves
 /// to `psycheros-v` for `Stable` (default), `psycheros-beta-v` for
 /// `Beta`. Cached in the [`LauncherConfig`] so a channel switch is
@@ -859,6 +866,54 @@ pub(crate) fn check_for_updates_blocking() -> Result<UpdateInfo, String> {
         current_version,
         latest_version,
         update_available,
+    })
+}
+
+/// Info about a launcher app update (separate from daemon source updates).
+///
+/// The launcher can't self-update yet — it's a compiled binary. This check
+/// surfaces "new launcher version available" so the user knows to download it.
+/// The toast includes a link to the releases page.
+#[derive(Debug, Serialize, Clone)]
+pub struct LauncherUpdateInfo {
+    /// The running launcher version (from `CARGO_PKG_VERSION` at compile time).
+    pub current_version: String,
+    /// The latest `launcher-v2-v*` tag on the public repo, if any.
+    pub latest_version: Option<String>,
+    /// True iff `latest_version` is newer than `current_version`.
+    pub update_available: bool,
+    /// URL to the GitHub releases page for manual download.
+    pub download_url: String,
+}
+
+/// Check whether a newer launcher app version is available upstream.
+/// Queries `launcher-v2-v*` tags and compares against the compiled-in
+/// version (`CARGO_PKG_VERSION`). Used by the update watcher to surface
+/// launcher updates via a toast with a download link.
+pub(crate) fn check_for_launcher_update_blocking() -> Result<LauncherUpdateInfo, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let latest_version = bundle::query_latest_tag(SOURCE_REPO_URL, LAUNCHER_TAG_PREFIX)
+        .map_err(|e| format!("query latest launcher tag: {e}?"))?;
+
+    let update_available = match &latest_version {
+        Some(latest) => {
+            // Both are bare semver (no prefix) — compare directly
+            let cur = semver::Version::parse(current).ok();
+            let lat = semver::Version::parse(latest).ok();
+            match (cur, lat) {
+                (Some(c), Some(l)) => l > c,
+                // Fallback: string comparison if semver parse fails
+                _ => latest != current,
+            }
+        }
+        None => false,
+    };
+
+    Ok(LauncherUpdateInfo {
+        current_version: current.to_string(),
+        latest_version,
+        update_available,
+        download_url: "https://github.com/PsycherosAI/Psycheros/releases".to_string(),
     })
 }
 

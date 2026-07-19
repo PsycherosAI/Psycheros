@@ -5,6 +5,24 @@ format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/). It is pre-1.0 until
 cross-platform supervisors ship.
 
+## [0.2.45] - 2026-07-18
+
+### Added
+
+- **Launcher self-update notifications:** the update watcher now also polls for
+  new `launcher-v2-v*` tags and shows a toast when a newer launcher version is
+  available. The toast includes a direct link to the GitHub releases page for
+  manual download. The launcher can't self-update yet (it's a compiled binary),
+  but this ensures users learn about critical fixes (like the v0.2.44
+  snapshot-consistency patch) without manually checking the releases page.
+
+### Fixed
+
+- Synced `Cargo.toml` version with `tauri.conf.json` (was drifting since
+  0.2.43). The tag-cut gate only checks `tauri.conf.json`, but
+  `CARGO_PKG_VERSION` (used by the new self-update check) reads from
+  `Cargo.toml`. Both are now kept in sync.
+
 ## [0.2.44] - 2026-07-18
 
 ### Fixed
