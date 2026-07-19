@@ -5,6 +5,17 @@ format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/). It is pre-1.0 until
 cross-platform supervisors ship.
 
+## [0.2.44] - 2026-07-18
+
+### Fixed
+
+- **Critical data loss fix:** the daemon is now stopped before the pre-update
+  snapshot is taken. Previously, the snapshot copied `psycheros.db` while the
+  daemon held it open in SQLite WAL mode, producing an inconsistent copy — on
+  rollback, uncommitted WAL data (recent conversations/messages) was silently
+  discarded. Stopping the daemon first forces a clean checkpoint + close,
+  guaranteeing snapshot consistency.
+
 ## [0.2.43] - 2026-07-16
 
 ### Changed

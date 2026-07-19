@@ -918,8 +918,32 @@ fn apply_source_update_blocking(app: AppHandle, target_tag: Option<String>) -> R
     // Phase 0: snapshot the pre-update entity data so rollback is
     // possible (§5.21 / §5.22). Best-effort — failure here doesn't
     // abort the update, just leaves snapshot_id=None in the history
-    // entry. The data dir can be tens of MB; the copy happens before
-    // the daemon restart so files aren't being mutated underneath us.
+    // entry.
+    //
+    // CRITICAL: the daemon must be stopped BEFORE the snapshot is
+    // taken. SQLite runs in WAL mode — recent writes live in a
+    // `-wal` sidecar file that gets merged into the main `.db` on
+    // checkpoint or clean shutdown. Copying the `.db` and `.db-wal`
+    // files separately while the daemon is actively writing produces
+    // an inconsistent snapshot: the main `.db` and `.db-wal` don't
+    // agree on their contents. On rollback restore, SQLite can only
+    // salvage whatever was already checkpointed, silently discarding
+    // uncommitted WAL data. This caused real data loss for a user
+    // (ceremony conversations lost between a pre-update snapshot and
+    // the update itself — psycheros-v0.9.1 incident, 2026-07-18).
+    //
+    // Stopping the daemon first forces a clean WAL checkpoint +
+    // close, guaranteeing the snapshot is consistent. The Phase 3
+    // restart() call later is idempotent if the daemon is already
+    // stopped (LaunchdSupervisor::restart returns Ok(()) when the
+    // service isn't loaded), so this doesn't change the restart
+    // semantics.
+    let _ = app.emit(
+        "source-update-progress",
+        SourceUpdateProgress::Phase { phase: "stop-daemon" },
+    );
+    let _ = default_supervisor().stop_daemon();
+
     let _ = app.emit(
         "source-update-progress",
         SourceUpdateProgress::Phase { phase: "snapshot" },
