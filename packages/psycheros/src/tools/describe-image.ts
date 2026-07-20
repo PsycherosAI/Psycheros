@@ -493,8 +493,12 @@ async function executeDescribeImage(
 
     return {
       toolCallId: ctx.toolCallId,
-      content:
-        `[describe_image] Image description: ${caption.long}[short:${caption.short}]`,
+      content: `Image description: ${caption.long}`,
+      metadata: {
+        fade: {
+          replacementContent: `Image description: ${caption.short}`,
+        },
+      },
     };
   } catch (error) {
     return {

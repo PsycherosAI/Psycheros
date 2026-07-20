@@ -33,6 +33,35 @@ export interface Message {
    * read time, never stored.
    */
   isVoice?: boolean;
+  /**
+   * Tool-result sidecar metadata. Currently used to carry generated-image
+   * data (path, descriptions) so the LLM-visible `content` can stay plain
+   * text without `[IMAGE:...]` markers. Parsed from JSON in rowToMessage.
+   */
+  metadata?: MessageMetadata;
+}
+
+/**
+ * Sidecar metadata stored on tool-result messages. The `image` shape is
+ * populated by `generate_image`; the `fade` shape is populated by tools whose
+ * result content should be replaced with a shorter version after the
+ * IMAGE_DESCRIPTION_FADE_TURNS threshold (describe_image, look_closer).
+ */
+export interface MessageMetadata {
+  image?: {
+    /** URL path for `<img src>` (e.g. "/generated-images/abc.png") */
+    path: string;
+    /** Path relative to .psycheros/ for send_discord_dm image_path */
+    filePath: string;
+    prompt: string;
+    generatorName: string;
+    description?: string;
+    shortDescription?: string;
+  };
+  fade?: {
+    /** Content text to swap in after IMAGE_DESCRIPTION_FADE_TURNS */
+    replacementContent: string;
+  };
 }
 
 // =============================================================================
@@ -72,6 +101,12 @@ export interface ToolResult {
   isError?: boolean;
   /** UI regions affected by this tool execution (for reactive updates) */
   affectedRegions?: string[];
+  /**
+   * Optional sidecar metadata. Persisted as-is to the tool-message
+   * `metadata` column. generate_image populates `metadata.image`;
+   * describe_image and look_closer populate `metadata.fade`.
+   */
+  metadata?: MessageMetadata;
 }
 
 /**

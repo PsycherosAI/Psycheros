@@ -218,7 +218,11 @@ export class MCPClient {
     this.activeToolCalls++;
     try {
       const result = await Promise.race([
-        this.client.callTool({ name, arguments: args }),
+        this.client.callTool(
+          { name, arguments: args },
+          undefined,
+          { timeout: ms },
+        ),
         new Promise<never>((_, reject) =>
           setTimeout(
             () =>

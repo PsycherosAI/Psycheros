@@ -48,9 +48,14 @@ export interface ImportResult {
       messages_restored?: number;
       lorebooks_restored?: number;
       lorebook_entries_restored?: number;
+      pulses_restored?: number;
       vault_documents_restored?: number;
       images_restored?: number;
       anchor_images_restored?: number;
+      anchor_files_restored?: number;
+      chat_attachment_files_restored?: number;
+      custom_tool_files_restored?: number;
+      background_files_restored?: number;
       plugins_restored?: number;
       plugin_restart_required?: boolean;
     };
@@ -252,6 +257,11 @@ export async function exportEntityData(
   let lorebookEntryCount = 0;
   let vaultDocCount = 0;
   let imageCount = 0;
+  let pulseCount = 0;
+  let anchorFileCount = 0;
+  let chatAttachmentFileCount = 0;
+  let customToolFileCount = 0;
+  let backgroundFileCount = 0;
   let pluginFileCount = 0;
 
   // Conversations + messages
@@ -279,10 +289,14 @@ export async function exportEntityData(
       tool_calls: string | null;
       created_at: string;
       is_voice: number | null;
+      edited_at: string | null;
+      pulse_id: string | null;
+      pulse_name: string | null;
+      metadata: string | null;
     }
   >(
     ctx,
-    "SELECT id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice FROM messages ORDER BY conversation_id, created_at",
+    "SELECT id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice, edited_at, pulse_id, pulse_name, metadata FROM messages ORDER BY conversation_id, created_at",
   );
   messageCount = messages.length;
 
@@ -298,6 +312,10 @@ export async function exportEntityData(
         tool_calls: msg.tool_calls,
         created_at: msg.created_at,
         is_voice: msg.is_voice ?? 0,
+        edited_at: msg.edited_at,
+        pulse_id: msg.pulse_id,
+        pulse_name: msg.pulse_name,
+        metadata: msg.metadata,
       });
     }
   }
@@ -359,6 +377,16 @@ export async function exportEntityData(
     entries: lorebookEntries.filter((e) => e.book_id === lb.id),
   }));
   zip.file("psycheros/lorebooks.json", JSON.stringify(lorebooksJson, null, 2));
+
+  // Pulses — use SELECT * so the dump survives future column additions
+  // without needing to maintain a column list here. The pulses table has
+  // ~20 columns covering prompt, trigger config, scheduling, chaining.
+  const pulses = queryAll<Record<string, unknown>>(
+    ctx,
+    "SELECT * FROM pulses ORDER BY created_at",
+  );
+  pulseCount = pulses.length;
+  zip.file("psycheros/pulses.json", JSON.stringify(pulses, null, 2));
 
   // Anchor images
   const anchorImages = queryAll<
@@ -473,6 +501,42 @@ export async function exportEntityData(
     (path) => !isPluginSecretFilename(path),
   );
 
+  // Anchor image files — the DB rows are exported above as anchor-images.json,
+  // but the binary files in .psycheros/anchors/ were previously dropped on
+  // export. Without them, generate_image fails at readFile() for any
+  // anchor_id after import.
+  anchorFileCount = await addDirectoryToZip(
+    zip,
+    join(ctx.dataRoot, ".psycheros", "anchors"),
+    "psycheros/anchors",
+  );
+
+  // Chat attachments — referenced from user messages via
+  // [USER_IMAGE: /chat-attachments/<filename> ...]. Missing files break
+  // those references on re-import.
+  chatAttachmentFileCount = await addDirectoryToZip(
+    zip,
+    join(ctx.dataRoot, ".psycheros", "chat-attachments"),
+    "psycheros/chat-attachments",
+  );
+
+  // Custom tools — user-installed tool JS files. Without these, custom
+  // tools silently vanish on import (the DB has no record of them; they
+  // live entirely on disk).
+  customToolFileCount = await addDirectoryToZip(
+    zip,
+    join(ctx.dataRoot, ".psycheros", "custom-tools"),
+    "psycheros/custom-tools",
+  );
+
+  // Background images — cosmetic, but a user's chosen background should
+  // survive a backup/restore cycle.
+  backgroundFileCount = await addDirectoryToZip(
+    zip,
+    join(ctx.dataRoot, ".psycheros", "backgrounds"),
+    "psycheros/backgrounds",
+  );
+
   // Build manifest
   const manifest: Record<string, unknown> = {
     schema_version: 1,
@@ -485,9 +549,14 @@ export async function exportEntityData(
       psycheros: {
         conversations: true,
         lorebooks: true,
+        pulses: true,
         vault: true,
         images: true,
         plugins: true,
+        anchors: true,
+        chat_attachments: true,
+        custom_tools: true,
+        backgrounds: true,
       },
     },
     counts: {
@@ -496,9 +565,14 @@ export async function exportEntityData(
       messages: messageCount,
       lorebooks: lorebookCount,
       lorebook_entries: lorebookEntryCount,
+      pulses: pulseCount,
       vault_documents: vaultDocCount,
       images: imageCount,
       plugin_files: pluginFileCount,
+      anchor_files: anchorFileCount,
+      chat_attachment_files: chatAttachmentFileCount,
+      custom_tool_files: customToolFileCount,
+      background_files: backgroundFileCount,
     },
   };
 
@@ -677,11 +751,14 @@ export async function importEntityData(
               : (detectedVoice === 1 && typeof m.content === "string"
                 ? m.content.slice("[Voice Chat] ".length)
                 : String(m.content));
+            // Newer columns default to null on old exports — preserves
+            // round-trip fidelity for fresh backups while keeping legacy
+            // imports working without forcing a re-export.
             execSql(
               ctx,
               `INSERT OR IGNORE INTO messages
-                (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice, edited_at, pulse_id, pulse_name, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 String(m.id),
                 conv.id,
@@ -694,6 +771,10 @@ export async function importEntityData(
                 m.tool_calls != null ? String(m.tool_calls) : null,
                 String(m.created_at),
                 detectedVoice,
+                m.edited_at != null ? String(m.edited_at) : null,
+                m.pulse_id != null ? String(m.pulse_id) : null,
+                m.pulse_name != null ? String(m.pulse_name) : null,
+                m.metadata != null ? String(m.metadata) : null,
               ],
             );
             messageTotal++;
@@ -801,6 +882,65 @@ export async function importEntityData(
 
         details.psycheros.lorebooks_restored = lorebooks.length;
         details.psycheros.lorebook_entries_restored = entryTotal;
+      }
+    }
+
+    // Pulses — restore from psycheros/pulses.json. Column intersection
+    // against the destination schema so old exports (missing newly-added
+    // columns) and new exports (with columns the destination doesn't know)
+    // both import cleanly. Missing columns fall back to schema defaults.
+    if (psycherosParts.pulses) {
+      const pulsesFile = zip.file("psycheros/pulses.json");
+      if (pulsesFile) {
+        await progress({
+          phase: "pulses",
+          status: "Restoring pulses...",
+        });
+        const pulses = JSON.parse(await pulsesFile.async("string")) as Array<
+          Record<string, unknown>
+        >;
+
+        if (pulses.length > 0) {
+          // Intersect JSON keys with destination table columns so the
+          // INSERT is robust to schema drift in either direction.
+          const destCols = queryAll<{ name: string }>(
+            ctx,
+            "PRAGMA table_info(pulses)",
+          ).map((r) => r.name);
+          const jsonCols = Object.keys(pulses[0]);
+          const commonCols = jsonCols.filter((c) => destCols.includes(c));
+
+          if (commonCols.length > 0) {
+            const placeholders = commonCols.map(() => "?").join(", ");
+            const sql = `INSERT OR REPLACE INTO pulses (${
+              commonCols.join(", ")
+            }) VALUES (${placeholders})`;
+            for (const p of pulses) {
+              execSql(
+                ctx,
+                sql,
+                commonCols.map((c): string | number | null => {
+                  const v = p[c];
+                  if (v === null || v === undefined) return null;
+                  if (typeof v === "number") return v;
+                  if (typeof v === "string") return v;
+                  // Arrays / objects must be stringified — pulses columns
+                  // like chain_pulse_ids are TEXT in the schema.
+                  return JSON.stringify(v);
+                }),
+              );
+            }
+          }
+        }
+
+        await progress({
+          phase: "pulses",
+          status: "Pulses imported.",
+          current: pulses.length,
+          total: pulses.length,
+        });
+
+        details.psycheros.pulses_restored = pulses.length;
       }
     }
 
@@ -1030,6 +1170,59 @@ export async function importEntityData(
       details.psycheros.plugins_restored = pluginFileCount;
       details.psycheros.plugin_restart_required = pluginFileCount > 0;
     }
+
+    // Restore binary directories that previously weren't included in the
+    // export. Each is optional in the zip — old exports without these
+    // entries import cleanly, the destination dir is just left empty.
+    const restoreBinaryDir = async (
+      zipPrefix: string,
+      destSubpath: string[],
+      detailKey:
+        | "anchor_files_restored"
+        | "chat_attachment_files_restored"
+        | "custom_tool_files_restored"
+        | "background_files_restored",
+    ): Promise<void> => {
+      if (!zip.file(new RegExp(`^${zipPrefix}/`))) return;
+      const destDir = join(ctx.dataRoot, ".psycheros", ...destSubpath);
+      await Deno.remove(destDir, { recursive: true }).catch((error) => {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+      });
+      await ensureDir(destDir);
+
+      let count = 0;
+      for (const [filename, file] of Object.entries(zip.files)) {
+        if (file.dir || !filename.startsWith(zipPrefix + "/")) continue;
+        const relative = filename.slice(zipPrefix.length + 1);
+        if (!relative || !isSafeArchivePath(relative)) continue;
+        const destination = join(destDir, ...relative.split("/"));
+        await ensureDir(join(destination, ".."));
+        await Deno.writeFile(destination, await file.async("uint8array"));
+        count++;
+      }
+      details.psycheros[detailKey] = count;
+    };
+
+    await restoreBinaryDir(
+      "psycheros/anchors",
+      ["anchors"],
+      "anchor_files_restored",
+    );
+    await restoreBinaryDir(
+      "psycheros/chat-attachments",
+      ["chat-attachments"],
+      "chat_attachment_files_restored",
+    );
+    await restoreBinaryDir(
+      "psycheros/custom-tools",
+      ["custom-tools"],
+      "custom_tool_files_restored",
+    );
+    await restoreBinaryDir(
+      "psycheros/backgrounds",
+      ["backgrounds"],
+      "background_files_restored",
+    );
 
     // --- Import entity-core data via MCP ---
     if (entityCoreParts && ctx.mcpClient?.isConnected()) {

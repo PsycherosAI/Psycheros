@@ -385,6 +385,7 @@ export type EntityYield =
     prompt: string;
     generatorName: string;
     description?: string;
+    toolCallId: string;
   }
   | {
     type: "thinking_corrected";
@@ -1448,32 +1449,23 @@ Discord interaction:
           // Yield the tool result
           yield { type: "tool_result", result };
 
-          // Detect [IMAGE:...] markers in tool results for inline image display
-          const imageMatch = result.content.match(/\[IMAGE:(\{.*\})\]/);
-          if (imageMatch) {
-            try {
-              const img = JSON.parse(imageMatch[1]);
-              yield {
-                type: "image_generated",
-                imagePath: img.path,
-                prompt: img.prompt,
-                generatorName: img.generator,
-                description: img.description,
-              };
-              // Append image marker to persisted content so it survives page reload
-              if (messageId) {
-                const imgMarker = `\n\n[IMAGE:${imageMatch[1]}]`;
-                assistantContent += imgMarker;
-                this.db.getRawDb().prepare(
-                  "UPDATE messages SET content = ? WHERE id = ?",
-                ).run(assistantContent, messageId);
-                console.log(
-                  `[ImageGen] Persisted image marker to message ${messageId}: ${img.path}`,
-                );
-              }
-            } catch {
-              // Invalid JSON in marker — skip
-            }
+          // Image sidecar path: when a tool returns structured image data
+          // (currently only generate_image via metadata.image), emit an
+          // image_generated SSE event so the live UI can surface the image
+          // inline. The legacy `[IMAGE:...]` marker path that used to live
+          // here is gone — new tool messages persist image data in
+          // `metadata.image`, and old messages still render via the retained
+          // legacy parser in templates.ts.
+          if (result.metadata?.image) {
+            const img = result.metadata.image;
+            yield {
+              type: "image_generated",
+              imagePath: img.path,
+              prompt: img.prompt,
+              generatorName: img.generatorName,
+              description: img.description,
+              toolCallId: result.toolCallId,
+            };
           }
 
           // Collect affected UI regions from the result
@@ -1486,16 +1478,14 @@ Discord interaction:
 
           // Persist to DB with error handling
           try {
-            // Strip [IMAGE:{...}] markers — they're UI-only, stored in the
-            // assistant message content instead
-            const persistedContent = result.content.replace(
-              /\[IMAGE:\{.*?\}\]/g,
-              "",
-            );
+            // Persist sidecar metadata (image data from generate_image, fade
+            // data from describe_image / look_closer) on the tool message row.
+            const metadata = result.metadata;
             this.db.addMessage(conversationId, {
               role: "tool",
-              content: persistedContent,
+              content: result.content,
               toolCallId: result.toolCallId,
+              metadata,
             });
           } catch (dbError) {
             // Non-fatal: result already yielded and in LLM context (see Error Handling Strategy)
@@ -1614,6 +1604,14 @@ Discord interaction:
     const lookCloserTurns = new Map<number, number>();
     // Track generate_image and describe_image tool results for fading
     const imageDescToolTurns = new Map<number, number>();
+    // Track tool messages that carry the new image sidecar (post-refactor
+    // generate_image results). Their long description lives verbatim in
+    // content text; fading swaps it for metadata.image.shortDescription.
+    const imageSidecarTurns = new Map<number, number>();
+    // Track tool messages that carry a generic fade sidecar (post-refactor
+    // describe_image / look_closer results). Content is replaced wholesale
+    // with metadata.fade.replacementContent past the threshold.
+    const fadeSidecarTurns = new Map<number, number>();
 
     // First pass: identify image markers and look_closer results with their turn positions
     for (let i = 0; i < history.length; i++) {
@@ -1635,6 +1633,14 @@ Discord interaction:
           msg.content.startsWith("[describe_image]"))
       ) {
         imageDescToolTurns.set(i, turnCount);
+      }
+      // New path: tool messages with metadata.image sidecar
+      if (msg.role === "tool" && msg.metadata?.image) {
+        imageSidecarTurns.set(i, turnCount);
+      }
+      // New path: tool messages with metadata.fade sidecar
+      if (msg.role === "tool" && msg.metadata?.fade) {
+        fadeSidecarTurns.set(i, turnCount);
       }
     }
 
@@ -1669,7 +1675,7 @@ Discord interaction:
       }
     }
 
-    // Fade generate_image and describe_image tool results
+    // Fade generate_image and describe_image tool results (legacy prefix path)
     for (const [msgIdx, resultTurn] of imageDescToolTurns) {
       if (currentTurn - resultTurn > IMAGE_DESCRIPTION_FADE_TURNS) {
         const msg = history[msgIdx];
@@ -1679,6 +1685,39 @@ Discord interaction:
         const shortMatch = msg.content.match(/\[short:(.+?)\]/);
         if (prefixMatch && shortMatch) {
           fadeMap.set(msg.id, `${prefixMatch[0]}${shortMatch[1]}`);
+        }
+      }
+    }
+
+    // Fade tool messages with metadata.image sidecar. The long description
+    // is embedded verbatim in content; swap it for shortDescription in memory.
+    // The persisted DB row is unchanged — fading is LLM-context-only.
+    for (const [msgIdx, resultTurn] of imageSidecarTurns) {
+      if (currentTurn - resultTurn > IMAGE_DESCRIPTION_FADE_TURNS) {
+        const msg = history[msgIdx];
+        const img = msg.metadata?.image;
+        if (
+          img?.description && img.shortDescription &&
+          msg.content.includes(img.description)
+        ) {
+          fadeMap.set(
+            msg.id,
+            msg.content.replace(img.description, img.shortDescription),
+          );
+        }
+      }
+    }
+
+    // Fade tool messages with metadata.fade sidecar (describe_image /
+    // look_closer post-refactor). Replace content wholesale with the
+    // precomputed replacementContent — no string matching needed because
+    // the tool already built the faded version at execution time.
+    for (const [msgIdx, resultTurn] of fadeSidecarTurns) {
+      if (currentTurn - resultTurn > IMAGE_DESCRIPTION_FADE_TURNS) {
+        const msg = history[msgIdx];
+        const fade = msg.metadata?.fade;
+        if (fade?.replacementContent) {
+          fadeMap.set(msg.id, fade.replacementContent);
         }
       }
     }

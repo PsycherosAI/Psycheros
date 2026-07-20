@@ -1,6 +1,6 @@
 {
   "name": "@psycheros/daemon",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "exports": "./src/main.ts",
   "imports": {
     "marked": "npm:marked@^15",
@@ -11,7 +11,8 @@
     "web-push": "npm:web-push@^3.6",
     "@zendrex/buttplug.js": "npm:@zendrex/buttplug.js@^0.3",
     "emojilib": "npm:emojilib@^3",
-    "mpg123-decoder": "npm:mpg123-decoder@^1.0.3"
+    "mpg123-decoder": "npm:mpg123-decoder@^1.0.3",
+    "sharp": "npm:sharp@0.33.5"
   },
   "tasks": {
     "dev": "deno run --watch --watch-exclude=identity/ -A src/main.ts",

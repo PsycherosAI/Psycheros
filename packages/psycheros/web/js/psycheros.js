@@ -2419,9 +2419,11 @@ function handleSSEEvent(eventType, data, messageEl, state) {
         const result = JSON.parse(data);
         const toolCard = pendingToolCalls.get(result.toolCallId);
         if (toolCard) {
-          addToolResult(toolCard, result.content, result.isError);
+          addToolResult(toolCard, result);
           // Re-expand the card so the result is visible (the done event
-          // collapsed it while tools were still executing)
+          // collapsed it while tools were still executing). The image (if
+          // any) renders as a sibling via the separate image_generated
+          // event, so we don't need to keep this card pinned open.
           toolCard.classList.add('expanded');
           pendingToolCalls.delete(result.toolCallId);
           AutoScroll.streamTick();
@@ -2436,10 +2438,18 @@ function handleSSEEvent(eventType, data, messageEl, state) {
         const img = JSON.parse(data);
         const container = document.createElement('div');
         container.className = 'generated-image-container';
+        // Optional Show-caption toggle. The description arrives in the SSE
+        // payload; the toggle uses toolCallId as a stable anchor so it
+        // survives HTMX swaps of the surrounding content.
+        const captionHtml = img.description && img.toolCallId
+          ? `<div class="generated-image-caption-toggle" onclick="Psycheros.toggleImageCaption('${escapeHtml(img.toolCallId)}')">▸ Show caption</div>
+             <div class="generated-image-caption" id="caption-${escapeHtml(img.toolCallId)}" hidden>${escapeHtml(img.description)}</div>`
+          : '';
         container.innerHTML = `
           <img src="${escapeHtml(img.imagePath)}" alt="${escapeHtml(img.prompt)}"
                class="generated-image" loading="lazy"/>
           <div class="generated-image-meta">${escapeHtml(img.generatorName)}</div>
+          ${captionHtml}
         `;
         contentContainer.appendChild(container);
         AutoScroll.streamTick();
@@ -2536,7 +2546,7 @@ function handleSSEEvent(eventType, data, messageEl, state) {
       break;
 
     case 'done': {
-      // Collapse all thinking and tool sections after streaming completes
+      // Collapse all thinking and tool sections after streaming completes.
       contentContainer.querySelectorAll('.thinking.expanded, .tool.expanded').forEach(el => {
         el.classList.remove('expanded');
       });
@@ -2635,8 +2645,10 @@ function createToolCard(toolCall) {
   return card;
 }
 
-function addToolResult(card, content, isError = false) {
+function addToolResult(card, result) {
   const resultEl = document.createElement('div');
+  const isError = result.isError ?? false;
+  const content = result.content;
   resultEl.className = 'tool-result' + (isError ? ' error' : '');
 
   let displayContent = content;
@@ -2654,6 +2666,25 @@ function addToolResult(card, content, isError = false) {
   `;
 
   card.appendChild(resultEl);
+}
+
+/**
+ * Toggle the long-caption disclosure on an image-bearing tool card.
+ * Lookup by toolCallId so the onclick attribute survives HTMX swaps —
+ * the card itself may be re-rendered, but the id is stable per generation.
+ */
+function toggleImageCaption(toolCallId) {
+  const caption = document.getElementById(`caption-${toolCallId}`);
+  if (!caption) return;
+  const toggle = caption.previousElementSibling;
+  const isHidden = caption.hasAttribute('hidden');
+  if (isHidden) {
+    caption.removeAttribute('hidden');
+    if (toggle) toggle.textContent = '▾ Hide caption';
+  } else {
+    caption.setAttribute('hidden', '');
+    if (toggle) toggle.textContent = '▸ Show caption';
+  }
 }
 
 // =============================================================================
@@ -4998,6 +5029,8 @@ globalThis.Psycheros = {
   startMessageEdit,
   cancelMessageEdit,
   saveMessageEdit,
+  // Tool card image caption toggle
+  toggleImageCaption,
   // Context inspector
   toggleContextViewer,
   hideContextViewer,
@@ -5803,9 +5836,10 @@ async function loadGallery(offset) {
       const promptAttr = img.prompt ? ' title="' + esc(img.prompt) + '"' : '';
       const catLabel = img.category === 'generated' ? 'generated' : 'uploaded';
       const catClass = img.category === 'generated' ? 'gallery-badge--generated' : 'gallery-badge--user';
+      const thumbUrl = img.url.replace(/^\/(generated-images|chat-attachments)\//, '/$1/thumbs/') + '.webp';
       return '<div class="gallery-card" data-category="' + img.category + '"' + promptAttr + '>'
         + '<div class="gallery-thumb-wrap">'
-        + '<img src="' + esc(img.url) + '" class="gallery-thumb" loading="lazy" onclick="openLightbox(\'' + esc(img.url) + '\',\'' + esc(img.filename) + '\')"/>'
+        + '<img src="' + esc(thumbUrl) + '" class="gallery-thumb" loading="lazy" onclick="openLightbox(\'' + esc(img.url) + '\',\'' + esc(img.filename) + '\')"/>'
         + '<span class="gallery-badge ' + catClass + '">' + catLabel + '</span>'
         + '</div>'
         + '<div class="gallery-meta">'

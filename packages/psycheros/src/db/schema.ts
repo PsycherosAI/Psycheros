@@ -717,6 +717,22 @@ function runMigrations(db: Database): void {
     console.log("[DB] Backfilled is_voice from legacy prefix");
   }
 
+  // metadata migration: nullable JSON column on messages. Tool-result rows
+  // use it to carry sidecar data (e.g. generate_image's image metadata) so
+  // the LLM-visible content stays plain text without `[IMAGE:...]` markers.
+  // No backfill — legacy messages keep their markers in content and render
+  // via the retained legacy parser in templates.ts.
+  const hasMetadataCol = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('messages') WHERE name = 'metadata'",
+    )
+    .get();
+
+  if (!hasMetadataCol) {
+    db.exec("ALTER TABLE messages ADD COLUMN metadata TEXT");
+    console.log("[DB] Added metadata column to messages table");
+  }
+
   // Migration: Add push_subscriptions table if missing
   const hasPushSubscriptions = db
     .prepare(

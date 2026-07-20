@@ -28,6 +28,7 @@
     "npm:mpg123-decoder@^1.0.3": "1.0.3",
     "npm:pdf-parse@^1.1.1": "1.1.4",
     "npm:sanitize-html@2": "2.17.4",
+    "npm:sharp@0.33.5": "0.33.5",
     "npm:web-push@^3.6.0": "3.6.7",
     "npm:xlsx@~0.18.5": "0.18.5",
     "npm:zod@3": "3.25.76"
@@ -1365,6 +1366,7 @@
           "npm:mpg123-decoder@^1.0.3",
           "npm:pdf-parse@^1.1.1",
           "npm:sanitize-html@2",
+          "npm:sharp@0.33.5",
           "npm:web-push@^3.6.0",
           "npm:xlsx@~0.18.5"
         ]

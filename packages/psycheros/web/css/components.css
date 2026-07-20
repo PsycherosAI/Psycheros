@@ -673,6 +673,40 @@
   background-color: rgba(255, 68, 68, 0.1);
 }
 
+/* Caption disclosure on generated-image containers. Lives as a sibling of
+   the <img>, below the generator-name meta line. */
+.generated-image-caption-toggle {
+  display: inline-block;
+  margin-top: var(--sp-2);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.generated-image-caption-toggle:hover {
+  color: var(--c-fg);
+  text-decoration: underline;
+}
+
+.generated-image-caption {
+  margin: var(--sp-2) auto 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  color: var(--c-fg-muted);
+  text-align: left;
+  background-color: var(--c-bg-sunken);
+  border-radius: var(--radius-sm);
+  line-height: 1.5;
+  max-width: 640px;
+}
+
+.generated-image-caption[hidden] {
+  display: none;
+}
+
 .tool-result-label {
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);

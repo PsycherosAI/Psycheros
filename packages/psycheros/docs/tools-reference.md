@@ -670,21 +670,26 @@ request. This enables workflows like "change the background", "make it darker",
 "add a character".
 
 **Image Persistence:** Generated images are saved to
-`.psycheros/generated-images/` and displayed inline in chat. Images persist
-across conversation switches via `[IMAGE:...]` markers appended to the assistant
-message content in the database. These markers are used only for UI rendering
-and DB persistence — they are stripped from LLM context to prevent the model
-from learning to parrot the marker syntax.
+`.psycheros/generated-images/` and rendered as a sibling element below the
+collapsed `generate_image` tool card. Image metadata (path, prompt, generator,
+long/short description) is persisted as a structured `metadata.image` sidecar on
+the tool-result message row in the database. Old messages from before this
+refactor still carry `[IMAGE:...]` markers in assistant content and continue to
+render via the retained legacy parser — no backfill migration.
 
 **Context Fading:** Image descriptions fade from longform to shortform after 5
 conversation turns in the LLM context. The DB always retains the full
 description. Fading applies to:
 
-- `[IMAGE:...]` markers in assistant/user messages (long description → short)
-- `generate_image` tool results (long auto-caption → short)
-- `describe_image` tool results (long description → short)
-- `look_closer` tool results (full description → "[faded — use look_closer
-  again]")
+- `generate_image` tool results via the `metadata.image` sidecar (long
+  description in content text → short description in memory)
+- `describe_image` tool results via the `metadata.fade` sidecar (long
+  description → short, swapped wholesale)
+- `look_closer` tool results via the `metadata.fade` sidecar (full description →
+  "[faded — use look_closer again]")
+- `[IMAGE:...]` markers in assistant/user messages (legacy, long → short)
+- `[describe_image]` / `[look_closer]` prefix-form tool results (legacy, same
+  behavior as the metadata.fade path)
 
 Additionally, tool call arguments for image tools (`generate_image`,
 `describe_image`, `look_closer`) are truncated in context — string values over
@@ -693,10 +698,11 @@ Additionally, tool call arguments for image tools (`generate_image`,
 **Data flow:** Entity calls `generate_image` → server reads generator config →
 dispatches to provider (OpenRouter, Gemini, Venice, or NanoGPT API) → saves
 image to disk → auto-captions via configured captioning provider (dual
-short/long) → returns plain text description with `[IMAGE:...]` marker for loop
-detection → entity loop strips marker before sending to LLM, yields
-`image_generated` SSE event, appends marker to assistant message for UI
-persistence → frontend renders inline image.
+short/long) → returns plain text content that spells out the file path verbatim
+(so the entity can chain into `send_discord_dm` without hallucinating) plus a
+structured `image` sidecar → entity loop persists the sidecar as
+`metadata.image` on the tool message row, yields `image_generated` SSE event →
+frontend renders image below the tool card.
 
 **Anchor capability tagging:** Each generator's entry in the entity's image-gen
 context block includes an anchor-capability tag (`accepts anchor images` or

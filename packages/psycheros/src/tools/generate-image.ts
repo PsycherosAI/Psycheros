@@ -12,6 +12,7 @@ import type { ToolResult } from "../types.ts";
 import type { Tool, ToolContext } from "./types.ts";
 import type { ImageGenConfig } from "../llm/image-gen-settings.ts";
 import { captionImageDual } from "./describe-image.ts";
+import { generateThumbnail } from "../utils/thumbnail.ts";
 
 // =============================================================================
 // Tool Definition
@@ -942,6 +943,15 @@ async function execute(
     );
     await Deno.writeFile(filePath, imageBytes);
 
+    try {
+      await generateThumbnail(
+        filePath,
+        join(generatedDir, "thumbs", `${filename}.webp`),
+      );
+    } catch (thumbError) {
+      console.warn("[ImageGen] Thumbnail generation failed:", thumbError);
+    }
+
     // Auto-caption the generated image if captioning is configured
     let description: string | undefined;
     let shortDescription: string | undefined;
@@ -960,30 +970,34 @@ async function execute(
       }
     }
 
-    // Build the IMAGE marker for the entity loop to detect (SSE event +
-    // assistant message persistence). The marker is stripped from the tool result
-    // before it reaches the LLM and before DB persistence.
+    // Build the image sidecar — the canonical structured source for the
+    // generated image. The loop persists it as `metadata.image` on the tool
+    // message row, the tool-card UI renders from it directly, and the
+    // in-memory fader rewrites `description` → `shortDescription` after
+    // IMAGE_DESCRIPTION_FADE_TURNS.
     const imagePath = `/generated-images/${filename}`;
-    const markerData: Record<string, string> = {
+    const relativeFilePath = `generated-images/${filename}`;
+    const imageSidecar: NonNullable<
+      NonNullable<ToolResult["metadata"]>["image"]
+    > = {
       path: imagePath,
+      filePath: relativeFilePath,
       prompt,
-      generator: generator.name,
+      generatorName: generator.name,
     };
-    if (description) {
-      markerData.description = description;
-    }
-    if (shortDescription) {
-      markerData.shortDescription = shortDescription;
-    }
-    const marker = JSON.stringify(markerData);
+    if (description) imageSidecar.description = description;
+    if (shortDescription) imageSidecar.shortDescription = shortDescription;
 
-    // Plain text description for the entity to "see" what they generated.
-    // [image_generated] prefix enables fading. [short:] suffix stores the
-    // short description for the fading mechanism (hidden from the LLM).
-    let resultText = "[image_generated] Image generated successfully.";
+    // LLM-visible content text. Plain prose, no `[image_generated]` prefix
+    // (hallucination trigger), no `[IMAGE:...]` marker (UI-only metadata
+    // that lived here historically), no `[short:...]` suffix (the short
+    // description lives in the sidecar now). The file path is spelled out
+    // verbatim so the model can pass it through unchanged to tools like
+    // send_discord_dm that need it.
+    let resultText = "Image generated successfully.";
     if (description) resultText += ` ${description}`;
-    if (shortDescription) resultText += `[short:${shortDescription}]`;
-    resultText += ` [IMAGE:${marker}]`;
+    resultText +=
+      `\n\nFile path (use verbatim for send_discord_dm image_path argument): ${relativeFilePath}`;
 
     if (veniceDroppedImages) {
       resultText +=
@@ -997,6 +1011,7 @@ async function execute(
     return {
       toolCallId: ctx.toolCallId,
       content: resultText,
+      metadata: { image: imageSidecar },
     };
   } catch (error) {
     return {

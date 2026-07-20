@@ -57,6 +57,7 @@ interface MessageRow {
   pulse_id: string | null;
   pulse_name: string | null;
   is_voice: number | null;
+  metadata: string | null;
 }
 
 /**
@@ -531,8 +532,8 @@ export class DBClient {
 
       this.db.exec(
         `INSERT INTO messages
-         (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, pulse_id, pulse_name, is_voice)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, pulse_id, pulse_name, is_voice, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           conversationId,
@@ -545,6 +546,7 @@ export class DBClient {
           message.pulseId ?? null,
           message.pulseName ?? null,
           message.isVoice ? 1 : 0,
+          message.metadata ? JSON.stringify(message.metadata) : null,
         ],
       );
 
@@ -571,6 +573,7 @@ export class DBClient {
       pulseId: message.pulseId,
       pulseName: message.pulseName,
       isVoice: !!message.isVoice,
+      metadata: message.metadata,
     };
   }
 
@@ -591,7 +594,7 @@ export class DBClient {
     const stmt = this.db.prepare(
       `SELECT id, conversation_id, role, content, reasoning_content,
               tool_call_id, tool_calls, created_at, edited_at,
-              pulse_id, pulse_name, is_voice
+              pulse_id, pulse_name, is_voice, metadata
        FROM messages
        WHERE conversation_id = ?
        ORDER BY created_at ASC`,
@@ -628,7 +631,7 @@ export class DBClient {
       const hasTiebreaker = !!options.beforeId;
       query = `SELECT id, conversation_id, role, content, reasoning_content,
                       tool_call_id, tool_calls, created_at, edited_at,
-                      pulse_id, pulse_name, is_voice
+                      pulse_id, pulse_name, is_voice, metadata
                FROM messages
                WHERE conversation_id = ?
                  AND (created_at < ?${
@@ -649,7 +652,7 @@ export class DBClient {
       // Initial load: fetch the most recent messages (DESC). Reversed below.
       query = `SELECT id, conversation_id, role, content, reasoning_content,
                       tool_call_id, tool_calls, created_at, edited_at,
-                      pulse_id, pulse_name, is_voice
+                      pulse_id, pulse_name, is_voice, metadata
                FROM messages
                WHERE conversation_id = ?
                ORDER BY created_at DESC
@@ -702,6 +705,20 @@ export class DBClient {
       }
     }
 
+    // Parse metadata JSON if present (tool-result sidecar data)
+    let metadata: Message["metadata"] | undefined;
+    if (row.metadata) {
+      try {
+        metadata = JSON.parse(row.metadata) as Message["metadata"];
+      } catch (error) {
+        throw new Error(
+          `Corrupted data: invalid metadata JSON for message ${row.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
     return {
       id: row.id,
       role: row.role as Message["role"],
@@ -714,6 +731,7 @@ export class DBClient {
       pulseId: row.pulse_id ?? undefined,
       pulseName: row.pulse_name ?? undefined,
       isVoice: !!row.is_voice,
+      metadata,
     };
   }
 
@@ -761,7 +779,7 @@ export class DBClient {
       const getUpdatedStmt = this.db.prepare(
         `SELECT id, conversation_id, role, content, reasoning_content,
                 tool_call_id, tool_calls, created_at, edited_at,
-                pulse_id, pulse_name, is_voice
+                pulse_id, pulse_name, is_voice, metadata
          FROM messages WHERE id = ?`,
       );
       const updatedRow = getUpdatedStmt.get<MessageRow>(id);

@@ -2015,9 +2015,21 @@ export function renderMessages(
   metricsMap?: MetricsMap,
   displayNames?: { entityName: string; userName: string },
 ): string {
+  // Build a lookup of tool results by toolCallId so renderToolCard can
+  // surface persisted results (and their image sidecar) on reload. Without
+  // this, tool cards on reload show only the call args — no result and no
+  // generated image.
+  const toolResultsByCallId = new Map<string, Message>();
+  for (const m of messages) {
+    if (m.role === "tool" && m.toolCallId) {
+      toolResultsByCallId.set(m.toolCallId, m);
+    }
+  }
   return messages
     .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m) => renderMessage(m, metricsMap?.get(m.id), displayNames))
+    .map((m) =>
+      renderMessage(m, metricsMap?.get(m.id), displayNames, toolResultsByCallId)
+    )
     .join("");
 }
 
@@ -2028,6 +2040,7 @@ export function renderMessage(
   msg: Message,
   metrics?: TurnMetrics,
   displayNames?: { entityName: string; userName: string },
+  toolResultsByCallId?: Map<string, Message>,
 ): string {
   // Derive [Voice Chat] prefix from the isVoice column (authoritative).
   // Also strip any stray prefix from content as defense-in-depth — the
@@ -2048,7 +2061,12 @@ export function renderMessage(
       displayNames?.userName,
     );
   } else if (voicedMsg.role === "assistant") {
-    return renderAssistantMessage(voicedMsg, metrics, displayNames?.entityName);
+    return renderAssistantMessage(
+      voicedMsg,
+      metrics,
+      displayNames?.entityName,
+      toolResultsByCallId,
+    );
   }
   return "";
 }
@@ -2162,6 +2180,7 @@ export function renderAssistantMessage(
   msg: Message,
   metrics?: TurnMetrics,
   entityName?: string,
+  toolResultsByCallId?: Map<string, Message>,
 ): string {
   const editedIndicator = msg.editedAt
     ? `<span class="msg-edited-indicator">(edited)</span>`
@@ -2203,7 +2222,17 @@ export function renderAssistantMessage(
   // Tool calls
   if (msg.toolCalls && msg.toolCalls.length > 0) {
     for (const tc of msg.toolCalls) {
-      html += renderToolCard(tc);
+      const toolMsg = toolResultsByCallId?.get(tc.id);
+      const result: ToolResult | undefined = toolMsg
+        ? { toolCallId: tc.id, content: toolMsg.content }
+        : undefined;
+      html += renderToolCard(tc, result);
+      // If the tool produced an image sidecar, render it as a sibling below
+      // the (collapsed) tool card. Matches the streaming `image_generated`
+      // event path — same DOM, same caption toggle, both keyed by toolCallId.
+      if (toolMsg?.metadata?.image) {
+        html += renderGeneratedImageSibling(toolMsg.metadata.image, tc.id);
+      }
     }
   }
 
@@ -2436,6 +2465,32 @@ export function renderToolCard(
 }
 
 /**
+ * Render a generated image as a sibling element below the tool card.
+ * Matches the streaming `image_generated` event's DOM exactly so the
+ * caption-toggle ids line up across both paths.
+ */
+function renderGeneratedImageSibling(
+  image: NonNullable<NonNullable<Message["metadata"]>["image"]>,
+  toolCallId: string,
+): string {
+  const captionHtml = image.description
+    ? `<div class="generated-image-caption-toggle" onclick="Psycheros.toggleImageCaption('${
+      escapeHtml(toolCallId)
+    }')">▸ Show caption</div>
+  <div class="generated-image-caption" id="caption-${
+      escapeHtml(toolCallId)
+    }" hidden>${escapeHtml(image.description)}</div>`
+    : "";
+  return `<div class="generated-image-container">
+  <img src="${escapeHtml(image.path)}" alt="${
+    escapeHtml(image.prompt)
+  }" class="generated-image" loading="lazy"/>
+  <div class="generated-image-meta">${escapeHtml(image.generatorName)}</div>
+  ${captionHtml}
+</div>`;
+}
+
+/**
  * Render a tool result section.
  */
 export function renderToolResult(result: ToolResult): string {
@@ -2450,7 +2505,8 @@ export function renderToolResult(result: ToolResult): string {
     }
   }
 
-  // Detect [IMAGE:...] markers and render them inline
+  // Detect [IMAGE:...] markers and render them inline (legacy path for
+  // messages persisted before the metadata.image refactor).
   const imagePattern = /\[IMAGE:(\{.*?\})\]/g;
   if (imagePattern.test(content)) {
     content = content.replace(imagePattern, (_match, jsonStr) => {
@@ -7938,6 +7994,11 @@ export function renderVisionGalleryTab(data: {
         : img.filename;
       const promptAttr = img.prompt ? ` title="${escapeHtml(img.prompt)}"` : "";
       const escapedUrl = escapeHtml(img.url);
+      const thumbUrl = img.url.replace(
+        /^\/(generated-images|chat-attachments)\//,
+        "/$1/thumbs/",
+      ) + ".webp";
+      const escapedThumb = escapeHtml(thumbUrl);
       const escapedFilename = escapeHtml(img.filename);
       const categoryLabel = img.category === "generated"
         ? "generated"
@@ -7949,7 +8010,7 @@ export function renderVisionGalleryTab(data: {
         escapeHtml(img.category)
       }"${promptAttr}>
       <div class="gallery-thumb-wrap">
-        <img src="${escapedUrl}" class="gallery-thumb" loading="lazy" onclick="openLightbox('${escapedUrl}','${escapedFilename}')"/>
+        <img src="${escapedThumb}" class="gallery-thumb" loading="lazy" onclick="openLightbox('${escapedUrl}','${escapedFilename}')"/>
         <span class="gallery-badge ${categoryClass}">${categoryLabel}</span>
       </div>
       <div class="gallery-meta">

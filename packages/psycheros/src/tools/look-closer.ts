@@ -91,7 +91,13 @@ async function executeLookCloser(
 
     return {
       toolCallId: ctx.toolCallId,
-      content: `[look_closer] ${image_path}: ${description}`,
+      content: `Looked closer at ${image_path}: ${description}`,
+      metadata: {
+        fade: {
+          replacementContent:
+            `Looked closer at ${image_path}: [description faded — use look_closer again for details]`,
+        },
+      },
     };
   } catch (error) {
     return {

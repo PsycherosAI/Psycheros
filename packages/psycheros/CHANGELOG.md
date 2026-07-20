@@ -6,6 +6,61 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-07-19
+
+### Changed
+
+- **Generated image rendering moved into tool-call surface:** image metadata is
+  now persisted as a structured `metadata.image` sidecar on the tool-result
+  message row instead of a `[IMAGE:{...}]` marker embedded in assistant content.
+  The tool card stays collapsed by default; the image renders as a sibling
+  element below the card with an optional "Show caption" disclosure.
+  `generate_image`'s LLM-visible content is now plain text that spells out the
+  file path verbatim — fixes a regression where the entity hallucinated a path
+  when chaining into `send_discord_dm` (the marker was stripped before reaching
+  the LLM, so the model never saw the actual filename). Old messages with
+  `[IMAGE:...]` markers in assistant content continue to render via the retained
+  legacy parser. Context fading now operates on `metadata.image` for new
+  messages (long → short description after 5 turns, in-memory only); the legacy
+  prefix-based fade path remains for `describe_image` / `look_closer`.
+- **describe_image / look_closer migrated to metadata.fade sidecar:** the
+  `[describe_image]` / `[look_closer]` text prefixes and `[short:...]` suffix
+  are gone from new tool results — content is plain prose, and the faded version
+  lives in `metadata.fade.replacementContent`. Removes a minor hallucination
+  trigger (entities occasionally mimicked the prefix pattern). Legacy
+  prefix-based fading remains for old DB rows.
+- **Entity Data export/import round-trips the full messages row:** previously
+  dropped `metadata`, `edited_at`, `pulse_id`, and `pulse_name` columns are now
+  included in both the export SELECT and the import INSERT. Old exports without
+  these fields continue to import cleanly (default to null).
+- **Entity Data export now includes pulses + missing binary dirs:** the `pulses`
+  table is exported as `psycheros/pulses.json` and restored on import
+  (column-intersected against the destination schema so old/new exports both
+  import cleanly). Four previously-dropped binary directories are now included:
+  `.psycheros/anchors/`, `.psycheros/chat-attachments/`,
+  `.psycheros/custom-tools/`, `.psycheros/backgrounds/`. Old exports without
+  these entries still import — the destination dirs are left empty.
+
+### Fixed
+
+- **Gallery tab performance (thumbnails + scan caching):** the Settings → Vision
+  → Gallery tab was slow to load for three reasons: (1) the grid served
+  full-size originals (~800 KB avg, some 2 MB+) as 150px thumbnails; (2)
+  `scanGalleryImages` ran a leading-wildcard `LIKE '%<filename>%'` query per
+  image — a full `messages` table scan per file; (3) nothing was cached, so
+  every tab click re-walked the filesystem and re-ran the SQL. Fixed by
+  generating 400px WebP thumbnails via sharp at image-write time
+  (`src/utils/thumbnail.ts`) with lazy backfill on miss, replacing the per-file
+  SQL with two batch queries feeding an in-memory metadata map, and memoizing
+  the scan at module level with directory-mtime + 60s TTL invalidation.
+  Bandwidth on first page load drops ~25×; repeated tab clicks skip the
+  filesystem and SQL entirely.
+- **MCP tool-call timeout not propagated to SDK:** `callToolWithTimeout` wrapped
+  `client.callTool` in `Promise.race` with a longer timeout (e.g. 10 minutes for
+  `memory_embedding_rebuild`) but never told the SDK — so the SDK's hardcoded
+  60s default rejected first with `McpError -32001`. The wrapper now passes
+  `{ timeout: ms }` as the SDK options arg.
+
 ## [0.9.1] - 2026-07-18
 
 ### Fixed
@@ -1244,6 +1299,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 - Entity identity and memory served by the sibling `entity-core` MCP server,
   spawned as a subprocess when `PSYCHEROS_MCP_ENABLED=true`.
 
+[0.9.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.9.2
 [0.9.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.9.1
 [0.9.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.9.0
 [0.8.24]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.8.24

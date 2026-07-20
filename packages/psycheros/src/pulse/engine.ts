@@ -831,6 +831,7 @@ export class PulseEngine {
                   content: truncatedContent,
                   isError: result.isError,
                   affectedRegions: result.affectedRegions,
+                  metadata: result.metadata,
                 }, conversationId);
               } catch { /* no clients */ }
             }

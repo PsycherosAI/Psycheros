@@ -410,29 +410,36 @@ user makes changes via the UI.
 
 ## Inline Image Display
 
-Generated images render inline in chat messages. The entity uses the
-`generate_image` tool and images appear directly in the conversation as the tool
-result is processed.
+Generated images render as a sibling element below the (collapsed)
+`generate_image` tool card. The entity uses the `generate_image` tool and the
+image appears directly in the conversation as the tool result is processed.
 
 **Features:**
 
-- Images display inline with a subtle container and generator name metadata
-- Auto-generated image descriptions displayed below the image (via the
-  configured captioning provider)
-- Images persist across conversation switches via `[IMAGE:...]` markers stored
-  in the assistant message content
-- Descriptions are included in the marker JSON and rendered from persisted
-  messages
+- Tool card stays collapsed by default — the image renders underneath it, not
+  inside it, keeping the chat log compact
+- Image container shows the image plus generator name metadata
+- Long caption hidden by default; a "Show caption" / "Hide caption" toggle below
+  the image reveals it on click
+- Auto-generated captions come from the configured captioning provider (dual
+  short/long)
+- Images persist across conversation switches via a structured `metadata.image`
+  sidecar stored on the tool-result message row
+- Legacy messages (pre-refactor) still render via the retained `[IMAGE:...]`
+  marker parser in assistant content — no migration required
 - Lazy loading (`loading="lazy"`) for performance
 - Server-side rendered in `renderAssistantMessage()` for persisted messages,
   client-side rendered during SSE streaming
 
 **SSE event:** `image_generated` with JSON payload
-`{ imagePath, prompt, generatorName, description }`.
+`{ imagePath, prompt, generatorName, description, toolCallId }`. The
+`toolCallId` anchors the "Show caption" toggle so it survives HTMX swaps.
 
-Implemented in `web/js/psycheros.js` (SSE handler), `src/server/templates.ts`
-(server-side rendering), `web/css/components.css` (`.generated-image-container`,
-`.generated-image`, `.generated-image-meta`, `.generated-image-desc`).
+Implemented in `web/js/psycheros.js` (SSE handler + `toggleImageCaption`),
+`src/server/templates.ts` (`renderGeneratedImageSibling`, server-side
+rendering), `web/css/components.css` (`.generated-image-container`,
+`.generated-image`, `.generated-image-meta`, `.generated-image-caption-toggle`,
+`.generated-image-caption`).
 
 ## Chat Image Attachments
 
