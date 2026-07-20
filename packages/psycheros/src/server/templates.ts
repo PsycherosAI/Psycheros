@@ -887,6 +887,9 @@ function renderPluginUpdate(status: PluginStatus): string {
   const values = [
     status.update.repoUrl ? `repo ${status.update.repoUrl}` : "",
     status.update.tagPrefix ? `tag prefix ${status.update.tagPrefix}` : "",
+    status.update.packagePath
+      ? `package path ${status.update.packagePath}`
+      : "",
   ].filter(Boolean).join(", ");
   return `<p class="settings-note">Update metadata: ${
     escapeHtml(values || "declared")
@@ -1062,6 +1065,10 @@ export function renderPluginsSettings(
             <div class="llm-field" style="min-width:160px;">
               <label for="plugin-git-ref">Branch or tag</label>
               <input type="text" id="plugin-git-ref" class="input-field llm-input" placeholder="default">
+            </div>
+            <div class="llm-field" style="min-width:220px;">
+              <label for="plugin-git-package-path">Plugin directory (optional)</label>
+              <input type="text" id="plugin-git-package-path" class="input-field llm-input" placeholder="plugins/my-plugin">
             </div>
             <button type="submit" class="btn btn--primary">Inspect Git</button>
           </form>

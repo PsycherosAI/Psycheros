@@ -5,6 +5,7 @@
 import JSZip from "jszip";
 import { ensureDir } from "@std/fs";
 import { basename, dirname, isAbsolute, join, relative } from "@std/path";
+import * as semver from "@std/semver";
 import { VERSION_BASE as PSYCHEROS_VERSION } from "../version.ts";
 import entityCoreDeno from "../../../entity-core/deno.json" with {
   type: "json",
@@ -18,11 +19,17 @@ import {
   type PluginStatus,
   validatePluginDirectory,
   validatePluginManifest,
+  validatePluginPackagePath,
 } from "../../../plugin-api/src/mod.ts";
 
 export type PluginInstallSource =
   | { type: "zip"; fileName?: string }
-  | { type: "git"; repoUrl: string; ref?: string };
+  | {
+    type: "git";
+    repoUrl: string;
+    ref?: string;
+    packagePath?: string;
+  };
 
 export interface PluginInstallExisting {
   name: string;
@@ -196,58 +203,15 @@ function deriveDeclaredCapabilities(
   };
 }
 
-function parseVersion(version: string): number[] | null {
-  const match = version.trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
-  if (!match) return null;
-  return [
-    Number(match[1]),
-    Number(match[2] ?? "0"),
-    Number(match[3] ?? "0"),
-  ];
-}
-
-function compareVersions(actual: string, expected: string): number | null {
-  const left = parseVersion(actual);
-  const right = parseVersion(expected);
-  if (!left || !right) return null;
-  for (let i = 0; i < 3; i++) {
-    if (left[i] > right[i]) return 1;
-    if (left[i] < right[i]) return -1;
-  }
-  return 0;
-}
-
-function satisfiesComparator(
-  actual: string,
-  comparator: string,
-): boolean | null {
-  const match = comparator.match(/^(>=|<=|>|<|=)?\s*v?(\d+(?:\.\d+){0,2})$/);
-  if (!match) return null;
-  const comparison = compareVersions(actual, match[2]);
-  if (comparison === null) return null;
-  switch (match[1] ?? "=") {
-    case ">=":
-      return comparison >= 0;
-    case "<=":
-      return comparison <= 0;
-    case ">":
-      return comparison > 0;
-    case "<":
-      return comparison < 0;
-    default:
-      return comparison === 0;
-  }
-}
-
 function satisfiesRange(actual: string, range: string): boolean | null {
-  const comparators = range.trim().split(/\s+/).filter(Boolean);
-  if (comparators.length === 0) return true;
-  for (const comparator of comparators) {
-    const satisfied = satisfiesComparator(actual, comparator);
-    if (satisfied === null) return null;
-    if (!satisfied) return false;
+  try {
+    return semver.satisfies(
+      semver.parse(actual),
+      semver.parseRange(range),
+    );
+  } catch {
+    return null;
   }
-  return true;
 }
 
 function compatibilityWarnings(manifest: PluginManifest): string[] {
@@ -277,6 +241,45 @@ function compatibilityWarnings(manifest: PluginManifest): string[] {
     );
   }
   return warnings;
+}
+
+/**
+ * Compatibility problems that make an unattended/one-click update unsafe.
+ *
+ * Manual installs retain the existing review-and-warning flow. Updates are
+ * stricter: a Psycheros range must be declared, and every host range that can
+ * be checked from inside Psycheros must parse and match. Launcher ranges remain
+ * informational because the daemon cannot determine the launcher version.
+ */
+export function pluginUpdateCompatibilityBlockers(
+  manifest: PluginManifest,
+): string[] {
+  const compatibility = manifest.compatibility;
+  if (!compatibility?.psycheros) {
+    return [
+      "This release does not declare compatibility.psycheros, so a safe automatic update cannot be verified.",
+    ];
+  }
+
+  const checks: Array<[string, string, string | undefined]> = [
+    ["Psycheros", PSYCHEROS_VERSION, compatibility.psycheros],
+    ["entity-core", ENTITY_CORE_VERSION, compatibility.entityCore],
+  ];
+  const blockers: string[] = [];
+  for (const [label, actual, range] of checks) {
+    if (!range) continue;
+    const satisfied = satisfiesRange(actual, range);
+    if (satisfied === null) {
+      blockers.push(
+        `Could not verify this release's ${label} compatibility range (${range}) against ${actual}.`,
+      );
+    } else if (!satisfied) {
+      blockers.push(
+        `This installation is running ${label} ${actual}, but the release declares ${label} compatibility ${range}.`,
+      );
+    }
+  }
+  return blockers;
 }
 
 function dependencyWarnings(manifest: PluginManifest): string[] {
@@ -393,9 +396,13 @@ export class PluginInstaller {
   async inspectGit(
     repoUrl: string,
     ref?: string,
+    packagePath?: string,
   ): Promise<PluginInstallPreview> {
     const cleanRepoUrl = repoUrl.trim();
     const cleanRef = ref?.trim() || undefined;
+    const cleanPackagePath = packagePath?.trim()
+      ? validatePluginPackagePath(packagePath)
+      : undefined;
     if (!cleanRepoUrl) fail("A Git repository URL is required.");
     if (cleanRepoUrl.startsWith("-")) {
       fail("That Git repository URL could not be used.");
@@ -419,10 +426,15 @@ export class PluginInstaller {
         const stderr = new TextDecoder().decode(result.stderr).trim();
         fail(stderr || "Could not clone that plugin repository.");
       }
-      return await this.finalizeStagedPackage(draftId, cloneRoot, {
+      const packageRoot = cleanPackagePath
+        ? join(cloneRoot, ...cleanPackagePath.split("/"))
+        : cloneRoot;
+      assertInside(cloneRoot, packageRoot);
+      return await this.finalizeStagedPackage(draftId, packageRoot, {
         type: "git",
         repoUrl: cleanRepoUrl,
         ref: cleanRef,
+        packagePath: cleanPackagePath,
       });
     } catch (error) {
       await removeIfExists(draftRoot);
@@ -469,6 +481,10 @@ export class PluginInstaller {
       backupPath,
       restartRequired: true,
     };
+  }
+
+  async discardDraft(draftId: string): Promise<void> {
+    await removeIfExists(this.resolveDraftRoot(draftId));
   }
 
   async removePlugin(id: string): Promise<PluginRemoveResult> {
@@ -698,6 +714,9 @@ export class PluginInstaller {
         type: "git",
         repoUrl: source.repoUrl,
         ref: typeof source.ref === "string" ? source.ref : undefined,
+        packagePath: typeof source.packagePath === "string"
+          ? validatePluginPackagePath(source.packagePath)
+          : undefined,
       };
     }
     fail("Could not read that plugin draft source.");

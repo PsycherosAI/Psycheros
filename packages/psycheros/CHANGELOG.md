@@ -6,6 +6,18 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Compatibility-safe plugin updates from monorepos:** plugin manifests can
+  declare `update.packagePath` when their package lives below the repository
+  root, and the Git install form accepts the same optional directory. Update
+  checks inspect tagged manifests from newest to oldest, skip releases whose id,
+  manifest version, or Psycheros/entity-core compatibility is invalid, and
+  select the newest compatible version. Apply now re-reads trusted update
+  metadata from the installed plugin, refuses tagged manifests that silently
+  change that update channel, and repeats every compatibility check before the
+  existing backup-and-atomic-replace flow.
+
 ## [0.9.2] - 2026-07-19
 
 ### Changed
