@@ -1859,7 +1859,7 @@ export function renderSidebar(conversations: Conversation[]): string {
     <span class="sidebar-title">Conversations</span>
     <button class="btn btn--primary btn--sm" onclick="Psycheros.newConversation()">+ New</button>
   </div>
-  <nav class="conv-list" id="conv-list" hx-get="/fragments/conv-list" hx-trigger="load" hx-swap="innerHTML">
+  <nav class="conv-list" id="conv-list" hx-get="/fragments/conv-list" hx-trigger="load, refresh-conv-list" hx-swap="innerHTML">
     ${renderConversationList(conversations)}
   </nav>
   <div class="sidebar-footer">
