@@ -331,7 +331,10 @@ the full context of the other conversation into the current one.
 | `conversation_peek` | Summarize another conversation and inject the summary into context |
 
 **Parameters:** `query` (string, partial match against conversation titles) or
-`conversation_id` (string, exact ID from a prior search).
+`conversation_id` (string, exact ID from a prior search). Optional
+`instructions` (string) appends specific focus guidance for the summary —
+particular topics, decisions, or wording to capture. Omit for a general
+overview.
 
 **Behavior:**
 
@@ -772,7 +775,9 @@ metadata suffix. After 5 turns, the longform fades to shortform in LLM context.
 | `describe_image` | Get a detailed description of an image from a local path or URL |
 
 **Parameters:** `path` (optional, local file path relative to `.psycheros/`),
-`url` (optional, remote image URL). One of `path` or `url` is required.
+`url` (optional, remote image URL). One of `path` or `url` is required. Optional
+`instructions` (string) appends specific focus guidance — a particular aspect to
+focus on, level of detail, or framing. Omit for a general detailed description.
 
 **Use cases:** Examining images found via web search, reviewing previously
 generated images, understanding user-attached images in more detail.
@@ -787,6 +792,9 @@ This is useful when the image's description has faded from context.
 | `look_closer` | Re-examine an image for a detailed description |
 
 **Parameters:** `image_path` (required, path relative to `.psycheros/`).
+Optional `instructions` (string) appends specific focus guidance — a particular
+aspect to focus on, level of detail, or framing. Omit for a general detailed
+description.
 
 **Behavior:** Re-captions the image using the configured captioning provider and
 returns the full longform description. The result is prefixed with

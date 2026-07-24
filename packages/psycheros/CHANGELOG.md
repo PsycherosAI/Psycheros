@@ -18,6 +18,50 @@ follows [Semantic Versioning](https://semver.org/).
   change that update channel, and repeats every compatibility check before the
   existing backup-and-atomic-replace flow.
 
+## [0.10.0] - 2026-07-24
+
+### Added
+
+- **Bundled Google Suite plugin:** Calendar, Contacts, Drive, Fit, Gmail, and
+  Tasks tools with full OAuth PKCE flow. Ships as a first-party bundled plugin —
+  enabled per-entity in the Plugins settings tab.
+- **Context Inspector Plugins tab:** view loaded plugins and their prompt-hook
+  detail directly in the inspector.
+- **Per-conversation composer draft persistence:** unsent text in the composer
+  is now saved per-conversation and restored on switch.
+- **Configurable embedding model and chunk sizes:** users can now choose the
+  embedding model and tune RAG chunk parameters from the Memory & RAG settings
+  page. Changing the model triggers a full re-embed.
+- **Configurable eager-RAG chunk limit:** controls how many chunks are eagerly
+  injected into context per turn.
+- **Optional instructions field for synthesis tools:** synthesis tool
+  definitions can now carry custom instructions for the LLM.
+- **Per-component log-level filtering:** set log verbosity per component
+  (gateway, RAG, entity loop, etc.) instead of a single global level.
+
+### Fixed
+
+- **Discord gateway silently drops and never reconnects:** the gateway's
+  `skipNextClose` flag was set unconditionally at the top of `connectWs()` but
+  was only consumed by the asynchronous close event of an outgoing WebSocket. On
+  initial connect (and any reconnect where the old WS was already null), no
+  close event ever fired, so the flag sat stale indefinitely. When Discord
+  rotated the connection a few hours later, the close handler saw the stale
+  flag, cleared it, and returned without scheduling a reconnect — leaving the
+  entity dark with no log lines and no recovery path short of a daemon restart.
+  The flag is now set only inside the `if (this.ws)` block in both `connectWs()`
+  and `closeAndReconnect()`, so it's always paired with an actual close that
+  will consume it. Two related changes shipped together: (1) a 60-second health
+  watchdog now schedules a reconnect if the WebSocket is not open and no
+  reconnect is already pending — defence-in-depth on top of the heartbeat's
+  missed-ACK check, which only fires while the WS is OPEN; (2) the hard
+  10-attempt cap on reconnects is removed. Backoff stays bounded at 30s, so
+  transient outages are affordable to retry indefinitely; a permanent give-up
+  left no recovery path for token fixes, network changes, or DNS hiccups that
+  outlasted the old ~3-minute window.
+- **Embedding config not applied on boot:** saved embedding model/chunk settings
+  were loaded from DB but not propagated to the embedder singleton at startup.
+
 ## [0.9.2] - 2026-07-19
 
 ### Changed
@@ -1311,6 +1355,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 - Entity identity and memory served by the sibling `entity-core` MCP server,
   spawned as a subprocess when `PSYCHEROS_MCP_ENABLED=true`.
 
+[0.10.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.10.0
 [0.9.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.9.2
 [0.9.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.9.1
 [0.9.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.9.0

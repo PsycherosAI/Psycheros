@@ -21,7 +21,8 @@ import {
   getPlatformExtension,
 } from "../vec-extension.ts";
 import type { LocalEmbedder } from "./mod.ts";
-import { EMBEDDING_DIMENSION } from "../graph/types.ts";
+import { getActiveEmbeddingDimension } from "../graph/types.ts";
+import { loadEmbeddingRuntimeConfig } from "./settings.ts";
 import type { Granularity } from "../types.ts";
 import { chunkContent, shouldChunk } from "./chunker.ts";
 
@@ -104,16 +105,68 @@ const CACHE_INDEX_DDL = `
     ON memory_embeddings(granularity);
 `;
 
-const VECTOR_TABLE_SQL = `
+function vectorTableSql(dim: number): string {
+  return `
   CREATE VIRTUAL TABLE IF NOT EXISTS vec_memory_embeddings USING vec0(
-    embedding FLOAT[${EMBEDDING_DIMENSION}] distance=cosine
+    embedding FLOAT[${dim}] distance=cosine
   )
 `;
+}
 
-// Schema version for the embedding enrichment algorithm.
-// Bump this when the text enrichment logic changes (e.g., date prefix added).
-// The cache auto-detects a version mismatch and triggers a full rebuild.
-const EMBEDDING_SCHEMA_VERSION = 2;
+// Schema version for the embedding enrichment algorithm. Bumped when the
+// text enrichment logic changes (e.g., date prefix added). Combined with
+// the active chunk params and model repo into a composite fingerprint so
+// any of those changes triggers a full rebuild on next startup.
+//
+// Migration note: the historical value was a bare integer `2` stored as TEXT.
+// The new format is a JSON object. `checkSchemaVersion()` treats any value
+// that fails to JSON-parse as a mismatch, which means legacy installs upgrade
+// cleanly (one-time rebuild cost indistinguishable from any other schema bump).
+const EMBEDDING_SCHEMA_ALGORITHM_VERSION = 3;
+
+interface EmbeddingSchemaFingerprint {
+  algorithm: number;
+  chunkParamsHash: string;
+  modelRepoId: string;
+}
+
+/**
+ * Compute the current embedding schema fingerprint from the active runtime
+ * config. The fingerprint captures everything that would invalidate cached
+ * embeddings: the algorithm version (manual bump on enrichment changes),
+ * the active chunk params, and the active model repo.
+ */
+function computeSchemaFingerprint(): EmbeddingSchemaFingerprint {
+  const cfg = loadEmbeddingRuntimeConfig();
+  const cp = cfg.chunkParams;
+  const chunkParamsHash =
+    `${cp.thresholdChars}:${cp.targetChars}:${cp.minChars}:${cp.maxChars}:${cp.overlapChars}`;
+  return {
+    algorithm: EMBEDDING_SCHEMA_ALGORITHM_VERSION,
+    chunkParamsHash,
+    modelRepoId: cfg.modelRepoId,
+  };
+}
+
+/**
+ * Compare a stored fingerprint (raw TEXT from embedding_metadata) against the
+ * currently-active fingerprint. Returns true if a rebuild is needed — either
+ * because no fingerprint is stored, the value can't be parsed (legacy integer
+ * format), or any field of the composite differs.
+ */
+function fingerprintNeedsRebuild(stored: string | undefined): boolean {
+  if (!stored) return true;
+  try {
+    const parsed = JSON.parse(stored) as Partial<EmbeddingSchemaFingerprint>;
+    const active = computeSchemaFingerprint();
+    return parsed.algorithm !== active.algorithm ||
+      parsed.chunkParamsHash !== active.chunkParamsHash ||
+      parsed.modelRepoId !== active.modelRepoId;
+  } catch {
+    // Legacy integer format or corrupt JSON — rebuild.
+    return true;
+  }
+}
 
 // ---- Cache class ----
 
@@ -441,7 +494,7 @@ export class EmbeddingCache {
     // Cache miss — delete any stale chunks
     this.delete(parentKey);
 
-    if (!shouldChunk(entry.content)) {
+    if (!shouldChunk(entry.content, loadEmbeddingRuntimeConfig().chunkParams)) {
       // SHORT PATH: single embedding
       const embedding = await embedder.embed(enrichedContent);
       if (!embedding) return null;
@@ -461,7 +514,10 @@ export class EmbeddingCache {
     }
 
     // LONG PATH: chunk and embed each chunk
-    const chunks = chunkContent(entry.content);
+    const chunks = chunkContent(
+      entry.content,
+      loadEmbeddingRuntimeConfig().chunkParams,
+    );
     let firstEmbedding: number[] | null = null;
 
     for (const chunk of chunks) {
@@ -523,7 +579,7 @@ export class EmbeddingCache {
     if (this.vectorAvailable) {
       try {
         this.db.exec("DROP TABLE IF EXISTS vec_memory_embeddings");
-        this.db.exec(VECTOR_TABLE_SQL);
+        this.db.exec(vectorTableSql(getActiveEmbeddingDimension()));
       } catch {
         // Vector extension might be unavailable — metadata clear still proceeds
       }
@@ -580,12 +636,7 @@ export class EmbeddingCache {
     const row = stmt.get<{ value: string }>();
     stmt.finalize();
 
-    if (!row) return true; // No version recorded — needs rebuild
-
-    const stored = parseInt(row.value, 10);
-    if (isNaN(stored) || stored !== EMBEDDING_SCHEMA_VERSION) return true;
-
-    return false;
+    return fingerprintNeedsRebuild(row?.value);
   }
 
   /**
@@ -598,10 +649,12 @@ export class EmbeddingCache {
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS embedding_metadata (key TEXT PRIMARY KEY, value TEXT)`,
     );
-    this.db.exec(
+    const fingerprint = JSON.stringify(computeSchemaFingerprint());
+    const stmt = this.db.prepare(
       "INSERT OR REPLACE INTO embedding_metadata (key, value) VALUES ('schema_version', ?)",
-      [String(EMBEDDING_SCHEMA_VERSION)],
     );
+    stmt.run(fingerprint);
+    stmt.finalize();
     this.rebuildNeeded = false;
   }
 
@@ -689,7 +742,7 @@ export class EmbeddingCache {
           .get();
 
         if (!hasTable) {
-          this.db.exec(VECTOR_TABLE_SQL);
+          this.db.exec(vectorTableSql(getActiveEmbeddingDimension()));
         }
         return true;
       }

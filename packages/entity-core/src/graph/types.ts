@@ -327,7 +327,26 @@ export interface GraphStats {
 }
 
 /**
- * Embedding dimension for vector search.
- * Matches the all-MiniLM-L6-v2 model used in Psycheros.
+ * Embedding dimension I fall back to when my Psycheros parent hasn't pushed
+ * an explicit dimension via env var. Matches the historical all-MiniLM-L6-v2
+ * value so I remain runnable as a standalone subprocess (e.g. `deno task dev`
+ * without Psycheros) and so existing installs keep working through upgrade.
  */
-export const EMBEDDING_DIMENSION = 384;
+export const DEFAULT_EMBEDDING_DIMENSION = 384;
+
+/**
+ * Read the active embedding dimension from the `ENTITY_CORE_EMBEDDING_DIMENSION`
+ * env var my Psycheros parent pushes at spawn time. Falls back to the
+ * MiniLM default when unset.
+ *
+ * Pure function of `Deno.env` — safe to call any number of times. The
+ * embedder, chunker, and vec0 DDL all re-read on each call so a
+ * spawn-time env-var change (from a Psycheros MCP restart) takes effect on
+ * next initialization without me having to restart.
+ */
+export function getActiveEmbeddingDimension(): number {
+  const raw = Deno.env.get("ENTITY_CORE_EMBEDDING_DIMENSION");
+  if (!raw) return DEFAULT_EMBEDDING_DIMENSION;
+  const dim = parseInt(raw, 10);
+  return Number.isFinite(dim) && dim > 0 ? dim : DEFAULT_EMBEDDING_DIMENSION;
+}

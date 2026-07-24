@@ -9,7 +9,7 @@ import { z } from "zod";
 import type { FileStore } from "../storage/mod.ts";
 import type { GraphStore } from "../graph/mod.ts";
 import type { Granularity, MemoryEntry } from "../types.ts";
-import { getEmbedder } from "../embeddings/mod.ts";
+import { getEmbedder, resetEmbedder } from "../embeddings/mod.ts";
 import type { EmbeddingCache } from "../embeddings/mod.ts";
 import { computeMemoryKey } from "../embeddings/mod.ts";
 import { chunkContent, shouldChunk } from "../embeddings/chunker.ts";
@@ -1359,6 +1359,164 @@ export function createMemoryEmbeddingRebuildHandler(
   };
 }
 
+// =============================================================================
+// embedding/rebuild_all — full re-embed across memory cache AND graph nodes
+// =============================================================================
+
+export const EmbeddingRebuildAllSchema = z.object({});
+
+export interface EmbeddingRebuildAllOutput {
+  memoriesRebuilt: number;
+  memoriesFailed: number;
+  memoriesTotal: number;
+  nodesRebuilt: number;
+  nodesFailed: number;
+  nodesTotal: number;
+  message: string;
+}
+
+/**
+ * Build the rebuild-all handler. Called by the psycheros parent (via MCP)
+ * when the user switches embedding model or chunk size — drops+recreates
+ * the memory-cache and graph-node vec0 tables, re-embeds everything from
+ * the active model, and marks the composite schema version as up-to-date
+ * so the next boot doesn't re-trigger.
+ *
+ * Assumes the caller has already restarted me with the new
+ * `ENTITY_CORE_EMBEDDING_*` env vars — otherwise I'd re-embed with the old
+ * model.
+ */
+export function createEmbeddingRebuildAllHandler(
+  store: FileStore,
+  cache: EmbeddingCache,
+  graphStore: GraphStore,
+) {
+  return async (): Promise<EmbeddingRebuildAllOutput> => {
+    console.error("[Embeddings] rebuild_all: starting");
+    // Pick up new env vars if my parent restarted me with them.
+    resetEmbedder();
+    const embedder = getEmbedder();
+    console.error("[Embeddings] rebuild_all: initializing embedder");
+    await embedder.initialize();
+    console.error("[Embeddings] rebuild_all: embedder ready");
+
+    // ---- Memory cache rebuild ----
+    console.error("[Embeddings] rebuild_all: clearing cache");
+    cache.clearAll();
+    console.error("[Embeddings] rebuild_all: cache cleared");
+
+    const granularities: Granularity[] = [
+      "daily",
+      "weekly",
+      "monthly",
+      "yearly",
+      "significant",
+    ];
+    let memoriesRebuilt = 0;
+    let memoriesFailed = 0;
+    let memoriesTotal = 0;
+
+    for (const granularity of granularities) {
+      const memories = await store.listMemories(granularity);
+      memoriesTotal += memories.length;
+      console.error(
+        `[Embeddings] rebuild_all: ${granularity} — ${memories.length} entries`,
+      );
+      for (const memory of memories) {
+        try {
+          const result = await cache.getOrCompute(
+            {
+              granularity: memory.granularity,
+              date: memory.date,
+              sourceInstance: memory.sourceInstance || undefined,
+              slug: memory.slug || undefined,
+              content: memory.content,
+            },
+            embedder,
+          );
+          if (result) {
+            memoriesRebuilt++;
+            if (memoriesRebuilt % 25 === 0) {
+              console.error(
+                `[Embeddings] rebuild_all: ${granularity} progress ${memoriesRebuilt}/${memories.length}`,
+              );
+            }
+          } else {
+            memoriesFailed++;
+          }
+        } catch (err) {
+          console.error(
+            `[Embeddings] rebuild_all: memory failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          memoriesFailed++;
+        }
+      }
+    }
+    console.error(
+      `[Embeddings] rebuild_all: memories done (${memoriesRebuilt} ok, ${memoriesFailed} failed)`,
+    );
+
+    // ---- Graph node rebuild ----
+    console.error("[Embeddings] rebuild_all: dropping vec_graph_nodes");
+    const { total: nodesTotal } = graphStore.reembedAllGraphNodes();
+    console.error(
+      `[Embeddings] rebuild_all: ${nodesTotal} graph nodes to re-embed`,
+    );
+    let nodesRebuilt = 0;
+    let nodesFailed = 0;
+
+    if (nodesTotal > 0) {
+      const nodes = graphStore.listNodeLabels();
+      for (const node of nodes) {
+        try {
+          const vec = await embedder.embed(node.label);
+          if (!vec) {
+            nodesFailed++;
+            continue;
+          }
+          graphStore.updateNodeEmbedding(node.id, vec);
+          nodesRebuilt++;
+          if (nodesRebuilt % 25 === 0) {
+            console.error(
+              `[Embeddings] rebuild_all: graph progress ${nodesRebuilt}/${nodesTotal}`,
+            );
+          }
+        } catch (err) {
+          console.error(
+            `[Embeddings] rebuild_all: graph node failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          nodesFailed++;
+        }
+      }
+    }
+    console.error(
+      `[Embeddings] rebuild_all: graph done (${nodesRebuilt} ok, ${nodesFailed} failed)`,
+    );
+
+    cache.markSchemaUpToDate();
+    console.error("[Embeddings] rebuild_all: complete");
+
+    const ok = memoriesFailed === 0 && nodesFailed === 0;
+    return {
+      memoriesRebuilt,
+      memoriesFailed,
+      memoriesTotal,
+      nodesRebuilt,
+      nodesFailed,
+      nodesTotal,
+      message: ok
+        ? `Rebuilt ${memoriesRebuilt} memory + ${nodesRebuilt} node embeddings.`
+        : `Rebuilt ${memoriesRebuilt} memory + ${nodesRebuilt} node embeddings; ${
+          memoriesFailed + nodesFailed
+        } failed.`,
+    };
+  };
+}
+
 /**
  * Input schema for memory/grep tool.
  */
@@ -1527,5 +1685,10 @@ export const memoryTools = {
     description:
       "Clear all memory embeddings and rebuild them from existing memory files. I use this after bulk deletion or migration to ensure embeddings match current files.",
     inputSchema: MemoryEmbeddingRebuildSchema,
+  },
+  "embedding/rebuild_all": {
+    description:
+      "Rebuild every embedding I own — memory cache AND knowledge graph nodes — using the currently-active model. My Psycheros parent calls this when the user switches embedding model or chunk size. Assumes I've been restarted with the new ENTITY_CORE_EMBEDDING_* env vars first.",
+    inputSchema: EmbeddingRebuildAllSchema,
   },
 };

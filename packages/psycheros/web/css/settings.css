@@ -542,6 +542,42 @@
   border-color: var(--c-accent, var(--c-border));
 }
 
+/* Reusable styled file input — mirrors the admin.css .admin-input[type="file"]
+ * pattern (native input + themed ::file-selector-button). Used by the Plugins
+ * page's "Install Plugin" form and any other settings-page file picker that
+ * wants the same look as Entity Data's choose-file buttons. */
+.settings-file-input {
+  width: auto;
+  padding: var(--sp-1) var(--sp-2);
+  color-scheme: dark;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.settings-file-input::file-selector-button {
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--c-bg-sunken);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  color: var(--c-accent);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+  margin-right: var(--sp-3);
+  transition: background var(--transition), box-shadow var(--transition);
+}
+
+.settings-file-input::file-selector-button:hover {
+  background: var(--c-accent-subtle);
+  box-shadow: var(--glow-accent);
+}
+
+.settings-file-input::file-selector-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Entry cards */
 .lorebook-entries-list {
   display: flex;

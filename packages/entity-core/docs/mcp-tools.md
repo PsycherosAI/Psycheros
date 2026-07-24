@@ -62,6 +62,7 @@ MCP server — what an LLM actually calls — are the underscore forms shown her
 | `memory_consolidate`       | Consolidate memories across time periods (daily→weekly, weekly→monthly, monthly→yearly). Use `all=true` for catch-up consolidation of all unconsolidated periods. Use `granularity` for a specific level. Requires `ENTITY_CORE_LLM_API_KEY`.                                                                                                                                                                                            |
 | `memory_embedding_purge`   | Remove orphaned memory embedding cache entries (files deleted manually). Only affects memory embeddings — knowledge graph embeddings are untouched. Returns count of purged entries and remaining.                                                                                                                                                                                                                                       |
 | `memory_embedding_rebuild` | Clear all memory embeddings and rebuild from existing files. Use after bulk deletion or migration. Only affects memory embeddings — knowledge graph embeddings are untouched. May take several minutes with large memory stores. Returns rebuilt/failed counts.                                                                                                                                                                          |
+| `embedding_rebuild_all`    | Rebuild every embedding I own — memory cache **and** knowledge graph nodes — using the currently-active model. My Psycheros parent calls this when the user switches embedding model or chunk size. Assumes I've been restarted with the new `ENTITY_CORE_EMBEDDING_*` env vars first. May take many minutes on large datasets. Returns `{memoriesRebuilt, memoriesFailed, memoriesTotal, nodesRebuilt, nodesFailed, nodesTotal}`.       |
 
 ### memory_create Inputs
 
@@ -303,3 +304,38 @@ Adding a new embodiment type:
 
 1. Add the type to `InstanceInfo.type` union in `src/types.ts`
 2. Update any embodiment-specific logic (e.g., instance relevance boosting)
+
+## Embedding Runtime Config
+
+I read my embedding model and chunk params from env vars that my Psycheros
+parent pushes at spawn time. When Psycheros restarts me with new env vars (e.g.
+after the user switches embedding model in the UI), I pick them up on the next
+`getEmbedder()` call — provided `resetEmbedder()` ran first to clear the cached
+ONNX weights.
+
+| Env Var                                    | Default                                  | Description                                          |
+| ------------------------------------------ | ---------------------------------------- | ---------------------------------------------------- |
+| `ENTITY_CORE_EMBEDDING_MODEL`              | `sentence-transformers/all-MiniLM-L6-v2` | HuggingFace repo ID                                  |
+| `ENTITY_CORE_EMBEDDING_DIMENSION`          | `384`                                    | Output vector dimension (must match Psycheros)       |
+| `ENTITY_CORE_EMBEDDING_CHUNK_THRESHOLD`    | `3000`                                   | Content length above which chunking kicks in (chars) |
+| `ENTITY_CORE_EMBEDDING_CHUNK_TARGET_CHARS` | `2048`                                   | Target chunk size (chars)                            |
+| `ENTITY_CORE_EMBEDDING_CHUNK_MIN_CHARS`    | `400`                                    | Minimum chunk size (chars)                           |
+| `ENTITY_CORE_EMBEDDING_CHUNK_MAX_CHARS`    | `2800`                                   | Hard max chunk size (chars)                          |
+| `ENTITY_CORE_EMBEDDING_OVERLAP_CHARS`      | `200`                                    | Overlap between consecutive chunks (chars)           |
+
+When any of these changes, the cached embeddings are invalidated via a composite
+schema-version fingerprint stored in `embedding_metadata`:
+
+```json
+{
+  "algorithm": 3,
+  "chunkParamsHash": "3000:2048:400:2800:200",
+  "modelRepoId": "sentence-transformers/all-MiniLM-L6-v2"
+}
+```
+
+A mismatch on next startup triggers `EmbeddingCache.needsRebuild()`, which the
+boot path uses to defer serving tool calls until the rebuild finishes. The
+Psycheros parent typically calls `embedding_rebuild_all` explicitly right after
+restart instead, so the cache is already populated by the time the boot-time
+check runs.

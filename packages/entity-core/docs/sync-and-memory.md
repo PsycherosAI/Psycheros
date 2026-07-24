@@ -109,13 +109,13 @@ sentences.
 
 ### Scoring Signals
 
-| Signal                | Weight | Description                                                       |
-| --------------------- | ------ | ----------------------------------------------------------------- |
-| **Vector similarity** | 0.6    | Semantic match via embeddings (all-MiniLM-L6-v2, 384 dims)        |
-| **Recency**           | 0.05   | Inverse decay: `1 / (1 + age_days × 0.007)` — half-life ~100 days |
-| **Graph boost**       | 0.05   | Boosts memories linked to entity nodes matching the query         |
-| **Keyword boost**     | 0.2    | Ratio of query terms matched in memory content                    |
-| **Instance affinity** | 0.1    | +0.1 for memories from the same embodiment                        |
+| Signal                | Weight | Description                                                           |
+| --------------------- | ------ | --------------------------------------------------------------------- |
+| **Vector similarity** | 0.6    | Semantic match via embeddings (model + dims configurable — see below) |
+| **Recency**           | 0.05   | Inverse decay: `1 / (1 + age_days × 0.007)` — half-life ~100 days     |
+| **Graph boost**       | 0.05   | Boosts memories linked to entity nodes matching the query             |
+| **Keyword boost**     | 0.2    | Ratio of query terms matched in memory content                        |
+| **Instance affinity** | 0.1    | +0.1 for memories from the same embodiment                            |
 
 ### Keyword Retrieval Phase
 
@@ -138,14 +138,26 @@ and events ("Valentine's Day", "our anniversary") can match memories even when
 the event name isn't explicitly mentioned in the prose.
 
 The enrichment is part of the embedding cache's content hash, so changing the
-enrichment logic invalidates all cached embeddings. A schema version in
-`graph.db` tracks the enrichment algorithm — when the version changes,
-entity-core automatically rebuilds all embeddings on startup.
+enrichment logic invalidates all cached embeddings. A composite schema
+fingerprint in `graph.db` (`{ algorithm, chunkParamsHash, modelRepoId }`) tracks
+everything that would invalidate cached embeddings — when any field changes,
+entity-core automatically rebuilds memory embeddings on startup. Graph nodes are
+rebuilt via the `embedding_rebuild_all` MCP tool, called by my Psycheros parent
+after it restarts me with the new env vars.
+
+### Configurable embedding model
+
+The active embedding model is supplied by my Psycheros parent via
+`ENTITY_CORE_EMBEDDING_*` env vars at spawn time. Defaults to
+`sentence-transformers/all-MiniLM-L6-v2` (384 dims) when running standalone.
+Chunk params (target/threshold/min/max/overlap) are also configurable — defaults
+match the historical hardcoded values. The vec0 table dimension is dynamic
+(`getActiveEmbeddingDimension()` reads the env var at call time).
 
 ### How It Works
 
-1. The query is embedded locally using the same model as Psycheros
-   (`all-MiniLM-L6-v2`)
+1. The query is embedded locally using the configured model (same model
+   Psycheros uses — cross-package dimension invariant is enforced at save time)
 2. Entity nodes in the knowledge graph matching the query are found (for graph
    boosting)
 3. **Cached embeddings** (preferred): KNN search against pre-computed embeddings

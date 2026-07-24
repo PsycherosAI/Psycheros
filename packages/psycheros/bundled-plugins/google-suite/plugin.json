@@ -1,0 +1,21 @@
+{
+  "id": "google-suite",
+  "name": "Google Suite",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "Google Calendar, Gmail, Drive, and Contacts integration. Each service is enabled individually; OAuth scopes are requested based on what's enabled. Google Calendar ships first; Gmail, Drive, and Contacts are planned.",
+  "enabled": true,
+  "compatibility": {
+    "psycheros": ">=0.9.1"
+  },
+  "entrypoints": {
+    "psycheros": "./psycheros.ts"
+  },
+  "capabilities": {
+    "settings": true
+  },
+  "promptHookDefaults": {
+    "timeoutMs": 10000,
+    "maxChars": 3000
+  }
+}

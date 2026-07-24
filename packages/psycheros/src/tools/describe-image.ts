@@ -69,12 +69,18 @@ export function captionImageDual(
   imageData: string,
   mediaType: string,
   settings: CaptioningSettings,
+  instructions?: string,
 ): Promise<DualCaption> {
   switch (settings.provider) {
     case "gemini":
-      return captionViaGeminiDual(imageData, mediaType, settings);
+      return captionViaGeminiDual(imageData, mediaType, settings, instructions);
     case "openrouter":
-      return captionViaOpenRouterDual(imageData, mediaType, settings);
+      return captionViaOpenRouterDual(
+        imageData,
+        mediaType,
+        settings,
+        instructions,
+      );
     default:
       throw new Error(`Unknown captioning provider: ${settings.provider}`);
   }
@@ -88,12 +94,13 @@ export function captionImage(
   imageData: string,
   mediaType: string,
   settings: CaptioningSettings,
+  instructions?: string,
 ): Promise<string> {
   switch (settings.provider) {
     case "gemini":
-      return captionViaGemini(imageData, mediaType, settings);
+      return captionViaGemini(imageData, mediaType, settings, instructions);
     case "openrouter":
-      return captionViaOpenRouter(imageData, mediaType, settings);
+      return captionViaOpenRouter(imageData, mediaType, settings, instructions);
     default:
       throw new Error(`Unknown captioning provider: ${settings.provider}`);
   }
@@ -105,6 +112,7 @@ export function captionImage(
 export async function fetchAndCaptionUrlDual(
   url: string,
   settings: CaptioningSettings,
+  instructions?: string,
 ): Promise<DualCaption> {
   const response = await fetch(url);
   if (!response.ok) {
@@ -115,7 +123,7 @@ export async function fetchAndCaptionUrlDual(
   const buffer = await response.arrayBuffer();
   const base64 = uint8ToBase64(new Uint8Array(buffer));
   const mediaType = response.headers.get("content-type") || "image/png";
-  return captionImageDual(base64, mediaType, settings);
+  return captionImageDual(base64, mediaType, settings, instructions);
 }
 
 /**
@@ -124,6 +132,7 @@ export async function fetchAndCaptionUrlDual(
 export async function fetchAndCaptionUrl(
   url: string,
   settings: CaptioningSettings,
+  instructions?: string,
 ): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) {
@@ -134,7 +143,7 @@ export async function fetchAndCaptionUrl(
   const buffer = await response.arrayBuffer();
   const base64 = uint8ToBase64(new Uint8Array(buffer));
   const mediaType = response.headers.get("content-type") || "image/png";
-  return captionImage(base64, mediaType, settings);
+  return captionImage(base64, mediaType, settings, instructions);
 }
 
 // =============================================================================
@@ -145,6 +154,7 @@ async function captionViaGemini(
   imageData: string,
   mediaType: string,
   settings: CaptioningSettings,
+  instructions?: string,
 ): Promise<string> {
   const geminiSettings = settings.gemini;
   if (!geminiSettings) {
@@ -155,12 +165,16 @@ async function captionViaGemini(
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
+  const prompt = instructions
+    ? `${CAPTION_PROMPT}\n\n${instructions}`
+    : CAPTION_PROMPT;
+
   const body = {
     contents: [{
       role: "user",
       parts: [
         { inline_data: { mime_type: mediaType, data: imageData } },
-        { text: CAPTION_PROMPT },
+        { text: prompt },
       ],
     }],
   };
@@ -213,6 +227,7 @@ async function captionViaGeminiDual(
   imageData: string,
   mediaType: string,
   settings: CaptioningSettings,
+  instructions?: string,
 ): Promise<DualCaption> {
   const geminiSettings = settings.gemini;
   if (!geminiSettings) {
@@ -223,12 +238,16 @@ async function captionViaGeminiDual(
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
+  const prompt = instructions
+    ? `${CAPTION_DUAL_PROMPT}\n\n${instructions}`
+    : CAPTION_DUAL_PROMPT;
+
   const body = {
     contents: [{
       role: "user",
       parts: [
         { inline_data: { mime_type: mediaType, data: imageData } },
-        { text: CAPTION_DUAL_PROMPT },
+        { text: prompt },
       ],
     }],
   };
@@ -281,6 +300,7 @@ async function captionViaOpenRouter(
   imageData: string,
   mediaType: string,
   settings: CaptioningSettings,
+  instructions?: string,
 ): Promise<string> {
   const orSettings = settings.openrouter;
   if (!orSettings) {
@@ -292,6 +312,10 @@ async function captionViaOpenRouter(
   const url = `${baseUrl}/chat/completions`;
   const apiKey = orSettings.apiKey.trim();
 
+  const prompt = instructions
+    ? `${CAPTION_PROMPT}\n\n${instructions}`
+    : CAPTION_PROMPT;
+
   const body = {
     model: orSettings.model,
     messages: [{
@@ -301,7 +325,7 @@ async function captionViaOpenRouter(
           type: "image_url",
           image_url: { url: `data:${mediaType};base64,${imageData}` },
         },
-        { type: "text", text: CAPTION_PROMPT },
+        { type: "text", text: prompt },
       ],
     }],
   };
@@ -342,6 +366,7 @@ async function captionViaOpenRouterDual(
   imageData: string,
   mediaType: string,
   settings: CaptioningSettings,
+  instructions?: string,
 ): Promise<DualCaption> {
   const orSettings = settings.openrouter;
   if (!orSettings) {
@@ -353,6 +378,10 @@ async function captionViaOpenRouterDual(
   const url = `${baseUrl}/chat/completions`;
   const apiKey = orSettings.apiKey.trim();
 
+  const prompt = instructions
+    ? `${CAPTION_DUAL_PROMPT}\n\n${instructions}`
+    : CAPTION_DUAL_PROMPT;
+
   const body = {
     model: orSettings.model,
     messages: [{
@@ -362,7 +391,7 @@ async function captionViaOpenRouterDual(
           type: "image_url",
           image_url: { url: `data:${mediaType};base64,${imageData}` },
         },
-        { type: "text", text: CAPTION_DUAL_PROMPT },
+        { type: "text", text: prompt },
       ],
     }],
   };
@@ -420,6 +449,13 @@ export const describeImageTool: Tool = {
             type: "string",
             description: "URL of an image to describe",
           },
+          instructions: {
+            type: "string",
+            description:
+              "Optional specific guidance for how I want this image described — " +
+              "a particular aspect to focus on, level of detail, or framing. " +
+              "Omit for a general detailed description; use only when I have a specific need.",
+          },
         },
       },
     },
@@ -431,7 +467,11 @@ async function executeDescribeImage(
   args: Record<string, unknown>,
   ctx: ToolContext,
 ): Promise<ToolResult> {
-  const { path, url } = args as { path?: string; url?: string };
+  const { path, url, instructions } = args as {
+    path?: string;
+    url?: string;
+    instructions?: string;
+  };
 
   if (!path && !url) {
     return {
@@ -456,7 +496,11 @@ async function executeDescribeImage(
     let caption: DualCaption;
 
     if (url) {
-      caption = await fetchAndCaptionUrlDual(url, captioningSettings);
+      caption = await fetchAndCaptionUrlDual(
+        url,
+        captioningSettings,
+        instructions,
+      );
     } else if (path) {
       // path is relative to .psycheros/
       // If the path has no extension, look up the actual file in the directory
@@ -482,7 +526,12 @@ async function executeDescribeImage(
       const fileData = await Deno.readFile(resolvedPath);
       const base64 = uint8ToBase64(fileData);
       const mediaType = getMediaType(resolvedPath);
-      caption = await captionImageDual(base64, mediaType, captioningSettings);
+      caption = await captionImageDual(
+        base64,
+        mediaType,
+        captioningSettings,
+        instructions,
+      );
     } else {
       return {
         toolCallId: ctx.toolCallId,

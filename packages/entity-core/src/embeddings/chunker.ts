@@ -2,27 +2,26 @@
  * Memory Chunker
  *
  * Splits long memory files into overlapping chunks for independent embedding.
- * Short memories (≤3000 chars) pass through unchanged.
+ * Short memories pass through unchanged.
  *
  * Chunking respects markdown structure: ## headers are primary boundaries,
  * then - bullet lines, then paragraphs. Each chunk includes the title line
  * (if present) as context so embeddings retain topical grounding.
  */
 
-/** Threshold above which a memory gets chunked. */
-export const CHUNK_THRESHOLD = 3000;
+import type { ChunkParams } from "./settings.ts";
 
-/** Target chunk size in characters (~512 tokens at 4 chars/token). */
-const CHUNK_TARGET_CHARS = 2048;
-
-/** Minimum chunk size in characters. */
-const CHUNK_MIN_CHARS = 400;
-
-/** Hard maximum per chunk. */
-const CHUNK_MAX_CHARS = 2800;
-
-/** Overlap between consecutive chunks for boundary coverage. */
-const OVERLAP_CHARS = 200;
+/**
+ * Default chunk parameters. Match the historical hardcoded values so
+ * existing installs keep their existing chunk boundaries after upgrade.
+ */
+export const DEFAULT_CHUNK_PARAMS: ChunkParams = {
+  thresholdChars: 3000,
+  targetChars: 2048,
+  minChars: 400,
+  maxChars: 2800,
+  overlapChars: 200,
+};
 
 export interface MemoryChunk {
   content: string;
@@ -32,19 +31,27 @@ export interface MemoryChunk {
 
 /**
  * Whether a memory's content is long enough to require chunking.
+ * Pass `params` to use a non-default threshold; omit for defaults.
  */
-export function shouldChunk(content: string): boolean {
-  return content.length > CHUNK_THRESHOLD;
+export function shouldChunk(content: string, params?: ChunkParams): boolean {
+  const p = params ?? DEFAULT_CHUNK_PARAMS;
+  return content.length > p.thresholdChars;
 }
 
 /**
  * Split memory content into chunks suitable for embedding.
  *
- * For content ≤ CHUNK_THRESHOLD, returns a single chunk (no splitting).
+ * For content at or below the threshold, returns a single chunk (no splitting).
  * For longer content, splits at semantic boundaries with overlap.
+ *
+ * Pass `params` to use non-default chunk sizes; omit for defaults.
  */
-export function chunkContent(content: string): MemoryChunk[] {
-  if (!shouldChunk(content)) {
+export function chunkContent(
+  content: string,
+  params?: ChunkParams,
+): MemoryChunk[] {
+  const p = params ?? DEFAULT_CHUNK_PARAMS;
+  if (!shouldChunk(content, p)) {
     return [{ content, index: 0, total: 1 }];
   }
 
@@ -57,10 +64,10 @@ export function chunkContent(content: string): MemoryChunk[] {
   const segments = splitIntoSegments(body);
 
   // Pack segments into chunks with overlap
-  const rawChunks = packSegments(segments);
+  const rawChunks = packSegments(segments, p);
 
   // Merge final chunk if too small
-  const merged = mergeTailChunk(rawChunks);
+  const merged = mergeTailChunk(rawChunks, p);
 
   // Build output with title prepended
   return merged.map((text, index) => ({
@@ -114,7 +121,7 @@ function splitIntoSegments(body: string): Segment[] {
   return segments;
 }
 
-function packSegments(segments: Segment[]): string[] {
+function packSegments(segments: Segment[], p: ChunkParams): string[] {
   if (segments.length === 0) return [];
 
   const chunks: string[] = [];
@@ -133,9 +140,9 @@ function packSegments(segments: Segment[]): string[] {
     const seg = segments[i];
 
     // Hard-split oversized segments at paragraph or bullet boundaries
-    if (seg.text.length > CHUNK_MAX_CHARS) {
+    if (seg.text.length > p.maxChars) {
       flush();
-      const subChunks = hardSplit(seg.text);
+      const subChunks = hardSplit(seg.text, p);
       chunks.push(...subChunks);
       continue;
     }
@@ -144,11 +151,11 @@ function packSegments(segments: Segment[]): string[] {
 
     // If adding this segment exceeds target and we have enough content, flush
     if (
-      currentLen + segLen > CHUNK_TARGET_CHARS &&
-      currentLen >= CHUNK_MIN_CHARS
+      currentLen + segLen > p.targetChars &&
+      currentLen >= p.minChars
     ) {
       // Record overlap from the tail of the current chunk
-      const overlap = extractOverlap(currentLines.join("\n"));
+      const overlap = extractOverlap(currentLines.join("\n"), p.overlapChars);
 
       flush();
 
@@ -168,11 +175,11 @@ function packSegments(segments: Segment[]): string[] {
   return chunks;
 }
 
-function extractOverlap(text: string): string {
-  if (text.length <= OVERLAP_CHARS) return "";
+function extractOverlap(text: string, overlapChars: number): string {
+  if (text.length <= overlapChars) return "";
 
-  // Find a clean boundary near OVERLAP_CHARS from the end
-  const start = text.length - OVERLAP_CHARS;
+  // Find a clean boundary near overlapChars from the end
+  const start = text.length - overlapChars;
   const snippet = text.slice(start);
 
   // Try to break at a bullet boundary
@@ -190,28 +197,28 @@ function extractOverlap(text: string): string {
   return snippet;
 }
 
-function hardSplit(text: string): string[] {
+function hardSplit(text: string, p: ChunkParams): string[] {
   const parts: string[] = [];
   let remaining = text;
 
   while (remaining.length > 0) {
-    if (remaining.length <= CHUNK_MAX_CHARS) {
+    if (remaining.length <= p.maxChars) {
       parts.push(remaining);
       break;
     }
 
     // Try splitting at a bullet boundary within the limit
-    let splitAt = remaining.lastIndexOf("\n- ", CHUNK_MAX_CHARS);
+    let splitAt = remaining.lastIndexOf("\n- ", p.maxChars);
     if (splitAt <= 0) {
       // Try paragraph boundary
-      splitAt = remaining.lastIndexOf("\n\n", CHUNK_MAX_CHARS);
+      splitAt = remaining.lastIndexOf("\n\n", p.maxChars);
     }
     if (splitAt <= 0) {
       // Try any newline
-      splitAt = remaining.lastIndexOf("\n", CHUNK_MAX_CHARS);
+      splitAt = remaining.lastIndexOf("\n", p.maxChars);
     }
     if (splitAt <= 0) {
-      splitAt = CHUNK_MAX_CHARS;
+      splitAt = p.maxChars;
     }
 
     parts.push(remaining.slice(0, splitAt));
@@ -221,15 +228,15 @@ function hardSplit(text: string): string[] {
   return parts;
 }
 
-function mergeTailChunk(chunks: string[]): string[] {
+function mergeTailChunk(chunks: string[], p: ChunkParams): string[] {
   if (chunks.length <= 1) return chunks;
 
   const last = chunks[chunks.length - 1];
-  if (last.length >= CHUNK_MIN_CHARS) return chunks;
+  if (last.length >= p.minChars) return chunks;
 
   // Merge final chunk into the previous one if the combined size is reasonable
   const combined = chunks[chunks.length - 2] + "\n\n" + last;
-  if (combined.length <= CHUNK_MAX_CHARS + OVERLAP_CHARS) {
+  if (combined.length <= p.maxChars + p.overlapChars) {
     return [...chunks.slice(0, -2), combined];
   }
 

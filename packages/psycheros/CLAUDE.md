@@ -31,6 +31,54 @@ The agentic loop is in `src/entity/loop.ts` — LLM call, tool execution, contex
 capture, image and tool-arg fading. The chat HTTP route in
 `src/server/routes.ts` calls into it and streams SSE back to the browser.
 
+## Embedding model configuration
+
+`src/embeddings/` is the configuration surface for the user-selectable embedding
+model. Settings persist to `.psycheros/embedding-settings.json` and propagate to
+entity-core via `ENTITY_CORE_EMBEDDING_*` env vars at MCP spawn (same pattern as
+LLM settings).
+
+Key files:
+
+- `presets.ts` — curated model catalog (MiniLM, BGE-small/base, jina, nomic,
+  mpnet) with metadata for the UI picker.
+- `settings.ts` / `entity-core-embedding-settings.ts` — load/save.
+- `entity-core-env.ts` — builds the env-var map pushed to entity-core.
+- `download-manager.ts` — pre-fetches models with progress events. Tracks
+  completed downloads in `.psycheros/downloaded-models.json` (Xenova's
+  filesystem cache is not reliably persistent in Deno — see below).
+- `re-embed.ts` — orchestrator that drops/recreates psycheros vec tables,
+  reindexes messages/memories/vault, and calls entity-core's
+  `embedding_rebuild_all` MCP tool.
+
+The vec0 dimension is **dynamic** —
+`src/db/schema.ts:getActiveEmbeddingDimension()` reads from
+`app_metadata.active_embedding_dimension`. All vec0 DDL sites read via this
+getter at call time. The orchestrator calls `setActiveEmbeddingDimension()`
+after a successful rebuild.
+
+**Xenova cache gotcha (load-bearing):** `@huggingface/transformers` defaults to
+`env.useBrowserCache = true`. In Deno the Web Cache API is available, so Xenova
+writes there and skips the filesystem entirely — leaving models in Deno's opaque
+`~/.cache/deno/...` and breaking any on-disk check. Both embedders
+(`src/rag/embedder.ts` for psycheros, entity-core's `src/embeddings/mod.ts`)
+force `env.useBrowserCache = false` so models persist at
+`${dataRoot}/.psycheros/model-cache/`. Don't remove this.
+
+**MCP ping pause invariant:** the re-embed orchestrator pauses health pings
+before restarting entity-core and resumes after. Loading the new model spikes
+psycheros's CPU enough that the ping watchdog would falsely trip and storm
+reconnect attempts that race with the explicit restart. Any new long-running
+maintenance task that spikes CPU should call `mcpClient.pausePings()` /
+`resumePings()` the same way.
+
+The UI lives in Settings > Model Settings > Embeddings (the "LLM Settings" card
+was renamed). Tabs are `LLM Profiles` and `Embeddings`; the shell is
+`renderModelSettingsShell()` in `src/server/templates.ts`. HTMX swaps the whole
+tab content, so the fragment ends with an inline `<script>` that calls
+`globalThis.initEmbeddingsTab()` to seed the recommended-chunk-size hint —
+`DOMContentLoaded` fires too early (before the swap).
+
 ## Voice chat subsystem
 
 `src/voice/` manages voice chat using a **walkie-talkie model**: one user
@@ -543,6 +591,10 @@ vetting guide lives in the User Guide at
 - Context Inspector Metrics tab — `pluginBudgetUsed` / `pluginBudgetMax` on
   `LLMContextSnapshot.metrics`. Plugin Context added to the section breakdown.
   Both persist per-turn via the `metrics_json` column.
+- Context Inspector Plugins tab — per-hook detail (output, chars used,
+  truncated/degraded/budget-skipped flags, elapsed ms) from
+  `LLMContextSnapshot.pluginHooks`, persisted in the `plugin_hooks_json` column.
+  Tabs ordered System → RAG → Messages → Tools → Plugins → Metrics.
 - API endpoints under `/api/plugin-manager/*`: health, events, log download,
   check-update, apply-update, plus the original inspect/install /remove set.
 
@@ -594,6 +646,33 @@ channel for background updates and Pulse streaming.
   spawn concurrently and race for entity-core's `graph.db` — the root cause of
   the Windows "database is locked" crash. Any new "restart MCP because X" path
   must call `mcp.restart()`, not spawn its own transport.
+
+## Discord Gateway reconnect invariants
+
+Three load-bearing wirings in `src/discord/gateway.ts`. Break any of them and
+the entity silently goes dark a few hours after startup with no log lines and no
+recovery path short of a daemon restart.
+
+- **`skipNextClose` only inside `if (this.ws)` blocks** — the flag suppresses
+  the outgoing WS's asynchronous close event so it doesn't double-schedule a
+  reconnect. Setting it unconditionally at the top of `connectWs()` (the prior
+  bug) leaks a stale flag: on initial connect there's no old WS to fire a close
+  event, the flag never gets consumed, and the next real disconnect gets
+  silently swallowed. Always pair the set with the actual `ws.close()` call.
+- **`scheduleReconnect()` must never refuse** — no hard attempt cap. The 60s
+  watchdog (next bullet) relies on this. A permanent give-up leaves no recovery
+  path for transient outages, token fixes, or DNS hiccups. Backoff is already
+  bounded at 30s, so infinite retries are affordable. If a cap is ever
+  reintroduced, the watchdog must be updated to reset the counter on a cooldown
+  or it becomes a dead safety net.
+- **`reconnectTimer` is tracked, not anonymous** — the watchdog checks it to
+  detect "reconnect already pending" before scheduling another. `disconnect()`
+  clears it. Don't go back to an untracked `setTimeout` — the watchdog will
+  stack reconnects.
+
+The watchdog also runs `try/catch` around its check body, matching the router's
+prune-timer pattern — an uncaught throw inside `setInterval` kills the Deno
+process.
 
 ## User data and runtime state
 

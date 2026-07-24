@@ -224,6 +224,7 @@ export const SCHEMA = `
     messages_json TEXT NOT NULL,
     tool_definitions_json TEXT NOT NULL,
     metrics_json TEXT NOT NULL,
+    plugin_hooks_json TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
   );
@@ -233,9 +234,72 @@ export const SCHEMA = `
 `;
 
 /**
- * Embedding dimension for all-MiniLM-L6-v2 model.
+ * Embedding dimension I fall back to when no explicit dimension has been
+ * recorded in `app_metadata`. Matches the historical all-MiniLM-L6-v2 value
+ * so existing installs keep working without re-embedding on upgrade.
  */
-export const EMBEDDING_DIMENSION = 384;
+export const DEFAULT_EMBEDDING_DIMENSION = 384;
+
+const EMBEDDING_DIMENSION_META_KEY = "active_embedding_dimension";
+
+/**
+ * Read the dimension the vec0 tables were created with (or will be created
+ * with on next init). Falls back to DEFAULT_EMBEDDING_DIMENSION when no row
+ * exists yet — e.g. on the very first init before `ensureAppMetadata` runs.
+ */
+export function getActiveEmbeddingDimension(db: Database): number {
+  try {
+    const stmt = db.prepare(
+      "SELECT value FROM app_metadata WHERE key = ?",
+    );
+    const row = stmt.get<{ value: string }>(EMBEDDING_DIMENSION_META_KEY);
+    stmt.finalize();
+    if (!row) return DEFAULT_EMBEDDING_DIMENSION;
+    const dim = parseInt(row.value, 10);
+    return Number.isFinite(dim) && dim > 0 ? dim : DEFAULT_EMBEDDING_DIMENSION;
+  } catch {
+    // app_metadata doesn't exist yet (pre-ensureAppMetadata call)
+    return DEFAULT_EMBEDDING_DIMENSION;
+  }
+}
+
+/**
+ * Record the active embedding dimension. Called by the re-embed orchestrator
+ * after dropping + recreating vec0 tables with a new model's dimension.
+ */
+export function setActiveEmbeddingDimension(db: Database, dim: number): void {
+  const stmt = db.prepare(
+    `INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?)`,
+  );
+  stmt.run(EMBEDDING_DIMENSION_META_KEY, String(dim));
+  stmt.finalize();
+}
+
+/**
+ * Ensure the app_metadata table exists and the dimension row is populated.
+ * Called from `initializeSchema` before any vec0 DDL so the getter returns a
+ * stable value during init.
+ */
+function ensureAppMetadata(db: Database): void {
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS app_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )`,
+  );
+  if (getActiveEmbeddingDimension(db) === DEFAULT_EMBEDDING_DIMENSION) {
+    // Only seed if no row exists — preserves orchestrator-set values across
+    // restarts.
+    const stmt = db.prepare(
+      `INSERT OR IGNORE INTO app_metadata (key, value) VALUES (?, ?)`,
+    );
+    stmt.run(
+      EMBEDDING_DIMENSION_META_KEY,
+      String(DEFAULT_EMBEDDING_DIMENSION),
+    );
+    stmt.finalize();
+  }
+}
 
 /**
  * Initializes the database schema by executing the schema SQL.
@@ -245,6 +309,7 @@ export const EMBEDDING_DIMENSION = 384;
  */
 export function initializeSchema(db: Database): void {
   db.exec(SCHEMA);
+  ensureAppMetadata(db);
   runMigrations(db);
   initializeVectorTables(db);
 }
@@ -595,6 +660,24 @@ function runMigrations(db: Database): void {
   if (!hasCustomContentCol) {
     db.exec("ALTER TABLE context_snapshots ADD COLUMN custom_content TEXT");
     console.log("[DB] Added custom_content column to context_snapshots");
+  }
+
+  // Migration: Add plugin_hooks_json column to context_snapshots if missing
+  // Per-hook detail (id, name, priority, output, charsUsed, truncated, degraded,
+  // budgetSkipped, elapsedMs) for the Context Inspector's Plugin Hooks tab.
+  const hasPluginHooksCol = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('context_snapshots') WHERE name = 'plugin_hooks_json'",
+    )
+    .get();
+
+  if (!hasPluginHooksCol) {
+    db.exec(
+      "ALTER TABLE context_snapshots ADD COLUMN plugin_hooks_json TEXT",
+    );
+    console.log(
+      "[DB] Added plugin_hooks_json column to context_snapshots",
+    );
   }
 
   // Migration: Add Pulse tables if missing
@@ -1169,7 +1252,7 @@ function initializeVectorTables(db: Database): void {
     if (!hasMemoryVecTable) {
       db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS vec_memory_chunks USING vec0(
-          embedding FLOAT[${EMBEDDING_DIMENSION}] distance=cosine
+          embedding FLOAT[${getActiveEmbeddingDimension(db)}] distance=cosine
         )
       `);
       console.log("[DB] Created vec_memory_chunks virtual table");
@@ -1185,7 +1268,7 @@ function initializeVectorTables(db: Database): void {
     if (!hasMessageVecTable) {
       db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS vec_messages USING vec0(
-          embedding FLOAT[${EMBEDDING_DIMENSION}] distance=cosine
+          embedding FLOAT[${getActiveEmbeddingDimension(db)}] distance=cosine
         )
       `);
       console.log("[DB] Created vec_messages virtual table");
@@ -1201,7 +1284,7 @@ function initializeVectorTables(db: Database): void {
     if (!hasVaultVecTable) {
       db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS vec_vault_chunks USING vec0(
-          embedding FLOAT[${EMBEDDING_DIMENSION}] distance=cosine
+          embedding FLOAT[${getActiveEmbeddingDimension(db)}] distance=cosine
         )
       `);
       console.log("[DB] Created vec_vault_chunks virtual table");
@@ -1274,7 +1357,9 @@ function verifyVectorTableSync(db: Database): void {
       db.exec("DROP TABLE IF EXISTS vec_memory_chunks");
     } catch { /* ignore */ }
     db.exec(
-      `CREATE VIRTUAL TABLE vec_memory_chunks USING vec0(embedding FLOAT[${EMBEDDING_DIMENSION}] distance=cosine)`,
+      `CREATE VIRTUAL TABLE vec_memory_chunks USING vec0(embedding FLOAT[${
+        getActiveEmbeddingDimension(db)
+      }] distance=cosine)`,
     );
   }
 
@@ -1333,7 +1418,9 @@ function verifyVectorTableSync(db: Database): void {
       db.exec("DROP TABLE IF EXISTS vec_messages");
     } catch { /* ignore */ }
     db.exec(
-      `CREATE VIRTUAL TABLE vec_messages USING vec0(embedding FLOAT[${EMBEDDING_DIMENSION}] distance=cosine)`,
+      `CREATE VIRTUAL TABLE vec_messages USING vec0(embedding FLOAT[${
+        getActiveEmbeddingDimension(db)
+      }] distance=cosine)`,
     );
   }
 
@@ -1393,7 +1480,9 @@ function verifyVectorTableSync(db: Database): void {
       db.exec("DROP TABLE IF EXISTS vec_vault_chunks");
     } catch { /* ignore */ }
     db.exec(
-      `CREATE VIRTUAL TABLE vec_vault_chunks USING vec0(embedding FLOAT[${EMBEDDING_DIMENSION}] distance=cosine)`,
+      `CREATE VIRTUAL TABLE vec_vault_chunks USING vec0(embedding FLOAT[${
+        getActiveEmbeddingDimension(db)
+      }] distance=cosine)`,
     );
   }
 

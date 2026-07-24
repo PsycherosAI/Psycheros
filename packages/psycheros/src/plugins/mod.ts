@@ -31,6 +31,7 @@ export type {
   PluginPromptContext,
   PluginPromptHook,
   PluginRoute,
+  PluginSettingsContext,
 } from "./plugin-manager.ts";
 export type {
   PluginDraftInstallResult,

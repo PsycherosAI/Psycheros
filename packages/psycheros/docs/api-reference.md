@@ -244,9 +244,30 @@ excluded.
 | `POST` | `/api/llm-settings/set-active` | Set active profile by ID (triggers entity-core restart if connected) |
 | `POST` | `/api/llm-settings/reset`      | Reset to environment variable defaults                               |
 | `POST` | `/api/llm-settings/test`       | Test connection for a profile (accepts partial profile)              |
-| `GET`  | `/fragments/settings/llm`      | Hub view (card grid of all profiles)                                 |
+| `GET`  | `/fragments/settings/llm`      | Model Settings shell with LLM Profiles tab active                    |
 | `GET`  | `/fragments/settings/llm/new`  | New profile edit form                                                |
 | `GET`  | `/fragments/settings/llm/:id`  | Edit existing profile form                                           |
+
+### Embedding Settings (Model Settings > Embeddings tab)
+
+| Method | Path                                                 | Description                                                                 |
+| ------ | ---------------------------------------------------- | --------------------------------------------------------------------------- |
+| `GET`  | `/api/embedding-settings`                            | Return active settings + presets + downloaded repo IDs + resolved dimension |
+| `POST` | `/api/embedding-settings`                            | Save model/chunk params; returns `reembedRequired` flag                     |
+| `POST` | `/api/embedding-settings/confirm-reembed`            | Kick off the re-embed orchestrator (drops/recreates vec tables + reindexes) |
+| `GET`  | `/api/embedding-settings/reembed-status`             | SSE stream of orchestrator progress (`phase`, `progress`, `message`)        |
+| `POST` | `/api/embedding-settings/download`                   | Pre-fetch a model into the filesystem cache (body: `{ repoId }`)            |
+| `GET`  | `/api/embedding-settings/download-status?repoId=...` | SSE stream of download progress                                             |
+| `POST` | `/api/embedding-settings/probe-dimension`            | Fetch a custom model's `config.json` (body: `{ repoId }`)                   |
+| `GET`  | `/api/entity-core/embedding-settings`                | Get entity-core overrides + resolved values                                 |
+| `POST` | `/api/entity-core/embedding-settings`                | Save overrides + restart MCP; 400 on dimension mismatch                     |
+| `GET`  | `/fragments/settings/llm/embeddings`                 | Model Settings shell with Embeddings tab active                             |
+
+The re-embed orchestrator **pauses MCP health pings** for its duration to avoid
+false-alarm reconnect storms while psycheros is CPU-bound loading the new model.
+After entity-core restart, the orchestrator polls `isConnected() + ping()` with
+backoff (up to 60s) before calling `embedding_rebuild_all`. See
+`src/embeddings/re-embed.ts` and `src/server/server.ts:waitForEntityCoreStable`.
 
 ### Web Search Settings
 
@@ -588,7 +609,7 @@ reloaded. Returns `{ "success": true, "toolName": "..." }` or
 | `GET`  | `/fragments/settings/memories/:granularity`       | Memory file list fragment (daily/weekly/monthly/yearly/significant). Query params: `offset` (pagination), `before`, `after` (date range, YYYY-MM-DD)                                                                                                 |
 | `GET`  | `/fragments/settings/memories/:granularity/:date` | Memory editor fragment                                                                                                                                                                                                                               |
 | `GET`  | `/api/admin/diagnostics`                          | JSON diagnostics snapshot (all subsystems)                                                                                                                                                                                                           |
-| `GET`  | `/api/admin/logs`                                 | JSON log entries with filtering (`?level=`, `?component=`, `?limit=`, `?since=`)                                                                                                                                                                     |
+| `GET`  | `/api/admin/logs`                                 | JSON log entries with filtering (`?level=`, `?component=`, `?limit=`, `?since=`). Entries below the configured floor (default `info`) are dropped before reaching the buffer — see [Log Levels](configuration.md#log-levels).                        |
 | `GET`  | `/api/admin/logs/entries`                         | HTML partial of log entries (same query params as above)                                                                                                                                                                                             |
 | `GET`  | `/api/admin/jobs`                                 | JSON scheduled jobs status                                                                                                                                                                                                                           |
 | `GET`  | `/api/admin/jobs/rows`                            | HTML partial of job table rows                                                                                                                                                                                                                       |

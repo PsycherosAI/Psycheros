@@ -296,7 +296,7 @@ export class WearableConnectionManager {
     if (client && !client.deviceIds.has(deviceId)) {
       client.deviceIds.add(deviceId);
       this.deviceToClient.set(deviceId, clientId);
-      console.log(
+      console.debug(
         `[Wearable] Client ${clientId} registered device: ${deviceId}`,
       );
     }
@@ -328,7 +328,7 @@ export class WearableConnectionManager {
 
     // Log summary
     const types = readings.map((r) => r.type).join(", ");
-    console.log(
+    console.debug(
       `[Wearable] ${deviceId}: received [${types}] from client ${clientId}`,
     );
   }

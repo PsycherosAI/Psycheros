@@ -629,6 +629,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Focus input on load
   const input = document.getElementById('message-input');
   if (input) {
+    // Restore any saved draft for the initial view (home or direct /c/:id URL).
+    // Direct /c/:id URLs also call restoreDraft() from loadConversationFromUrl,
+    // but that runs before the message-input is in the DOM; this runs after.
+    restoreDraft();
     input.focus();
   }
 
@@ -643,6 +647,11 @@ document.addEventListener('DOMContentLoaded', () => {
         LazyLoader.cleanup();
       }
       requestAnimationFrame(() => AutoScroll.jumpToBottom());
+      // Re-restore draft after any HTMX-driven #chat swap (e.g. HTMX-SSE
+      // auto-refresh) — the swap resets the textarea, so without this the
+      // saved draft would be lost. saveDraft on every keystroke keeps
+      // localStorage current; we don't need a matching beforeSwap save.
+      restoreDraft();
     }
 
     // Initialize graph view if present in chat or settings-content
@@ -839,6 +848,9 @@ async function loadConversationFromUrl(conversationId, { silent = false } = {}) 
     // Focus input
     focusInputWhenReady();
 
+    // Restore any saved draft for this conversation (Discord-style persistence)
+    restoreDraft();
+
   } catch (error) {
     console.error('Failed to load conversation:', error);
     if (!silent) showToast('Failed to load conversation');
@@ -945,6 +957,13 @@ function selectConversation(id) {
   // UI state from the old conversation's stream.
   // streamingConversationId retains the old value so sendMessage knows it's orphaned.
 
+  // Save the draft for the conversation we're leaving BEFORE currentConversationId
+  // changes. Sidebar clicks route through this function (not HTMX), so this is
+  // the only save point that runs while the old conversation ID is still active.
+  // (saveDraft on every keystroke keeps localStorage current, so this is mostly
+  // defensive — but it's load-bearing on the first nav from the __new__ slot.)
+  saveDraft();
+
   // Detach from the old stream without aborting it
   currentAbortController = null;
   isStreaming = false;
@@ -998,6 +1017,64 @@ function selectConversation(id) {
 function autoResize(textarea) {
   textarea.style.height = 'auto';
   textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+}
+
+// =============================================================================
+// Draft persistence (unsent text in the composer)
+// =============================================================================
+
+// Discord-style: unsent text lives in localStorage keyed per-conversation so
+// navigating away to settings or another conversation — or closing the tab —
+// doesn't lose what the user was typing. A synthetic "__new__" slot holds the
+// draft for the no-conversation home view. Storage is wrapped in try/catch so
+// private-mode browsers or quota errors degrade silently — no UI breakage.
+//
+// Saves are synchronous (no debounce): localStorage writes for short strings
+// are sub-millisecond, and a debounce introduced a timing bug where the save
+// fired after currentConversationId had changed on navigation, writing the
+// draft to the wrong conversation's key.
+const DRAFT_PREFIX = 'psycheros:draft:';
+const NEW_CONVERSATION_DRAFT_KEY = DRAFT_PREFIX + '__new__';
+
+function draftKeyForConversation(conversationId) {
+  return conversationId ? (DRAFT_PREFIX + conversationId) : NEW_CONVERSATION_DRAFT_KEY;
+}
+
+function saveDraft() {
+  const input = document.getElementById('message-input');
+  if (!input) return;
+  const key = draftKeyForConversation(currentConversationId);
+  const value = input.value;
+  try {
+    if (value) {
+      localStorage.setItem(key, value);
+    } else {
+      localStorage.removeItem(key);
+    }
+  } catch (_e) {
+    // localStorage unavailable (private mode, quota) — drafts just won't persist
+  }
+}
+
+function restoreDraft() {
+  const input = document.getElementById('message-input');
+  if (!input) return;
+  let value = '';
+  try {
+    value = localStorage.getItem(draftKeyForConversation(currentConversationId)) || '';
+  } catch (_e) {
+    return;
+  }
+  input.value = value;
+  if (value) autoResize(input);
+}
+
+function clearDraft(conversationId) {
+  try {
+    localStorage.removeItem(draftKeyForConversation(conversationId));
+  } catch (_e) {
+    // ignore
+  }
 }
 
 function isMobileDevice() {
@@ -1236,6 +1313,7 @@ async function sendMessage() {
   input.value = '';
   input.style.height = 'auto';
   input.disabled = true;
+  clearDraft(currentConversationId);
 
   // Save and clear attachment before sending
   const attachmentId = pendingAttachmentId || undefined;
@@ -2229,6 +2307,13 @@ function stripEntityXml(text) {
 // Configure marked to match server-side settings — preserves line breaks in
 // blockquotes and other multi-line content (e.g. group chat transcripts).
 marked.setOptions({ breaks: true, gfm: true });
+
+// Force all markdown links to open in a new tab so the user doesn't
+// lose their Psycheros session when clicking a link the entity shared.
+const _origLink = marked.Renderer.prototype.link;
+marked.Renderer.prototype.link = function(href, title, text) {
+  return _origLink.call(this, href, title, text).replace('<a ', '<a target="_blank" rel="noopener" ');
+};
 
 /** Debounce timer for progressive markdown rendering */
 let _renderTimer = null;
@@ -3489,6 +3574,11 @@ async function confirmDelete() {
       throw new Error(error.error || 'Failed to delete');
     }
 
+    // Drop any saved drafts for the deleted conversations
+    for (const id of ids) {
+      clearDraft(id);
+    }
+
     // Exit selection mode if active
     if (selectionMode) {
       exitSelectionMode();
@@ -3782,6 +3872,7 @@ function createContextInspector() {
       <button class="context-tab" data-tab="rag">RAG</button>
       <button class="context-tab" data-tab="messages">Messages</button>
       <button class="context-tab" data-tab="tools">Tools</button>
+      <button class="context-tab" data-tab="plugins">Plugins</button>
       <button class="context-tab" data-tab="metrics">Metrics</button>
     </div>
     <div class="context-viewer-content" id="context-content">
@@ -3884,6 +3975,9 @@ function renderContextTab(tabName) {
       break;
     case 'metrics':
       content.innerHTML = renderMetricsTab(snap);
+      break;
+    case 'plugins':
+      content.innerHTML = renderPluginsTab(snap);
       break;
   }
 }
@@ -4144,6 +4238,110 @@ function renderMetricsTab(snap) {
 
   html += '</div>';
   return html;
+}
+
+/**
+ * Render the Plugins tab — per-hook detail of what each plugin prompt hook
+ * contributed to the system message this turn.
+ */
+function renderPluginsTab(snap) {
+  let metrics;
+  try {
+    metrics = JSON.parse(snap.metricsJson);
+  } catch {
+    metrics = {};
+  }
+
+  // Budget meter — shared with Metrics tab, but prominent here because this
+  // tab is the "why is my plugin context only X chars?" view.
+  let budgetOverview = '';
+  if (typeof metrics.pluginBudgetMax === 'number' && typeof metrics.pluginBudgetUsed === 'number') {
+    const pct = metrics.pluginBudgetMax > 0
+      ? Math.min(100, Math.round((metrics.pluginBudgetUsed / metrics.pluginBudgetMax) * 100))
+      : 0;
+    const meterColor = pct >= 90 ? 'var(--c-danger, #ff6b6b)' : (pct >= 70 ? 'var(--c-warning, #f0ad4e)' : 'var(--c-accent)');
+    budgetOverview = `
+      <div class="context-utilization">
+        <div class="context-utilization-label">Plugin Context Budget</div>
+        <div class="context-utilization-bar">
+          <div class="context-utilization-fill" style="width: ${pct}%;background:${meterColor};"></div>
+        </div>
+        <div class="context-utilization-pct">${pct}% &mdash; ${metrics.pluginBudgetUsed.toLocaleString()} / ${metrics.pluginBudgetMax.toLocaleString()} chars</div>
+      </div>`;
+  }
+
+  let hooks = [];
+  if (snap.pluginHooksJson) {
+    try {
+      hooks = JSON.parse(snap.pluginHooksJson);
+    } catch {
+      hooks = [];
+    }
+  }
+
+  let html = `<div class="context-metrics-overview">
+    <div class="context-metrics-row">
+      <span>Hooks Run</span>
+      <span>${hooks.length}</span>
+    </div>
+    ${budgetOverview}
+  </div>`;
+
+  if (hooks.length === 0) {
+    html += '<div class="context-empty">No plugin prompt hooks contributed to this turn</div>';
+    return html;
+  }
+
+  // Sort by priority ascending for display (matches run order).
+  const sorted = [...hooks].sort((a, b) =>
+    (a.priority ?? 0) - (b.priority ?? 0) ||
+    (a.pluginId || '').localeCompare(b.pluginId || '') ||
+    (a.hookName || '').localeCompare(b.hookName || '')
+  );
+
+  html += '<h3 class="context-metrics-heading">Per-Hook Breakdown</h3>';
+
+  for (const h of sorted) {
+    const statusBadge = renderPluginHookStatusBadge(h);
+    const meta = `${h.pluginId ?? 'unknown'} &middot; priority ${h.priority ?? 0} &middot; ${h.charsUsed ?? 0} chars &middot; ${h.elapsedMs ?? 0}ms`;
+    const output = h.output && h.output.length > 0
+      ? highlightSearch(h.output)
+      : '<span class="context-dim">No output captured</span>';
+    html += `
+      <div class="context-section${h.output ? ' expanded' : ''}">
+        <div class="context-section-header" onclick="this.parentElement.classList.toggle('expanded')">
+          <span>${escapeHtml(h.hookName || 'unnamed')} ${statusBadge}</span>
+          <span class="context-size-badge">${meta}</span>
+          <span class="context-section-toggle">&#9660;</span>
+        </div>
+        <div class="context-section-content">
+          <pre>${output}</pre>
+        </div>
+      </div>
+    `;
+  }
+
+  return html;
+}
+
+/**
+ * Build a status badge for a plugin hook entry. Mirrors the tone of the
+ * existing plugin health card — green fired, amber degraded, red failed/skipped.
+ */
+function renderPluginHookStatusBadge(h) {
+  if (h.degraded) {
+    return '<span class="context-tag context-tag-warn">failed</span>';
+  }
+  if (h.budgetSkipped) {
+    return '<span class="context-tag context-tag-warn">budget-skipped</span>';
+  }
+  if (h.truncated) {
+    return '<span class="context-tag context-tag-warn">truncated</span>';
+  }
+  if (!h.output || h.output.length === 0) {
+    return '<span class="context-tag context-tag-dim">empty</span>';
+  }
+  return '<span class="context-tag context-tag-ok">fired</span>';
 }
 
 // =============================================================================
@@ -4976,6 +5174,10 @@ async function deleteSignificantMemory(date) {
 }
 
 function goBack() {
+  // Preserve whatever the user was typing before resetting the chat DOM —
+  // loadConversationFromUrl restores from storage for the target conversation,
+  // and the home-view branch restores the "__new__" draft below.
+  saveDraft();
   if (currentConversationId) {
     loadConversationFromUrl(currentConversationId, { silent: true });
   } else {
@@ -4990,11 +5192,12 @@ function goBack() {
             </svg>
           </button>
           <input type="file" id="attach-input" accept="image/*" style="display:none" onchange="Psycheros.handleAttachment(this)">
-          <textarea class="input-field" id="message-input" placeholder="Type your message..." rows="1" onkeydown="Psycheros.handleKeyDown(event)" oninput="Psycheros.autoResize(this)"></textarea>
+          <textarea class="input-field" id="message-input" placeholder="Type your message..." rows="1" onkeydown="Psycheros.handleKeyDown(event)" oninput="Psycheros.autoResize(this); Psycheros.saveDraft()"></textarea>
           <button class="send-btn" id="send-btn" onclick="Psycheros.sendMessage()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>
         </div><div id="attachment-preview" class="attachment-preview" style="display:none;"></div></div>`;
+      restoreDraft();
     }
   }
 }
@@ -5006,6 +5209,7 @@ globalThis.Psycheros = {
   newConversation,
   selectConversation,
   autoResize,
+  saveDraft,
   handleKeyDown,
   sendMessage,
   handleAttachment,
@@ -5748,6 +5952,20 @@ globalThis.setPluginActivityFilter = setPluginActivityFilter;
 globalThis.copyPluginEvents = copyPluginEvents;
 globalThis.checkPluginUpdate = checkPluginUpdate;
 globalThis.applyPluginUpdate = applyPluginUpdate;
+
+/**
+ * Navigate to a plugin's owned settings page. Used by the "Configure" button
+ * on plugin rows. Triggers an HTMX swap into #chat, same as any other
+ * settings fragment navigation.
+ */
+function openPluginSettings(pluginId) {
+  if (!pluginId) return;
+  htmx.ajax('GET', `/fragments/settings/plugins/${encodeURIComponent(pluginId)}`, {
+    target: '#chat',
+    swap: 'innerHTML',
+  });
+}
+globalThis.openPluginSettings = openPluginSettings;
 
 // Auto-load the health card and vetting guide whenever the Plugins Settings
 // fragment is in the DOM. Re-runs on every HTMX swap of #chat (settings nav,
@@ -7024,3 +7242,558 @@ globalThis.toggleVoiceChatDebug = toggleVoiceChatDebug;
 globalThis.clearVoiceChatDebugLog = clearVoiceChatDebugLog;
 globalThis.copyVoiceChatDebugLog = copyVoiceChatDebugLog;
 globalThis.runVoiceChatTest = runVoiceChatTest;
+
+// =============================================================================
+// Embedding Settings (Model Settings > Embeddings tab)
+// =============================================================================
+
+/**
+ * Read the active repo id from the dropdown or custom-repo field.
+ */
+function getActiveEmbeddingRepoId() {
+  const sel = document.getElementById('embedding-preset');
+  if (!sel) return '';
+  if (sel.value === '__custom__') {
+    const custom = document.getElementById('embedding-custom-repo');
+    return custom ? normalizeRepoId(custom.value.trim()) : '';
+  }
+  return sel.value;
+}
+
+/**
+ * Accept either a bare repo id ("BAAI/bge-small-en-v1.5") or a full
+ * huggingface URL and normalize to the repo id form.
+ */
+function normalizeRepoId(input) {
+  if (!input) return '';
+  const stripped = input.replace(/^https?:\/\/(www\.)?huggingface\.co\//i, '');
+  return stripped.replace(/\/$/, '').trim();
+}
+
+/**
+ * Read embedded JSON blobs.
+ */
+function readEmbeddingData() {
+  const presetsJson = document.getElementById('embedding-presets-data');
+  const downloadedJson = document.getElementById('embedding-downloaded-data');
+  const activeJson = document.getElementById('embedding-active-data');
+  let presets = [];
+  let downloaded = [];
+  let active = { modelRepoId: '', dimension: 0, downloaded: false, downloadSizeMb: null };
+  try {
+    if (presetsJson) presets = JSON.parse(presetsJson.textContent || '[]');
+  } catch (err) { console.warn('parse presets', err); }
+  try {
+    if (downloadedJson) downloaded = JSON.parse(downloadedJson.textContent || '[]');
+  } catch (err) { console.warn('parse downloaded', err); }
+  try {
+    if (activeJson) active = JSON.parse(activeJson.textContent || '{}');
+  } catch (err) { console.warn('parse active', err); }
+  return { presets, downloaded, active };
+}
+
+/**
+ * Refresh the inline download button / "downloaded" badge to match the
+ * currently-selected model. Called on dropdown change and on custom-repo
+ * input (debounced).
+ */
+function refreshDownloadUi() {
+  const { presets, downloaded } = readEmbeddingData();
+  const repoId = getActiveEmbeddingRepoId();
+  const preset = presets.find((p) => p.repoId === repoId);
+  const isDownloaded = downloaded.includes(repoId);
+
+  const inlineWrap = document.getElementById('embedding-download-inline');
+  const badge = document.getElementById('embedding-downloaded-badge');
+  const nameLabel = document.getElementById('embedding-download-name');
+  const statusEl = document.getElementById('embedding-download-status');
+
+  if (isDownloaded) {
+    if (inlineWrap) inlineWrap.style.display = 'none';
+    if (badge) {
+      badge.style.display = '';
+      badge.innerHTML = `✓ <strong>${
+        escapeHtmlClient(preset?.label ?? repoId)
+      }</strong> is downloaded and ready.`;
+    }
+  } else {
+    if (badge) badge.style.display = 'none';
+    if (inlineWrap) {
+      inlineWrap.style.display = '';
+      if (nameLabel) {
+        nameLabel.textContent = preset?.label ?? repoId ?? '(set repo ID)';
+      }
+      // The "(XXMB)" suffix is part of the button text node — swap it.
+      const btn = inlineWrap.querySelector('button');
+      if (btn) {
+        const sizeText = preset ? ` (${preset.downloadSizeMb}MB)` : '';
+        // Rebuild: ↓ Download <name> <size>
+        btn.innerHTML = `↓ Download <span id="embedding-download-name">${
+          escapeHtmlClient(preset?.label ?? repoId ?? '(set repo ID)')
+        }</span>${sizeText}`;
+      }
+    }
+    if (statusEl) statusEl.textContent = '';
+  }
+}
+
+/**
+ * Dropdown onchange: show/hide custom row, refresh download UI, update
+ * recommended chunk size hints.
+ */
+function onEmbeddingPresetChange(value) {
+  const customRow = document.getElementById('embedding-custom-row');
+  if (customRow) customRow.style.display = value === '__custom__' ? '' : 'none';
+
+  // Clear the hint for custom repos — will be filled by probeCustomRepoDimension.
+  if (value === '__custom__') {
+    setRecommendedHint(null, '');
+  } else {
+    try {
+      const { presets } = readEmbeddingData();
+      const preset = presets.find((p) => p.repoId === value);
+      if (preset) {
+        setRecommendedHint(preset.recommendedChunkTargetChars, preset.label);
+      }
+    } catch (err) {
+      console.warn('rec update failed', err);
+    }
+  }
+
+  refreshDownloadUi();
+  updateSaveButtonLabel();
+}
+globalThis.onEmbeddingPresetChange = onEmbeddingPresetChange;
+
+/**
+ * Custom repo input handler — debounced dimension probe + UI refresh.
+ */
+let customRepoDebounce = null;
+function onCustomRepoInput(value) {
+  if (customRepoDebounce) clearTimeout(customRepoDebounce);
+  customRepoDebounce = setTimeout(() => {
+    refreshDownloadUi();
+    updateSaveButtonLabel();
+    if (value) probeCustomRepoDimension(normalizeRepoId(value));
+  }, 500);
+}
+globalThis.onCustomRepoInput = onCustomRepoInput;
+
+/**
+ * Render the recommended-chunk-size hint under "Target chars". Pass null to
+ * hide it (e.g. custom repo before probe completes).
+ */
+function setRecommendedHint(value, modelLabel) {
+  const container = document.querySelector('[data-rec-container="targetChars"]');
+  if (!container) return;
+  if (value === null || value === undefined) {
+    container.textContent = '';
+    return;
+  }
+  const label = modelLabel || 'this model';
+  container.textContent = `(Recommended for ${label}: ${value})`;
+}
+
+/**
+ * Probe a custom HF repo's dimension + context length. Updates the
+ * recommended chunk-size hint using the probed context length
+ * (capped at 8192 chars by the server).
+ */
+async function probeCustomRepoDimension(repoId) {
+  if (!repoId || !repoId.includes('/')) {
+    setRecommendedHint(null);
+    return;
+  }
+  const hint = document.getElementById('embedding-custom-dimension');
+  if (hint) hint.textContent = 'Probing dimension...';
+  try {
+    const resp = await fetch('/api/embedding-settings/probe-dimension', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoId }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (hint) hint.textContent = `Error: ${data.error || resp.status}`;
+      setRecommendedHint(null);
+      return;
+    }
+    const ctxInfo = data.maxContextTokens
+      ? ` — ${data.maxContextTokens}-token context`
+      : '';
+    if (hint) hint.textContent = `Dimension: ${data.dimension}${ctxInfo}`;
+    // Use the probed recommended value if the server returned one;
+    // otherwise hide the hint so we don't show a misleading number.
+    if (data.recommendedChunkTargetChars !== null && data.recommendedChunkTargetChars !== undefined) {
+      setRecommendedHint(data.recommendedChunkTargetChars, repoId);
+    } else {
+      setRecommendedHint(null);
+    }
+  } catch (err) {
+    if (hint) hint.textContent = `Error: ${err.message || err}`;
+    setRecommendedHint(null);
+  }
+}
+
+/**
+ * Start a download for the currently-selected model.
+ */
+async function downloadEmbeddingModel() {
+  const repoId = getActiveEmbeddingRepoId();
+  if (!repoId) {
+    alert('Select a model first.');
+    return;
+  }
+  const statusEl = document.getElementById('embedding-download-status');
+  if (statusEl) statusEl.textContent = `Starting download for ${repoId}...`;
+  try {
+    await fetch('/api/embedding-settings/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoId }),
+    });
+    pollDownloadStatus(repoId);
+  } catch (err) {
+    if (statusEl) statusEl.textContent = `Error: ${err.message || err}`;
+  }
+}
+globalThis.downloadEmbeddingModel = downloadEmbeddingModel;
+
+/**
+ * Subscribe to the download SSE stream.
+ */
+function pollDownloadStatus(repoId) {
+  const statusEl = document.getElementById('embedding-download-status');
+  const btn = document.querySelector('#embedding-download-inline button');
+  // Swap the button for a spinner + "Downloading..." label so the user
+  // gets clear feedback even when the progress percent is unreliable
+  // (Xenova's progress callback fires inconsistently for some files).
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="admin-action-spinner"></span> Downloading...';
+  }
+  if (statusEl) statusEl.innerHTML = '';
+
+  const es = new EventSource(
+    `/api/embedding-settings/download-status?repoId=${encodeURIComponent(repoId)}`,
+  );
+  es.onmessage = (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      if (data.state === 'ready') {
+        markRepoDownloaded(repoId);
+        if (statusEl) {
+          statusEl.innerHTML = `<span class="embedding-download-success">✓ Download complete — ready to switch</span>`;
+        }
+        es.close();
+        refreshDownloadUi();
+        setTimeout(() => {
+          const status = document.getElementById('embedding-download-status');
+          if (status) status.innerHTML = '';
+        }, 4000);
+      } else if (data.state === 'error') {
+        if (statusEl) {
+          statusEl.innerHTML = `<span class="embedding-download-error">✗ Error: ${data.error || 'unknown'}</span>`;
+        }
+        if (btn) { btn.disabled = false; btn.textContent = 'Download'; }
+        es.close();
+      }
+      // Ignore 'downloading' state — the spinner already conveys it.
+    } catch (err) {
+      console.warn('download SSE parse error', err);
+    }
+  };
+  es.onerror = () => {
+    es.close();
+    if (btn) { btn.disabled = false; btn.textContent = 'Download'; }
+  };
+}
+
+/**
+ * Patch the in-memory downloaded list to include the just-downloaded repo.
+ * The page-embedded JSON is static from server render time, so without this
+ * refreshDownloadUi wouldn't know about new downloads in the same session.
+ */
+function markRepoDownloaded(repoId) {
+  const downloadedJson = document.getElementById('embedding-downloaded-data');
+  if (!downloadedJson) return;
+  try {
+    const list = JSON.parse(downloadedJson.textContent || '[]');
+    if (!list.includes(repoId)) {
+      list.push(repoId);
+      downloadedJson.textContent = JSON.stringify(list);
+    }
+  } catch (err) {
+    console.warn('markRepoDownloaded parse failed', err);
+  }
+}
+
+/**
+ * Compute the form state and detect whether saving would require re-embedding.
+ */
+function gatherEmbeddingForm() {
+  const repoId = getActiveEmbeddingRepoId();
+  const chunkParams = {};
+  document.querySelectorAll('[data-chunk-param]').forEach((el) => {
+    const key = el.getAttribute('data-chunk-param');
+    const v = el.value;
+    if (key && v !== '') chunkParams[key] = parseInt(v, 10);
+  });
+  return { modelRepoId: repoId, chunkParams };
+}
+
+/**
+ * Compare current form state to the originally-loaded active model +
+ * chunk params. Returns true if saving would trigger a re-embed.
+ */
+function wouldReembed() {
+  const { active } = readEmbeddingData();
+  // System out of sync (e.g. previous re-embed failed) → always re-embed.
+  if (active.outOfSync) return true;
+  const form = gatherEmbeddingForm();
+  if (!form.modelRepoId || form.modelRepoId !== active.modelRepoId) return true;
+  // We don't have the original chunk params client-side, so any change to
+  // a chunk-param field is treated as a potential re-embed trigger.
+  const changedChunks = Array.from(document.querySelectorAll('[data-chunk-param]'))
+    .some((el) => el.dataset.original && el.value !== el.dataset.original);
+  return changedChunks;
+}
+
+/**
+ * Update the save button label to reflect whether re-embed will be needed.
+ * Also surfaces a warning when the system is out of sync (saved settings
+ * don't match what the daemon actually has loaded).
+ */
+function updateSaveButtonLabel() {
+  const btn = document.getElementById('embedding-save-btn');
+  if (!btn) return;
+  // Always "Save & Re-embed" — saving always triggers a re-embed, even if
+  // the form looks unchanged, to handle cases where the system is out of
+  // sync with the saved settings.
+  btn.textContent = 'Save & Re-embed';
+  // Toggle a visible warning when saved != running.
+  const { active } = readEmbeddingData();
+  let warning = document.getElementById('embedding-sync-warning');
+  if (active.outOfSync) {
+    if (!warning) {
+      warning = document.createElement('div');
+      warning.id = 'embedding-sync-warning';
+      warning.className = 'embedding-sync-warning';
+      btn.parentNode.insertBefore(warning, btn.nextSibling);
+    }
+    warning.innerHTML = `<strong>System out of sync:</strong> saved model is ${
+      active.dimension
+    }d but the daemon is running ${active.actualDimension}d. Click Save &amp; Re-embed to align.`;
+  } else if (warning) {
+    warning.remove();
+  }
+}
+
+/**
+ * Save settings. If the change requires a re-embed, confirm with the user
+ * via a native confirm() dialog, then kick off the orchestrator with a
+ * blocking overlay + inline progress.
+ */
+async function saveEmbeddingSettings() {
+  const form = gatherEmbeddingForm();
+  if (!form.modelRepoId) {
+    alert('Select a model first.');
+    return;
+  }
+
+  // Check download state for the selected model.
+  const { downloaded } = readEmbeddingData();
+  if (!downloaded.includes(form.modelRepoId)) {
+    if (!confirm(
+      `The selected model "${form.modelRepoId}" is not downloaded yet.\n\n` +
+        `Click OK to download it first (you'll see a progress indicator), ` +
+        `then come back and click Save again. Click Cancel to abort.`
+    )) {
+      return;
+    }
+    await downloadEmbeddingModel();
+    return;
+  }
+
+  // Always confirm — saving always triggers a full re-embed, even if the
+  // form looks unchanged, because the underlying system may be out of sync
+  // with the saved settings (e.g. a previous re-embed failed mid-run).
+  const ok = confirm(
+    `Save these settings and re-embed all memories, messages, vault ` +
+      `documents, and graph nodes with the selected model?\n\n` +
+      `This may take several minutes. The chat will be unavailable during ` +
+      `re-indexing. Do not close this page.`
+  );
+  if (!ok) return;
+
+  const btn = document.getElementById('embedding-save-btn');
+  const statusEl = document.getElementById('embedding-save-status');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  if (statusEl) statusEl.textContent = '';
+
+  try {
+    // Persist the settings first.
+    const resp = await fetch('/api/embedding-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form),
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) {
+      throw new Error(data.error || 'Failed to save');
+    }
+    // Then kick off the orchestrator unconditionally.
+    await runReembedWithProgress(btn, statusEl);
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save & Re-embed'; }
+    if (statusEl) statusEl.textContent = `Error: ${err.message || err}`;
+    alert(`Error: ${err.message || err}`);
+  }
+}
+globalThis.saveEmbeddingSettings = saveEmbeddingSettings;
+
+/**
+ * Kick off the re-embed orchestrator and show blocking progress UI.
+ */
+async function runReembedWithProgress(btn, statusEl) {
+  const progressSection = document.getElementById('embedding-reembed-progress');
+  const progressFill = document.getElementById('embedding-reembed-progress-fill');
+  const progressText = document.getElementById('embedding-reembed-progress-text');
+  const overlay = document.getElementById('embedding-reembed-overlay');
+
+  if (progressSection) progressSection.style.display = '';
+  if (progressFill) progressFill.style.width = '0%';
+  if (progressText) progressText.textContent = 'Preparing...';
+  if (overlay) overlay.style.display = '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="admin-action-spinner"></span> Re-embedding...'; }
+  if (statusEl) statusEl.textContent = '';
+
+  try {
+    const resp = await fetch('/api/embedding-settings/confirm-reembed', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) {
+      throw new Error(data.error || 'Failed to start re-embed');
+    }
+    subscribeReembedProgress(btn, statusEl);
+  } catch (err) {
+    if (progressText) progressText.textContent = `Error: ${err.message || err}`;
+    if (overlay) overlay.style.display = 'none';
+    if (btn) { btn.disabled = false; btn.textContent = 'Save & Re-embed'; }
+  }
+}
+
+/**
+ * Subscribe to re-embed SSE progress stream.
+ */
+function subscribeReembedProgress(btn, statusEl) {
+  const fill = document.getElementById('embedding-reembed-progress-fill');
+  const text = document.getElementById('embedding-reembed-progress-text');
+  const overlay = document.getElementById('embedding-reembed-overlay');
+  let lastPhase = '';
+  const logLines = [];
+  const es = new EventSource('/api/embedding-settings/reembed-status');
+  es.onmessage = (ev) => {
+    try {
+      const s = JSON.parse(ev.data);
+      const pct = Math.round((s.progress || 0) * 100);
+      if (fill) fill.style.width = `${pct}%`;
+
+      // Append a new line when the phase changes or when a progress
+      // message arrives (e.g. "Re-embedding messages: 23/51").
+      const phaseLabel = formatPhase(s.phase);
+      const msg = s.message ? ` — ${s.message}` : '';
+      const line = `${phaseLabel}${msg}`;
+      if (line !== logLines[logLines.length - 1]) {
+        logLines.push(line);
+      }
+      if (text) {
+        text.innerHTML = logLines.map((l) => `<div>${escapeHtmlClient(l)}</div>`).join('');
+      }
+
+      if (s.phase === 'complete') {
+        es.close();
+        if (text) {
+          text.innerHTML += '<div><strong>✓ Re-embed complete.</strong></div>';
+        }
+        // Hide the blocking overlay + re-enable the button so the user
+        // stays on the settings page. Refresh just the tab content via
+        // HTMX so the sync warning clears — no full-page reload.
+        if (overlay) overlay.style.display = 'none';
+        if (btn) { btn.disabled = false; btn.textContent = 'Save & Re-embed'; }
+        if (statusEl) statusEl.textContent = '✓ Re-embed complete.';
+        setTimeout(() => {
+          if (window.htmx) {
+            window.htmx.ajax('GET', '/fragments/settings/llm/embeddings', '#chat');
+          }
+        }, 1000);
+      } else if (s.phase === 'error') {
+        es.close();
+        if (text) {
+          text.innerHTML += `<div><strong>✗ Error: ${escapeHtmlClient(s.error || 'unknown')}</strong></div>`;
+        }
+        if (overlay) overlay.style.display = 'none';
+        if (btn) { btn.disabled = false; btn.textContent = 'Save & Re-embed'; }
+        if (statusEl) statusEl.textContent = `Error: ${s.error || 'unknown'}`;
+      }
+    } catch (err) {
+      console.warn('reembed SSE parse error', err);
+    }
+  };
+  es.onerror = () => es.close();
+}
+
+function formatPhase(phase) {
+  const map = {
+    'idle': 'Idle',
+    'preparing': 'Preparing',
+    'dropping-psycheros': 'Resetting vector tables',
+    'reindexing-psycheros-messages': 'Re-embedding messages',
+    'reindexing-psycheros-memories': 'Re-embedding memory chunks',
+    'reindexing-psycheros-vault': 'Re-embedding vault documents',
+    'triggering-entity-core': 'Rebuilding entity-core',
+    'persisting': 'Saving settings',
+    'complete': 'Complete',
+    'error': 'Error',
+  };
+  return map[phase] || phase;
+}
+
+function escapeHtmlClient(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// On page load, mark the original chunk-param values so we can detect changes.
+document.addEventListener('DOMContentLoaded', () => {
+  initEmbeddingsTab();
+});
+
+/**
+ * Per-tab init. Called from main DOMContentLoaded AND from an inline
+ * script at the end of the embeddings tab fragment so it runs after
+ * HTMX swaps the tab in.
+ */
+function initEmbeddingsTab() {
+  const root = document.querySelector('[data-embedding-settings]');
+  if (!root) return; // tab not loaded yet
+  document.querySelectorAll('[data-chunk-param]').forEach((el) => {
+    el.dataset.original = el.value;
+  });
+  refreshDownloadUi();
+  updateSaveButtonLabel();
+  // Seed the recommended hint with the active model's value.
+  try {
+    const sel = document.getElementById('embedding-preset');
+    if (sel && sel.value && sel.value !== '__custom__') {
+      onEmbeddingPresetChange(sel.value);
+    }
+  } catch (err) {
+    console.warn('init hint failed', err);
+  }
+}
+globalThis.initEmbeddingsTab = initEmbeddingsTab;

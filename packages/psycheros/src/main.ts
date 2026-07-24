@@ -5,7 +5,7 @@
  */
 
 import "@std/dotenv/load";
-import { initLogCapture } from "./server/logger.ts";
+import { configureLogLevelsFromFile, initLogCapture } from "./server/logger.ts";
 initLogCapture();
 
 import { Server } from "./server/mod.ts";
@@ -14,6 +14,11 @@ import { initialize } from "./init/mod.ts";
 import { prepareVectorExtension } from "./db/mod.ts";
 import { getDefaultWebSearchSettings } from "./llm/web-search-settings.ts";
 import { loadEntityCoreLLMSettings } from "./llm/entity-core-settings.ts";
+import {
+  computeEntityCoreEmbeddingEnv,
+  loadEmbeddingSettings,
+  loadEntityCoreEmbeddingSettings,
+} from "./embeddings/mod.ts";
 import { join } from "@std/path";
 import { VERSION } from "./version.ts";
 
@@ -82,6 +87,10 @@ console.log(`
 // projectRoot (source bundle), writes to dataRoot (runtime state location).
 await initialize(config.projectRoot, config.dataRoot);
 
+// Load per-component log-level overrides from .psycheros/log-settings.json
+// (silent no-op when the file doesn't exist).
+await configureLogLevelsFromFile(config.dataRoot);
+
 console.log(`Starting server on http://${config.hostname}:${config.port}`);
 console.log(`Project root: ${config.projectRoot}`);
 if (config.dataRoot !== config.projectRoot) {
@@ -136,6 +145,16 @@ if (mcpEnabled) {
   const ecTemperature = ecLLMSettings.temperature ?? 0.3;
   const ecMaxTokens = ecLLMSettings.maxTokens ?? 8000;
 
+  // Load embedding settings + entity-core overrides to push as env vars
+  const psycherosEmbeddings = await loadEmbeddingSettings(config.dataRoot);
+  const ecEmbeddingOverrides = await loadEntityCoreEmbeddingSettings(
+    config.dataRoot,
+  );
+  const embeddingEnv = computeEntityCoreEmbeddingEnv(
+    psycherosEmbeddings,
+    ecEmbeddingOverrides,
+  );
+
   mcpClient = createMCPClient({
     command: mcpCommand,
     args: mcpArgs,
@@ -159,6 +178,9 @@ if (mcpEnabled) {
       ZAI_API_KEY: Deno.env.get("ZAI_API_KEY") || "",
       ZAI_BASE_URL: Deno.env.get("ZAI_BASE_URL") || "",
       ZAI_MODEL: Deno.env.get("ZAI_MODEL") || "",
+      // Embedding model + chunk params — entity-core reads these to pick its
+      // model at init time and to drive its chunker/cache.
+      ...embeddingEnv,
     },
     syncOnStartup: true,
     offlineFallback: true,

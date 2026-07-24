@@ -1912,6 +1912,38 @@
   display: block;
 }
 
+.context-tag {
+  display: inline-block;
+  margin-left: var(--sp-2);
+  padding: 0 var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-sm);
+  vertical-align: middle;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.context-tag-ok {
+  color: var(--c-success, var(--c-accent));
+  border-color: var(--c-success, var(--c-accent));
+}
+
+.context-tag-warn {
+  color: var(--c-warning, #f0ad4e);
+  border-color: var(--c-warning, #f0ad4e);
+}
+
+.context-tag-danger {
+  color: var(--c-danger, #ff6b6b);
+  border-color: var(--c-danger, #ff6b6b);
+}
+
+.context-tag-dim {
+  color: var(--c-fg-muted);
+  border-color: var(--c-border);
+}
+
 .context-section-content pre {
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);

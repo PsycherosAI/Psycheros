@@ -6,7 +6,7 @@
  */
 
 import type { Database } from "@db/sqlite";
-import { EMBEDDING_DIMENSION } from "./types.ts";
+import { getActiveEmbeddingDimension } from "./types.ts";
 
 /**
  * SQL schema for the knowledge graph.
@@ -96,13 +96,17 @@ export const GRAPH_SCHEMA = `
 
 /**
  * SQL to create the vector virtual table for semantic search.
- * This is run separately after checking for sqlite-vec availability.
+ * Resolves the active dimension at call time so a spawn-time env-var change
+ * (from a Psycheros MCP restart with a new model) is honored without a
+ * restart of my own process.
  */
-export const VECTOR_TABLE_SQL = `
+export function vectorTableSql(dim: number): string {
+  return `
   CREATE VIRTUAL TABLE IF NOT EXISTS vec_graph_nodes USING vec0(
-    embedding FLOAT[${EMBEDDING_DIMENSION}] distance=cosine
+    embedding FLOAT[${dim}] distance=cosine
   )
 `;
+}
 
 /**
  * Initialize the graph schema in the database.
@@ -215,7 +219,7 @@ function initializeVectorTables(db: Database): boolean {
         .get();
 
       if (!hasVecTable) {
-        db.exec(VECTOR_TABLE_SQL);
+        db.exec(vectorTableSql(getActiveEmbeddingDimension()));
       }
       return true;
     }

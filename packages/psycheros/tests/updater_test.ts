@@ -165,7 +165,9 @@ Deno.test("update check selects the newest compatible package in a monorepo", as
   await Deno.mkdir(join(pluginRoot, pluginId));
   await Deno.writeTextFile(
     join(pluginRoot, pluginId, "plugin.json"),
-    JSON.stringify(updateManifest(pluginId, "1.0.0", ">=0.9.0 <1.0.0", update)),
+    JSON.stringify(
+      updateManifest(pluginId, "1.0.0", ">=0.10.0 <1.0.0", update),
+    ),
   );
 
   const requested: string[] = [];
@@ -182,7 +184,7 @@ Deno.test("update check selects the newest compatible package in a monorepo", as
     }
     if (url.includes("ref=community-test-v3.0.0")) {
       return githubFileResponse(
-        updateManifest(pluginId, "3.0.0", "^0.9.0", {
+        updateManifest(pluginId, "3.0.0", "^0.10.0", {
           ...update,
           repoUrl: "https://github.com/example/hijacked-channel",
         }),
@@ -195,7 +197,7 @@ Deno.test("update check selects the newest compatible package in a monorepo", as
     }
     if (url.includes("ref=community-test-v1.2.0")) {
       return githubFileResponse(
-        updateManifest(pluginId, "1.2.0", "^0.9.0", update),
+        updateManifest(pluginId, "1.2.0", "^0.10.0", update),
       );
     }
     return new Response("not found", { status: 404 });

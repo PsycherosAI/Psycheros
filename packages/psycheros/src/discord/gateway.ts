@@ -161,7 +161,21 @@ export class DiscordGatewayClient {
   private resumeUrl: string | null = null;
   private sequence: number | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
+  /**
+   * Pending reconnect setTimeout handle. Tracked so the watchdog can detect
+   * "a reconnect is already scheduled" and so disconnect() can cancel it.
+   * Null when no reconnect is pending.
+   */
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Periodic connection-health watchdog. Catches the failure mode where the
+   * WS dies and no close handler schedules a reconnect — e.g. a close event
+   * swallowed by stale state, or a reconnect timer that fired but failed to
+   * start a new WS. Defence-in-depth on top of the heartbeat's missed-ACK
+   * check; the heartbeat only fires while the WS is OPEN.
+   */
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private watchdogIntervalMs = 60_000;
   private closed = false;
   private skipNextClose = false;
   private handlers: Map<string, Set<GatewayEventHandler>> = new Map();
@@ -205,6 +219,7 @@ export class DiscordGatewayClient {
 
   async connect(): Promise<void> {
     this.closed = false;
+    this.startWatchdog();
     const gatewayUrl = await this.getGatewayUrl();
     const wsUrl = `${gatewayUrl}/?v=10&encoding=json`;
     return this.connectWs(wsUrl);
@@ -212,9 +227,13 @@ export class DiscordGatewayClient {
 
   private connectWs(wsUrl: string): Promise<void> {
     // Close any existing WebSocket to prevent stale event handlers from
-    // firing and scheduling duplicate reconnects.
-    this.skipNextClose = true;
+    // firing and scheduling duplicate reconnects. Only set skipNextClose
+    // when there IS an old WS to close — setting it unconditionally leaks a
+    // stale flag: on initial connect (and any connect where the old WS is
+    // already null), no close event ever fires to consume it, so the flag
+    // sits as `true` and silently swallows the next legitimate disconnect.
     if (this.ws) {
+      this.skipNextClose = true;
       try {
         this.ws.close(1000, "Replacing connection");
       } catch {
@@ -281,6 +300,11 @@ export class DiscordGatewayClient {
   disconnect(): void {
     this.closed = true;
     this.cleanupHeartbeat();
+    this.stopWatchdog();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
       try {
         this.ws.close(1000, "Client disconnect");
@@ -465,6 +489,39 @@ export class DiscordGatewayClient {
   }
 
   // -------------------------------------------------------------------------
+  // Watchdog
+  // -------------------------------------------------------------------------
+
+  private startWatchdog(): void {
+    this.stopWatchdog();
+    // Wrap in try/catch so an unexpected error inside the check can never
+    // take down the daemon — an uncaught throw inside setInterval kills the
+    // Deno process. Same pattern as the router's prune timer.
+    this.watchdogTimer = setInterval(() => {
+      try {
+        if (this.closed) return;
+        // If the WS reports open, the heartbeat is responsible for liveness.
+        if (this.isConnected()) return;
+        // A reconnect is already scheduled — let it ride.
+        if (this.reconnectTimer) return;
+        console.warn(
+          "[Discord] Watchdog: connection not open and no reconnect pending — scheduling one",
+        );
+        this.scheduleReconnect();
+      } catch (error) {
+        console.error("[Discord] Watchdog check error (non-fatal):", error);
+      }
+    }, this.watchdogIntervalMs);
+  }
+
+  private stopWatchdog(): void {
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Identify / Resume
   // -------------------------------------------------------------------------
 
@@ -505,10 +562,10 @@ export class DiscordGatewayClient {
 
   private closeAndReconnect(): void {
     this.cleanupHeartbeat();
-    // Set skipNextClose before closing so that the onclose handler
-    // triggered by ws.close() doesn't double-schedule a reconnect.
-    this.skipNextClose = true;
+    // Only set skipNextClose when actually closing an old WS — see
+    // connectWs() for why setting it unconditionally leaks a stale flag.
     if (this.ws) {
+      this.skipNextClose = true;
       try {
         this.ws.close(4000, "Reconnecting");
       } catch {
@@ -521,10 +578,13 @@ export class DiscordGatewayClient {
 
   private scheduleReconnect(): void {
     if (this.closed) return;
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error("[Discord] Max reconnect attempts reached, giving up");
-      return;
-    }
+    // No hard cap on reconnect attempts. Backoff is bounded at 30s, so a
+    // transient Discord outage costs ~2 attempts/min — affordable. A
+    // permanent give-up has no recovery path and is the worse failure mode:
+    // a token fix, a network change, or a brief DNS hiccup that outlasts
+    // the old 10-attempt window would leave the entity dark forever. The
+    // watchdog also relies on this never refusing — any swallowed close
+    // gets retried within watchdogIntervalMs.
     const delay = Math.min(
       1000 * Math.pow(2, this.reconnectAttempts) + Math.random() * 1000,
       30000,
@@ -535,7 +595,9 @@ export class DiscordGatewayClient {
         Math.round(delay)
       }ms (attempt ${this.reconnectAttempts})`,
     );
-    setTimeout(() => {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       if (this.closed) return;
       const url = this.resumeUrl
         ? `${this.resumeUrl}/?v=10&encoding=json`

@@ -9,14 +9,18 @@ import {
   DEFAULT_PROMPT_HOOK_MAX_CHARS,
   DEFAULT_PROMPT_HOOK_TIMEOUT_MS,
   emptyPluginCapabilityCounts,
+  getPluginEnvPath,
+  isDeniedPluginEnvVar,
   type PluginEnv,
   type PluginManifest,
   type PluginStatus,
+  readPluginEnv,
   validatePluginManifest,
   validatePluginRelativePath,
 } from "../../../plugin-api/src/mod.ts";
 import type { Tool } from "../tools/mod.ts";
 import type { MCPClient } from "../mcp-client/mod.ts";
+import type { PluginHookDetail } from "../types.ts";
 import type { LLMClient } from "../llm/mod.ts";
 import { PluginEventLogRegistry } from "./event-log.ts";
 import type { PluginEvent } from "./event-log.ts";
@@ -48,12 +52,38 @@ export interface PluginPromptContext {
   statePath: string;
   env: PluginEnv;
   mcpClient?: MCPClient;
+  /**
+   * Configured user name from GeneralSettings. Plugins use this for
+   * personalization (e.g. `calendarLabel` "{userName}'s calendar" template
+   * substitution in the today-schedule hook). Optional because some turn
+   * sources (Pulse?) may not have a user-message context — entity-side
+   * defaults handle the undefined case.
+   */
+  userName?: string;
   completeWorker: (prompt: string, systemPrompt?: string) => Promise<string>;
 }
 
 export interface PsycherosPluginServices {
   statePath: string;
   env: PluginEnv;
+  /**
+   * Write or update a single secret in this plugin's secrets file. Name must
+   * match `PSYCHEROS_PLUGIN_<ID>_*` prefix; value must be non-empty. Atomically
+   * merges (read-modify-write). Also Deno.env.set's so the live environment
+   * sees the new value before the next applyPluginEnv cycle.
+   *
+   * Used by plugin settings routes to persist credentials captured from a
+   * form (e.g. OAuth client ID/secret, API keys). Avoids plugins reaching
+   * outside their statePath — a security smell flagged in the vetting guide.
+   */
+  writeSecret: (name: string, value: string) => Promise<void>;
+  /**
+   * Read all secrets for this plugin as a { name: value } record. Empty
+   * object if no secrets file exists yet. Convenience over env.get() when
+   * the plugin needs to enumerate (e.g. which scopes were previously granted,
+   * or to check whether a refresh token exists without throwing).
+   */
+  readSecrets: () => Promise<Record<string, string>>;
 }
 
 export interface PluginPromptHook {
@@ -74,10 +104,37 @@ export interface PluginRoute {
   ) => Response | Promise<Response>;
 }
 
+/**
+ * Context passed to a plugin's `settingsFragment` callback. The fragment
+ * returns an HTML string that the host wraps in standard settings chrome
+ * (header, back button, content wrapper) — plugins must NOT emit their own
+ * `<div class="settings-view">` or back button.
+ *
+ * Reachable even when the plugin is disabled, so operators can configure
+ * credentials before enabling.
+ */
+export interface PluginSettingsContext {
+  /** Plugin state dir, same path passed to start()/stop(). */
+  statePath: string;
+  /** Plugin env accessor (reads from applied plugin-secrets). */
+  env: PluginEnv;
+  /**
+   * HTMX swap target the fragment will land in. Plugins should target this
+   * for any in-fragment htmx swaps (e.g. re-rendering after a save).
+   */
+  targetElementId: string;
+}
+
 interface PsycherosPluginModule {
   tools?: Tool[];
   promptHooks?: PluginPromptHook[];
   routes?: PluginRoute[];
+  /**
+   * Returns an HTML fragment for the plugin's settings page. Declared in the
+   * manifest via `capabilities.settings: true`. The host wraps the returned
+   * HTML in standard settings chrome.
+   */
+  settingsFragment?: (ctx: PluginSettingsContext) => Promise<string> | string;
   start?: (services: PsycherosPluginServices) => void | Promise<void>;
   stop?: (services: PsycherosPluginServices) => void | Promise<void>;
 }
@@ -88,6 +145,13 @@ interface LoadedPlugin {
   module?: PsycherosPluginModule;
   appliedEnv?: AppliedPluginEnv;
   status: PluginStatus;
+  /**
+   * Where the plugin was discovered. `builtin` plugins ship with Psycheros
+   * (live under `<projectRoot>/bundled-plugins/`); `installed` plugins are
+   * user-installed via zip/git. Controls statePath resolution, secrets path,
+   * and which UI affordances the Plugins Settings page renders.
+   */
+  origin: "installed" | "builtin";
 }
 
 function getMimeType(path: string): string {
@@ -117,6 +181,27 @@ function safeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Serialize a secrets record as `.env` text. One `KEY=value` per line. Values
+ * containing whitespace, `#`, `"`, or `'` are wrapped in double quotes with
+ * `"` and `\` escaped. This is the inverse of @std/dotenv's `parse` for the
+ * subset of value shapes we control — caller controls all values, so we
+ * don't need to handle every edge case (variable expansion, comments, etc.).
+ */
+function serializePluginEnv(values: Record<string, string>): string {
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(values)) {
+    if (value === "") continue; // skip empties — read-modify-write preserves file shape
+    if (/[\s#"']/.test(value)) {
+      const escaped = value.replace(/["\\]/g, "\\$&");
+      lines.push(`${key}="${escaped}"`);
+    } else {
+      lines.push(`${key}=${value}`);
+    }
+  }
+  return lines.join("\n") + (lines.length > 0 ? "\n" : "");
+}
+
 export class PluginManager {
   private plugins: LoadedPlugin[] = [];
   /**
@@ -138,15 +223,48 @@ export class PluginManager {
   constructor(
     private pluginRoot: string,
     private getLlm: () => LLMClient,
+    private bundledRoot?: string,
+    private dataRoot?: string,
   ) {
-    this.eventLog = new PluginEventLogRegistry(
-      join(pluginRoot, "..", "plugin-logs"),
-    );
+    // Event log path: when dataRoot is provided (production wiring), use
+    // `<dataRoot>/.psycheros/plugin-logs` for origin-independence — installed
+    // and bundled plugins share the same logs directory. When omitted (tests),
+    // preserve the original `<pluginRoot>/../plugin-logs` behavior.
+    const logDir = dataRoot
+      ? join(dataRoot, ".psycheros", "plugin-logs")
+      : join(pluginRoot, "..", "plugin-logs");
+    this.eventLog = new PluginEventLogRegistry(logDir);
+  }
+
+  /**
+   * Directory holding plugin-secrets files. When `dataRoot` is provided,
+   * always `<dataRoot>/.psycheros/plugin-secrets/` — both installed and
+   * bundled plugins look here so credentials live in user data regardless
+   * of plugin origin. When omitted, original behavior (`<pluginRoot>/../plugin-secrets/`).
+   */
+  private get secretsDir(): string | undefined {
+    return this.dataRoot
+      ? join(this.dataRoot, ".psycheros", "plugin-secrets")
+      : undefined;
   }
 
   private services(plugin: LoadedPlugin): PsycherosPluginServices {
+    // Bundled plugins load from `<projectRoot>/bundled-plugins/<id>/` which is
+    // source tree — state can't live there. Redirect to dataRoot.
+    const statePath = plugin.origin === "builtin" && this.dataRoot
+      ? join(this.dataRoot, ".psycheros", "plugin-state", plugin.manifest.id)
+      : join(plugin.directory, "state");
+    const pluginId = plugin.manifest.id;
+    const upperId = pluginId.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+    const prefix = `PSYCHEROS_PLUGIN_${upperId}_`;
+    const prefixRe = new RegExp(`^${prefix}[A-Z0-9_]+$`);
+    // Capture secretsDir on the local stack so closures can read it without
+    // rebinding `this`. `this.secretsDir` is a getter, so the value is fresh
+    // per services() call but constant for the manager's lifetime.
+    const secretsDir = this.secretsDir;
+    const pluginDir = plugin.directory;
     return {
-      statePath: join(plugin.directory, "state"),
+      statePath,
       env: plugin.appliedEnv?.env ?? {
         get: (name) => Deno.env.get(name),
         has: (name) => Deno.env.has(name),
@@ -158,26 +276,57 @@ export class PluginManager {
           return value;
         },
       },
+      async writeSecret(name, value) {
+        if (!prefixRe.test(name)) {
+          throw new Error(
+            `writeSecret: name must match ${prefix}*[A-Z0-9_]+ — got "${name}"`,
+          );
+        }
+        if (typeof value !== "string" || value.length === 0) {
+          throw new Error(`writeSecret: value for "${name}" must be non-empty`);
+        }
+        if (isDeniedPluginEnvVar(name)) {
+          throw new Error(
+            `writeSecret: name "${name}" is denylisted (process-global or host-owned)`,
+          );
+        }
+        // Read-modify-write under the plugin's secrets path. Uses the same
+        // path resolution as applyPluginEnv (secretsDir-aware).
+        const secretsFile = getPluginEnvPath(pluginDir, pluginId, secretsDir);
+        const existing = await readPluginEnv(pluginDir, pluginId, secretsDir);
+        existing[name] = value;
+        await Deno.mkdir(join(secretsFile, ".."), { recursive: true });
+        await Deno.writeTextFile(secretsFile, serializePluginEnv(existing));
+        // Mirror applyPluginEnv's behavior: live env sees the new value
+        // immediately, no restart needed.
+        Deno.env.set(name, value);
+      },
+      async readSecrets() {
+        return await readPluginEnv(pluginDir, pluginId, secretsDir);
+      },
     };
   }
 
-  async load(): Promise<void> {
-    await this.stop();
-    this.plugins = [];
+  /**
+   * Scan a single root for plugin directories. Returns LoadedPlugin entries
+   * with `origin` tagged. Used for both the user-installed plugin root and
+   * (when configured) the bundled-plugins root.
+   */
+  private async discoverInRoot(
+    root: string,
+    origin: "installed" | "builtin",
+  ): Promise<LoadedPlugin[]> {
     let entries: Deno.DirEntry[];
     try {
-      entries = Array.from(Deno.readDirSync(this.pluginRoot));
+      entries = Array.from(Deno.readDirSync(root));
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) return;
+      if (error instanceof Deno.errors.NotFound) return [];
       throw error;
     }
 
-    // === DISCOVER: read every plugin.json, validate, build LoadedPlugin
-    // entries with active=false. Don't load entrypoints yet — we need the
-    // full manifest set first so dependency resolution can see it.
     const discovered: LoadedPlugin[] = [];
     for (const entry of entries.filter((item) => item.isDirectory)) {
-      const directory = join(this.pluginRoot, entry.name);
+      const directory = join(root, entry.name);
       try {
         const raw = JSON.parse(
           await Deno.readTextFile(join(directory, "plugin.json")),
@@ -205,8 +354,10 @@ export class PluginManager {
             entityCore: !!manifest.entrypoints?.entityCore,
           },
           capabilities,
+          declaresSettings: manifest.capabilities?.settings === true,
+          origin,
         };
-        discovered.push({ directory, manifest, status });
+        discovered.push({ directory, manifest, status, origin });
       } catch (error) {
         console.error(`[Plugins] Failed to load ${entry.name}:`, error);
         await this.eventLog.record(entry.name, {
@@ -238,9 +389,44 @@ export class PluginManager {
             entrypoints: { psycheros: false, entityCore: false },
             capabilities: emptyPluginCapabilityCounts(),
             lastError: safeError(error),
+            origin,
           },
+          origin,
         });
       }
+    }
+    return discovered;
+  }
+
+  async load(): Promise<void> {
+    await this.stop();
+    this.plugins = [];
+
+    // === DISCOVER: scan installed plugins root (always) and bundled-plugins
+    // root (when configured). Built-in plugins win on id collisions — a
+    // user-installed plugin with the same id is shadowed with a warning.
+    const installed = await this.discoverInRoot(this.pluginRoot, "installed");
+    const builtin = this.bundledRoot
+      ? await this.discoverInRoot(this.bundledRoot, "builtin")
+      : [];
+
+    const seenIds = new Set<string>();
+    const discovered: LoadedPlugin[] = [];
+    for (const plugin of [...builtin, ...installed]) {
+      if (seenIds.has(plugin.manifest.id)) {
+        console.warn(
+          `[Plugins] Plugin "${plugin.manifest.id}" exists in both bundled and installed roots; bundled wins.`,
+        );
+        await this.eventLog.record(plugin.manifest.id, {
+          level: "warn",
+          category: "load",
+          message:
+            `shadowed by bundled plugin with the same id (bundled wins, this copy is ignored)`,
+        });
+        continue;
+      }
+      seenIds.add(plugin.manifest.id);
+      discovered.push(plugin);
     }
 
     // === RESOLVE: figure out load order, identify plugins that can't load
@@ -286,7 +472,11 @@ export class PluginManager {
 
       let appliedEnv: AppliedPluginEnv | undefined;
       try {
-        appliedEnv = await applyPluginEnv(this.pluginRoot, plugin.manifest.id);
+        appliedEnv = await applyPluginEnv(
+          this.pluginRoot,
+          plugin.manifest.id,
+          this.secretsDir,
+        );
         plugin.appliedEnv = appliedEnv;
         if (appliedEnv.skippedEnvVars.length > 0) {
           this.markDegraded(
@@ -311,12 +501,18 @@ export class PluginManager {
         );
         const module = (imported.default ?? imported) as PsycherosPluginModule;
         plugin.module = module;
+        plugin.status.active = true;
+        // Run start() BEFORE counting capabilities — many plugins use async
+        // initialization in start() (loading config, building clients) and
+        // their get tools()/get promptHooks() getters return [] until
+        // start() completes. Counting after ensures the real counts.
+        await module.start?.(this.services(plugin));
         plugin.status.capabilities.tools = module.tools?.length ?? 0;
         plugin.status.capabilities.promptHooks = module.promptHooks?.length ??
           0;
         plugin.status.capabilities.routes = module.routes?.length ?? 0;
-        plugin.status.active = true;
-        await module.start?.(this.services(plugin));
+        plugin.status.capabilities.settings =
+          typeof module.settingsFragment === "function" ? 1 : 0;
         await this.eventLog.record(plugin.manifest.id, {
           level: "info",
           category: "lifecycle",
@@ -393,6 +589,77 @@ export class PluginManager {
     return this.eventLog.filePath(pluginId);
   }
 
+  /**
+   * Whether a plugin (by id) declares the settings capability in its manifest.
+   * Manifest-only check — works for disabled, failed-load, or not-yet-loaded
+   * plugins. The Plugins Settings UI uses this to decide whether to render
+   * a "Configure" button on the plugin row.
+   */
+  hasSettings(id: string): boolean {
+    const plugin = this.plugins.find((p) => p.manifest.id === id);
+    return plugin?.status.declaresSettings === true;
+  }
+
+  /**
+   * Public accessor for a plugin's services. Used by the settings fragment
+   * route to build PluginSettingsContext without reaching into private state.
+   * Returns undefined for unknown plugin ids. The returned services object
+   * is fresh on each call (no leaky shared references).
+   */
+  getServices(id: string): PsycherosPluginServices | undefined {
+    const plugin = this.plugins.find((p) => p.manifest.id === id);
+    if (!plugin) return undefined;
+    return this.services(plugin);
+  }
+
+  /**
+   * Render the settings fragment for a plugin. One-shot imports the
+   * psycheros entrypoint if not already loaded (so disabled plugins can
+   * still render their settings form — operators configure credentials
+   * before enabling). Does NOT call start() or flip status.active.
+   *
+   * Throws if the plugin doesn't exist, doesn't declare capabilities.settings,
+   * or doesn't export settingsFragment.
+   */
+  async renderSettingsFragment(
+    id: string,
+    ctx: PluginSettingsContext,
+  ): Promise<string> {
+    const plugin = this.plugins.find((p) => p.manifest.id === id);
+    if (!plugin) {
+      throw new Error(`renderSettingsFragment: unknown plugin "${id}"`);
+    }
+    if (!plugin.status.declaresSettings) {
+      throw new Error(
+        `renderSettingsFragment: plugin "${id}" does not declare capabilities.settings`,
+      );
+    }
+
+    // One-shot import for disabled plugins. Active plugins already have the
+    // module cached on the LoadedPlugin.
+    if (!plugin.module) {
+      const entrypoint = plugin.manifest.entrypoints?.psycheros;
+      if (!entrypoint) {
+        throw new Error(
+          `renderSettingsFragment: plugin "${id}" has no psycheros entrypoint`,
+        );
+      }
+      const resolved = validatePluginRelativePath(entrypoint);
+      const imported = await import(
+        toFileUrl(join(plugin.directory, resolved)).href
+      );
+      plugin.module = (imported.default ?? imported) as PsycherosPluginModule;
+    }
+
+    const fragment = plugin.module.settingsFragment;
+    if (typeof fragment !== "function") {
+      throw new Error(
+        `Plugin "${id}" declares capabilities.settings but its entrypoint does not export settingsFragment`,
+      );
+    }
+    return await fragment(ctx);
+  }
+
   getTools(): Record<string, Tool> {
     const tools: Record<string, Tool> = {};
     for (const plugin of this.plugins) {
@@ -442,10 +709,11 @@ export class PluginManager {
   async buildPromptContent(
     context: Omit<PluginPromptContext, "statePath" | "env" | "completeWorker">,
     options?: { maxTotalChars?: number },
-  ): Promise<string | undefined> {
+  ): Promise<{ content: string | undefined; hooks: PluginHookDetail[] }> {
     const maxTotalChars = options?.maxTotalChars ??
       DEFAULT_PROMPT_HOOK_AGGREGATE_MAX_CHARS;
     const contributions: string[] = [];
+    const hookDetails: PluginHookDetail[] = [];
     let remainingChars = maxTotalChars;
     const hooks = this.plugins.flatMap((plugin) =>
       (plugin.module?.promptHooks ?? []).map((hook) => ({ plugin, hook }))
@@ -462,6 +730,7 @@ export class PluginManager {
       const perHookMaxChars = hook.maxChars ??
         plugin.manifest.promptHookDefaults?.maxChars ??
         DEFAULT_PROMPT_HOOK_MAX_CHARS;
+      const startedAt = performance.now();
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
         const output = await Promise.race([
@@ -492,6 +761,7 @@ export class PluginManager {
             )
           ),
         ]);
+        const elapsedMs = Math.round(performance.now() - startedAt);
         if (output?.trim()) {
           const trimmedOutput = output.trim();
           const aggregateAwareMax = Math.max(
@@ -518,6 +788,16 @@ export class PluginManager {
               message:
                 `hook "${hook.name}" skipped — aggregate budget exhausted at ${maxTotalChars} chars`,
               details: { hook: hook.name, budget: maxTotalChars },
+            });
+            hookDetails.push({
+              pluginId: plugin.manifest.id,
+              hookName: hook.name,
+              priority: hook.priority ?? 0,
+              charsUsed: 0,
+              truncated: false,
+              degraded: false,
+              budgetSkipped: true,
+              elapsedMs,
             });
             continue;
           }
@@ -552,8 +832,32 @@ export class PluginManager {
             `<plugin_context source="${plugin.manifest.id}" hook="${hook.name}">\n${body}\n</plugin_context>`;
           contributions.push(contribution);
           remainingChars = Math.max(0, remainingChars - contribution.length);
+          hookDetails.push({
+            pluginId: plugin.manifest.id,
+            hookName: hook.name,
+            priority: hook.priority ?? 0,
+            output: trimmedOutput,
+            charsUsed: contribution.length,
+            truncated: truncatedByAggregate,
+            degraded: false,
+            budgetSkipped: false,
+            elapsedMs,
+          });
+        } else {
+          // Hook returned empty/undefined — silent skip (not a failure).
+          hookDetails.push({
+            pluginId: plugin.manifest.id,
+            hookName: hook.name,
+            priority: hook.priority ?? 0,
+            charsUsed: 0,
+            truncated: false,
+            degraded: false,
+            budgetSkipped: false,
+            elapsedMs,
+          });
         }
       } catch (error) {
+        const elapsedMs = Math.round(performance.now() - startedAt);
         plugin.status.degraded = true;
         plugin.status.lastError = safeError(error);
         console.error(
@@ -566,9 +870,19 @@ export class PluginManager {
           message: `hook "${hook.name}" failed: ${safeError(error)}`,
           details: { hook: hook.name },
         });
-        contributions.push(
-          `<plugin_failure source="${plugin.manifest.id}">\nI could not access my ${plugin.manifest.name} integration during this turn. I should mention that naturally if it affects my response.\n</plugin_failure>`,
-        );
+        const failureContribution =
+          `<plugin_failure source="${plugin.manifest.id}">\nI could not access my ${plugin.manifest.name} integration during this turn. I should mention that naturally if it affects my response.\n</plugin_failure>`;
+        contributions.push(failureContribution);
+        hookDetails.push({
+          pluginId: plugin.manifest.id,
+          hookName: hook.name,
+          priority: hook.priority ?? 0,
+          charsUsed: failureContribution.length,
+          truncated: false,
+          degraded: true,
+          budgetSkipped: false,
+          elapsedMs,
+        });
       } finally {
         if (timeoutId !== undefined) clearTimeout(timeoutId);
       }
@@ -585,7 +899,7 @@ export class PluginManager {
       : undefined;
     this.lastBudgetCapChars = maxTotalChars;
     this.lastBudgetUsedChars = result?.length ?? 0;
-    return result;
+    return { content: result, hooks: hookDetails };
   }
 
   /**
@@ -621,10 +935,34 @@ export class PluginManager {
     subpath: string,
     request: Request,
   ): Promise<Response> {
-    const plugin = this.plugins.find((item) =>
-      item.manifest.id === pluginId && item.status.active
-    );
+    const plugin = this.plugins.find((item) => item.manifest.id === pluginId);
     if (!plugin) return new Response("Not Found", { status: 404 });
+
+    // For disabled-but-configurable plugins, one-shot import the entrypoint
+    // so settings routes are available before the plugin is enabled.
+    // Operators need to configure credentials BEFORE enabling, which means
+    // the settings form's POST handlers must work while the plugin is inactive.
+    if (!plugin.module) {
+      if (!plugin.manifest.entrypoints?.psycheros) {
+        return new Response("Not Found", { status: 404 });
+      }
+      try {
+        const resolved = validatePluginRelativePath(
+          plugin.manifest.entrypoints.psycheros,
+        );
+        const imported = await import(
+          toFileUrl(join(plugin.directory, resolved)).href
+        );
+        plugin.module = (imported.default ?? imported) as PsycherosPluginModule;
+      } catch (error) {
+        console.error(
+          `[Plugins] Failed to one-shot import ${pluginId} for route dispatch:`,
+          error,
+        );
+        return new Response("Internal Server Error", { status: 500 });
+      }
+    }
+
     const method = request.method.toUpperCase();
     const route = plugin.module?.routes?.find((item) =>
       (item.method?.toUpperCase() ?? "GET") === method &&
@@ -669,6 +1007,8 @@ export class PluginManager {
 export function createPluginManager(
   pluginRoot: string,
   getLlm: () => LLMClient,
+  bundledRoot?: string,
+  dataRoot?: string,
 ): PluginManager {
-  return new PluginManager(pluginRoot, getLlm);
+  return new PluginManager(pluginRoot, getLlm, bundledRoot, dataRoot);
 }

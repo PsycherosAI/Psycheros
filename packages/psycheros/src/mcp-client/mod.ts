@@ -157,6 +157,32 @@ export class MCPClient {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private pingInterval = 30000; // 30 seconds
   private wasAlive = true;
+  /**
+   * When true, the health-ping loop skips entirely. Set by callers that
+   * hold the daemon busy for long enough that a ping would falsely trip
+   * the reconnect watchdog (e.g. re-embed orchestrator loading a model).
+   */
+  private pingsPaused = false;
+
+  /**
+   * Pause automatic health pings. Use around long-running maintenance
+   * tasks so the ping watchdog doesn't fire false alarms and storm
+   * reconnect attempts. Pair with `resumePings()`.
+   */
+  pausePings(): void {
+    this.pingsPaused = true;
+  }
+
+  /**
+   * Resume automatic health pings and reset the liveness baseline so the
+   * next ping doesn't immediately trip the watchdog.
+   */
+  resumePings(): void {
+    this.pingsPaused = false;
+    this.wasAlive = true;
+    this.reconnectAttempts = 0;
+    this.lastPingSuccess = new Date();
+  }
   private toolCallTimeoutMs = 60_000; // 60 seconds default for tool calls
   private pingTimeoutMs = 5_000; // 5 seconds for health probes
   /**
@@ -590,6 +616,10 @@ export class MCPClient {
     if (this.pingTimer !== null) clearInterval(this.pingTimer);
 
     this.pingTimer = setInterval(async () => {
+      // Skip pings while a long-running maintenance task (e.g. re-embed)
+      // holds the pause flag — psycheros is likely CPU-bound loading a
+      // model and the ping would falsely trigger reconnect storms.
+      if (this.pingsPaused) return;
       const ok = await this.ping();
       if (ok && !this.wasAlive) {
         this.wasAlive = true;
@@ -1730,6 +1760,40 @@ export class MCPClient {
       console.error("[MCP] snapshot_create failed:", error);
       return { success: false, error: String(error) };
     }
+  }
+
+  /**
+   * Call entity-core's `embedding_rebuild_all` tool. Re-embeds every memory
+   * cache entry and every graph node using the currently-active model.
+   *
+   * Used by the psycheros re-embed orchestrator when the user switches
+   * embedding model or chunk size. Assumes entity-core has already been
+   * restarted with the new `ENTITY_CORE_EMBEDDING_*` env vars.
+   */
+  async callEmbeddingRebuildAll(): Promise<{
+    memoriesRebuilt: number;
+    memoriesFailed: number;
+    memoriesTotal: number;
+    nodesRebuilt: number;
+    nodesFailed: number;
+    nodesTotal: number;
+    message: string;
+  }> {
+    if (!this.client) {
+      throw new Error("[MCP] Not connected");
+    }
+    const result = await this.callToolWithTimeout(
+      "embedding_rebuild_all",
+      {},
+      // Rebuild can take many minutes for large datasets — bypass the
+      // default tool-call timeout.
+      60 * 60 * 1000,
+    );
+    const textContent = extractTextContent(result);
+    if (!textContent) {
+      throw new Error("[MCP] embedding_rebuild_all returned no content");
+    }
+    return JSON.parse(textContent);
   }
 
   /**

@@ -42,12 +42,23 @@ import {
   TOOL_CATEGORIES,
 } from "../tools/mod.ts";
 import type { Tool } from "../tools/mod.ts";
+import type {
+  ChunkParams,
+  EmbeddingModelPreset,
+  EmbeddingSettings,
+  EntityCoreEmbeddingSettings,
+} from "../embeddings/mod.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { pulseIconSvg } from "../pulse/templates.ts";
 import type { ExtractionHealth } from "../mcp-client/mod.ts";
 import { getWearableConnectionManager } from "../wearable/mod.ts";
 import type { PluginStatus } from "../../../plugin-api/src/mod.ts";
 import type { UnmanagedCustomTool } from "../plugins/mod.ts";
+import type { MemorySettings } from "../memory/memory-settings.ts";
+import {
+  RAG_MAX_CHUNKS_MAX,
+  RAG_MAX_CHUNKS_MIN,
+} from "../memory/memory-settings.ts";
 
 // =============================================================================
 // Utilities
@@ -480,15 +491,22 @@ export function renderHeaderTitle(title?: string): string {
 /**
  * Render a back button that returns to the settings hub.
  */
-function renderSettingsBackButton(): string {
+function renderSettingsBackButton(
+  href: string = "/fragments/settings",
+): string {
+  const label = href === "/fragments/settings/plugins"
+    ? "Plugins"
+    : href === "/fragments/settings"
+    ? "Settings"
+    : "Back";
   return `<a class="settings-back-btn"
-    hx-get="/fragments/settings"
+    hx-get="${escapeHtml(href)}"
     hx-target="#chat"
     hx-swap="innerHTML">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <polyline points="15 18 9 12 15 6"/>
     </svg>
-    <span>Settings</span>
+    <span>${escapeHtml(label)}</span>
   </a>`;
 }
 
@@ -762,8 +780,8 @@ export function renderSettingsHub(): string {
           </svg>
         </div>
         <div class="settings-hub-card-body">
-          <span class="settings-hub-card-title">LLM Settings</span>
-          <span class="settings-hub-card-desc">Configure model connection and generation parameters</span>
+          <span class="settings-hub-card-title">Model Settings</span>
+          <span class="settings-hub-card-desc">Configure LLM connections and the embedding model used for memory and RAG</span>
         </div>
         <svg class="settings-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="9 18 15 12 9 6"/>
@@ -898,6 +916,10 @@ function renderPluginUpdate(status: PluginStatus): string {
 
 function renderPluginStatusBadges(status: PluginStatus): string {
   const badges: string[] = [];
+  // Bundled badge appears first — strongest signal about provenance.
+  if (status.origin === "builtin") {
+    badges.push(renderPluginBadge("Bundled", "badge-info"));
+  }
   if (status.pendingAction === "install") {
     badges.push(renderPluginBadge("Pending install", "badge-info"));
   } else if (status.pendingAction === "remove") {
@@ -977,15 +999,30 @@ function renderPluginRows(statuses: PluginStatus[]): string {
       status.pendingAction === "remove"
         ? `<p class="settings-note">Plugin secrets remain available for reinstall until removed manually.</p>`
         : `<div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3);">
-            <button type="button" class="btn btn--danger btn--sm" data-plugin-id="${
-          escapeHtml(status.id)
-        }" onclick="removePlugin(this.dataset.pluginId)">Remove</button>
+            ${
+          (status.declaresSettings || status.capabilities.settings)
+            ? `<button type="button" class="btn btn--primary btn--sm" data-plugin-id="${
+              escapeHtml(status.id)
+            }" onclick="openPluginSettings(this.dataset.pluginId)">Configure</button>`
+            : ""
+        }
+            ${
+          status.origin !== "builtin"
+            ? `<button type="button" class="btn btn--danger btn--sm" data-plugin-id="${
+              escapeHtml(status.id)
+            }" onclick="removePlugin(this.dataset.pluginId)">Remove</button>`
+            : ""
+        }
             <button type="button" class="btn btn--ghost btn--sm" data-plugin-id="${
           escapeHtml(status.id)
         }" onclick="togglePluginActivity(this.dataset.pluginId, this)">Show recent activity</button>
-            <button type="button" class="btn btn--ghost btn--sm" data-plugin-id="${
-          escapeHtml(status.id)
-        }" onclick="checkPluginUpdate(this.dataset.pluginId, this)">Check for updates</button>
+            ${
+          status.origin !== "builtin"
+            ? `<button type="button" class="btn btn--ghost btn--sm" data-plugin-id="${
+              escapeHtml(status.id)
+            }" onclick="checkPluginUpdate(this.dataset.pluginId, this)">Check for updates</button>`
+            : ""
+        }
           </div>
           <div id="plugin-update-result-${
           escapeHtml(status.id)
@@ -1015,6 +1052,36 @@ function renderUnmanagedCustomTools(tools: UnmanagedCustomTool[]): string {
     <p class="theme-section-desc">Files in <code>.psycheros/custom-tools/*.js</code> still load normally, but they do not carry plugin manifest metadata.</p>
     ${body}
   </section>`;
+}
+
+/**
+ * Wrap a plugin's settings fragment in the standard settings chrome (header,
+ * back button to /fragments/settings/plugins, content wrapper). Plugins must
+ * NOT emit their own `<div class="settings-view">`, header, or back button —
+ * that's what this wrapper provides. Plugins emit form sections, status
+ * blocks, and HTMX-driven regions only.
+ */
+export function renderPluginOwnedSettings(
+  pluginName: string,
+  pluginId: string,
+  innerFragment: string,
+): string {
+  return `<div class="settings-view">
+    <div class="settings-header">
+      <div class="settings-header-row">
+        ${renderSettingsBackButton("/fragments/settings/plugins")}
+        <div>
+          <h1 class="settings-title">${escapeHtml(pluginName)}</h1>
+          <p class="settings-desc">Plugin configuration &middot; <code>${
+    escapeHtml(pluginId)
+  }</code></p>
+        </div>
+      </div>
+    </div>
+    <div class="settings-content" id="settings-content">
+      ${innerFragment}
+    </div>
+  </div>`;
 }
 
 export function renderPluginsSettings(
@@ -1052,7 +1119,7 @@ export function renderPluginsSettings(
           <form onsubmit="inspectPluginZip(event)" style="display:flex;gap:var(--sp-3);align-items:flex-end;flex-wrap:wrap;">
             <div class="llm-field" style="min-width:220px;">
               <label for="plugin-zip-input">Plugin zip</label>
-              <input type="file" id="plugin-zip-input" class="input-field llm-input" accept=".zip,application/zip">
+              <input type="file" id="plugin-zip-input" accept=".zip,application/zip" class="settings-file-input" />
             </div>
             <button type="submit" class="btn btn--primary">Inspect Zip</button>
           </form>
@@ -2400,7 +2467,7 @@ export function renderInputArea(): string {
       placeholder="Type your message..."
       rows="1"
       onkeydown="Psycheros.handleKeyDown(event)"
-      oninput="Psycheros.autoResize(this)"
+      oninput="Psycheros.autoResize(this); Psycheros.saveDraft()"
     ></textarea>
     <button class="send-btn" id="send-btn" onclick="Psycheros.sendMessage()">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
@@ -3050,34 +3117,20 @@ const VALID_MEMORY_GRANULARITIES = [
 type MemoryGranularity = typeof VALID_MEMORY_GRANULARITIES[number];
 
 /**
- * Render the memories view with tabs.
+ * Render the memory filter bar (search + date range).
+ *
+ * `hidden` true suppresses the bar on tabs that have no memory list to filter
+ * (the Configuration tab). When called from a tab-switch OOB swap, sets
+ * `hx-swap-oob="outerHTML"` so htmx replaces the existing bar in place.
  */
-export function renderMemoriesView(
-  activeGranularity: string = "daily",
+function renderMemoryFilterBar(
+  activeGranularity: string,
+  hidden: boolean,
 ): string {
-  const tabs: { id: string; label: string }[] = [
-    { id: "daily", label: "Daily" },
-    { id: "weekly", label: "Weekly" },
-    { id: "monthly", label: "Monthly" },
-    { id: "yearly", label: "Yearly" },
-    { id: "significant", label: "Significant" },
-    { id: "instructions", label: "Instructions" },
-  ];
-
-  const tabsHtml = tabs.map((tab) => {
-    const isActive = tab.id === activeGranularity;
-    return `<button
-      class="settings-tab${isActive ? " active" : ""}"
-      hx-get="/fragments/settings/memories/${tab.id}"
-      hx-target="#settings-content"
-      hx-swap="innerHTML"
-      hx-include="[name=after],[name=before]"
-      id="memtab-${tab.id}"
-    >${tab.label}</button>`;
-  }).join("");
-
-  const filterBarHtml = `
-    <div class="memory-filter-bar">
+  const displayStyle = hidden ? "none" : "";
+  const oobAttr = hidden ? ' hx-swap-oob="outerHTML"' : "";
+  return `
+    <div class="memory-filter-bar" id="memory-filter-bar" style="display:${displayStyle}"${oobAttr}>
       <form class="memory-search-form" hx-get="/fragments/settings/memories/search"
             hx-target="#settings-content" hx-swap="innerHTML"
             hx-trigger="submit">
@@ -3111,6 +3164,36 @@ export function renderMemoriesView(
         </button>
       </div>
     </div>`;
+}
+
+/**
+ * Render the memories view with tabs.
+ */
+export function renderMemoriesView(
+  activeGranularity: string = "daily",
+): string {
+  const tabs: { id: string; label: string }[] = [
+    { id: "daily", label: "Daily" },
+    { id: "weekly", label: "Weekly" },
+    { id: "monthly", label: "Monthly" },
+    { id: "yearly", label: "Yearly" },
+    { id: "significant", label: "Significant" },
+    { id: "instructions", label: "Configuration" },
+  ];
+
+  const tabsHtml = tabs.map((tab) => {
+    const isActive = tab.id === activeGranularity;
+    return `<button
+      class="settings-tab${isActive ? " active" : ""}"
+      hx-get="/fragments/settings/memories/${tab.id}"
+      hx-target="#settings-content"
+      hx-swap="innerHTML"
+      hx-include="[name=after],[name=before]"
+      id="memtab-${tab.id}"
+    >${tab.label}</button>`;
+  }).join("");
+
+  const filterBarHtml = renderMemoryFilterBar(activeGranularity, false);
 
   return `<div class="settings-view">
   <div class="settings-header">
@@ -3140,12 +3223,12 @@ export function renderMemoriesView(
  */
 function renderMemoryTabActiveState(activeGranularity: string): string {
   const tabs = [...VALID_MEMORY_GRANULARITIES, "consolidation", "instructions"];
-  return tabs.map((g) => {
+  const tabSwaps = tabs.map((g) => {
     const isActive = g === activeGranularity;
     const label = g === "consolidation"
       ? "Catch-up"
       : g === "instructions"
-      ? "Instructions"
+      ? "Configuration"
       : g.charAt(0).toUpperCase() + g.slice(1);
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
@@ -3157,6 +3240,16 @@ function renderMemoryTabActiveState(activeGranularity: string): string {
       id="memtab-${g}"
     >${label}</button>`;
   }).join("");
+
+  // Configuration tab has no memory list to filter — OOB-swap the search/date
+  // bar to hidden. Re-rendered with content preserved so switching back to a
+  // granularity tab restores it intact.
+  const filterBarSwap = renderMemoryFilterBar(
+    activeGranularity,
+    activeGranularity === "instructions",
+  );
+
+  return tabSwaps + filterBarSwap;
 }
 
 /**
@@ -3862,6 +3955,7 @@ export function renderEntityCoreHub(activeTab: string = "overview"): string {
   const tabs = [
     { id: "overview", label: "Overview" },
     { id: "llm", label: "LLM" },
+    { id: "embeddings", label: "Embeddings" },
     { id: "graph", label: "Knowledge Graph" },
     { id: "maintenance", label: "Maintenance" },
     { id: "snapshots", label: "Snapshots" },
@@ -3905,7 +3999,14 @@ export function renderEntityCoreHub(activeTab: string = "overview"): string {
  * Render Entity Core tab active state as an OOB swap.
  */
 function renderEntityCoreTabActiveState(activeTab: string): string {
-  const tabs = ["overview", "llm", "graph", "maintenance", "snapshots"];
+  const tabs = [
+    "overview",
+    "llm",
+    "embeddings",
+    "graph",
+    "maintenance",
+    "snapshots",
+  ];
   return tabs.map((tab) => {
     const isActive = tab === activeTab;
     const label = tab.charAt(0).toUpperCase() + tab.slice(1);
@@ -4225,6 +4326,149 @@ function saveEntityCoreLLMSettings() {
       htmx.ajax('GET', '/fragments/settings/entity-core/llm', '#settings-content');
     } else {
       alert('Failed to save: ' + (d.error || 'Unknown error'));
+    }
+  })
+  .catch(e => alert('Error: ' + e.message));
+}
+</script>`;
+}
+
+/**
+ * Data for the Entity Core > Embeddings tab.
+ */
+export interface EntityCoreEmbeddingsData {
+  settings: EntityCoreEmbeddingSettings;
+  /** Psycheros's active embedding model — shown as the inherited default. */
+  psycherosActiveRepoId: string;
+  /** Resolved config after applying overrides. */
+  resolved: {
+    modelRepoId: string;
+    dimension: number;
+    chunkParams: ChunkParams;
+  };
+}
+
+/**
+ * Render the Entity Core > Embeddings tab. Lets the user override the model
+ * repo and/or chunk params that entity-core uses, inheriting from Psycheros
+ * by default. Dimension must match Psycheros (enforced server-side).
+ */
+export function renderEntityCoreEmbeddings(
+  data: EntityCoreEmbeddingsData,
+): string {
+  const oobTabs = renderEntityCoreTabActiveState("embeddings");
+  const { settings, psycherosActiveRepoId, resolved } = data;
+  const cpOverride = settings.chunkParams ?? {};
+
+  return `${oobTabs}
+<div class="ec-overview">
+  <p class="ec-llm-desc">Entity-core uses the same embedding model as Psycheros by default. Override fields below to use a different model — but the dimension <strong>must match</strong> Psycheros's, or cross-package graph search breaks.</p>
+
+  <div class="ec-detail">
+    <span class="ec-detail-label">Psycheros active:</span>
+    <span class="ec-detail-value"><code>${
+    escapeHtml(psycherosActiveRepoId)
+  }</code></span>
+  </div>
+  <div class="ec-detail">
+    <span class="ec-detail-label">Resolved:</span>
+    <span class="ec-detail-value"><code>${
+    escapeHtml(resolved.modelRepoId)
+  }</code> (${resolved.dimension}d)</span>
+  </div>
+
+  <div class="ec-llm-section">
+    <h3>Model Override</h3>
+    <div class="form-group">
+      <label for="ec-emb-model">HuggingFace Repo ID</label>
+      <div class="ec-llm-field-row">
+        <input type="text" id="ec-emb-model" placeholder="Inherits from Psycheros" value="${
+    escapeHtml(settings.modelRepoId || "")
+  }" />
+        ${
+    settings.modelRepoId
+      ? '<button type="button" class="btn btn--sm btn--ghost" onclick="document.getElementById(\'ec-emb-model\').value=\'\'">Reset</button>'
+      : ""
+  }
+      </div>
+      <span class="ec-llm-resolved">Currently using: <strong>${
+    escapeHtml(resolved.modelRepoId)
+  }</strong> (${resolved.dimension}d)</span>
+    </div>
+  </div>
+
+  <div class="ec-llm-section">
+    <h3>Chunk Params (Advanced)</h3>
+    <p class="ec-llm-desc">Leave blank to inherit from Psycheros. Override individual fields only when needed.</p>
+    <div class="settings-grid">
+      <label>
+        <span>Target chars</span>
+        <input type="number" id="ec-emb-target" min="256" max="16000" placeholder="${
+    String(resolved.chunkParams.targetChars)
+  }" value="${cpOverride.targetChars ?? ""}" />
+      </label>
+      <label>
+        <span>Threshold chars</span>
+        <input type="number" id="ec-emb-threshold" min="500" max="20000" placeholder="${
+    String(resolved.chunkParams.thresholdChars)
+  }" value="${cpOverride.thresholdChars ?? ""}" />
+      </label>
+      <label>
+        <span>Min chars</span>
+        <input type="number" id="ec-emb-min" min="50" max="2000" placeholder="${
+    String(resolved.chunkParams.minChars)
+  }" value="${cpOverride.minChars ?? ""}" />
+      </label>
+      <label>
+        <span>Max chars</span>
+        <input type="number" id="ec-emb-max" min="512" max="16000" placeholder="${
+    String(resolved.chunkParams.maxChars)
+  }" value="${cpOverride.maxChars ?? ""}" />
+      </label>
+      <label>
+        <span>Overlap chars</span>
+        <input type="number" id="ec-emb-overlap" min="0" max="1000" placeholder="${
+    String(resolved.chunkParams.overlapChars)
+  }" value="${cpOverride.overlapChars ?? ""}" />
+      </label>
+    </div>
+  </div>
+
+  <div class="ec-actions">
+    <button class="btn btn--primary btn--sm" onclick="saveEntityCoreEmbeddingSettings()">Save & Restart</button>
+  </div>
+</div>
+
+<script>
+function saveEntityCoreEmbeddingSettings() {
+  const modelRepoId = document.getElementById('ec-emb-model').value.trim();
+  const target = document.getElementById('ec-emb-target').value;
+  const threshold = document.getElementById('ec-emb-threshold').value;
+  const min = document.getElementById('ec-emb-min').value;
+  const max = document.getElementById('ec-emb-max').value;
+  const overlap = document.getElementById('ec-emb-overlap').value;
+
+  const body = {};
+  if (modelRepoId) body.modelRepoId = modelRepoId;
+  const chunkParams = {};
+  if (target) chunkParams.targetChars = parseInt(target, 10);
+  if (threshold) chunkParams.thresholdChars = parseInt(threshold, 10);
+  if (min) chunkParams.minChars = parseInt(min, 10);
+  if (max) chunkParams.maxChars = parseInt(max, 10);
+  if (overlap) chunkParams.overlapChars = parseInt(overlap, 10);
+  if (Object.keys(chunkParams).length > 0) body.chunkParams = chunkParams;
+
+  fetch('/api/entity-core/embedding-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.success) {
+      htmx.ajax('GET', '/fragments/settings/entity-core/embeddings', '#settings-content');
+    } else {
+      alert(d.error || 'Failed to save');
     }
   })
   .catch(e => alert('Error: ' + e.message));
@@ -4988,25 +5232,236 @@ export function renderLLMProfileHub(settings: LLMProfileSettings): string {
       </div>
     </button>`;
 
+  return `<div class="settings-hub-grid">
+    ${profileCards}
+    ${addCard}
+  </div>`;
+}
+
+/**
+ * Render the Model Settings shell — the outer settings-view wrapper with
+ * tab navigation. The tab content is supplied by the caller (LLM hub or
+ * Embeddings tab). Tabs swap the entire #chat region via HTMX so each
+ * tab is its own fragment URL.
+ *
+ * Pattern mirrors `renderEntityCoreHub` at line ~3908.
+ *
+ * @param activeTab - "llm" or "embeddings"
+ * @param contentHtml - inner HTML for the active tab
+ * @param profileCount - used in the header subtitle for the LLM tab
+ */
+export function renderModelSettingsShell(
+  activeTab: "llm" | "embeddings",
+  contentHtml: string,
+  profileCount?: number,
+): string {
+  const tabs: Array<{ id: "llm" | "embeddings"; label: string }> = [
+    { id: "llm", label: "LLM Profiles" },
+    { id: "embeddings", label: "Embeddings" },
+  ];
+
+  const tabsHtml = tabs.map((tab) => {
+    const isActive = tab.id === activeTab;
+    const path = tab.id === "llm"
+      ? "/fragments/settings/llm"
+      : "/fragments/settings/llm/embeddings";
+    return `<button
+      class="settings-tab${isActive ? " active" : ""}"
+      hx-get="${path}"
+      hx-target="#chat"
+      hx-swap="innerHTML"
+      id="model-tab-${tab.id}"
+    >${tab.label}</button>`;
+  }).join("");
+
+  const subtitle = activeTab === "llm"
+    ? `Manage model connection profiles &mdash; ${profileCount ?? 0} profile${
+      (profileCount ?? 0) !== 1 ? "s" : ""
+    } configured`
+    : "Choose the local embedding model I use for memory, vault, and graph search";
+
   return `<div class="settings-view">
   <div class="settings-header">
     <div class="settings-header-row">
       ${renderSettingsBackButton()}
       <div>
-        <h1 class="settings-title">LLM Connections</h1>
-        <p class="settings-desc">Manage model connection profiles &mdash; ${settings.profiles.length} profile${
-    settings.profiles.length !== 1 ? "s" : ""
-  } configured</p>
+        <h1 class="settings-title">Model Settings</h1>
+        <p class="settings-desc">${subtitle}</p>
       </div>
     </div>
   </div>
+  <div class="settings-tabs">
+    ${tabsHtml}
+  </div>
   <div class="settings-content" id="settings-content">
-    <div class="settings-hub-grid">
-      ${profileCards}
-      ${addCard}
-    </div>
+    ${contentHtml}
   </div>
 </div>`;
+}
+
+/**
+ * Render the Embeddings tab content (no shell). Caller wraps with
+ * renderModelSettingsShell("embeddings", ...).
+ */
+export function renderEmbeddingsTab(
+  settings: EmbeddingSettings,
+  presets: readonly EmbeddingModelPreset[],
+  downloadedRepoIds: string[],
+  resolvedDimension: number,
+  actualDimension?: number,
+): string {
+  const isCustom = !presets.some((p) => p.repoId === settings.modelRepoId);
+  const presetOptions = presets.map((p) => {
+    const selected = p.repoId === settings.modelRepoId;
+    const downloaded = downloadedRepoIds.includes(p.repoId);
+    const badge = "";
+    const dimBadge = downloaded ? " ✓" : " ↓";
+    return `<option value="${escapeHtml(p.repoId)}"${
+      selected ? " selected" : ""
+    }>${
+      escapeHtml(p.label)
+    } (${p.dimension}d, ${p.downloadSizeMb}MB${badge})${dimBadge}</option>`;
+  }).join("\n");
+
+  const activePreset = presets.find((p) => p.repoId === settings.modelRepoId);
+  const activeDownloaded = downloadedRepoIds.includes(settings.modelRepoId);
+
+  const cp = settings.chunkParams;
+
+  return `<div class="embedding-settings" data-embedding-settings>
+    <script type="application/json" id="embedding-presets-data">${
+    JSON.stringify(presets).replace(/</g, "\\u003c")
+  }</script>
+    <script type="application/json" id="embedding-downloaded-data">${
+    JSON.stringify(downloadedRepoIds)
+  }</script>
+    <script type="application/json" id="embedding-active-data">${
+    JSON.stringify({
+      modelRepoId: settings.modelRepoId,
+      dimension: resolvedDimension,
+      actualDimension: actualDimension ?? resolvedDimension,
+      outOfSync: actualDimension !== undefined &&
+        actualDimension !== resolvedDimension,
+      downloaded: activeDownloaded,
+      downloadSizeMb: activePreset?.downloadSizeMb ?? null,
+    })
+  }</script>
+
+    <section class="theme-section">
+      <h3 class="theme-section-title">Active Model</h3>
+      <div class="embedding-current-model">
+        <span class="embedding-current-label">Currently using:</span>
+        <span class="embedding-current-name">${
+    escapeHtml(activePreset?.label ?? settings.modelRepoId)
+  }</span>
+        <span class="embedding-current-meta">${resolvedDimension}d${
+    activePreset ? `, ${activePreset.downloadSizeMb}MB` : ""
+  }${
+    activeDownloaded
+      ? ' <span class="embedding-current-status embedding-current-status--ok">downloaded</span>'
+      : ' <span class="embedding-current-status embedding-current-status--missing">not downloaded</span>'
+  }</span>
+        <code class="embedding-current-repo">${
+    escapeHtml(settings.modelRepoId)
+  }</code>
+      </div>
+      <p class="theme-section-desc">Pick a different model below.</p>
+      <div class="llm-fields">
+        <div class="llm-field">
+          <label for="embedding-preset">Switch to</label>
+          <select id="embedding-preset" class="input-field llm-input" onchange="globalThis.onEmbeddingPresetChange(this.value)">
+            ${presetOptions}
+            <option value="__custom__"${
+    isCustom ? " selected" : ""
+  }>Custom...</option>
+          </select>
+        </div>
+
+        <div id="embedding-custom-row" class="llm-field" style="${
+    isCustom ? "" : "display:none;"
+  }">
+          <label for="embedding-custom-repo">HuggingFace Repo ID or URL</label>
+          <input id="embedding-custom-repo" type="text" class="input-field llm-input" placeholder="e.g. BAAI/bge-large-en-v1.5 or https://huggingface.co/BAAI/bge-large-en-v1.5" value="${
+    isCustom ? escapeHtml(settings.modelRepoId) : ""
+  }" oninput="globalThis.onCustomRepoInput(this.value)" />
+          <div id="embedding-custom-dimension" class="theme-section-desc"></div>
+        </div>
+      </div>
+
+      <div id="embedding-download-inline" class="embedding-download-inline" style="${
+    activeDownloaded ? "display:none;" : ""
+  }margin-top:12px;">
+        <button class="btn btn--primary btn--sm" onclick="globalThis.downloadEmbeddingModel()">
+          ↓ Download <span id="embedding-download-name">${
+    escapeHtml(activePreset?.label ?? settings.modelRepoId)
+  }</span>${activePreset ? ` (${activePreset.downloadSizeMb}MB)` : ""}
+        </button>
+        <span id="embedding-download-status" class="theme-section-desc" style="margin-left:8px;"></span>
+      </div>
+      <div id="embedding-downloaded-badge" class="theme-section-desc" style="${
+    activeDownloaded ? "" : "display:none;"
+  }margin-top:12px;">
+        ✓ <strong>${
+    escapeHtml(activePreset?.label ?? settings.modelRepoId)
+  }</strong> is downloaded and ready.
+      </div>
+
+      <p class="theme-section-desc" style="margin-top:12px;">Current dimension: <strong>${resolvedDimension}</strong>. Active model: <code>${
+    escapeHtml(settings.modelRepoId)
+  }</code></p>
+    </section>
+
+    <section class="theme-section">
+      <h3 class="theme-section-title">Chunk Sizes</h3>
+      <p class="theme-section-desc">Sets the chunk sizes used when splitting long memories and vault documents before embedding. <strong>Changing any value triggers a full re-embed.</strong></p>
+      <div class="llm-fields">
+        <div class="llm-field">
+          <label for="embedding-chunk-target">Target chars <span class="theme-section-desc" data-rec-container="targetChars"></span></label>
+          <input id="embedding-chunk-target" type="number" class="input-field llm-input" data-chunk-param="targetChars" value="${cp.targetChars}" min="256" max="16000" />
+        </div>
+        <div class="llm-field">
+          <label for="embedding-chunk-threshold">Threshold chars <span class="theme-section-desc">(content longer than this gets chunked)</span></label>
+          <input id="embedding-chunk-threshold" type="number" class="input-field llm-input" data-chunk-param="thresholdChars" value="${cp.thresholdChars}" min="500" max="20000" />
+        </div>
+        <div class="llm-field">
+          <label for="embedding-chunk-min">Min chars per chunk</label>
+          <input id="embedding-chunk-min" type="number" class="input-field llm-input" data-chunk-param="minChars" value="${cp.minChars}" min="50" max="2000" />
+        </div>
+        <div class="llm-field">
+          <label for="embedding-chunk-max">Max chars per chunk</label>
+          <input id="embedding-chunk-max" type="number" class="input-field llm-input" data-chunk-param="maxChars" value="${cp.maxChars}" min="512" max="16000" />
+        </div>
+        <div class="llm-field">
+          <label for="embedding-chunk-overlap">Overlap chars</label>
+          <input id="embedding-chunk-overlap" type="number" class="input-field llm-input" data-chunk-param="overlapChars" value="${cp.overlapChars}" min="0" max="1000" />
+        </div>
+      </div>
+    </section>
+
+    <div style="margin-top: 16px;">
+      <button id="embedding-save-btn" class="btn btn--primary" onclick="globalThis.saveEmbeddingSettings()">Save & Re-embed</button>
+      <span id="embedding-save-status" class="theme-section-desc" style="margin-left:12px;"></span>
+    </div>
+
+    <div id="embedding-reembed-progress" class="import-progress" style="display:none;margin-top:16px;">
+      <div class="import-progress-bar">
+        <div id="embedding-reembed-progress-fill" class="import-progress-fill"></div>
+      </div>
+      <div id="embedding-reembed-progress-text" class="import-progress-text">Preparing...</div>
+    </div>
+
+    <div id="embedding-reembed-overlay" class="import-blocking-overlay" style="display:none;">
+      <div class="import-blocking-text">Re-embedding memories, messages, and graph nodes...</div>
+      <div class="import-blocking-subtext">Do not close this page. The chat will be unavailable until this completes.</div>
+    </div>
+
+    <script>
+      // HTMX swaps this fragment in after the tab click; the main
+      // DOMContentLoaded has already fired by then, so we re-run the
+      // per-tab init here.
+      if (globalThis.initEmbeddingsTab) globalThis.initEmbeddingsTab();
+    </script>
+  </div>`;
 }
 
 /**
@@ -7528,22 +7983,24 @@ export function renderConsolidationComplete(
 }
 
 // =============================================================================
-// Memory Instructions Tab Template
+// Memory Configuration Tab Template
 // =============================================================================
 
 /**
- * Render the custom daily memory-writing instructions tab.
+ * Render the Memory Configuration tab — daily memory-writing instructions
+ * plus the eager-RAG retrieval limit (chunks per turn).
  *
- * The entity follows these instructions when writing daily memories.
- * Written from the entity's first-person perspective.
+ * UI copy is factual/system voice. Only the daily-instructions textarea
+ * placeholder and its example quotes are first-person, since those show the
+ * user how to write as the entity.
  */
-export function renderInstructionsTab(dailyInstructions: string): string {
+export function renderInstructionsTab(settings: MemorySettings): string {
   const oobTabs = renderMemoryTabActiveState("instructions");
 
   return `${oobTabs}
 <div id="instructions-content">
   <div class="consolidation-section">
-    <h1 class="settings-title">Custom Daily Memory Instructions</h1>
+    <h2 class="consolidation-heading">Custom Daily Memory Instructions</h2>
     <p class="settings-note" style="margin-bottom:1rem;">
       Additional instructions for the Daily Memory writer. Write in the first person from the entity's perspective, such as "I do not include vitamin reminders in my daily memories" or "When writing daily memories, I name specific songs or artists that came up".
     </p>
@@ -7559,11 +8016,31 @@ export function renderInstructionsTab(dailyInstructions: string): string {
           name="dailyInstructions"
           rows="8"
           placeholder="e.g. I do not include vitamin reminders in my daily memories. I always mention how I felt about creative projects. When I remember conversations about music, I name specific songs or artists that came up."
-        >${escapeHtml(dailyInstructions)}</textarea>
+        >${escapeHtml(settings.dailyInstructions)}</textarea>
       </div>
+
+      <h2 class="consolidation-heading" style="margin-top:2rem;">Memory Retrieval</h2>
+      <p class="settings-note" style="margin-bottom:1rem;">
+        How many memory chunks get pulled into context automatically each turn. Higher means richer recall but uses more context window.
+      </p>
+      <div class="llm-field">
+        <label for="ragMaxChunks">Max memories per turn</label>
+        <input
+          type="number"
+          id="ragMaxChunks"
+          name="ragMaxChunks"
+          class="settings-input"
+          min="${RAG_MAX_CHUNKS_MIN}"
+          max="${RAG_MAX_CHUNKS_MAX}"
+          step="1"
+          value="${settings.ragMaxChunks}"
+        />
+        <p class="settings-note" style="font-size:0.85em;opacity:0.8;">Range ${RAG_MAX_CHUNKS_MIN}–${RAG_MAX_CHUNKS_MAX}, default 10. Out-of-range values are clamped on save. This only affects the automatic every-turn memory pull — the on-demand memory_recall tool, conversation-history RAG, and knowledge graph keep their own limits.</p>
+      </div>
+
       <div class="consolidation-actions" style="margin-top:1rem;">
         <button class="btn btn--primary" type="submit">
-          Save Instructions
+          Save
         </button>
         <span id="instructions-save-status"></span>
       </div>

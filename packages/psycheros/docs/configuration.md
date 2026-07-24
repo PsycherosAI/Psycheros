@@ -13,6 +13,7 @@ All Psycheros configuration is via environment variables. Copy `.env.example` to
 | `ZAI_WORKER_MODEL`                  | No\*     | `GLM-4.5-Air` | Lightweight model for background tasks (auto-titling, daily memory summarization)                                                                                                                                                                                                                                                                                                         |
 | `PSYCHEROS_PORT`                    | No       | `3000`        | Server port                                                                                                                                                                                                                                                                                                                                                                               |
 | `PSYCHEROS_HOST`                    | No       | `0.0.0.0`     | Server hostname                                                                                                                                                                                                                                                                                                                                                                           |
+| `PSYCHEROS_LOG_LEVEL`               | No       | `info`        | Global log level floor (`debug`/`info`/`warn`/`error`). Entries below this level are dropped from stdout and the admin log ring buffer. See [Log Levels](#log-levels) for per-component overrides.                                                                                                                                                                                        |
 | `PSYCHEROS_DATA_DIR`                | No       | `cwd`         | Where runtime state lives — `.psycheros/` (including `custom-tools/`, `backgrounds/`, `vault/`), `identity/`, `.snapshots/`, `memories/`. Defaults to the cwd, matching the historic `deno task start` behaviour. Set this when running under a launcher that puts source and data in different places (e.g. the desktop app puts data under `~/Library/Application Support/Psycheros/`). |
 | `PSYCHEROS_ACCENT_COLOR`            | No       | `#a855f7`     | UI accent color (hex). Overridden by any preset theme selected in Settings > Appearance.                                                                                                                                                                                                                                                                                                  |
 | `PSYCHEROS_TOOLS`                   | No       | (all)         | Comma-separated list of enabled tools. Default: all tools enabled. Use `none` to disable all non-auto tools, or list specific tools to limit access.                                                                                                                                                                                                                                      |
@@ -30,6 +31,38 @@ connections are configured via **Settings > LLM Connections** in the web UI.
 Multiple named profiles can be created for different providers (OpenRouter,
 OpenAI, Alibaba/Qwen, NanoGPT, custom). Once profiles are saved to
 `.psycheros/llm-settings.json`, the UI settings take precedence over env vars.
+
+## Log Levels
+
+Psycheros captures all `console.*` output through a ring buffer that powers the
+admin log viewer. A configurable level floor controls which entries are kept:
+
+- **`info`** (default) — events worth knowing about: connections established or
+  dropped, errors, configuration changes, startup messages.
+- **`debug`** — routine operation: every sensor reading batch, RAG search
+  details, SSE client lifecycle. Suppressed by default to keep logs readable.
+  Enable with `PSYCHEROS_LOG_LEVEL=debug` when investigating an issue.
+
+Errors and warnings always pass regardless of the floor.
+
+### Per-component overrides
+
+For finer control, create `.psycheros/log-settings.json`:
+
+```json
+{
+  "defaultLevel": "info",
+  "components": {
+    "Wearable": "warn",
+    "MCP": "debug"
+  }
+}
+```
+
+This silences a specific noisy component (e.g. a high-frequency data source like
+entity-plexus) or brings a single component to debug without flooding the rest
+of the log. Component names match the `[Bracket]` tags parsed from log messages
+(e.g. `[Wearable]`, `[MCP]`, `[Server]`).
 
 ## Timezone
 
@@ -98,6 +131,22 @@ channels. This lets conversations wind down naturally — for example, two
 entities DMing each other will reach a natural stopping point rather than
 looping indefinitely.
 
+### Connection reliability
+
+The gateway maintains a persistent WebSocket to Discord's gateway servers. If
+the connection drops (Discord rotates connections, network blip, DNS hiccup),
+the gateway reconnects automatically with exponential backoff capped at 30
+seconds. Reconnects continue indefinitely — there is no permanent give-up — so a
+transient outage or a later token/config fix is recovered without a daemon
+restart. A 60-second health watchdog runs alongside the heartbeat as a safety
+net: if the WebSocket is not open and no reconnect is already scheduled, the
+watchdog schedules one.
+
+Live status is surfaced under **Settings > External Connections > Discord** (the
+`connected` indicator reflects the live WebSocket state). The
+`POST /api/discord/gateway/restart` endpoint triggers a manual restart — useful
+after rotating the bot token or changing intents.
+
 ## Available Tools
 
 All tools are enabled by default on a fresh install. No configuration is needed.
@@ -153,6 +202,67 @@ is handled by entity-core via MCP.
 | `PSYCHEROS_RAG_MAX_CHUNKS` | `8`     | Max chat/vault chunks to retrieve |
 | `PSYCHEROS_RAG_MAX_TOKENS` | `2000`  | Max tokens in retrieved context   |
 | `PSYCHEROS_RAG_MIN_SCORE`  | `0.3`   | Minimum similarity score          |
+
+## Embedding Model
+
+The embedding model I (and entity-core) use to vectorize memories, chat history,
+vault documents, and graph nodes is configurable via **Settings > Model Settings
+
+> Embeddings** in the web UI. Default is
+> `sentence-transformers/all-MiniLM-L6-v2` (384-dim, ~80MB) — chosen for the
+> same low-resource reasons SillyTavern ships it as a fallback. The dropdown
+> also includes longer-context options like `Cohee/jina-embeddings-v2-base-en`
+> (SillyTavern's default, 8192-token context) and
+> `nomic-ai/nomic-embed-text-v1.5`.
+
+Models are downloaded on first use to
+`${PSYCHEROS_DATA_DIR}/.psycheros/model-cache/` via `@xenova/transformers`. To
+pre-fetch before switching (recommended for Docker deployments), use the
+**Download Selected Model** button.
+
+Settings persist to:
+
+| File                                             | Purpose                                        |
+| ------------------------------------------------ | ---------------------------------------------- |
+| `.psycheros/embedding-settings.json`             | Active model + chunk params (Psycheros side)   |
+| `.psycheros/entity-core-embedding-settings.json` | Per-field overrides for entity-core (optional) |
+
+Switching model or changing chunk size triggers a full re-embed across messages,
+memory chunks, vault chunks, and graph nodes. A blocking modal shows progress;
+the chat endpoint returns 503 until the run completes.
+
+### Env vars pushed to entity-core
+
+Psycheros spawns entity-core with these env vars (and pushes them again on MCP
+restart when settings change):
+
+| Variable                                   | Description                                          |
+| ------------------------------------------ | ---------------------------------------------------- |
+| `ENTITY_CORE_EMBEDDING_MODEL`              | HuggingFace repo ID                                  |
+| `ENTITY_CORE_EMBEDDING_DIMENSION`          | Output vector dimension                              |
+| `ENTITY_CORE_EMBEDDING_CHUNK_THRESHOLD`    | Content length above which chunking kicks in (chars) |
+| `ENTITY_CORE_EMBEDDING_CHUNK_TARGET_CHARS` | Target chunk size (chars)                            |
+| `ENTITY_CORE_EMBEDDING_CHUNK_MIN_CHARS`    | Minimum chunk size (chars)                           |
+| `ENTITY_CORE_EMBEDDING_CHUNK_MAX_CHARS`    | Hard max chunk size (chars)                          |
+| `ENTITY_CORE_EMBEDDING_OVERLAP_CHARS`      | Overlap between consecutive chunks (chars)           |
+
+The dimension **must match** between Psycheros and entity-core — diverging
+dimensions breaks cross-package graph search. The Entity Core > Embeddings
+override UI refuses mismatches with a 400.
+
+### HTTP API
+
+| Method | Path                                              | Purpose                                           |
+| ------ | ------------------------------------------------- | ------------------------------------------------- |
+| GET    | `/api/embedding-settings`                         | Return settings + presets + download status       |
+| POST   | `/api/embedding-settings`                         | Save settings; returns `reembedRequired`          |
+| POST   | `/api/embedding-settings/confirm-reembed`         | Kick off orchestrator                             |
+| GET    | `/api/embedding-settings/reembed-status`          | SSE: orchestrator progress                        |
+| POST   | `/api/embedding-settings/download`                | Start model download                              |
+| GET    | `/api/embedding-settings/download-status?repoId=` | SSE: download progress                            |
+| POST   | `/api/embedding-settings/probe-dimension`         | Fetch custom model's `config.json` dim            |
+| GET    | `/api/entity-core/embedding-settings`             | Get entity-core overrides + resolved values       |
+| POST   | `/api/entity-core/embedding-settings`             | Save overrides; restart MCP (400 on dim mismatch) |
 
 ## MCP Integration (entity-core)
 

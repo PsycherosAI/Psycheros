@@ -72,6 +72,11 @@ Type your messages here. If you have Image Captioning set up (Settings > Vision
 
 > Generators) you can upload images for the entity to see.
 
+Unsent text is saved per-conversation as you type — switch to another
+conversation, open Settings, or reload the page and your draft will still be
+there when you come back. Sending a message or deleting the conversation clears
+its draft.
+
 ### Sidebar
 
 Click the Psycheros logo to open the sidebar, where you can see the conversation

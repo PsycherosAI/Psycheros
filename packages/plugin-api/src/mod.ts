@@ -32,6 +32,7 @@ export interface PluginManifest {
     timeoutMs?: number;
     maxChars?: number;
   };
+  capabilities?: PluginCapabilities;
 }
 
 export interface PluginCompatibility {
@@ -47,6 +48,27 @@ export interface PluginUpdateMetadata {
   packagePath?: string;
 }
 
+/**
+ * Declares optional capabilities a plugin provides beyond tools, hooks, and
+ * routes. Each flag is a contract between the plugin and the host UI: when
+ * the flag is true, the plugin's entrypoint MUST export the corresponding
+ * field (e.g. `settings: true` requires `settingsFragment` on the psycheros
+ * entrypoint).
+ *
+ * Declaring capabilities in the manifest (rather than detecting them at
+ * import time) lets the host render UI affordances — like a "Configure"
+ * button — for plugins that are not yet loaded, including disabled-but-
+ * shipped plugins an operator needs to configure before enabling.
+ */
+export interface PluginCapabilities {
+  /**
+   * When true, the plugin provides a settings UI fragment via the
+   * `settingsFragment` field on its psycheros entrypoint. The Plugins
+   * Settings page renders a "Configure" button that loads the fragment.
+   */
+  settings?: boolean;
+}
+
 export interface PluginCapabilityCounts {
   tools: number;
   promptHooks: number;
@@ -54,6 +76,8 @@ export interface PluginCapabilityCounts {
   resultDecorators: number;
   browserScripts: number;
   browserStyles: number;
+  /** 0 or 1 — whether the plugin's entrypoint exports `settingsFragment`. */
+  settings: number;
 }
 
 export type PluginPendingAction = "install" | "remove";
@@ -78,6 +102,21 @@ export interface PluginStatus {
     entityCore: boolean;
   };
   capabilities: PluginCapabilityCounts;
+  /**
+   * True when the manifest declares `capabilities.settings: true`. Distinct
+   * from `capabilities.settings` (the count) because the manifest field is
+   * populated during DISCOVER, before the entrypoint is imported. Lets the
+   * Plugins Settings UI render a "Configure" button on disabled plugins so
+   * operators can configure credentials before enabling.
+   */
+  declaresSettings?: boolean;
+  /**
+   * Where the plugin was discovered. `builtin` plugins ship with Psycheros
+   * and load from `<projectRoot>/bundled-plugins/`; `installed` plugins are
+   * user-installed via zip/git from `<dataRoot>/.psycheros/plugins/`.
+   * Built-ins can't be removed (they ride with Psycheros updates).
+   */
+  origin?: "installed" | "builtin";
   lastError?: string;
 }
 
@@ -281,6 +320,21 @@ export function validatePluginPackagePath(path: string): string {
   return parts.join("/");
 }
 
+function validateCapabilities(
+  value: unknown,
+): PluginCapabilities | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("capabilities must be an object");
+  }
+  const input = value as Record<string, unknown>;
+  return {
+    settings: input.settings === undefined
+      ? undefined
+      : input.settings === true,
+  };
+}
+
 export function isSafePluginId(id: string): boolean {
   return /^[a-z0-9][a-z0-9._-]*$/.test(id);
 }
@@ -403,6 +457,7 @@ export function validatePluginManifest(
         ),
       }
       : undefined,
+    capabilities: validateCapabilities(input.capabilities),
   };
 }
 
@@ -414,6 +469,7 @@ export function emptyPluginCapabilityCounts(): PluginCapabilityCounts {
     resultDecorators: 0,
     browserScripts: 0,
     browserStyles: 0,
+    settings: 0,
   };
 }
 
@@ -423,12 +479,22 @@ export function emptyPluginCapabilityCounts(): PluginCapabilityCounts {
  * My secrets live outside the executable plugin tree so my portable plugin
  * backups do not include credentials. I should use namespaced variables
  * because my trusted plugins share one process environment.
+ *
+ * When `secretsDir` is omitted, the path resolves to
+ * `<pluginRoot>/../plugin-secrets/<pluginId>.env` (the original behavior —
+ * installed plugins' secrets live alongside the plugins directory). When
+ * provided, secrets resolve to `<secretsDir>/<pluginId>.env`. PluginManager
+ * passes `<dataRoot>/.psycheros/plugin-secrets/` explicitly for both installed
+ * and bundled plugins so secrets land in user data regardless of plugin origin
+ * (bundled plugins load from `<projectRoot>/bundled-plugins/`, which is
+ * source-tree — we never want secrets written there).
  */
 export async function applyPluginEnv(
   pluginRoot: string,
   pluginId: string,
+  secretsDir?: string,
 ): Promise<AppliedPluginEnv> {
-  const values = await readPluginEnv(pluginRoot, pluginId);
+  const values = await readPluginEnv(pluginRoot, pluginId, secretsDir);
   const previous = new Map<string, string | undefined>();
   const skippedEnvVars: string[] = [];
   for (const [name, value] of Object.entries(values)) {
@@ -457,9 +523,16 @@ export async function applyPluginEnv(
   };
 }
 
-export function getPluginEnvPath(pluginRoot: string, pluginId: string): string {
+export function getPluginEnvPath(
+  pluginRoot: string,
+  pluginId: string,
+  secretsDir?: string,
+): string {
   if (!isSafePluginId(pluginId)) {
     throw new Error(`invalid plugin id: ${pluginId}`);
+  }
+  if (secretsDir) {
+    return join(secretsDir, `${pluginId}.env`);
   }
   return join(pluginRoot, "..", "plugin-secrets", `${pluginId}.env`);
 }
@@ -467,10 +540,13 @@ export function getPluginEnvPath(pluginRoot: string, pluginId: string): string {
 export async function readPluginEnv(
   pluginRoot: string,
   pluginId: string,
+  secretsDir?: string,
 ): Promise<Record<string, string>> {
   try {
     return parse(
-      await Deno.readTextFile(getPluginEnvPath(pluginRoot, pluginId)),
+      await Deno.readTextFile(
+        getPluginEnvPath(pluginRoot, pluginId, secretsDir),
+      ),
     );
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) return {};
