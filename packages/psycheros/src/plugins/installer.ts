@@ -200,6 +200,7 @@ function deriveDeclaredCapabilities(
     ...emptyPluginCapabilityCounts(),
     browserScripts: manifest.browser?.scripts?.length ?? 0,
     browserStyles: manifest.browser?.styles?.length ?? 0,
+    settings: manifest.capabilities?.settings === true ? 1 : 0,
   };
 }
 
