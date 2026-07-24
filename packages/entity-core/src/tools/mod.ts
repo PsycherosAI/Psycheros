@@ -30,6 +30,7 @@ export {
 } from "./identity.ts";
 
 export {
+  createEmbeddingRebuildAllHandler,
   createMemoryCreateHandler,
   createMemoryDeleteHandler,
   createMemoryEmbeddingPurgeHandler,

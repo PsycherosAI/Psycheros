@@ -258,6 +258,48 @@ Both user and assistant messages can be edited after they're sent.
 
 Implemented in `web/js/psycheros.js` and `src/server/state-changes.ts`.
 
+## Draft Persistence
+
+Unsent text in the composer (the message-input textarea) survives navigation:
+switching conversations, opening Settings, returning to the home view, or
+reloading the page no longer discards what the user was typing. Each
+conversation has its own draft slot — text typed in conversation A does not
+appear in conversation B.
+
+**Storage:** `localStorage`, keyed `psycheros:draft:<conversationId>`. A
+synthetic `psycheros:draft:__new__` slot holds the draft for the home view (no
+conversation selected). Storage is wrapped in try/catch so private-mode browsers
+or quota errors degrade silently with no UI breakage. Scope is per-browser,
+which fits multi-user deployments naturally.
+
+**Lifecycle:**
+
+- **Save** — synchronous on every keystroke via the textarea's `oninput`
+  handler. There is deliberately **no debounce**: a debounce introduced a timing
+  bug where the save fired after `currentConversationId` had already been
+  updated by `selectConversation`, writing the old conversation's text under the
+  new conversation's key. localStorage writes for short strings are
+  sub-millisecond, so synchronous saves are affordable. A defensive
+  `saveDraft()` also runs at the top of `selectConversation` and `goBack` before
+  the active ID changes.
+- **Restore** — in `loadConversationFromUrl` after the DOM swap, in `goBack`'s
+  home-view branch, in `DOMContentLoaded` for initial page load, and in the
+  `htmx:afterSwap` handler for `#chat` (defensive against HTMX-SSE-driven swaps
+  that reset the textarea).
+- **Clear** — in `sendMessage` after the input is emptied, and in
+  `confirmDelete` for every deleted conversation ID.
+
+**Trap to know about:** the `htmx:beforeSwap` event for `#chat` fires from a
+separate HTMX-SSE cycle, not from the conv-item click itself — and it fires
+_after_ `selectConversation` has already updated `currentConversationId`.
+Hooking a save there writes the old conversation's text under the new
+conversation's key, leaking drafts across conversations. Don't re-add a
+`beforeSwap` save; the on-input save is sufficient.
+
+Implemented in `web/js/psycheros.js`: `saveDraft`, `restoreDraft`, `clearDraft`,
+`draftKeyForConversation`. The `oninput` handler is in `src/server/templates.ts`
+(`renderInputArea`) and the home-view template inside `goBack`.
+
 ## Markdown Rendering
 
 Both user and assistant messages render markdown formatting with progressive
@@ -543,9 +585,11 @@ Implemented in `src/server/templates.ts` (`renderVisionSettings`,
 
 ## LLM Connections
 
-Multi-provider connection profile system. Access via Settings → LLM Settings
+Multi-provider connection profile system. Access via Settings → Model Settings
 (second card in the settings hub). Uses the same hub-and-card pattern as Image
-Gen and other settings.
+Gen and other settings. The card was renamed from "LLM Settings" to "Model
+Settings" when the Embeddings tab was added — the page now hosts both LLM
+profile management and embedding model configuration under one shell with tabs.
 
 **Hub View:**
 
@@ -595,6 +639,49 @@ Gen and other settings.
 **Persistence:** Settings stored in `.psycheros/llm-settings.json` as
 `{ profiles: LLMConnectionProfile[], activeProfileId: string }`.
 
+## Embedding Model
+
+Access via Settings → Model Settings → Embeddings tab. User-selectable local
+embedding model for memory, vault, chat, and graph RAG. Replaces the previously
+hardcoded `all-MiniLM-L6-v2`.
+
+**Preset dropdown:** 7 curated models with dimension, download size, and
+downloaded status shown inline. Includes `Cohee/jina-embeddings-v2-base-en`
+(SillyTavern's default, 8192-token context) and `nomic-ai/nomic-embed-text-v1.5`
+as recommended picks for companion chat. Plus a "Custom..." option that reveals
+a HuggingFace repo ID / URL field with debounced dimension probing against the
+model's `config.json`.
+
+**Current-model header:** always-visible strip showing what's actually running
+(`Currently using: Jina v2 base  768d, 320MB [downloaded]`). Compared against
+`app_metadata.active_embedding_dimension` in psycheros.db — mismatch (e.g.
+previous re-embed failed) shows a yellow warning and forces the save button to
+require a re-embed.
+
+**Download flow:** clicking Download on an undownloaded model uses Xenova's
+`pipeline()` with progress callbacks. The button shows a spinner + label during
+download; on completion it swaps to a green "✓ Download complete" pill and the
+dropdown option gets a ✓ badge. Downloaded-models.json records downloads
+explicitly because Xenova's Web Cache API usage in Deno isn't reliably reflected
+on disk (`env.useBrowserCache = false` is forced in both embedders to fix this).
+
+**Chunk Sizes section:** 5 fields (target, threshold, min, max, overlap chars).
+The "(Recommended for X: Y)" hint updates per-model — presets ship with a value,
+custom repos derive it from `max_position_embeddings × 4` via the probe
+endpoint. Changing any value forces a re-embed.
+
+**Save flow:** native `confirm()` dialog warning about the re-embed duration →
+blocking overlay + inline multi-line log
+(`Preparing →
+Resetting vector tables → Re-embedding messages → ...`) with
+phase-weighted progress bar. Pings pause during the run (psycheros is CPU-bound
+loading the new model and would falsely trip the reconnect watchdog otherwise).
+
+**Persistence:** `.psycheros/embedding-settings.json` (primary) +
+`.psycheros/entity-core-embedding-settings.json` (overrides). Entity-core
+receives the config via `ENTITY_CORE_EMBEDDING_*` env vars at MCP spawn — same
+pattern as the LLM settings overrides.
+
 ## System Admin Panel
 
 Built-in diagnostics and log viewer for inspecting system health without shell
@@ -629,9 +716,15 @@ refresh via button.
 Ring buffer capturing the last 1,000 log entries from all `console.*` calls.
 Component tags are parsed from `[Bracket]` prefixes in log messages.
 
+Entries below the configured log level floor are dropped before reaching the
+buffer — by default, `debug`-level entries (routine sensor readings, RAG search
+details, SSE lifecycle) are suppressed. Set `PSYCHEROS_LOG_LEVEL=debug` or add
+per-component overrides in `.psycheros/log-settings.json` to capture them. See
+[Configuration > Log Levels](configuration.md#log-levels) for details.
+
 **Filtering:**
 
-- By level (Error, Warning, Info)
+- By level (Error, Warning, Info, Debug)
 - By component tag (DB, RAG, MCP, Server, etc.)
 - By entry count limit (50, 100, 250, 500)
 
@@ -846,7 +939,7 @@ navigation pattern.
 
 **Features:**
 
-- Six tabs: Daily, Weekly, Monthly, Yearly, Significant, Instructions
+- Six tabs: Daily, Weekly, Monthly, Yearly, Significant, Configuration
 - File lists sorted newest-first, each linking to a full editor
 - **Pagination**: Shows "X of N" count with "Load more" button when more than 50
   memories exist for a granularity
@@ -865,10 +958,15 @@ navigation pattern.
 - Catch-up tab shows consolidation status (weekly/monthly/yearly) with a Run
   Catch-up button that backfills all missed periods in the background, with
   results displayed via SSE
-- Instructions tab provides a textarea for custom daily memory-writing
-  instructions (stored in `.psycheros/memory-settings.json`). Written in
-  first-person from the entity's perspective — these shape what the entity
-  remembers and how it expresses it. Defaults to empty.
+- Configuration tab provides a textarea for custom daily memory-writing
+  instructions plus a numeric "Max memories per turn" field controlling how many
+  memory chunks are pulled into context automatically each turn (1–50, default
+  10). Both stored in `.psycheros/memory-settings.json`. Instructions are
+  written in first-person from the entity's perspective — these shape what the
+  entity remembers and how it expresses it. The RAG limit only affects the eager
+  every-turn memory pull; the on-demand `memory_recall` tool,
+  conversation-history RAG, and knowledge graph keep their own limits. Defaults:
+  empty instructions, 10 chunks.
 - Works in offline mode (no MCP) — edits are saved locally only
 
 **Flow:**

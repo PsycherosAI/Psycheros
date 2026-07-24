@@ -9,7 +9,8 @@
 export {
   type CreateEdgeInput,
   type CreateNodeInput,
-  EMBEDDING_DIMENSION,
+  DEFAULT_EMBEDDING_DIMENSION,
+  getActiveEmbeddingDimension,
   type GetEdgesOptions,
   type GraphEdge,
   type GraphInsight,
@@ -35,6 +36,7 @@ export {
   getVecVersion,
   initializeGraphSchema,
   isVectorSearchAvailable,
+  vectorTableSql,
   verifyVectorTableSync,
 } from "./schema.ts";
 

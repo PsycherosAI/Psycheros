@@ -35,6 +35,17 @@ Focus especially on the most recent developments — new topics, recent decision
 
 Write in first person. Keep it to 2-3 paragraphs.`;
 
+/**
+ * Compose the effective peek instruction, appending the entity's specific
+ * focus guidance when provided. The default instruction's voice constraints
+ * ("Write in first person. Keep it to 2-3 paragraphs.") come first; the
+ * entity's instructions come last so more-specific later guidance wins.
+ */
+function buildPeekInstruction(instructions?: string): string {
+  if (!instructions || !instructions.trim()) return PEEK_INSTRUCTION;
+  return `${PEEK_INSTRUCTION}\n\n${instructions.trim()}`;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -173,12 +184,13 @@ async function summarizeConversation(
   conversationMessages: string,
   conversationTitle: string,
   llm: LLMClient,
+  instruction: string,
 ): Promise<string> {
   let summary = "";
 
   for await (
     const chunk of llm.chatStream([
-      { role: "system", content: systemMessage + PEEK_INSTRUCTION },
+      { role: "system", content: systemMessage + instruction },
       {
         role: "user",
         content:
@@ -218,6 +230,13 @@ export const conversationPeekTool: Tool = {
             description:
               "The exact conversation ID to peek at. I use this if I already know the ID from a previous search.",
           },
+          instructions: {
+            type: "string",
+            description:
+              "Optional guidance for what to focus on in the summary — particular " +
+              "topics, decisions, or wording to capture. Omit for a general overview; " +
+              "use only when I have a specific need.",
+          },
         },
       },
     },
@@ -229,6 +248,7 @@ export const conversationPeekTool: Tool = {
   ): Promise<ToolResult> => {
     const query = args.query as string | undefined;
     const conversationId = args.conversation_id as string | undefined;
+    const instructions = args.instructions as string | undefined;
 
     if (!query && !conversationId) {
       return {
@@ -327,12 +347,13 @@ export const conversationPeekTool: Tool = {
       const { llm, contextLength } = await createSummarizerClient(
         ctx.config.dataRoot,
       );
+      const effectiveInstruction = buildPeekInstruction(instructions);
 
       // Calculate token budget for conversation messages:
       // context window - system message - summary reserve - safety margin
       const safetyMargin = Math.floor(contextLength * 0.05);
       const systemTokens = estimateTokens(identitySystem) +
-        estimateTokens(PEEK_INSTRUCTION);
+        estimateTokens(effectiveInstruction);
       const maxMessageTokens = contextLength - systemTokens -
         SUMMARY_RESERVE_TOKENS - safetyMargin;
 
@@ -354,6 +375,7 @@ export const conversationPeekTool: Tool = {
         formattedMessages,
         title,
         llm,
+        effectiveInstruction,
       );
 
       if (!summary) {

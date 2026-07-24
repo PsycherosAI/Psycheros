@@ -163,8 +163,8 @@ prevents high-volume channels from blowing out the daily memory context window.
 ### Custom Daily Memory Instructions
 
 Users can configure additional instructions that the entity follows when writing
-daily memories. These are stored in `.psycheros/memory-settings.json` as
-`{ dailyInstructions: string }` and injected into the daily summarization prompt
+daily memories. These are stored in `.psycheros/memory-settings.json` as the
+`dailyInstructions` field and injected into the daily summarization prompt
 between the base guidelines and the conversation data.
 
 Instructions are written in first-person from the entity's perspective (e.g., "I
@@ -172,7 +172,28 @@ do not include vitamin reminders in my daily memories"). They are
 Psycheros-specific — different embodiments can have different memory-writing
 directives. The field defaults to empty (no custom instructions).
 
-Configured via the **Instructions** tab in Settings → Memories.
+### Eager-RAG chunk limit
+
+`memory-settings.json` also holds `ragMaxChunks` — how many memory chunks get
+pulled into context automatically each turn (range 1–50, default 10). The value
+is passed as a per-call `maxResults` override to entity-core's `memory_search`
+MCP tool from `src/entity/loop.ts`, so changing it takes effect on the next turn
+with no MCP restart.
+
+This only governs the eager every-turn pull. Other retrieval paths keep their
+own limits:
+
+- `memory_recall` tool (LLM-invoked, on-demand) — `maxResults` from tool input
+- Memories UI search preview — hardcoded 50 for browsing
+- ChatRAG (conversation-history RAG) — separate system, `limit: 5`
+- Knowledge graph context — `maxNodes: 8`
+
+Out-of-range values are silently clamped on save and on load (corrupted or
+hand-edited files won't break the entity loop). Entity-core's
+`DEFAULT_SERVER_CONFIG.ragMaxChunks = 10` remains as a pure fallback — only used
+if Psycheros omits the per-call override, which it doesn't in normal operation.
+
+Configured via the **Configuration** tab in Settings → Memories.
 
 **Exclusions:**
 
@@ -306,7 +327,8 @@ memory.
 **Context injection (automatic):**
 
 1. **Semantic Search**: Queries the knowledge graph for relevant nodes using
-   vector similarity (embeddings auto-generated via all-MiniLM-L6-v2)
+   vector similarity (embeddings generated via the configured model — see
+   Settings > Model Settings > Embeddings)
 2. **Graph Traversal**: Follows edges to find connected concepts (depth 1 by
    default)
 3. **Anchor Nodes**: Includes "me" and "user" nodes when referenced by edges in
@@ -358,7 +380,8 @@ no keyword triggers needed.
   pre-populated documents like welcome messages.
 - Files stored at `.psycheros/vault/documents/{global|chat-{convId}}/`
   (persisted across Docker container recreations)
-- Content extracted, chunked (512 tokens), embedded (all-MiniLM-L6-v2, 384 dims)
+- Content extracted, chunked, embedded via the configured model (see Settings >
+  Model Settings > Embeddings)
 
 **Scope:**
 
@@ -423,7 +446,12 @@ configurable duration and re-trigger behavior.
   run into `lib/vec0.{so,dylib,dll}` for the current platform.
 - **Fallback**: In-memory cosine similarity calculation when the extension is
   unavailable (e.g., the download failed and there is no cached binary).
-- **Embeddings**: HuggingFace `all-MiniLM-L6-v2` model (384 dimensions)
+- **Embeddings**: User-selectable via Settings > Model Settings > Embeddings.
+  Defaults to `all-MiniLM-L6-v2` (384 dimensions) for low-resource
+  compatibility; longer-context options (jina, nomic at 8192 tokens) are
+  recommended for companion chat. See
+  [configuration.md](configuration.md#embedding-model) for the full preset list
+  and env-var surface.
 - **Used for**: Chat RAG, Vault RAG, Graph RAG (all local to Psycheros)
 - **Memory RAG**: Handled by entity-core via MCP (not local)
 
@@ -437,7 +465,7 @@ configurable duration and re-trigger behavior.
 | `src/memory/trigger.ts`            | Startup catch-up, orphan repair, cron setup                                                                |
 | `src/memory/file-writer.ts`        | Content formatting utilities (extractChatIds, formatMemoryContent)                                         |
 | `src/memory/types.ts`              | Memory types, date formatting, instance tagging                                                            |
-| `src/memory/memory-settings.ts`    | Load/save custom daily memory instructions (`.psycheros/memory-settings.json`)                             |
+| `src/memory/memory-settings.ts`    | Load/save custom daily memory instructions + eager-RAG chunk limit (`.psycheros/memory-settings.json`)     |
 | `src/memory/date-utils.ts`         | Timezone-aware logical date helpers for message grouping                                                   |
 | `src/mcp-client/mod.ts`            | MCP client — createMemory, readMemory, searchMemories, listMemories, deleteMemory, updateMemory            |
 | `src/rag/mod.ts`                   | RAG retrieval system (chat, vault, graph — memory RAG removed)                                             |

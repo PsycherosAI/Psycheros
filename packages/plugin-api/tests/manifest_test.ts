@@ -88,6 +88,42 @@ Deno.test("plugin manifest rejects invalid review metadata", () => {
   );
 });
 
+Deno.test("plugin manifest parses capabilities.settings flag", () => {
+  const base = {
+    id: "calendar-caldav",
+    name: "Calendar (CalDAV)",
+    version: "0.1.0",
+    apiVersion: 1,
+    entrypoints: { psycheros: "./psycheros.ts" },
+  };
+
+  // Declared true → surfaced as true.
+  const enabled = validatePluginManifest({
+    ...base,
+    capabilities: { settings: true },
+  }, "calendar-caldav");
+  assertEquals(enabled.capabilities?.settings, true);
+
+  // Declared false → surfaced as false (distinct from undefined).
+  const disabled = validatePluginManifest({
+    ...base,
+    capabilities: { settings: false },
+  }, "calendar-caldav");
+  assertEquals(disabled.capabilities?.settings, false);
+
+  // Omitted entirely → undefined.
+  const omitted = validatePluginManifest(base, "calendar-caldav");
+  assertEquals(omitted.capabilities, undefined);
+
+  // Wrong shape → rejected.
+  assertThrows(() =>
+    validatePluginManifest({
+      ...base,
+      capabilities: "yes",
+    }, "calendar-caldav")
+  );
+});
+
 Deno.test("portable plugin archives reject conventional credential files", () => {
   assertEquals(isPluginSecretFilename("speech/.env"), true);
   assertEquals(isPluginSecretFilename("speech/secrets.env"), true);

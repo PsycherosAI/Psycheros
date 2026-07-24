@@ -117,20 +117,55 @@ higher tier. They're surfaced separately by RAG.
 
 Memory content is enriched with a human-readable date prefix before embedding
 (e.g., `"Significant memory from February 14, 2026. [original content]"`), so
-temporal queries can match memories by date. The enrichment algorithm is
-versioned — when the version changes, entity-core auto-rebuilds the entire
-embedding cache on startup. The rebuild runs after the MCP transport connects
-(so the handshake never times out), but before any tool calls are processed.
+temporal queries can match memories by date.
 
-Two MCP tools manage the memory embedding cache in `graph.db` (separate from
-knowledge graph embeddings in `vec_graph_nodes`):
+**The embedding model is configurable.** My Psycheros parent pushes the active
+model + chunk params at spawn time via `ENTITY_CORE_EMBEDDING_*` env vars
+(`ENTITY_CORE_EMBEDDING_MODEL`, `ENTITY_CORE_EMBEDDING_DIMENSION`,
+`ENTITY_CORE_EMBEDDING_CHUNK_TARGET_CHARS`, etc.). When absent (e.g.
+`deno task dev` standalone) I fall back to MiniLM defaults. See
+`src/embeddings/settings.ts:loadEmbeddingRuntimeConfig()`.
 
-- `memory_embedding_purge` — scans all cached memory embeddings and removes
-  entries whose memory file no longer exists. Use after manual file deletion to
-  prevent ghost search results.
-- `memory_embedding_rebuild` — clears the entire memory embedding cache and
-  re-embeds every memory file from scratch. Use after bulk deletion or
-  migration.
+The vec0 dimension is **dynamic** — `EMBEDDING_DIMENSION` in `graph/types.ts` is
+now `DEFAULT_EMBEDDING_DIMENSION` plus a `getActiveEmbeddingDimension()` getter
+that reads the env var at runtime. Vec0 DDL sites
+(`graph/schema.ts:vectorTableSql(dim)` and
+`embeddings/cache.ts:vectorTableSql(dim)`) take dim as a parameter.
+
+**Schema fingerprint (load-bearing):** `EmbeddingCache` stores a composite JSON
+fingerprint in `embedding_metadata.schema_version`:
+
+```json
+{
+  "algorithm": 3,
+  "chunkParamsHash": "3000:2048:400:2800:200",
+  "modelRepoId": "Cohee/jina-embeddings-v2-base-en"
+}
+```
+
+When any of those change (enrichment algorithm bump, chunk params, or model
+swap), `needsRebuild()` returns true and the boot path runs
+`autoRebuildEmbeddings()` — which calls `createMemoryEmbeddingRebuildHandler`
+(memory cache only). Graph nodes are NOT rebuilt automatically; Psycheros calls
+the `embedding_rebuild_all` MCP tool to rebuild both.
+
+Three MCP tools manage the embedding cache in `graph.db`:
+
+- `memory_embedding_purge` — scans cached memory embeddings and removes entries
+  whose memory file no longer exists. Use after manual file deletion to prevent
+  ghost search results.
+- `memory_embedding_rebuild` — clears the memory embedding cache and re-embeds
+  every memory file from scratch. Memory cache only — graph nodes untouched.
+- `embedding_rebuild_all` — drops + recreates both `vec_memory_embeddings` AND
+  `vec_graph_nodes`, re-embeds every memory file + every non-deleted graph node,
+  marks the schema fingerprint up to date. Called by my Psycheros parent when
+  the user switches embedding model or chunk size. Assumes I've been restarted
+  with the new `ENTITY_CORE_EMBEDDING_*` env vars first.
+
+**Xenova cache gotcha:** `env.useBrowserCache = false` is forced in
+`src/embeddings/mod.ts`. Deno has the Web Cache API, so Xenova defaults to it
+and skips the filesystem — breaking on-disk download detection. Don't remove the
+override.
 
 ## Knowledge graph
 

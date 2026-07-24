@@ -11,6 +11,7 @@ import { FileStore } from "./storage/mod.ts";
 import { GraphStore } from "./graph/mod.ts";
 import { extractMemoryToGraph } from "./graph/memory-integration.ts";
 import {
+  createEmbeddingRebuildAllHandler,
   createEntityExportHandler,
   createEntityImportHandler,
   createGraphEdgeCreateHandler,
@@ -673,6 +674,31 @@ export function createServer(
       const handler = createMemoryEmbeddingRebuildHandler(
         store,
         embeddingCache,
+      );
+      const result = await handler();
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.tool(
+    "embedding_rebuild_all",
+    memoryTools["embedding/rebuild_all"].description,
+    {},
+    async () => {
+      await store.initialize();
+      await embeddingCache.initialize();
+      await graphStore.initialize();
+      const handler = createEmbeddingRebuildAllHandler(
+        store,
+        embeddingCache,
+        graphStore,
       );
       const result = await handler();
       return {

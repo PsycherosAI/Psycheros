@@ -27,6 +27,18 @@ import type {
   LovenseSettings,
 } from "../llm/mod.ts";
 import { dispatchDeviceControl } from "../tools/control-device.ts";
+import {
+  type ChunkParams,
+  type DownloadStatus,
+  EMBEDDING_PRESETS,
+  type EmbeddingSettings,
+  type EntityCoreEmbeddingSettings,
+  getDownloadManager,
+  readActiveDimension,
+  type ReEmbedSnapshot,
+  resolveDimension,
+  resolveEntityCoreEmbeddingConfig,
+} from "../embeddings/mod.ts";
 import type {
   EntityCoreLLMSettings,
   ImageGenConfig,
@@ -47,6 +59,7 @@ import { getActiveProfile } from "../llm/settings.ts";
 import { detectModelCapabilities } from "../llm/model-capabilities.ts";
 import { createClientFromProfile } from "../llm/client.ts";
 import {
+  clampRagMaxChunks,
   loadMemorySettings,
   saveMemorySettings,
 } from "../memory/memory-settings.ts";
@@ -99,6 +112,8 @@ import {
   renderECEmbeddingPurgeRunning,
   renderECEmbeddingRebuildComplete,
   renderECEmbeddingRebuildRunning,
+  renderEmbeddingsTab,
+  renderEntityCoreEmbeddings,
   renderEntityCoreGraph,
   renderEntityCoreHub,
   renderEntityCoreLLM,
@@ -123,6 +138,7 @@ import {
   renderMemoryList,
   renderMemorySearchResults,
   renderMessages,
+  renderModelSettingsShell,
   renderSASettings,
   renderSaveError,
   renderSaveSuccess,
@@ -287,6 +303,29 @@ export interface RouteContext {
   updateEntityCoreLLMSettings: (
     settings: EntityCoreLLMSettings,
   ) => Promise<void>;
+  /** Get active embedding settings (model + chunk params) */
+  getEmbeddingSettings: () => import("../embeddings/mod.ts").EmbeddingSettings;
+  /** Persist embedding settings; returns whether a re-embed is required. */
+  updateEmbeddingSettings: (
+    settings: import("../embeddings/mod.ts").EmbeddingSettings,
+  ) => Promise<boolean>;
+  /** Get entity-core embedding overrides */
+  getEntityCoreEmbeddingSettings: () =>
+    import("../embeddings/mod.ts").EntityCoreEmbeddingSettings;
+  /** Update entity-core embedding overrides and restart MCP */
+  updateEntityCoreEmbeddingSettings: (
+    settings: import("../embeddings/mod.ts").EntityCoreEmbeddingSettings,
+  ) => Promise<void>;
+  /** Resolve the dataRoot (for cache dir / settings file paths). */
+  getDataRoot: () => string;
+  /** Start a re-embed run with the supplied next settings. Returns reembedId. */
+  startReembed?: (
+    settings: import("../embeddings/mod.ts").EmbeddingSettings,
+  ) => Promise<string>;
+  /** Subscribe to re-embed snapshot updates. Returns unsubscribe. */
+  subscribeReembed?: (
+    listener: (snapshot: ReEmbedSnapshot) => void,
+  ) => () => void;
   /** Get the device status cache for the SA system */
   getDeviceStatusCache: () => import("./device-cache.ts").DeviceStatusCache;
   /** Get the event rules engine (if available) */
@@ -1385,6 +1424,7 @@ export async function handleChat(
 
         // Create EntityTurn instance
         const activeProfile = ctx.getActiveLLMProfile();
+        const generalSettings = await loadGeneralSettings(ctx.dataRoot);
         const turn = new EntityTurn(
           ctx.llm,
           ctx.db,
@@ -1392,6 +1432,7 @@ export async function handleChat(
           {
             projectRoot: ctx.projectRoot,
             dataRoot: ctx.dataRoot,
+            userName: generalSettings.userName,
             chatRAG: ctx.chatRAG,
             mcpClient: ctx.mcpClient,
             lorebookManager: ctx.lorebookManager,
@@ -1599,6 +1640,7 @@ export async function handleChatRetry(
     async start(controller) {
       try {
         const retryProfile = ctx.getActiveLLMProfile();
+        const generalSettings = await loadGeneralSettings(ctx.dataRoot);
         const turn = new EntityTurn(
           ctx.llm,
           ctx.db,
@@ -1606,6 +1648,7 @@ export async function handleChatRetry(
           {
             projectRoot: ctx.projectRoot,
             dataRoot: ctx.dataRoot,
+            userName: generalSettings.userName,
             chatRAG: ctx.chatRAG,
             mcpClient: ctx.mcpClient,
             lorebookManager: ctx.lorebookManager,
@@ -3606,22 +3649,22 @@ function runConsolidationInBackground(ctx: RouteContext): void {
 // =============================================================================
 
 /**
- * Handle GET /fragments/settings/memories/instructions - Instructions tab.
- * Loads and displays the custom daily memory-writing instructions.
+ * Handle GET /fragments/settings/memories/instructions - Configuration tab.
+ * Loads and displays daily memory-writing instructions + the eager-RAG limit.
  */
 export async function handleInstructionsFragment(
   ctx: RouteContext,
 ): Promise<Response> {
   try {
     const settings = await loadMemorySettings(ctx.dataRoot);
-    const html = renderInstructionsTab(settings.dailyInstructions);
+    const html = renderInstructionsTab(settings);
     return new Response(html, {
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });
   } catch (error) {
     console.error("[Routes] handleInstructionsFragment error:", error);
     return new Response(
-      renderSaveError("Failed to load memory instructions"),
+      renderSaveError("Failed to load memory configuration"),
       {
         status: 500,
         headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -3631,7 +3674,8 @@ export async function handleInstructionsFragment(
 }
 
 /**
- * Handle POST /api/memories/instructions - Save custom daily memory instructions.
+ * Handle POST /api/memories/instructions - Save memory configuration.
+ * Persists daily instructions + the eager-RAG chunk limit.
  */
 export async function handleSaveMemoryInstructions(
   ctx: RouteContext,
@@ -3648,7 +3692,9 @@ export async function handleSaveMemoryInstructions(
       });
     }
 
-    await saveMemorySettings(ctx.dataRoot, { dailyInstructions });
+    const ragMaxChunks = clampRagMaxChunks(formData.get("ragMaxChunks"));
+
+    await saveMemorySettings(ctx.dataRoot, { dailyInstructions, ragMaxChunks });
 
     return new Response(renderSaveSuccess(), {
       headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -3656,7 +3702,7 @@ export async function handleSaveMemoryInstructions(
   } catch (error) {
     console.error("[Routes] handleSaveMemoryInstructions error:", error);
     return new Response(
-      renderSaveError("Failed to save memory instructions"),
+      renderSaveError("Failed to save memory configuration"),
       {
         status: 500,
         headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -6015,11 +6061,48 @@ export async function handleSetActiveProfile(
 }
 
 /**
- * Handle GET /fragments/settings/llm - LLM settings hub (profile cards).
+ * Handle GET /fragments/settings/llm - LLM settings hub (profile cards),
+ * wrapped in the Model Settings shell with LLM/Embeddings tabs.
  */
 export function handleLLMSettingsFragment(ctx: RouteContext): Response {
   const settings = ctx.getLLMProfileSettings();
-  const html = renderLLMProfileHub(settings);
+  const content = renderLLMProfileHub(settings);
+  const html = renderModelSettingsShell(
+    "llm",
+    content,
+    settings.profiles.length,
+  );
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+    },
+  });
+}
+
+/**
+ * Handle GET /fragments/settings/llm/embeddings - Embeddings tab in the
+ * Model Settings shell. Renders the preset picker + chunk-size advanced
+ * fields + download UI.
+ */
+export async function handleEmbeddingsTabFragment(
+  ctx: RouteContext,
+): Promise<Response> {
+  const settings = ctx.getEmbeddingSettings();
+  const presets = EMBEDDING_PRESETS;
+  const downloadedRepoIds = await collectDownloadedRepoIds(
+    ctx,
+    settings.modelRepoId,
+  );
+  const actualDimension = readActiveDimension(ctx.db.getRawDb());
+
+  const content = renderEmbeddingsTab(
+    settings,
+    presets,
+    downloadedRepoIds,
+    resolveDimension(settings),
+    actualDimension,
+  );
+  const html = renderModelSettingsShell("embeddings", content);
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -9077,6 +9160,25 @@ export function handleEntityCoreLLM(ctx: RouteContext): Response {
 }
 
 /**
+ * Handle GET /fragments/settings/entity-core/embeddings — Embedding
+ * override tab. Shows Psycheros's active model as the inherited default
+ * and lets the user override with a same-dimension alternative.
+ */
+export function handleEntityCoreEmbeddingsTab(ctx: RouteContext): Response {
+  const settings = ctx.getEntityCoreEmbeddingSettings();
+  const psycheros = ctx.getEmbeddingSettings();
+  const resolved = resolveEntityCoreEmbeddingConfig(psycheros, settings);
+  const html = renderEntityCoreEmbeddings({
+    settings,
+    psycherosActiveRepoId: psycheros.modelRepoId,
+    resolved,
+  });
+  return new Response(html, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+/**
  * Handle GET /fragments/settings/entity-core/graph — Knowledge Graph tab.
  */
 export async function handleEntityCoreGraph(
@@ -9985,6 +10087,597 @@ export async function handleSaveEntityCoreLLMSettings(
 }
 
 // =============================================================================
+// Embedding Settings API Routes
+// =============================================================================
+
+/**
+ * Handle GET /api/embedding-settings — return active settings + presets +
+ * downloaded status. The UI uses this to render the picker.
+ */
+export async function handleGetEmbeddingSettings(
+  ctx: RouteContext,
+): Promise<Response> {
+  const settings = ctx.getEmbeddingSettings();
+  const downloadedRepoIds = await collectDownloadedRepoIds(
+    ctx,
+    settings.modelRepoId,
+  );
+  const actualDimension = readActiveDimension(ctx.db.getRawDb());
+
+  return new Response(
+    JSON.stringify({
+      settings,
+      presets: EMBEDDING_PRESETS,
+      downloadedRepoIds,
+      resolvedDimension: resolveDimension(settings),
+      actualDimension,
+      activeModelRepoId: settings.modelRepoId,
+    }),
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    },
+  );
+}
+
+/**
+ * Handle POST /api/embedding-settings — validate and persist new settings.
+ * Returns `reembedRequired: true` when the change requires re-embedding; the
+ * UI then prompts the user to confirm before hitting /confirm-reembed.
+ *
+ * This endpoint does NOT itself trigger the re-embed — that gives the user
+ * a chance to back out.
+ */
+export async function handleSaveEmbeddingSettings(
+  ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
+  try {
+    const body = await request.json() as Partial<
+      EmbeddingSettings & { chunkParams?: Partial<ChunkParams> }
+    >;
+
+    const current = ctx.getEmbeddingSettings();
+    const next: EmbeddingSettings = {
+      modelRepoId: typeof body.modelRepoId === "string" && body.modelRepoId
+        ? body.modelRepoId
+        : current.modelRepoId,
+      chunkParams: body.chunkParams
+        ? {
+          ...current.chunkParams,
+          ...stripUndefinedChunk(body.chunkParams),
+        }
+        : { ...current.chunkParams },
+    };
+
+    const reembedRequired = await ctx.updateEmbeddingSettings(next);
+    const plan = reembedRequired
+      ? {
+        modelChanged: current.modelRepoId !== next.modelRepoId,
+        dimensionChanged: resolveDimension(current) !==
+          resolveDimension(next),
+        chunkChanged: !chunkParamsShallowEqual(
+          current.chunkParams,
+          next.chunkParams,
+        ),
+      }
+      : undefined;
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        settings: next,
+        reembedRequired,
+        reembed: plan,
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  } catch (error) {
+    console.error("[Routes] Failed to save embedding settings:", error);
+    return new Response(
+      JSON.stringify({ error: "Failed to save embedding settings" }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  }
+}
+
+/**
+ * Handle POST /api/embedding-settings/confirm-reembed — kick off the
+ * orchestrator. The request returns immediately with a reembedId; progress
+ * is streamed via /reembed-status (SSE).
+ */
+export async function handleConfirmReembed(
+  ctx: RouteContext,
+): Promise<Response> {
+  if (!ctx.startReembed) {
+    return new Response(
+      JSON.stringify({ error: "Re-embed orchestrator is not wired" }),
+      {
+        status: 501,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  }
+  try {
+    // The caller is expected to have already POSTed the new settings to
+    // /api/embedding-settings, which persisted them. Read them back so the
+    // orchestrator uses the just-saved values.
+    const next = ctx.getEmbeddingSettings();
+    const reembedId = await ctx.startReembed(next);
+    return new Response(
+      JSON.stringify({ success: true, reembedId }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return new Response(
+      JSON.stringify({ error: message }),
+      {
+        status: 409,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  }
+}
+
+/**
+ * Handle GET /api/embedding-settings/reembed-status — SSE stream of
+ * orchestrator progress updates. Closes when phase reaches "complete" or
+ * "error".
+ */
+export function handleReembedStatusSSE(ctx: RouteContext): Response {
+  if (!ctx.subscribeReembed) {
+    return new Response(
+      JSON.stringify({ error: "Re-embed orchestrator is not wired" }),
+      {
+        status: 501,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  }
+  const stream = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      const unsubscribe = ctx.subscribeReembed!((snapshot) => {
+        try {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(snapshot)}\n\n`),
+          );
+        } catch {
+          // controller may already be closed — unsubscribe below.
+          unsubscribe();
+        }
+        if (snapshot.phase === "complete" || snapshot.phase === "error") {
+          try {
+            controller.close();
+          } catch {
+            // already closed — fine
+          }
+          unsubscribe();
+        }
+      });
+    },
+    cancel() {
+      // Consumer disconnected — nothing to do here because the start()
+      // closure auto-unsubscribes on terminal phases. For non-terminal
+      // disconnects, the listener stays registered but the next event
+      // will hit the try/catch above and clean up.
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
+/**
+ * Handle POST /api/embedding-settings/download — start a model download.
+ * Body: `{ repoId: string }`. Returns immediately; progress via SSE.
+ */
+export async function handleStartEmbeddingDownload(
+  ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
+  try {
+    const body = await request.json() as { repoId?: string };
+    if (!body.repoId) {
+      return new Response(
+        JSON.stringify({ error: "repoId is required" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        },
+      );
+    }
+    const mgr = getDownloadManager(ctx.getDataRoot());
+    mgr.download(body.repoId).catch((err) => {
+      console.error(
+        `[Routes] Background download failed for ${body.repoId}:`,
+        err,
+      );
+    });
+    return new Response(
+      JSON.stringify({ success: true, repoId: body.repoId }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  } catch (error) {
+    console.error("[Routes] Failed to start embedding download:", error);
+    return new Response(
+      JSON.stringify({ error: "Failed to start download" }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  }
+}
+
+/**
+ * Handle GET /api/embedding-settings/download-status — SSE stream of
+ * download progress events for a specific repoId (query param).
+ */
+export function handleEmbeddingDownloadStatusSSE(
+  ctx: RouteContext,
+  url: URL,
+): Response {
+  const repoId = url.searchParams.get("repoId");
+  if (!repoId) {
+    return new Response(
+      JSON.stringify({ error: "repoId query param is required" }),
+      {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  }
+  const mgr = getDownloadManager(ctx.getDataRoot());
+  let unsubscribe: (() => void) | null = null;
+  const stream = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      const send = (status: DownloadStatus) => {
+        try {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(status)}\n\n`),
+          );
+        } catch {
+          if (unsubscribe) unsubscribe();
+          return;
+        }
+        if (status.state === "ready" || status.state === "error") {
+          try {
+            controller.close();
+          } catch {
+            // already closed
+          }
+          if (unsubscribe) unsubscribe();
+        }
+      };
+      // Push current status immediately so the UI doesn't have to wait for
+      // the first event.
+      send(mgr.getStatus(repoId));
+      unsubscribe = mgr.onProgress((event) => {
+        if (event.repoId === repoId) send(event.status);
+      });
+    },
+    cancel() {
+      // Consumer disconnected.
+      if (unsubscribe) unsubscribe();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
+/**
+ * Handle POST /api/embedding-settings/probe-dimension — fetch the dimension
+ * of a custom (non-preset) HuggingFace repo by reading its config.json.
+ * Body: `{ repoId: string }`.
+ */
+export async function handleProbeDimension(
+  _ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
+  try {
+    const body = await request.json() as { repoId?: string };
+    if (!body.repoId) {
+      return new Response(
+        JSON.stringify({ error: "repoId is required" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        },
+      );
+    }
+    // Check preset list first — saves a network call.
+    const preset = EMBEDDING_PRESETS.find((p) => p.repoId === body.repoId);
+    if (preset) {
+      return new Response(
+        JSON.stringify({
+          dimension: preset.dimension,
+          maxContextTokens: preset.maxContextTokens,
+          recommendedChunkTargetChars: preset.recommendedChunkTargetChars,
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        },
+      );
+    }
+    const cfg = await fetchHuggingFaceModelConfig(body.repoId);
+    // Derive a recommended chunk target from the probed context length.
+    // ~4 chars/token heuristic, capped so we don't suggest enormous chunks
+    // for models with very long context.
+    const recommended = cfg.maxContextTokens !== null
+      ? Math.min(cfg.maxContextTokens * 4, 8192)
+      : null;
+    return new Response(
+      JSON.stringify({
+        dimension: cfg.dimension,
+        maxContextTokens: cfg.maxContextTokens,
+        recommendedChunkTargetChars: recommended,
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  } catch (error) {
+    console.error("[Routes] Failed to probe dimension:", error);
+    return new Response(
+      JSON.stringify({
+        error: error instanceof Error
+          ? error.message
+          : "Failed to probe dimension",
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  }
+}
+
+/**
+ * Handle GET /api/entity-core/embedding-settings — return entity-core
+ * overrides + resolved values (after applying Psycheros defaults).
+ */
+export function handleGetEntityCoreEmbeddingSettings(
+  ctx: RouteContext,
+): Response {
+  const settings = ctx.getEntityCoreEmbeddingSettings();
+  const psycheros = ctx.getEmbeddingSettings();
+  const resolved = resolveEntityCoreEmbeddingConfig(psycheros, settings);
+  return new Response(
+    JSON.stringify({
+      settings,
+      resolved,
+      inheritedFromPsycheros: {
+        modelRepoId: settings.modelRepoId === undefined,
+        chunkParams: settings.chunkParams ?? {},
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    },
+  );
+}
+
+/**
+ * Handle POST /api/entity-core/embedding-settings — save entity-core
+ * embedding overrides and restart MCP. Returns 400 if the resolved
+ * dimension would diverge from Psycheros (cross-package graph search
+ * requires matching dimensions).
+ */
+export async function handleSaveEntityCoreEmbeddingSettings(
+  ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
+  try {
+    const body = await request.json() as Partial<EntityCoreEmbeddingSettings>;
+    const updated: EntityCoreEmbeddingSettings = {};
+    if (typeof body.modelRepoId === "string" && body.modelRepoId) {
+      updated.modelRepoId = body.modelRepoId;
+    }
+    if (body.chunkParams && typeof body.chunkParams === "object") {
+      const cp = stripUndefined(body.chunkParams);
+      if (Object.keys(cp).length > 0) updated.chunkParams = cp;
+    }
+
+    await ctx.updateEntityCoreEmbeddingSettings(updated);
+    const psycheros = ctx.getEmbeddingSettings();
+    const resolved = resolveEntityCoreEmbeddingConfig(psycheros, updated);
+    return new Response(
+      JSON.stringify({ success: true, settings: updated, resolved }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const isDimMismatch = message.includes("Dimension mismatch");
+    return new Response(
+      JSON.stringify({ error: message }),
+      {
+        status: isDimMismatch ? 400 : 500,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    );
+  }
+}
+
+// ---- Helpers ----
+
+function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) (out as Record<string, unknown>)[k] = v;
+  }
+  return out;
+}
+
+function stripUndefinedChunk(
+  obj: Partial<ChunkParams>,
+): Partial<ChunkParams> {
+  const out: Partial<ChunkParams> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) {
+      (out as Record<string, unknown>)[k] = v;
+    }
+  }
+  return out;
+}
+
+function chunkParamsShallowEqual(
+  a: ChunkParams,
+  b: ChunkParams,
+): boolean {
+  return a.thresholdChars === b.thresholdChars &&
+    a.targetChars === b.targetChars &&
+    a.minChars === b.minChars &&
+    a.maxChars === b.maxChars &&
+    a.overlapChars === b.overlapChars;
+}
+
+/**
+ * Build the list of repo IDs considered "downloaded" for UI rendering.
+ *
+ * The active model is ALWAYS included — the system loaded it successfully
+ * on startup, so it must be available (whether via Xenova's on-disk cache
+ * or in-memory). Other models are checked via the DownloadManager, which
+ * probes the on-disk cache and tracks in-session downloads.
+ */
+async function collectDownloadedRepoIds(
+  ctx: RouteContext,
+  activeRepoId: string,
+): Promise<string[]> {
+  const downloaded: string[] = [];
+  const mgr = getDownloadManager(ctx.getDataRoot());
+  for (const preset of EMBEDDING_PRESETS) {
+    if (preset.repoId === activeRepoId) {
+      downloaded.push(preset.repoId);
+      continue;
+    }
+    if (await mgr.isDownloaded(preset.repoId)) {
+      downloaded.push(preset.repoId);
+    }
+  }
+  // Active model is always considered downloaded (system loaded it at boot).
+  if (
+    activeRepoId &&
+    !EMBEDDING_PRESETS.some((p) => p.repoId === activeRepoId) &&
+    !downloaded.includes(activeRepoId)
+  ) {
+    downloaded.push(activeRepoId);
+  }
+  return downloaded;
+}
+
+/**
+ * Fetch a HuggingFace model's hidden_size from its config.json. Throws on
+ * any failure (404, parse error, network). The UI catches and shows an
+ * "unknown dimension" message.
+ */
+async function fetchHuggingFaceModelConfig(
+  repoId: string,
+): Promise<{ dimension: number; maxContextTokens: number | null }> {
+  const url = `https://huggingface.co/${repoId}/raw/main/config.json`;
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    throw new Error(`HuggingFace returned ${resp.status} for ${repoId}`);
+  }
+  const config = await resp.json() as {
+    hidden_size?: number;
+    dim?: number;
+    max_position_embeddings?: number;
+    n_positions?: number;
+    config?: {
+      hidden_size?: number;
+      max_position_embeddings?: number;
+      n_positions?: number;
+    };
+  };
+  const dim = config.hidden_size ?? config.dim ?? config.config?.hidden_size;
+  if (typeof dim !== "number" || dim <= 0) {
+    throw new Error(`Could not determine dimension from ${repoId} config.json`);
+  }
+  const maxContextTokens = config.max_position_embeddings ??
+    config.n_positions ?? config.config?.max_position_embeddings ??
+    config.config?.n_positions ?? null;
+  return { dimension: dim, maxContextTokens };
+}
+
+// =============================================================================
 // Discord Gateway API Routes
 // =============================================================================
 
@@ -10556,6 +11249,7 @@ export function handleVoiceWebSocket(
       thinkingEnabled: !profile.disableReasoning,
       persistentReasoningIntraTurn: false,
     });
+    const generalSettings = await loadGeneralSettings(ctx.dataRoot);
     const entityTurn = new EntityTurn(
       voiceLlm,
       ctx.db,
@@ -10563,6 +11257,7 @@ export function handleVoiceWebSocket(
       {
         projectRoot: ctx.projectRoot,
         dataRoot: ctx.dataRoot,
+        userName: generalSettings.userName,
         chatRAG: ctx.chatRAG,
         mcpClient: ctx.mcpClient,
         lorebookManager: ctx.lorebookManager,

@@ -13,6 +13,7 @@ import {
   getPlatformExtension,
 } from "../vec-extension.ts";
 import { initializeGraphSchema, verifyVectorTableSync } from "./schema.ts";
+import { getActiveEmbeddingDimension } from "./types.ts";
 import type {
   CreateEdgeInput,
   CreateNodeInput,
@@ -857,6 +858,54 @@ export class GraphStore {
     );
     stmt.run(new Date().toISOString(), id);
     stmt.finalize();
+  }
+
+  /**
+   * Drop and recreate the vec_graph_nodes table at the active dimension.
+   * vec0 virtual tables don't support reliable bulk DELETE — DROP+CREATE is
+   * the only way to get a clean slate for a full re-embed.
+   *
+   * After this call returns, all graph_nodes rows have NO embedding — caller
+   * must re-embed every non-deleted node via `storeNodeEmbedding` /
+   * `updateNodeEmbedding`.
+   */
+  reembedAllGraphNodes(): { total: number } {
+    const total = this.db
+      .prepare(
+        "SELECT COUNT(*) as count FROM graph_nodes WHERE deleted = 0",
+      )
+      .get<{ count: number }>()?.count ?? 0;
+
+    if (this.vectorAvailable) {
+      try {
+        this.db.exec("DROP TABLE IF EXISTS vec_graph_nodes");
+      } catch {
+        // best-effort
+      }
+      try {
+        const dim = getActiveEmbeddingDimension();
+        this.db.exec(
+          `CREATE VIRTUAL TABLE vec_graph_nodes USING vec0(embedding FLOAT[${dim}] distance=cosine)`,
+        );
+      } catch {
+        // sqlite-vec may not be available after the drop — degrade gracefully.
+      }
+    }
+    return { total };
+  }
+
+  /**
+   * List every non-deleted node id + label. Used by the rebuild-all flow to
+   * iterate nodes for re-embedding without paying the full GraphNode parse
+   * cost per row.
+   */
+  listNodeLabels(): Array<{ id: string; label: string }> {
+    const stmt = this.db.prepare(
+      "SELECT id, label FROM graph_nodes WHERE deleted = 0",
+    );
+    const rows = stmt.all<{ id: string; label: string }>();
+    stmt.finalize();
+    return rows;
   }
 
   // ========================================

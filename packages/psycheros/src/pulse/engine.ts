@@ -716,6 +716,7 @@ export class PulseEngine {
     const entityConfig: EntityConfig = {
       projectRoot: this.config.projectRoot,
       dataRoot: this.config.dataRoot,
+      userName: await readUserName(this.config.dataRoot),
       chatRAG: this.config.chatRAG,
       mcpClient: this.config.mcpClient,
       lorebookManager: this.config.lorebookManager,
@@ -911,5 +912,28 @@ export class PulseEngine {
     }
     this.scheduler.removeSchedule(this.scheduleIdFor(pulseId));
     this.db.deletePulse(pulseId);
+  }
+}
+
+/**
+ * Read the configured user name from general-settings.json. Used to populate
+ * EntityConfig.userName for plugin hooks that substitute {userName} (e.g.
+ * google-suite's today_schedule calendar label). Falls back to "You" if the
+ * file is missing or unreadable — matches the loadGeneralSettings default
+ * in routes.ts.
+ *
+ * Inlined here rather than imported from routes.ts to keep the pulse engine
+ * decoupled from the HTTP layer. If a third caller emerges, extract to a
+ * shared module.
+ */
+async function readUserName(dataRoot: string): Promise<string> {
+  try {
+    const text = await Deno.readTextFile(
+      `${dataRoot}/.psycheros/general-settings.json`,
+    );
+    const saved = JSON.parse(text) as { userName?: string };
+    return saved.userName || "You";
+  } catch {
+    return "You";
   }
 }

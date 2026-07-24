@@ -339,5 +339,99 @@ credential restoration after shutdown.
 The older `custom-tools/` directory remains supported for single-file
 LLM-callable tools. Existing custom tools do not need migration.
 
+## Bundled Plugins
+
+Plugins that ship with Psycheros itself live at
+`<projectRoot>/bundled-plugins/<id>/`. They load from source — no copy to the
+data directory, no install step, no update mechanism (they update with Psycheros
+itself).
+
+Key differences from user-installed plugins:
+
+- Discovered by scanning `<projectRoot>/bundled-plugins/` alongside the
+  installed plugins root. Bundled wins on id collisions.
+- State lives at `<dataRoot>/.psycheros/plugin-state/<id>/` (not inside the
+  plugin directory, which is source tree).
+- Secrets still live at `<dataRoot>/.psycheros/plugin-secrets/<id>.env`.
+- Cannot be removed via the UI (can be disabled). The Plugins Settings page
+  shows a "Bundled" badge.
+- Can declare `capabilities.settings: true` + export `settingsFragment` for a
+  plugin-owned settings page reachable via a "Configure" button.
+
+## Plugin Settings UI
+
+Plugins can declare a settings capability and export a `settingsFragment`
+callback that returns HTML. The host wraps the fragment in standard settings
+chrome (header, back button) and serves it at
+`GET /fragments/settings/plugins/<id>`.
+
+Declare in the manifest:
+
+```json
+{
+  "capabilities": { "settings": true }
+}
+```
+
+Export in the psycheros entrypoint:
+
+```ts
+export default {
+  settingsFragment: (ctx) => {
+    // ctx.statePath, ctx.env, ctx.targetElementId
+    return `<section>...</section>`;
+  },
+};
+```
+
+Settings fragments are reachable even when the plugin is disabled — operators
+need to configure credentials before enabling. Form submissions go through the
+existing `routes` capability (POST handlers return HTML fragments for HTMX
+swaps).
+
 All prompt text, tool descriptions, comments, and entity-facing copy follow my
 first-person convention.
+
+## Plugin Services API
+
+`PsycherosPluginServices` (passed to `start()` and available via
+`getServices(id)` on the manager) exposes:
+
+- `statePath: string` — plugin's persistent state directory. For installed
+  plugins this is `<plugin-dir>/state/`; for bundled plugins it's
+  `<dataRoot>/.psycheros/plugin-state/<id>/`. Create on first write with
+  `Deno.mkdir(statePath, { recursive: true })`.
+- `env: PluginEnv` — read access to this plugin's `.env` secrets via
+  `get(name)`, `has(name)`, `require(name)`.
+- `writeSecret(name, value): Promise<void>` — validates the name matches
+  `PSYCHEROS_PLUGIN_<UPPER_ID>_*`, merges into the `.env` file at
+  `<dataRoot>/.psycheros/plugin-secrets/<id>.env`, and pushes the value into the
+  live `Deno.env` so subsequent reads see it. Atomic read-modify-write — other
+  secrets in the file are preserved.
+- `readSecrets(): Promise<Record<string, string>>` — bulk read of this plugin's
+  secrets. Empty object if no file exists.
+
+## Prompt Hook Context
+
+`PluginPromptContext` (passed to each `promptHook.run(ctx)`) carries:
+
+- `conversationId`, `sourceType`, `userMessage`, `sections` — same as before.
+- `userName?: string` — operator's configured display name (from
+  `GeneralSettings.userName`). Useful for `{userName}` substitution in hook
+  output (e.g. `"{userName}' calendar"`).
+- `statePath`, `env`, `completeWorker` — runtime per-plugin context.
+
+Hooks return `string | undefined`. Return `undefined` for silent skip (not
+connected, service disabled, no data). Return a string to inject a
+`<plugin_context source="<id>" hook="<name>">` block into the system message.
+The wrapper is added by `buildPromptContent` — hooks just return body text.
+
+## Context Inspector
+
+Each turn's per-hook detail is captured in `LLMContextSnapshot.pluginHooks` and
+persisted in the `context_snapshots.plugin_hooks_json` column. The Context
+Inspector's Plugins tab renders one card per hook with: output, chars used,
+status badge (fired / truncated / budget-skipped / failed / empty), priority,
+and elapsed milliseconds. Hook output bodies should stay terse — the wrapper
+already identifies the plugin via `source="..."`, so don't repeat the plugin
+name in the body unless natural language demands it.

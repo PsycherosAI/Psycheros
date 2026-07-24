@@ -556,7 +556,11 @@ export class PluginInstaller {
     }
 
     for (const [id, status] of statuses) {
-      if (!manifests.has(id)) {
+      // Only mark as "pending removal" if the plugin was expected in the
+      // installed directory. Bundled plugins (origin: "builtin") live in
+      // the source tree, not the installed directory — they're never
+      // "removed from disk" just because the installer doesn't find them.
+      if (!manifests.has(id) && status.origin !== "builtin") {
         statuses.set(id, {
           ...status,
           restartRequired: true,

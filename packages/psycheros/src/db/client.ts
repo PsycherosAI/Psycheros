@@ -103,6 +103,7 @@ interface ContextSnapshotRow {
   messages_json: string;
   tool_definitions_json: string;
   metrics_json: string;
+  plugin_hooks_json: string | null;
   created_at: string;
 }
 
@@ -1396,8 +1397,8 @@ export class DBClient {
           system_message, base_instructions_content, self_content, user_content,
           relationship_content, custom_content, memories_content, chat_history_content,
           lorebook_content, graph_content, vault_content, situational_awareness_content,
-          messages_json, tool_definitions_json, metrics_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          messages_json, tool_definitions_json, metrics_json, plugin_hooks_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           snapshot.conversationId,
@@ -1420,6 +1421,7 @@ export class DBClient {
           snapshot.messagesJson,
           snapshot.toolDefinitionsJson,
           snapshot.metricsJson,
+          snapshot.pluginHooksJson ?? null,
           now,
         ],
       );
@@ -1463,7 +1465,7 @@ export class DBClient {
               system_message, base_instructions_content, self_content, user_content,
               relationship_content, custom_content, memories_content, chat_history_content,
               lorebook_content, graph_content, vault_content, situational_awareness_content,
-              messages_json, tool_definitions_json, metrics_json, created_at
+              messages_json, tool_definitions_json, metrics_json, plugin_hooks_json, created_at
        FROM context_snapshots
        WHERE conversation_id = ?
        ORDER BY turn_index ASC, iteration ASC`,
@@ -1489,7 +1491,7 @@ export class DBClient {
               system_message, base_instructions_content, self_content, user_content,
               relationship_content, custom_content, memories_content, chat_history_content,
               lorebook_content, graph_content, vault_content, situational_awareness_content,
-              messages_json, tool_definitions_json, metrics_json, created_at
+              messages_json, tool_definitions_json, metrics_json, plugin_hooks_json, created_at
        FROM context_snapshots
        WHERE conversation_id = ?
        ORDER BY turn_index DESC, iteration DESC
@@ -1529,6 +1531,7 @@ export class DBClient {
       messagesJson: row.messages_json,
       toolDefinitionsJson: row.tool_definitions_json,
       metricsJson: row.metrics_json,
+      pluginHooksJson: row.plugin_hooks_json ?? undefined,
       createdAt: row.created_at,
     };
   }

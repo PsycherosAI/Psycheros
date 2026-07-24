@@ -1,0 +1,133 @@
+/**
+ * Embedding Settings Styles
+ *
+ * Most of the tab uses the standard `.theme-section` / `.llm-field` /
+ * `.input-field` / `.btn` conventions, plus the `.import-progress` /
+ * `.import-blocking-overlay` classes from the admin import flow for the
+ * re-embed progress UI. This file styles only the current-model header
+ * and the inline download row — the two pieces with no existing convention.
+ */
+
+/* Current-model header — shown at the top of the Active Model section.
+   Stays static regardless of form state so the user always knows what's
+   actually in use. */
+.embedding-current-model {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  background: var(--c-bg-sunken);
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-accent);
+  border-radius: 4px;
+  font-size: 0.9rem;
+  margin-bottom: 12px;
+}
+
+.embedding-current-label {
+  color: var(--c-fg-label);
+}
+
+.embedding-current-name {
+  color: var(--c-fg-strong);
+  font-weight: 600;
+}
+
+.embedding-current-meta {
+  color: var(--c-fg-muted);
+  font-size: 0.8rem;
+}
+
+.embedding-current-status {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-left: 4px;
+}
+
+.embedding-current-status--ok {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.embedding-current-status--missing {
+  background: rgba(255, 170, 0, 0.15);
+  color: var(--c-warning);
+  border: 1px solid rgba(255, 170, 0, 0.3);
+}
+
+.embedding-current-repo {
+  margin-left: auto;
+  background: var(--c-bg);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  color: var(--c-fg-muted);
+}
+
+/* Inline download row — appears when the selected model isn't on disk yet. */
+.embedding-download-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Sync warning — shown when saved settings don't match running state. */
+.embedding-sync-warning {
+  display: block;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 170, 0, 0.1);
+  color: var(--c-warning);
+  border: 1px solid rgba(255, 170, 0, 0.4);
+  border-left: 3px solid var(--c-warning);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+/* Download status text — colored by state so success/error are obvious. */
+.embedding-download-success {
+  display: inline-block;
+  padding: 4px 10px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.embedding-download-error {
+  display: inline-block;
+  padding: 4px 10px;
+  background: rgba(255, 68, 68, 0.15);
+  color: var(--c-error);
+  border: 1px solid rgba(255, 68, 68, 0.4);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+/* Re-embed log — multi-line scrollable box under the progress bar. */
+.embedding-settings .import-progress-text {
+  max-height: 180px;
+  overflow-y: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  text-align: left;
+  background: var(--c-bg-sunken);
+  border: 1px solid var(--c-border);
+  padding: 8px 10px;
+  border-radius: 4px;
+}
+
+.embedding-settings .import-progress-text div {
+  padding: 1px 0;
+  color: var(--c-fg);
+}

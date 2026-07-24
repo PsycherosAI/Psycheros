@@ -255,6 +255,8 @@ export interface LLMContextSnapshot {
   situationalAwarenessContent?: string;
   /** Trusted local plugin context I add to my prompt */
   pluginContent?: string;
+  /** Per-hook detail for Context Inspector — what each hook contributed */
+  pluginHooks?: PluginHookDetail[];
   /** The messages array sent to the LLM (excluding system) */
   messages: Array<{
     role: string;
@@ -293,6 +295,24 @@ export interface LLMContextSnapshot {
   };
 }
 
+/** Per-hook detail captured during buildPromptContent for Context Inspector */
+export interface PluginHookDetail {
+  pluginId: string;
+  hookName: string;
+  priority: number;
+  /** The raw text the hook returned (before truncation). Undefined if skipped/failed. */
+  output?: string;
+  /** Chars that made it into the system prompt (after truncation + wrapper). */
+  charsUsed: number;
+  truncated: boolean;
+  /** Hook threw or timed out — a `<plugin_failure>` fallback was injected instead. */
+  degraded: boolean;
+  /** Skipped due to budget exhaustion — no output at all. */
+  budgetSkipped: boolean;
+  /** Execution time in milliseconds. */
+  elapsedMs: number;
+}
+
 /** Persisted context snapshot with DB metadata */
 export interface ContextSnapshotRecord {
   id: string;
@@ -316,6 +336,8 @@ export interface ContextSnapshotRecord {
   messagesJson: string;
   toolDefinitionsJson: string;
   metricsJson: string;
+  /** JSON-serialized PluginHookDetail[] for the Context Inspector tab. */
+  pluginHooksJson?: string;
   createdAt: string;
 }
 

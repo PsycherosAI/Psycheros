@@ -62,6 +62,15 @@ Discord** in the web UI, not via env vars. Settings persist to
 | `includeInDailyMemories` | boolean | `true`  | Include Discord activity in daily memory summarization via pre-summarizer                                                                                               |
 | `memoryInstructions`     | string  | `""`    | Instructions for the pre-summarizer and daily memory writer (e.g., handle mappings like "superdog420 is James"). Written in first-person from the entity's perspective. |
 
+### Connection reliability
+
+The gateway reconnects automatically with exponential backoff capped at 30
+seconds, and continues retrying indefinitely — there is no permanent give-up. A
+60-second health watchdog runs alongside the heartbeat as a safety net. If the
+entity ever appears disconnected in **Settings > External Connections >
+Discord** and isn't recovering on its own, `POST /api/discord/gateway/restart`
+triggers a manual restart.
+
 ## Available Tools
 
 All tools are enabled by default on a fresh install. No configuration is needed.

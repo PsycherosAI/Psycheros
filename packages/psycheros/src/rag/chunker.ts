@@ -8,24 +8,31 @@
 import type { Chunk, Chunker, ChunkMetadata } from "./types.ts";
 
 /**
- * Target chunk size in tokens.
- */
-const TARGET_CHUNK_TOKENS = 512;
-
-/**
- * Estimated characters per token (rough heuristic for English).
+ * Estimated characters per token (rough heuristic for English). Used to
+ * convert char-based ChunkParams into the token-based targets this chunker's
+ * internals grew around.
  */
 const CHARS_PER_TOKEN = 4;
 
 /**
- * Minimum chunk size in characters.
+ * Char-based defaults. Match the historical hardcoded values (target 512
+ * tokens × 4 chars/token = 2048) so existing vault chunks keep their existing
+ * boundaries after upgrade.
  */
-const MIN_CHUNK_CHARS = 100;
+export interface VaultChunkParams {
+  /** Target chunk size in characters. */
+  targetChars: number;
+  /** Minimum chunk size in characters — smaller tails get merged. */
+  minChars: number;
+  /** Hard maximum chunk size in characters. */
+  maxChars: number;
+}
 
-/**
- * Maximum chunk size in characters (hard limit).
- */
-const MAX_CHUNK_CHARS = TARGET_CHUNK_TOKENS * CHARS_PER_TOKEN;
+export const DEFAULT_VAULT_CHUNK_PARAMS: VaultChunkParams = {
+  targetChars: 2048,
+  minChars: 100,
+  maxChars: 2048,
+};
 
 /**
  * Estimate the token count of a text string.
@@ -36,9 +43,23 @@ export function estimateTokens(text: string): number {
 }
 
 /**
- * Memory chunker that respects markdown structure.
+ * Memory chunker that respects markdown structure. Accepts chunk-size params
+ * at construction; defaults preserve historical behavior.
  */
 export class MemoryChunker implements Chunker {
+  private readonly targetTokens: number;
+  private readonly minChars: number;
+  private readonly maxChars: number;
+
+  constructor(params: VaultChunkParams = DEFAULT_VAULT_CHUNK_PARAMS) {
+    this.targetTokens = Math.max(
+      1,
+      Math.floor(params.targetChars / CHARS_PER_TOKEN),
+    );
+    this.minChars = params.minChars;
+    this.maxChars = params.maxChars;
+  }
+
   /**
    * Chunk text into smaller pieces suitable for embedding.
    *
@@ -112,9 +133,9 @@ export class MemoryChunker implements Chunker {
 
       // If adding this line would exceed target and we have content, finalize chunk
       if (
-        currentTokens + lineTokens > TARGET_CHUNK_TOKENS &&
+        currentTokens + lineTokens > this.targetTokens &&
         currentChunk.length > 0 &&
-        currentTokens >= MIN_CHUNK_CHARS / CHARS_PER_TOKEN
+        currentTokens >= this.minChars / CHARS_PER_TOKEN
       ) {
         // Create chunk from accumulated content
         chunks.push(
@@ -135,8 +156,8 @@ export class MemoryChunker implements Chunker {
       // If it's a bullet point and we're at a good size, consider it a chunk boundary
       if (
         isBullet &&
-        currentTokens >= TARGET_CHUNK_TOKENS * 0.5 &&
-        currentTokens <= TARGET_CHUNK_TOKENS * 1.5
+        currentTokens >= this.targetTokens * 0.5 &&
+        currentTokens <= this.targetTokens * 1.5
       ) {
         // Check if next line is also a bullet or empty (end of bullet group)
         const nextLine = section.content[i + 1];
@@ -157,7 +178,7 @@ export class MemoryChunker implements Chunker {
       }
 
       // Hard limit: force chunk if too large
-      if (currentTokens > TARGET_CHUNK_TOKENS * 2) {
+      if (currentTokens > this.targetTokens * 2) {
         chunks.push(
           this.createChunk(
             currentChunk,
@@ -175,7 +196,7 @@ export class MemoryChunker implements Chunker {
     if (currentChunk.length > 0) {
       // Only add if meaningful content exists
       const content = currentChunk.join("\n").trim();
-      if (content.length >= MIN_CHUNK_CHARS) {
+      if (content.length >= this.minChars) {
         chunks.push(
           this.createChunk(currentChunk, sourceFile, section.header, startLine),
         );
@@ -183,7 +204,7 @@ export class MemoryChunker implements Chunker {
         // Merge small remaining content into last chunk
         const lastChunk = chunks[chunks.length - 1];
         const mergedContent = lastChunk.content + "\n\n" + content;
-        if (mergedContent.length <= MAX_CHUNK_CHARS) {
+        if (mergedContent.length <= this.maxChars) {
           lastChunk.content = mergedContent;
           lastChunk.tokenCount = estimateTokens(mergedContent);
         }
@@ -222,16 +243,27 @@ export class MemoryChunker implements Chunker {
 }
 
 /**
- * Singleton instance of the memory chunker.
+ * Singleton chunker instance cache, keyed by param signature so callers
+ * asking for different params (e.g. active model's recommended size) each
+ * get their own instance.
  */
-let chunkerInstance: MemoryChunker | null = null;
+const chunkerInstances = new Map<string, MemoryChunker>();
+
+function paramsKey(p: VaultChunkParams): string {
+  return `${p.targetChars}:${p.minChars}:${p.maxChars}`;
+}
 
 /**
- * Get the singleton chunker instance.
+ * Get a chunker instance for the given params. Omit params for defaults.
+ * Cached per-param-signature so repeated calls don't re-instantiate.
  */
-export function getChunker(): MemoryChunker {
-  if (!chunkerInstance) {
-    chunkerInstance = new MemoryChunker();
+export function getChunker(params?: VaultChunkParams): MemoryChunker {
+  const p = params ?? DEFAULT_VAULT_CHUNK_PARAMS;
+  const key = paramsKey(p);
+  let inst = chunkerInstances.get(key);
+  if (!inst) {
+    inst = new MemoryChunker(p);
+    chunkerInstances.set(key, inst);
   }
-  return chunkerInstance;
+  return inst;
 }

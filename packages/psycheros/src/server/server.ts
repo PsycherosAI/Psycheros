@@ -89,6 +89,21 @@ import {
   MessageRouter,
   ResponseHandler,
 } from "../discord/mod.ts";
+import {
+  computeEntityCoreEmbeddingEnv,
+  type EmbeddingSettings,
+  type EntityCoreEmbeddingSettings,
+  getDefaultEmbeddingSettings,
+  getDefaultEntityCoreEmbeddingSettings,
+  loadEmbeddingSettings,
+  loadEntityCoreEmbeddingSettings,
+  ReEmbedOrchestrator,
+  type ReEmbedSnapshot,
+  resolveDimension,
+  saveEmbeddingSettings,
+  saveEntityCoreEmbeddingSettings,
+} from "../embeddings/mod.ts";
+import { setEmbedderConfig } from "../rag/embedder.ts";
 import { join } from "@std/path";
 import { MAX_REQUEST_BODY_SIZE, MAX_UPLOAD_BODY_SIZE } from "../constants.ts";
 import {
@@ -106,6 +121,7 @@ import {
   handleChatRetry,
   handleChatStop,
   handleClearConversationContext,
+  handleConfirmReembed,
   handleConnectionsButtplugFragment,
   handleConnectionsDiscordFragment,
   handleConnectionsHomeFragment,
@@ -142,10 +158,13 @@ import {
   handleDeleteVault,
   handleDeviceBridge,
   handleDeviceCommand,
+  handleEmbeddingDownloadStatusSSE,
+  handleEmbeddingsTabFragment,
   handleEmbedMemories,
   // handleEntityCoreConsolidationRun, // removed — consolidation runs automatically on startup
   handleEntityCoreEmbeddingPurge,
   handleEntityCoreEmbeddingRebuild,
+  handleEntityCoreEmbeddingsTab,
   handleEntityCoreFragment,
   handleEntityCoreGraph,
   handleEntityCoreLLM,
@@ -163,6 +182,8 @@ import {
   handleGetButtplugSettings,
   handleGetContextSnapshots,
   handleGetDiscordSettings,
+  handleGetEmbeddingSettings,
+  handleGetEntityCoreEmbeddingSettings,
   handleGetEntityCoreLLMSettings,
   handleGetEventRules,
   handleGetGeneralSettings,
@@ -204,9 +225,11 @@ import {
   handleMemoriesSearchFragment,
   handleMemoryConsolidate,
   handleMessagesPaginated,
+  handleProbeDimension,
   handlePushSubscribe,
   handlePushUnsubscribe,
   handlePushVapidKey,
+  handleReembedStatusSSE,
   handleResetLorebookState,
   handleRestoreSnapshot,
   handleSASettingsFragment,
@@ -214,6 +237,8 @@ import {
   handleSaveBLESettings,
   handleSaveButtplugSettings,
   handleSaveDiscordSettings,
+  handleSaveEmbeddingSettings,
+  handleSaveEntityCoreEmbeddingSettings,
   handleSaveEntityCoreLLMSettings,
   handleSaveGeneralSettings,
   handleSaveHomeSettings,
@@ -241,6 +266,7 @@ import {
   handleSettingsHubFragment,
   handleSnapshotPreviewFragment,
   handleSnapshotsFragment,
+  handleStartEmbeddingDownload,
   handleStaticFile,
   handleTestButtplugConnection,
   handleTestLLMConnection,
@@ -396,6 +422,53 @@ export interface ServerConfig {
 /** Keepalive interval in milliseconds (30 seconds) */
 const KEEPALIVE_INTERVAL_MS = 30_000;
 
+function chunkParamsEqual(
+  a: {
+    thresholdChars: number;
+    targetChars: number;
+    minChars: number;
+    maxChars: number;
+    overlapChars: number;
+  },
+  b: {
+    thresholdChars: number;
+    targetChars: number;
+    minChars: number;
+    maxChars: number;
+    overlapChars: number;
+  },
+): boolean {
+  return a.thresholdChars === b.thresholdChars &&
+    a.targetChars === b.targetChars &&
+    a.minChars === b.minChars &&
+    a.maxChars === b.maxChars &&
+    a.overlapChars === b.overlapChars;
+}
+
+/**
+ * Poll the MCP client with backoff until entity-core is connected AND
+ * responds to a ping, or give up after the deadline. Used by the re-embed
+ * orchestrator to wait for a freshly-restarted entity-core to finish boot.
+ *
+ * Returns true if entity-core is stable, false on timeout.
+ */
+async function waitForEntityCoreStable(
+  mcpClient: MCPClient,
+  timeoutMs = 60_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  let delayMs = 500;
+  while (Date.now() < deadline) {
+    if (mcpClient.isConnected()) {
+      const ok = await mcpClient.ping();
+      if (ok) return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    delayMs = Math.min(delayMs * 1.5, 5000);
+  }
+  return false;
+}
+
 export class Server {
   private db: DBClient;
   private llm: LLMClient;
@@ -418,6 +491,10 @@ export class Server {
   private imageGenSettings: ImageGenSettings;
   private toolSettings: ToolsSettings;
   private entityCoreLLMSettings: EntityCoreLLMSettings;
+  private embeddingSettings: EmbeddingSettings;
+  private entityCoreEmbeddingSettings: EntityCoreEmbeddingSettings;
+  private reEmbedOrchestrator: ReEmbedOrchestrator | null = null;
+  private reEmbedListeners = new Set<(s: ReEmbedSnapshot) => void>();
   private customTools: Record<string, import("../tools/types.ts").Tool>;
   private pluginManager: PluginManager;
   private pluginInstaller: PluginInstaller;
@@ -488,11 +565,17 @@ export class Server {
     // Initialize Entity-Core LLM settings (will be reloaded from settings in init())
     this.entityCoreLLMSettings = {};
 
+    // Initialize embedding settings (will be reloaded in init())
+    this.embeddingSettings = getDefaultEmbeddingSettings();
+    this.entityCoreEmbeddingSettings = getDefaultEntityCoreEmbeddingSettings();
+
     // Initialize custom tools (will be loaded in init())
     this.customTools = {};
     this.pluginManager = createPluginManager(
       join(config.dataRoot, ".psycheros", "plugins"),
       () => this.llm,
+      join(config.projectRoot, "bundled-plugins"),
+      config.dataRoot,
     );
     this.pluginInstaller = new PluginInstaller(config.dataRoot);
 
@@ -564,6 +647,39 @@ export class Server {
     this.entityCoreLLMSettings = await loadEntityCoreLLMSettings(
       this.config.dataRoot,
     );
+    this.embeddingSettings = await loadEmbeddingSettings(this.config.dataRoot);
+    this.entityCoreEmbeddingSettings = await loadEntityCoreEmbeddingSettings(
+      this.config.dataRoot,
+    );
+    // Apply the saved model to the embedder singleton's config BEFORE any
+    // getEmbedder() call. Without this, the singleton defaults to MiniLM
+    // (384d) and the first chat turn embeds the query at the wrong dim —
+    // mismatching whatever the saved settings + vec tables actually use.
+    setEmbedderConfig(
+      this.embeddingSettings.modelRepoId,
+      resolveDimension(this.embeddingSettings),
+    );
+
+    // Wire the re-embed orchestrator. The entity-core trigger callback is
+    // attached lazily on first run — mcpClient may still be connecting at
+    // Server.init() time.
+    this.reEmbedOrchestrator = new ReEmbedOrchestrator({
+      db: this.db.getRawDb(),
+      dataRoot: this.config.dataRoot,
+      onProgress: (p) => {
+        const snapshot = this.reEmbedOrchestrator?.getSnapshot();
+        if (snapshot) {
+          for (const listener of this.reEmbedListeners) {
+            try {
+              listener(snapshot);
+            } catch {
+              // listener errors non-fatal
+            }
+          }
+        }
+        void p; // progress is surfaced via snapshot
+      },
+    });
     this.toolSettings = await loadToolsSettings(this.config.dataRoot);
     this.customTools = await loadCustomTools(this.config.dataRoot);
     this.voiceSettings = await loadVoiceSettings(this.config.dataRoot);
@@ -1115,6 +1231,171 @@ export class Server {
    */
   getEntityCoreLLMSettings(): EntityCoreLLMSettings {
     return this.entityCoreLLMSettings;
+  }
+
+  /**
+   * Get the active embedding settings (model + chunk params).
+   */
+  getEmbeddingSettings(): EmbeddingSettings {
+    return this.embeddingSettings;
+  }
+
+  /**
+   * Get the entity-core embedding overrides.
+   */
+  getEntityCoreEmbeddingSettings(): EntityCoreEmbeddingSettings {
+    return this.entityCoreEmbeddingSettings;
+  }
+
+  /**
+   * Persist new embedding settings without running the re-embed orchestrator.
+   * Use when the caller has already verified that no migration is required
+   * (e.g. loading defaults on first run) or has run the orchestrator
+   * out-of-band.
+   */
+  async setEmbeddingSettings(settings: EmbeddingSettings): Promise<void> {
+    this.embeddingSettings = settings;
+    await saveEmbeddingSettings(this.config.dataRoot, settings);
+  }
+
+  /**
+   * Persist new entity-core embedding overrides and restart MCP so the new
+   * env vars take effect. Refuses with 400-equivalent (throws) if the
+   * resolved dimension would diverge from Psycheros — graph search across
+   * packages breaks otherwise.
+   */
+  async updateEntityCoreEmbeddingSettings(
+    settings: EntityCoreEmbeddingSettings,
+  ): Promise<void> {
+    const resolvedRepo = settings.modelRepoId ??
+      this.embeddingSettings.modelRepoId;
+    const ecDim = resolveDimension({
+      ...this.embeddingSettings,
+      modelRepoId: resolvedRepo,
+    });
+    const psycherosDim = resolveDimension(this.embeddingSettings);
+    if (ecDim !== psycherosDim) {
+      throw new Error(
+        `Dimension mismatch: entity-core override would use ${ecDim}-dim model ` +
+          `but Psycheros is on ${psycherosDim}-dim. Cross-package graph search requires matching dimensions.`,
+      );
+    }
+
+    this.entityCoreEmbeddingSettings = settings;
+    await saveEntityCoreEmbeddingSettings(this.config.dataRoot, settings);
+
+    if (this.mcpClient) {
+      const env = computeEntityCoreEmbeddingEnv(
+        this.embeddingSettings,
+        settings,
+      );
+      console.log(
+        "[Server] Restarting entity-core with updated embedding settings...",
+      );
+      try {
+        await this.mcpClient.restart(env);
+        console.log("[Server] entity-core restarted successfully");
+      } catch (error) {
+        console.error(
+          "[Server] Failed to restart entity-core:",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+  }
+
+  /**
+   * Update embedding settings. If the new settings change the model,
+   * dimension, or chunk params, the caller is expected to drive the
+   * re-embed orchestrator separately — this method just persists and
+   * reconfigures the singleton. Returns whether a re-embed is required.
+   */
+  async updateEmbeddingSettings(
+    settings: EmbeddingSettings,
+  ): Promise<boolean> {
+    const oldDim = resolveDimension(this.embeddingSettings);
+    const newDim = resolveDimension(settings);
+    const modelChanged =
+      this.embeddingSettings.modelRepoId !== settings.modelRepoId;
+    const dimChanged = oldDim !== newDim;
+    const chunkChanged = !chunkParamsEqual(
+      this.embeddingSettings.chunkParams,
+      settings.chunkParams,
+    );
+
+    this.embeddingSettings = settings;
+    await saveEmbeddingSettings(this.config.dataRoot, settings);
+    return modelChanged || dimChanged || chunkChanged;
+  }
+
+  /**
+   * Kick off the re-embed orchestrator with the supplied next-settings.
+   * Returns a reembedId (timestamp-based). Resolves once the run is started;
+   * the actual re-embed runs asynchronously and progress is reported via
+   * `subscribeReembed`.
+   *
+   * Throws if a run is already in progress.
+   */
+  async startReembed(next: EmbeddingSettings): Promise<string> {
+    if (!this.reEmbedOrchestrator) {
+      throw new Error("Re-embed orchestrator not initialized");
+    }
+    if (this.reEmbedOrchestrator.isRunning()) {
+      throw new Error("Re-embed already in progress");
+    }
+    const reembedId = `reembed-${Date.now()}`;
+
+    // Attach a fresh entity-core trigger that captures the current MCP
+    // client. Each run gets its own closure so a mid-run MCP restart
+    // doesn't change which client this run talks to.
+    const mcpClient = this.mcpClient;
+    if (mcpClient) {
+      this.reEmbedOrchestrator.triggerEntityCoreRebuild = async () => {
+        // Pause health pings for the duration — psycheros is CPU-bound
+        // loading the new model and the ping watchdog would falsely
+        // trip a reconnect storm that races with our explicit restart.
+        mcpClient.pausePings();
+        try {
+          // 1. Restart entity-core with new env vars so it picks up the
+          // new model.
+          const env = computeEntityCoreEmbeddingEnv(
+            next,
+            this.entityCoreEmbeddingSettings,
+          );
+          await mcpClient.restart(env);
+          // 2. Wait for entity-core to actually be ready. The restart()
+          // call returns once the MCP handshake completes, but entity-core
+          // is still running boot tasks (auto-rebuild, consolidation) and
+          // may close+reopen the transport. Poll isAlive() until stable.
+          const stable = await waitForEntityCoreStable(mcpClient);
+          if (!stable) {
+            throw new Error(
+              "Entity-core did not stabilize after restart — try the re-embed again",
+            );
+          }
+          // 3. Call rebuild_all on the now-stable subprocess.
+          await mcpClient.callEmbeddingRebuildAll();
+        } finally {
+          mcpClient.resumePings();
+        }
+      };
+    }
+
+    // Run asynchronously — caller awaits only the kick-off.
+    this.reEmbedOrchestrator.run(next).catch((error) => {
+      console.error("[Server] Re-embed orchestrator failed:", error);
+    });
+    return reembedId;
+  }
+
+  /**
+   * Subscribe to re-embed snapshot updates. Returns unsubscribe.
+   */
+  subscribeReembed(
+    listener: (snapshot: ReEmbedSnapshot) => void,
+  ): () => void {
+    this.reEmbedListeners.add(listener);
+    return () => this.reEmbedListeners.delete(listener);
   }
 
   /**
@@ -1706,6 +1987,7 @@ export class Server {
             coreStatus.capabilities.browserScripts,
           browserStyles: localStatus.capabilities.browserStyles +
             coreStatus.capabilities.browserStyles,
+          settings: localStatus.capabilities.settings,
         },
       });
     }
@@ -1811,6 +2093,15 @@ export class Server {
       getEntityCoreLLMSettings: () => this.entityCoreLLMSettings,
       updateEntityCoreLLMSettings: (settings) =>
         this.updateEntityCoreLLMSettings(settings),
+      getEmbeddingSettings: () => this.embeddingSettings,
+      updateEmbeddingSettings: (settings) =>
+        this.updateEmbeddingSettings(settings),
+      getEntityCoreEmbeddingSettings: () => this.entityCoreEmbeddingSettings,
+      updateEntityCoreEmbeddingSettings: (settings) =>
+        this.updateEntityCoreEmbeddingSettings(settings),
+      getDataRoot: () => this.config.dataRoot,
+      startReembed: (settings) => this.startReembed(settings),
+      subscribeReembed: (listener) => this.subscribeReembed(listener),
       getDeviceStatusCache: () => this.deviceCache,
       getEventRulesEngine: () => this.eventRulesEngine!,
       customTools: this.customTools,
@@ -2301,6 +2592,62 @@ export class Server {
     // POST /api/entity-core-llm-settings - Save entity-core LLM settings
     if (method === "POST" && path === "/api/entity-core-llm-settings") {
       return await handleSaveEntityCoreLLMSettings(ctx, request);
+    }
+
+    // ========================================
+    // Embedding Settings API Routes
+    // ========================================
+
+    // GET /api/embedding-settings - Return active settings + presets + downloaded status
+    if (method === "GET" && path === "/api/embedding-settings") {
+      return await handleGetEmbeddingSettings(ctx);
+    }
+
+    // POST /api/embedding-settings - Validate + persist new settings
+    if (method === "POST" && path === "/api/embedding-settings") {
+      return await handleSaveEmbeddingSettings(ctx, request);
+    }
+
+    // POST /api/embedding-settings/confirm-reembed - Kick off orchestrator
+    if (
+      method === "POST" && path === "/api/embedding-settings/confirm-reembed"
+    ) {
+      return await handleConfirmReembed(ctx);
+    }
+
+    // GET /api/embedding-settings/reembed-status - SSE stream
+    if (method === "GET" && path === "/api/embedding-settings/reembed-status") {
+      return handleReembedStatusSSE(ctx);
+    }
+
+    // POST /api/embedding-settings/download - Start model download
+    if (method === "POST" && path === "/api/embedding-settings/download") {
+      return await handleStartEmbeddingDownload(ctx, request);
+    }
+
+    // GET /api/embedding-settings/download-status - SSE stream
+    if (
+      method === "GET" && path === "/api/embedding-settings/download-status"
+    ) {
+      const url = new URL(request.url);
+      return handleEmbeddingDownloadStatusSSE(ctx, url);
+    }
+
+    // POST /api/embedding-settings/probe-dimension - Fetch custom model dim
+    if (
+      method === "POST" && path === "/api/embedding-settings/probe-dimension"
+    ) {
+      return await handleProbeDimension(ctx, request);
+    }
+
+    // GET /api/entity-core/embedding-settings - Get entity-core embedding overrides
+    if (method === "GET" && path === "/api/entity-core/embedding-settings") {
+      return handleGetEntityCoreEmbeddingSettings(ctx);
+    }
+
+    // POST /api/entity-core/embedding-settings - Save entity-core embedding overrides
+    if (method === "POST" && path === "/api/entity-core/embedding-settings") {
+      return await handleSaveEntityCoreEmbeddingSettings(ctx, request);
     }
 
     // ========================================
@@ -3223,6 +3570,11 @@ export class Server {
       return handleEntityCoreLLM(ctx);
     }
 
+    // GET /fragments/settings/entity-core/embeddings - Embedding overrides
+    if (path === "/fragments/settings/entity-core/embeddings") {
+      return handleEntityCoreEmbeddingsTab(ctx);
+    }
+
     // GET /fragments/settings/entity-core/graph
     if (path === "/fragments/settings/entity-core/graph") {
       return await handleEntityCoreGraph(ctx);
@@ -3321,6 +3673,11 @@ export class Server {
     // GET /fragments/settings/llm - LLM settings hub (profile cards)
     if (path === "/fragments/settings/llm") {
       return handleLLMSettingsFragment(ctx);
+    }
+
+    // GET /fragments/settings/llm/embeddings - Embeddings tab in Model Settings
+    if (path === "/fragments/settings/llm/embeddings") {
+      return await handleEmbeddingsTabFragment(ctx);
     }
 
     // GET /fragments/settings/llm/new - New profile form
@@ -3528,6 +3885,53 @@ export class Server {
         ),
         { headers: { "Content-Type": "text/html; charset=utf-8" } },
       );
+    }
+
+    // GET /fragments/settings/plugins/<id> — plugin-owned settings page.
+    // Reachable even when the plugin is disabled, so operators can configure
+    // credentials before enabling. The plugin's settingsFragment callback
+    // returns the inner HTML; the host wraps it in standard settings chrome.
+    const pluginSettingsMatch = path.match(
+      /^\/fragments\/settings\/plugins\/([^/]+)$/,
+    );
+    if (pluginSettingsMatch) {
+      const pluginId = decodeURIComponent(pluginSettingsMatch[1]);
+      if (!this.pluginManager.hasSettings(pluginId)) {
+        return new Response("Not Found", { status: 404 });
+      }
+      const services = this.pluginManager.getServices(pluginId);
+      if (!services) {
+        return new Response("Not Found", { status: 404 });
+      }
+      const targetElementId = `plugin-settings-${pluginId}`;
+      try {
+        const fragment = await this.pluginManager.renderSettingsFragment(
+          pluginId,
+          {
+            statePath: services.statePath,
+            env: services.env,
+            targetElementId,
+          },
+        );
+        const status = (await this.getPluginStatuses()).find((s) =>
+          s.id === pluginId
+        );
+        const { renderPluginOwnedSettings } = await import("./templates.ts");
+        return new Response(
+          renderPluginOwnedSettings(
+            status?.name ?? pluginId,
+            pluginId,
+            fragment,
+          ),
+          { headers: { "Content-Type": "text/html; charset=utf-8" } },
+        );
+      } catch (error) {
+        console.error(
+          `[Plugins] Failed to render settings fragment for ${pluginId}:`,
+          error,
+        );
+        return new Response("Internal Server Error", { status: 500 });
+      }
     }
 
     // ========================================

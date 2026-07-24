@@ -29,6 +29,13 @@ export const lookCloserTool: Tool = {
             description:
               "Path to the image file relative to .psycheros/ (e.g. /generated-images/abc.png, /chat-attachments/def.jpg)",
           },
+          instructions: {
+            type: "string",
+            description:
+              "Optional specific guidance for how I want this image described — " +
+              "a particular aspect to focus on, level of detail, or framing. " +
+              "Omit for a general detailed description; use only when I have a specific need.",
+          },
         },
         required: ["image_path"],
       },
@@ -41,7 +48,10 @@ async function executeLookCloser(
   args: Record<string, unknown>,
   ctx: ToolContext,
 ): Promise<ToolResult> {
-  const { image_path } = args as { image_path: string };
+  const { image_path, instructions } = args as {
+    image_path: string;
+    instructions?: string;
+  };
 
   if (!image_path) {
     return {
@@ -87,6 +97,7 @@ async function executeLookCloser(
       base64,
       mediaType,
       captioningSettings,
+      instructions,
     );
 
     return {

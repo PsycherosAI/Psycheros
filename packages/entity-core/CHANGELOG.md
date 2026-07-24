@@ -6,6 +6,27 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-24
+
+### Added
+
+- **Configurable embedding model and dimensions:** the embedding model, repo ID,
+  and vector dimension are now configurable via `ENTITY_CORE_EMBEDDING_*` env
+  vars pushed by the Psycheros parent at spawn time. Falls back to
+  all-MiniLM-L6-v2 / 384-dim when unset.
+- **`embedding/rebuild_all` MCP tool:** drops and recreates the memory-cache and
+  graph-node vec0 tables, then re-embeds everything from the active model.
+  Called by Psycheros when the user switches embedding model or chunk size.
+
+### Changed
+
+- **`EMBEDDING_DIMENSION` → `DEFAULT_EMBEDDING_DIMENSION`:** the old constant is
+  renamed. New `getActiveEmbeddingDimension()` reads the env-var-pushed
+  dimension at call time.
+- **`LocalEmbedder` constructor:** now takes explicit
+  `{ modelRepoId, dimension }` instead of hardcoding MiniLM. The singleton
+  factory defaults from env config.
+
 ## [0.5.0] - 2026-07-16
 
 ### Added
@@ -323,6 +344,8 @@ capability APIs, and security model may change between releases before 1.0._
 - Knowledge graph (people, places, relationships) backed by SQLite + sqlite-vec.
 - Snapshot system: pre-destructive-operation snapshots for recovery.
 
+[0.6.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.6.0
+[0.5.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.5.0
 [0.4.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.5
 [0.4.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.3
 [0.4.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.2

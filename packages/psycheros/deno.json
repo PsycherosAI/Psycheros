@@ -1,6 +1,6 @@
 {
   "name": "@psycheros/daemon",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "exports": "./src/main.ts",
   "imports": {
     "marked": "npm:marked@^15",

@@ -46,7 +46,7 @@ Deno.test("psycheros prompt hooks run deterministically and expose fallback cont
     () => ({}) as unknown as LLMClient,
   );
   await manager.load();
-  const content = await manager.buildPromptContent({
+  const { content } = await manager.buildPromptContent({
     conversationId: "conversation",
     sourceType: "web",
     userMessage: "hello",
@@ -54,9 +54,9 @@ Deno.test("psycheros prompt hooks run deterministically and expose fallback cont
   });
 
   assert(content);
-  assert(content.indexOf("earlier") < content.indexOf("later"));
-  assert(content.includes("I could not access my failed integration"));
-  assertEquals(content.includes("private provider detail"), false);
+  assert(content!.indexOf("earlier") < content!.indexOf("later"));
+  assert(content!.includes("I could not access my failed integration"));
+  assertEquals(content!.includes("private provider detail"), false);
 });
 
 Deno.test("psycheros exposes tools, routes, assets, browser tags, and plugin env", async () => {
@@ -117,7 +117,7 @@ Deno.test("psycheros exposes tools, routes, assets, browser tags, and plugin env
       (await manager.serveAsset("speech", "../outside")).status,
       403,
     );
-    const prompt = await manager.buildPromptContent({
+    const { content: prompt } = await manager.buildPromptContent({
       conversationId: "conversation",
       sourceType: "web",
       userMessage: "hello",
@@ -175,7 +175,7 @@ Deno.test("psycheros isolates startup failures, disabled plugins, and hook timeo
     statuses.find((status) => status.id === "disabled")?.active,
     false,
   );
-  const content = await manager.buildPromptContent({
+  const { content } = await manager.buildPromptContent({
     conversationId: "conversation",
     sourceType: "pulse",
     userMessage: "hello",
@@ -208,7 +208,7 @@ Deno.test("psycheros aggregate prompt-hook budget truncates and skips per priori
 
   const manager = new PluginManager(root, () => ({}) as unknown as LLMClient);
   await manager.load();
-  const content = await manager.buildPromptContent({
+  const { content } = await manager.buildPromptContent({
     conversationId: "conv",
     sourceType: "web",
     userMessage: "hi",
@@ -217,17 +217,17 @@ Deno.test("psycheros aggregate prompt-hook budget truncates and skips per priori
 
   assert(content, "expected non-empty prompt content");
   // p10 processed first, fits within 10k — preserved intact.
-  assertStringIncludes(content, `<plugin_context source="p10" hook="p10">`);
+  assertStringIncludes(content!, `<plugin_context source="p10" hook="p10">`);
   // p30 processed last — aggregate exhausted before its turn, dropped entirely.
   assertEquals(
-    content.includes(`source="p30"`),
+    content!.includes(`source="p30"`),
     false,
     "p30 should be skipped (no contribution pushed)",
   );
   // Total output bounded well below the unconstrained 3 × 8k = 24k.
   assert(
-    content.length < 12_000,
-    `expected aggregate output < 12k, got ${content.length}`,
+    content!.length < 12_000,
+    `expected aggregate output < 12k, got ${content!.length}`,
   );
 
   const statuses = manager.getStatuses();
@@ -253,7 +253,7 @@ Deno.test("psycheros aggregate budget leaves small contributions untouched", asy
   );
   const manager = new PluginManager(root, () => ({}) as unknown as LLMClient);
   await manager.load();
-  const content = await manager.buildPromptContent({
+  const { content } = await manager.buildPromptContent({
     conversationId: "conv",
     sourceType: "web",
     userMessage: "hi",
