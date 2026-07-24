@@ -41,6 +41,7 @@ Deno.test("plugin manifest accepts review metadata", () => {
     update: {
       repo_url: "https://github.com/example/artifact-search",
       tag_prefix: "v",
+      package_path: "plugins/artifact-search",
     },
     dependencies: {
       "example.shared": "^1.0.0",
@@ -56,6 +57,7 @@ Deno.test("plugin manifest accepts review metadata", () => {
     "https://github.com/example/artifact-search",
   );
   assertEquals(manifest.update?.tagPrefix, "v");
+  assertEquals(manifest.update?.packagePath, "plugins/artifact-search");
   assertEquals(manifest.dependencies?.["example.shared"], "^1.0.0");
 });
 
@@ -78,6 +80,18 @@ Deno.test("plugin manifest rejects invalid review metadata", () => {
     validatePluginManifest({
       ...base,
       update: { repo_url: 5 },
+    }, "artifact-search")
+  );
+  assertThrows(() =>
+    validatePluginManifest({
+      ...base,
+      update: { packagePath: "../artifact-search" },
+    }, "artifact-search")
+  );
+  assertThrows(() =>
+    validatePluginManifest({
+      ...base,
+      update: { packagePath: 5 },
     }, "artifact-search")
   );
   assertThrows(() =>

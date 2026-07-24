@@ -1343,7 +1343,8 @@ sidebar. Renders five regions inside the standard `.settings-view` shell:
    counts (active / degraded / pending-restart / disabled) + last-turn
    prompt-hook budget meter from `getLastBudgetReport()` + denied env vars
    across all plugins.
-3. **Install Plugin** — zip upload + git URL/ref forms. Both feed
+3. **Install Plugin** — zip upload + git URL/ref/optional-package-path forms.
+   The package path locates a plugin directory inside a monorepo. Both feed
    `handleInspectPluginZip` / `handleInspectPluginGit`, which stage a draft and
    return a preview that `renderPluginInstallReview` renders into
    `#plugin-manager-review`.
@@ -1355,8 +1356,11 @@ sidebar. Renders five regions inside the standard `.settings-view` shell:
    one-line-per-event text format the file uses), and Download log (direct link
    to `GET .../<id>/log` with `Content-Disposition:
    attachment`). Check for
-   updates calls `POST .../check-update`, renders result inline; when an update
-   is available, an apply button calls `POST .../<id>/update`.
+   updates calls `POST .../check-update`, selects the newest tagged release
+   compatible with this installation, and renders skipped incompatible releases
+   inline. When an update is available, an apply button calls
+   `POST .../<id>/update`; the server revalidates source, id, version, and
+   compatibility before replacing the existing plugin.
 5. **Loose custom tools** — unmanaged `.psycheros/custom-tools/*.js` files
    surfaced for migration awareness. The custom-tools system predates the plugin
    surface and is unchanged.

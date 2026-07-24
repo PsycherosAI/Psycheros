@@ -5310,7 +5310,9 @@ function pluginManagerCapabilities(capabilities) {
 function pluginManagerSourceLabel(source) {
   if (!source) return 'Unknown source';
   if (source.type === 'git') {
-    return 'Git: ' + source.repoUrl + (source.ref ? ' @ ' + source.ref : ' @ default branch');
+    return 'Git: ' + source.repoUrl +
+      (source.ref ? ' @ ' + source.ref : ' @ default branch') +
+      (source.packagePath ? ' / ' + source.packagePath : '');
   }
   return 'Zip: ' + (source.fileName || 'uploaded package');
 }
@@ -5553,6 +5555,7 @@ async function inspectPluginGit(event) {
   event.preventDefault();
   const repoUrl = document.getElementById('plugin-git-url')?.value || '';
   const ref = document.getElementById('plugin-git-ref')?.value || '';
+  const packagePath = document.getElementById('plugin-git-package-path')?.value || '';
   const button = event.submitter;
   const originalText = button ? button.textContent : '';
   if (button) {
@@ -5563,7 +5566,7 @@ async function inspectPluginGit(event) {
     const result = await pluginManagerJson('/api/plugin-manager/inspect-git', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repoUrl, ref }),
+      body: JSON.stringify({ repoUrl, ref, packagePath }),
     });
     renderPluginInstallReview(result.preview);
   } catch (error) {
@@ -5858,23 +5861,42 @@ function renderPluginUpdateResult(pluginId, target, result) {
       'network': 'Network error',
       'rate-limited': 'Rate-limited by GitHub',
       'no-valid-tags': 'No version tags found',
+      'invalid-release': 'Invalid plugin release',
+      'incompatible': 'Incompatible plugin release',
     }[result.reason] || 'Update check failed';
     target.innerHTML =
       '<p class="settings-note"><strong>' + pluginManagerEscape(reasonLabel) +
       ':</strong> ' + pluginManagerEscape(result.message || '') + '</p>';
     return;
   }
+  const skippedCount = Number(result.skippedUpdateCount || 0);
+  const skipped = Array.isArray(result.skippedUpdates) ? result.skippedUpdates : [];
+  const newestSkipped = skipped[0];
+  const skippedDetail = newestSkipped && Array.isArray(newestSkipped.reasons) && newestSkipped.reasons[0]
+    ? ' ' + pluginManagerEscape(newestSkipped.reasons[0])
+    : '';
+  if (!result.updateAvailable && skippedCount > 0) {
+    target.innerHTML =
+      '<p class="settings-note"><strong>No compatible update found.</strong> ' +
+      pluginManagerEscape(String(skippedCount)) + ' newer release' +
+      (skippedCount === 1 ? ' was' : 's were') +
+      ' skipped for this installation.' +
+      (result.latestPublishedVersion
+        ? ' Newest published: <code>' + pluginManagerEscape(result.latestPublishedVersion) + '</code>.'
+        : '') +
+      skippedDetail + '</p>';
+    return;
+  }
   if (!result.updateAvailable) {
     target.innerHTML =
       '<p class="settings-note">Up to date at <code>' +
       pluginManagerEscape(result.currentVersion || '?') + '</code>' +
-      (result.latestVersion ? ' (latest tag: <code>' + pluginManagerEscape(result.latestVersion) + '</code>)' : '') +
+      (result.latestPublishedVersion ? ' (latest tag: <code>' + pluginManagerEscape(result.latestPublishedVersion) + '</code>)' : '') +
       '.</p>';
     return;
   }
-  // Update available — render the apply button inline. The tag + repoUrl
-  // travel through data-attrs on the button so applyPluginUpdate has what
-  // it needs without re-checking.
+  // Update available — the browser returns only the selected tag. The server
+  // re-reads repository metadata and compatibility from trusted manifests.
   target.innerHTML =
     '<div style="display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;">' +
       pluginManagerBadge('Update available', 'badge-primary') +
@@ -5885,14 +5907,18 @@ function renderPluginUpdateResult(pluginId, target, result) {
       '<button type="button" class="btn btn--primary btn--sm"' +
         ' data-plugin-id="' + pluginManagerEscape(pluginId) + '"' +
         ' data-tag="' + pluginManagerEscape(result.latestTag || '') + '"' +
-        ' data-repo-url="' + pluginManagerEscape(result.repoUrl || '') + '"' +
-        ' onclick="applyPluginUpdate(this.dataset.pluginId, this.dataset.tag, this.dataset.repoUrl, this)">' +
+        ' onclick="applyPluginUpdate(this.dataset.pluginId, this.dataset.tag, this)">' +
         'Update to ' + pluginManagerEscape(result.latestVersion || 'latest') +
       '</button>' +
-    '</div>';
+    '</div>' +
+    (skippedCount > 0
+      ? '<p class="settings-note" style="margin-top:var(--sp-2);">' +
+        pluginManagerEscape(String(skippedCount)) + ' newer incompatible or invalid release' +
+        (skippedCount === 1 ? ' was' : 's were') + ' skipped.' + skippedDetail + '</p>'
+      : '');
 }
 
-async function applyPluginUpdate(pluginId, tag, repoUrl, button) {
+async function applyPluginUpdate(pluginId, tag, button) {
   if (!confirm('Apply update to ' + pluginId + ' at tag ' + tag + '?\n\nThe current install will be backed up. Psycheros will need a restart for the new version to load.')) {
     return;
   }
@@ -5907,7 +5933,7 @@ async function applyPluginUpdate(pluginId, tag, repoUrl, button) {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tag, repoUrl }),
+        body: JSON.stringify({ tag }),
       },
     );
     showToast('Plugin updated. Restart Psycheros for the new version to take effect.');

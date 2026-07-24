@@ -44,6 +44,8 @@ export interface PluginCompatibility {
 export interface PluginUpdateMetadata {
   repoUrl?: string;
   tagPrefix?: string;
+  /** Repository-relative directory containing this plugin's plugin.json. */
+  packagePath?: string;
 }
 
 /**
@@ -272,13 +274,50 @@ function validateUpdateMetadata(
     throw new Error("update must be an object");
   }
   const input = value as Record<string, unknown>;
+  const packagePath = optionalString(
+    input.packagePath ?? input.package_path,
+    "update.packagePath",
+  );
   return {
     repoUrl: optionalString(input.repoUrl ?? input.repo_url, "update.repoUrl"),
     tagPrefix: optionalString(
       input.tagPrefix ?? input.tag_prefix,
       "update.tagPrefix",
     ),
+    packagePath: packagePath === undefined
+      ? undefined
+      : validatePluginPackagePath(packagePath),
   };
+}
+
+/**
+ * Validate a repository-relative directory used to locate a plugin package.
+ *
+ * Repository paths always use forward slashes and never include `.` or `..`
+ * segments. Omitting update.packagePath means the repository root.
+ */
+export function validatePluginPackagePath(path: string): string {
+  requireString(path, "update.packagePath");
+  const trimmed = path.trim();
+  if (
+    trimmed.includes("\\") || trimmed.startsWith("/") ||
+    /^[A-Za-z]:/.test(trimmed) || trimmed.includes("\0") ||
+    trimmed.includes("//")
+  ) {
+    throw new Error(
+      `update.packagePath must be a repository-relative path: ${path}`,
+    );
+  }
+  const parts = trimmed.split("/");
+  if (
+    parts.length === 0 ||
+    parts.some((part) => !part || part === "." || part === "..")
+  ) {
+    throw new Error(
+      `update.packagePath must be a repository-relative path: ${path}`,
+    );
+  }
+  return parts.join("/");
 }
 
 function validateCapabilities(

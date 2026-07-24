@@ -75,7 +75,10 @@ export async function handleInspectPluginGit(
     const body = await readJsonObject(request);
     const repoUrl = typeof body.repoUrl === "string" ? body.repoUrl : "";
     const ref = typeof body.ref === "string" ? body.ref : undefined;
-    const preview = await installer.inspectGit(repoUrl, ref);
+    const packagePath = typeof body.packagePath === "string"
+      ? body.packagePath
+      : undefined;
+    const preview = await installer.inspectGit(repoUrl, ref, packagePath);
     return json({ success: true, preview });
   } catch (error) {
     return errorResponse(error);
@@ -233,12 +236,11 @@ export async function handlePluginCheckUpdate(
 }
 
 /**
- * Apply a previously-checked update. Body: `{ tag, repoUrl }` — both come
- * straight from the prior check-update response, so the UI just hands them
- * back. Hands off to PluginInstaller which handles backup + atomic replace
- * + restartRequired. Refuses if the update target's manifest id doesn't
- * match the installed plugin id — defends against a tag pointing at a
- * renamed/forked repo.
+ * Apply a previously-checked update. Body: `{ tag }`. The repository,
+ * tag prefix, and optional package path are read again from the installed
+ * manifest rather than trusted from the browser. PluginInstaller handles
+ * backup + atomic replace + restartRequired; the updater revalidates id,
+ * version, and host compatibility before replacement.
  */
 export async function handlePluginApplyUpdate(
   installer: PluginInstaller,
@@ -251,14 +253,14 @@ export async function handlePluginApplyUpdate(
     if (!body || typeof body !== "object") {
       return json({ success: false, error: "Request body required." }, 400);
     }
-    const { tag, repoUrl } = body as { tag?: string; repoUrl?: string };
-    if (typeof tag !== "string" || typeof repoUrl !== "string") {
+    const { tag } = body as { tag?: string };
+    if (typeof tag !== "string") {
       return json({
         success: false,
-        error: "Body must include 'tag' and 'repoUrl'.",
+        error: "Body must include 'tag'.",
       }, 400);
     }
-    const result = await applyPluginUpdate(installer, pluginId, tag, repoUrl);
+    const result = await applyPluginUpdate(installer, pluginId, tag);
     return json({
       success: true,
       pluginId,

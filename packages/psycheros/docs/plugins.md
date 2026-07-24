@@ -196,9 +196,13 @@ apply them with one click. v1 supports public GitHub repositories only.
 
 ```json
 {
+  "compatibility": {
+    "psycheros": ">=0.9.2 <0.10.0"
+  },
   "update": {
-    "repoUrl": "https://github.com/your-name/your-plugin",
-    "tagPrefix": "v"
+    "repoUrl": "https://github.com/your-name/community-addons",
+    "tagPrefix": "artifact-search-v",
+    "packagePath": "plugins/artifact-search"
   }
 }
 ```
@@ -209,14 +213,29 @@ apply them with one click. v1 supports public GitHub repositories only.
 - `tagPrefix` strips a fixed prefix from each tag before parsing as semver. Use
   `"v"` if you tag releases as `v1.2.3`; omit it if you tag as `1.2.3`. Tags
   that don't parse as semver after stripping are skipped silently.
+- `packagePath` optionally names the repository-relative directory containing
+  this plugin's `plugin.json`. Omit it for a standalone plugin repository whose
+  manifest is at the root. This lets one public repository publish several
+  independently tagged plugins.
 
-The check hits GitHub's public tag API (`/repos/{owner}/{repo}/tags`) once per
-plugin per click, so it's subject to GitHub's unauthenticated rate limit
-(60/hour per IP). The check response surfaces the reset time when GitHub
-returns 429. Applying an update uses the same backup → atomic replace path as a
-fresh install — the current version is moved to
-`<dataRoot>/.psycheros/plugin-backups/<id>-<timestamp>/` before the new version
-lands, and a restart is required for the new code to load.
+One-click releases must declare `compatibility.psycheros` using `@std/semver`
+range syntax, and the version in their tagged `plugin.json` must match the
+semver portion of the tag. The update check examines newer tags from highest to
+lowest and selects the first release whose manifest id, version, and host
+compatibility are valid. Newer incompatible or malformed releases are skipped
+and reported in the UI. The tagged manifest must also preserve `repoUrl`,
+`tagPrefix`, and `packagePath`; changing the trusted update channel requires a
+reviewed manual reinstall. The apply endpoint reads the repository metadata from
+the installed manifest and rechecks all of those conditions before replacement,
+so a stale or modified browser request cannot bypass the compatibility gate.
+
+The check uses GitHub's public tags and contents APIs, so it is subject to
+GitHub's unauthenticated rate limit (60/hour per IP). It makes one tag request
+plus one manifest request per newer candidate until it finds a compatible
+release; the UI surfaces rate-limit failures. Applying an update uses the same
+backup → atomic replace path as a fresh install — the current version is moved
+to `<dataRoot>/.psycheros/plugin-backups/<id>-<timestamp>/` before the new
+version lands, and a restart is required for the new code to load.
 
 ## Psycheros Entrypoint
 
