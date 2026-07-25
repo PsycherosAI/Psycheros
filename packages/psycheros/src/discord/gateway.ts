@@ -463,6 +463,10 @@ export class DiscordGatewayClient {
 
   private startHeartbeat(intervalMs: number): void {
     this.cleanupHeartbeat();
+    // HELLO starts a fresh heartbeat cycle for this socket. A missed ACK from
+    // the socket we just replaced must not make the first timer tick close the
+    // new connection before it has sent even one heartbeat of its own.
+    this.lastHeartbeatAcked = true;
     // Discord recommends a small random jitter
     const jittered = intervalMs * (0.9 + Math.random() * 0.2);
 
