@@ -68,6 +68,52 @@ Deno.test("token budget: all reasoning retained when budget fits", () => {
   assertEquals(kept.reasoning_content, pad(700));
 });
 
+Deno.test(
+  "token budget: consecutive user rows preserve the current user input",
+  () => {
+    const messages: ChatMessage[] = [
+      system(),
+      user("already handled by an intentional pass"),
+      user("current Discord batch"),
+    ];
+
+    const result = applyContextBudget(messages, NO_TOOLS, 100000, 1000);
+
+    assertEquals(result.messages.length, 2);
+    assertEquals(result.messages[0].role, "system");
+    assertEquals(result.messages[1].role, "user");
+    assertEquals(result.messages[1].content, "current Discord batch");
+    assertEquals(result.messagesRemoved, 1);
+  },
+);
+
+Deno.test(
+  "token budget: consecutive pass rows do not disturb earlier completed turns",
+  () => {
+    const messages: ChatMessage[] = [
+      system(),
+      user("earlier question"),
+      assistant("earlier answer"),
+      user("handled pass one"),
+      user("handled pass two"),
+      user("current batch"),
+    ];
+
+    const result = applyContextBudget(messages, NO_TOOLS, 100000, 1000);
+
+    assertEquals(
+      result.messages.map((message) => [message.role, message.content]),
+      [
+        ["system", "system"],
+        ["user", "earlier question"],
+        ["assistant", "earlier answer"],
+        ["user", "current batch"],
+      ],
+    );
+    assertEquals(result.messagesRemoved, 2);
+  },
+);
+
 // =============================================================================
 // Two-pass trim — single message stripped, message retained
 // =============================================================================
