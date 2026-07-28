@@ -247,6 +247,8 @@ export interface ProcessOptions {
     isDM: boolean;
     senderUsername: string;
     senderUserId: string;
+    eligibleMessageIds: string[];
+    commitVisibleAction?: () => void;
     activeTier?: import("../llm/discord-settings.ts").ActiveTier;
   };
   /**
@@ -870,6 +872,14 @@ export class EntityTurn {
           `\nMy instructions for Discord:\n${this.config.discordSettings.globalInstructions}`,
         );
       }
+
+      parts.push(
+        `\nThe message IDs I may target in this turn are: ${
+          ctx.eligibleMessageIds.length > 0
+            ? ctx.eligibleMessageIds.join(", ")
+            : "none"
+        }. Older Discord messages visible in conversation history are context, not unanswered requests. If I do not act on the current batch, quiet is a complete decision and future ordinary turns should not reopen it.`,
+      );
       // Add per-channel instructions if present
       if (this.config.discordGatewayConfig) {
         for (const server of this.config.discordGatewayConfig.servers) {
@@ -915,7 +925,8 @@ Discord interaction:
 - To reply to a specific message, I include 'content' and 'message_id' — my message threads under it. To send a plain channel message, I omit 'message_id'.
 - To react to a message, I include 'emoji' (one or more emoji, e.g. 👍 or ["🔥","💀"]) and 'message_id'.
 - I can combine reply and react in one action: { message_id, content, emoji } replies to and reacts to the same message.
-- If I have nothing to add, I simply don't call the tool. No message is sent. This is a natural pass.
+- I do not reply merely to agree, restate another speaker, prove presence, or answer every line in a busy room. A fitting reaction or quiet may be the complete contribution.
+- If I have nothing to add, I simply don't call the tool. No message is sent, and this current batch is settled.
 - I reserve @mentions (<@userId>) for when I genuinely need to draw someone's attention. Using @mentions for every reply is redundant when message threading already makes the connection clear.`);
       discordChannelContent = parts.join("\n");
     }

@@ -150,6 +150,17 @@ function sanitizeMessageSequence(messages: ChatMessage[]): ChatMessage[] {
     const prev = result[result.length - 1];
     const prevRole = prev.role;
 
+    // Intentional no-message turns (for example a deliberate Discord pass)
+    // can leave consecutive user rows in durable history. The last message is
+    // the current user input and is the one invariant this sanitizer must not
+    // violate. Replace an older adjacent user row with the newer one instead
+    // of keeping the stale row and dropping the current turn.
+    if (prevRole === "user" && msg.role === "user") {
+      result[result.length - 1] = msg;
+      prevHadToolCalls = false;
+      continue;
+    }
+
     let valid = false;
 
     switch (prevRole) {

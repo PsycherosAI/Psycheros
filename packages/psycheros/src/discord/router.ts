@@ -13,6 +13,10 @@ import type {
   DiscordGatewayConfig,
 } from "../llm/discord-settings.ts";
 import type { ConversationMapper } from "./conversation-map.ts";
+import type {
+  DiscordPendingStore,
+  PendingDiscordMessage,
+} from "./pending-store.ts";
 
 // =============================================================================
 // Types
@@ -38,11 +42,21 @@ export interface RouterDeps {
     conversationId: string,
     userMessage: string,
     context: DiscordTurnContext,
-  ) => Promise<void>;
+  ) => Promise<DiscordTurnOutcome | void>;
   onMessage?: (
     channelId: string,
     message: AccumulatedMessage,
   ) => Promise<void> | void;
+  pendingStore?: DiscordPendingStore;
+}
+
+export type DiscordTurnDisposition =
+  | "contributed"
+  | "deliberately_quiet"
+  | "failed";
+
+export interface DiscordTurnOutcome {
+  disposition: DiscordTurnDisposition;
 }
 
 export interface DiscordTurnContext {
@@ -54,10 +68,19 @@ export interface DiscordTurnContext {
   isDM: boolean;
   senderUsername: string;
   senderUserId: string;
+  /** Messages in this bounded batch that replies and reactions may target. */
+  eligibleMessageIds: string[];
+  /** Commit durable receipt work after the first visible Discord action. */
+  commitVisibleAction?: () => void;
   /** In lurk mode, individual messages are already persisted — skip userMessage persistence in the turn */
   skipUserMessagePersist?: boolean;
   /** The active mode tier that triggered this turn (only set for active mode channels) */
   activeTier?: ActiveTier;
+}
+
+interface DeferredFlush {
+  mode: ChannelMode;
+  tier?: ActiveTier;
 }
 
 // =============================================================================
@@ -72,6 +95,8 @@ export class MessageRouter {
   private timers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   /** Per-channel processing lock to prevent overlapping turns */
   private processing: Set<string> = new Set();
+  /** One coalesced eligible flush waiting behind the active channel turn. */
+  private deferredFlushes: Map<string, DeferredFlush> = new Map();
   /** Per-channel message timestamps for rate calculation (rolling window) */
   private messageTimestamps: Map<string, number[]> = new Map();
   /** Per-channel periodic digest timers (for medium/fast tiers) */
@@ -81,6 +106,8 @@ export class MessageRouter {
   private channelTiers: Map<string, ActiveTier> = new Map();
   /** Handle for the timestamp pruning interval */
   private pruneInterval: ReturnType<typeof setInterval> | null = null;
+  /** Failed or interrupted durable work retries without requiring a new post. */
+  private pendingRecoveryInterval: ReturnType<typeof setInterval> | null = null;
   /** DM channel IDs currently being tracked (not in server config) */
   private dmChannels: Set<string> = new Set();
 
@@ -110,6 +137,13 @@ export class MessageRouter {
         console.error("[Discord] prune timer error (non-fatal):", error);
       }
     }, 5 * 60 * 1000);
+    if (this.deps.pendingStore) {
+      queueMicrotask(() => this.recoverPendingMessages());
+      this.pendingRecoveryInterval = setInterval(
+        () => this.recoverPendingMessages(),
+        30_000,
+      );
+    }
     console.log("[Discord] Message router started");
   }
 
@@ -126,8 +160,13 @@ export class MessageRouter {
       clearInterval(this.pruneInterval);
       this.pruneInterval = null;
     }
+    if (this.pendingRecoveryInterval) {
+      clearInterval(this.pendingRecoveryInterval);
+      this.pendingRecoveryInterval = null;
+    }
     this.buffers.clear();
     this.processing.clear();
+    this.deferredFlushes.clear();
     this.messageTimestamps.clear();
     this.channelTiers.clear();
     this.dmChannels.clear();
@@ -158,7 +197,10 @@ export class MessageRouter {
           clearTimeout(debounce);
           this.timers.delete(channelId);
         }
+        const discarded = this.buffers.get(channelId) ?? [];
         this.buffers.delete(channelId);
+        this.settlePending(discarded.map((message) => message.messageId));
+        this.deferredFlushes.delete(channelId);
         this.channelTiers.delete(channelId);
         this.messageTimestamps.delete(channelId);
         console.log(
@@ -229,6 +271,14 @@ export class MessageRouter {
       replyToBot,
       referenceMessageId: msg.reference?.message_id ?? null,
     };
+    this.persistPending({
+      channelId,
+      serverId,
+      isDM: false,
+      mode,
+      directlyAddressed: mentionsBot || replyToBot || isEveryoneHere,
+      message: accumulated,
+    });
 
     this.addToBuffer(
       channelId,
@@ -251,19 +301,28 @@ export class MessageRouter {
     // doesn't silently drop it (DM channels are never in server config).
     this.dmChannels.add(msg.channel_id);
 
+    const accumulated: AccumulatedMessage = {
+      authorId: msg.author.id,
+      authorUsername: msg.author.global_name || msg.author.username,
+      authorBot: false,
+      content: msg.content,
+      timestamp: msg.timestamp,
+      messageId: msg.id,
+      mentionsBot: true, // DMs always trigger
+      replyToBot: false,
+      referenceMessageId: msg.reference?.message_id ?? null,
+    };
+    this.persistPending({
+      channelId: msg.channel_id,
+      serverId: null,
+      isDM: true,
+      mode: "active",
+      directlyAddressed: true,
+      message: accumulated,
+    });
     this.addToBuffer(
       msg.channel_id,
-      {
-        authorId: msg.author.id,
-        authorUsername: msg.author.global_name || msg.author.username,
-        authorBot: false,
-        content: msg.content,
-        timestamp: msg.timestamp,
-        messageId: msg.id,
-        mentionsBot: true, // DMs always trigger
-        replyToBot: false,
-        referenceMessageId: msg.reference?.message_id ?? null,
-      },
+      accumulated,
       "active",
       true,
     );
@@ -292,7 +351,9 @@ export class MessageRouter {
     // Cap buffer size
     const maxSize = this.deps.config.maxBufferSize;
     if (buffer.length > maxSize) {
+      const discarded = buffer.slice(0, buffer.length - maxSize);
       buffer = buffer.slice(-maxSize);
+      this.settlePending(discarded.map((item) => item.messageId));
     }
 
     this.buffers.set(channelId, buffer);
@@ -409,7 +470,10 @@ export class MessageRouter {
       !this.getChannelConfigByChannelId(channelId)
     ) {
       this.clearPeriodicTimer(channelId);
+      const discarded = this.buffers.get(channelId) ?? [];
       this.buffers.delete(channelId);
+      this.settlePending(discarded.map((message) => message.messageId));
+      this.deferredFlushes.delete(channelId);
       return;
     }
 
@@ -448,8 +512,9 @@ export class MessageRouter {
 
     // Prevent overlapping turns per channel
     if (this.processing.has(channelId)) {
+      this.deferredFlushes.set(channelId, { mode, tier });
       console.log(
-        `[Discord] Channel ${channelId} already processing, skipping`,
+        `[Discord] Channel ${channelId} already processing; flush deferred`,
       );
       return;
     }
@@ -459,6 +524,16 @@ export class MessageRouter {
     this.buffers.delete(channelId);
 
     this.processing.add(channelId);
+    const messageIds = [...new Set(buffer.map((message) => message.messageId))];
+    try {
+      this.deps.pendingStore?.claim(messageIds);
+    } catch (error) {
+      console.warn(
+        `[Discord] Could not claim durable batch for ${channelId}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    let durableWorkCommitted = false;
     try {
       // Build conversation ID and user message
       const isDM = !buffer[0]?.replyToBot &&
@@ -493,18 +568,124 @@ export class MessageRouter {
         isDM,
         senderUsername: triggerMsg.authorUsername,
         senderUserId: triggerMsg.authorId,
+        eligibleMessageIds: messageIds,
+        commitVisibleAction: () => {
+          if (durableWorkCommitted) return;
+          this.settlePending(messageIds);
+          durableWorkCommitted = true;
+        },
         skipUserMessagePersist: false,
         activeTier: tier,
       };
 
-      await this.deps.onTurn(conversationId, userMessage, context);
+      const outcome = await this.deps.onTurn(
+        conversationId,
+        userMessage,
+        context,
+      );
+      if (outcome?.disposition === "failed") {
+        if (!durableWorkCommitted) this.releasePending(messageIds);
+      } else {
+        this.settlePending(messageIds);
+        durableWorkCommitted = true;
+      }
     } catch (error) {
+      if (!durableWorkCommitted) this.releasePending(messageIds);
       console.error(
         `[Discord] Error processing turn for channel ${channelId}:`,
         error,
       );
     } finally {
       this.processing.delete(channelId);
+      const deferred = this.deferredFlushes.get(channelId);
+      this.deferredFlushes.delete(channelId);
+      if (deferred && (this.buffers.get(channelId)?.length ?? 0) > 0) {
+        queueMicrotask(() => {
+          void this.flushBuffer(channelId, deferred.mode, deferred.tier);
+        });
+      }
+    }
+  }
+
+  private persistPending(record: PendingDiscordMessage): void {
+    try {
+      this.deps.pendingStore?.enqueue(record);
+    } catch (error) {
+      console.warn(
+        `[Discord] Could not persist pending message ${record.message.messageId}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  private settlePending(messageIds: string[]): void {
+    try {
+      this.deps.pendingStore?.settle(messageIds);
+    } catch (error) {
+      console.warn(
+        "[Discord] Could not settle durable pending work:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  private releasePending(messageIds: string[]): void {
+    try {
+      this.deps.pendingStore?.release(messageIds);
+    } catch (error) {
+      console.warn(
+        "[Discord] Could not release durable pending work:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  private recoverPendingMessages(): void {
+    const store = this.deps.pendingStore;
+    if (!store) return;
+    let recovered: PendingDiscordMessage[];
+    try {
+      recovered = store.recoverReady();
+    } catch (error) {
+      console.warn(
+        "[Discord] Pending-message recovery failed:",
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    let added = 0;
+    for (const record of recovered) {
+      try {
+        if (
+          !record.isDM &&
+          (!record.serverId ||
+            !this.getChannelConfig(record.serverId, record.channelId))
+        ) {
+          this.settlePending([record.message.messageId]);
+          continue;
+        }
+        const alreadyBuffered = this.buffers.get(record.channelId)?.some(
+          (message) => message.messageId === record.message.messageId,
+        ) === true;
+        if (alreadyBuffered) continue;
+        if (record.isDM) this.dmChannels.add(record.channelId);
+        this.addToBuffer(
+          record.channelId,
+          record.message,
+          record.mode,
+          record.directlyAddressed,
+        );
+        added++;
+      } catch (error) {
+        console.warn(
+          `[Discord] Could not restore pending message ${record.message.messageId}:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+    if (added > 0) {
+      console.log(`[Discord] Recovered ${added} durable pending message(s)`);
     }
   }
 
@@ -591,13 +772,15 @@ export class MessageRouter {
       !this.getChannelConfigByChannelId(channelId)
     ) {
       this.clearPeriodicTimer(channelId);
+      const discarded = this.buffers.get(channelId) ?? [];
       this.buffers.delete(channelId);
+      this.settlePending(discarded.map((message) => message.messageId));
+      this.deferredFlushes.delete(channelId);
       return;
     }
 
     const buffer = this.buffers.get(channelId);
     if (!buffer || buffer.length === 0) return;
-    if (this.processing.has(channelId)) return;
 
     // Recalculate tier — channel activity may have changed
     const newTier = this.calculateTier(channelId);

@@ -231,6 +231,34 @@ export const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_context_snapshots_conversation
     ON context_snapshots(conversation_id, turn_index DESC);
+
+  -- Discord receipt work is durable until the entity reaches an explicit
+  -- outcome. In-memory debounce remains an optimization rather than the only
+  -- record that a message still needs a decision.
+  CREATE TABLE IF NOT EXISTS discord_pending_messages (
+    message_id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    server_id TEXT,
+    is_dm INTEGER NOT NULL DEFAULT 0 CHECK (is_dm IN (0, 1)),
+    channel_mode TEXT NOT NULL CHECK (channel_mode IN ('active', 'lurk', 'strict')),
+    directly_addressed INTEGER NOT NULL DEFAULT 0 CHECK (
+      directly_addressed IN (0, 1)
+    ),
+    message_json TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending' CHECK (
+      state IN ('pending', 'processing')
+    ),
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_discord_pending_ready
+    ON discord_pending_messages(state, next_attempt_at, received_at ASC);
+
+  CREATE INDEX IF NOT EXISTS idx_discord_pending_channel
+    ON discord_pending_messages(channel_id, received_at ASC);
 `;
 
 /**

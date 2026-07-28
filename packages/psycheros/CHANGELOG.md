@@ -6,6 +6,14 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Discord batches now reach an explicit contribution, deliberate-quiet, or
+  retryable-failure outcome. Eligible work survives daemon restarts in the
+  existing SQLite database, overlapping flushes resume after the active channel
+  turn, and replies or reactions cannot target message IDs that appear only in
+  older conversation history.
+
 ## [0.10.0] - 2026-07-24
 
 ### Added

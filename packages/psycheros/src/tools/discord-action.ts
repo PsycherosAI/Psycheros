@@ -24,7 +24,7 @@ export const actInDiscordTool: Tool = {
     function: {
       name: "act_in_discord",
       description:
-        "I use this tool to act in the current Discord channel. I pass an 'actions' array — I should batch everything I want to do into a single call (reply to multiple messages, react to several, or mix both). Each action can include 'content' (to send a message), 'emoji' (to react, one or more), or both on the same 'message_id'. If I have nothing to add, I simply don't call this tool — no message will be sent.",
+        "I use this tool to act in the current Discord channel. I pass one batched 'actions' array. A message_id must belong to the current bounded batch; older conversation history is context, not an open request. If I have nothing to add, I simply don't call this tool.",
       parameters: {
         type: "object",
         properties: {
@@ -38,7 +38,7 @@ export const actInDiscordTool: Tool = {
                 message_id: {
                   type: "string",
                   description:
-                    "The Discord message ID to target. If I include 'content', my reply threads under this message. If I include 'emoji', I react to this message. Omit to send a plain channel message (no threading).",
+                    "A message ID from the current bounded Discord batch. If I include 'content', my reply threads under it; if I include 'emoji', I react to it. Omit to send a plain channel message.",
                 },
                 content: {
                   type: "string",
@@ -99,6 +99,23 @@ export const actInDiscordTool: Tool = {
       };
     }
 
+    for (const action of actions) {
+      const messageId = typeof action.message_id === "string" &&
+          action.message_id.trim()
+        ? action.message_id.trim()
+        : undefined;
+      if (
+        messageId && !isDiscordActionTargetEligible(discordContext, messageId)
+      ) {
+        return {
+          toolCallId: ctx.toolCallId,
+          content:
+            `Message ${messageId} is historical context, not an eligible target for this turn. I can target only the current Discord batch.`,
+          isError: true,
+        };
+      }
+    }
+
     const channelId = discordContext.channelId;
     const headers = {
       "Authorization": `Bot ${discordSettings.botToken}`,
@@ -107,6 +124,7 @@ export const actInDiscordTool: Tool = {
 
     const results: string[] = [];
     let hadError = false;
+    let hadVisibleSuccess = false;
 
     for (const action of actions) {
       const hasContent = typeof action.content === "string" &&
@@ -130,6 +148,10 @@ export const actInDiscordTool: Tool = {
         const result = await executeReply(action, channelId, headers);
         results.push(result.content);
         if (result.isError) hadError = true;
+        else {
+          hadVisibleSuccess = true;
+          discordContext.commitVisibleAction?.();
+        }
       }
 
       // Add reactions if emoji is present
@@ -149,6 +171,10 @@ export const actInDiscordTool: Tool = {
             );
             results.push(result.content);
             if (result.isError) hadError = true;
+            else {
+              hadVisibleSuccess = true;
+              discordContext.commitVisibleAction?.();
+            }
           }
         }
       }
@@ -157,10 +183,17 @@ export const actInDiscordTool: Tool = {
     return {
       toolCallId: ctx.toolCallId,
       content: results.join("\n"),
-      isError: hadError,
+      isError: hadError && !hadVisibleSuccess,
     };
   },
 };
+
+export function isDiscordActionTargetEligible(
+  context: { eligibleMessageIds?: string[] },
+  messageId: string,
+): boolean {
+  return context.eligibleMessageIds?.includes(messageId) === true;
+}
 
 /**
  * Normalize the emoji field — accept a string or array of strings.
