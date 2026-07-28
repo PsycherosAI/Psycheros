@@ -84,8 +84,11 @@ import { PulseEngine } from "../pulse/mod.ts";
 import { setPulseEngine } from "../tools/pulse-tools.ts";
 import { DeviceStatusCache } from "./device-cache.ts";
 import {
+  classifyDiscordTurnDisposition,
   ConversationMapper,
   DiscordGatewayClient,
+  DiscordPendingStore,
+  type DiscordTurnOutcome,
   MessageRouter,
   ResponseHandler,
 } from "../discord/mod.ts";
@@ -897,6 +900,7 @@ export class Server {
         gateway: this.discordGatewayClient,
         config: this.discordGatewayConfig,
         conversationMapper: this.discordConversationMapper,
+        pendingStore: new DiscordPendingStore(this.db.getRawDb()),
         onTurn: (conversationId, userMessage, context) =>
           this.handleDiscordTurn(conversationId, userMessage, context),
         onMessage: (channelId, message) =>
@@ -1015,8 +1019,15 @@ export class Server {
     conversationId: string,
     userMessage: string,
     context: import("../discord/router.ts").DiscordTurnContext,
-  ): Promise<void> {
-    if (!this.discordResponseHandler) return;
+  ): Promise<DiscordTurnOutcome> {
+    if (!this.discordResponseHandler) return { disposition: "failed" };
+
+    let discordActionSucceeded = false;
+    const commitVisibleAction = context.commitVisibleAction;
+    context.commitVisibleAction = () => {
+      discordActionSucceeded = true;
+      commitVisibleAction?.();
+    };
 
     // Show typing indicator
     await this.discordResponseHandler.triggerTyping(context.channelId);
@@ -1081,27 +1092,43 @@ export class Server {
         `[System Message: The following messages are piped in from a connected Discord channel (${location}). Each message shows the author, mention ID, timestamp, and message ID.${identity}]\n\n`;
       const contextualizedMessage = header + userMessage;
 
+      let discordActionAttempted = false;
       for await (
-        const _ of turn.process(conversationId, contextualizedMessage, {
+        const chunk of turn.process(conversationId, contextualizedMessage, {
           sourceType: "discord",
           discordContext: context,
           skipStickyDecrement: true,
           skipUserPersist: context.skipUserMessagePersist,
         })
       ) {
-        // Consume the generator — tool calls within the loop handle Discord output
+        if (
+          chunk.type === "tool_call" &&
+          chunk.toolCall.function.name === "act_in_discord"
+        ) {
+          discordActionAttempted = true;
+        }
       }
+      const disposition = classifyDiscordTurnDisposition({
+        discordActionAttempted,
+        discordActionSucceeded,
+      });
+      if (disposition === "deliberately_quiet") {
+        console.log(
+          `[Discord] Channel ${context.channelId}: deliberate pass`,
+        );
+      }
+      if (context.activeTier) {
+        console.log(
+          `[Discord] Channel ${context.channelId}: entity turn completed (tier: ${context.activeTier})`,
+        );
+      }
+      return { disposition };
     } catch (error) {
       console.error(
         "[Discord] Entity turn error:",
         error instanceof Error ? error.message : String(error),
       );
-    }
-
-    if (context.activeTier) {
-      console.log(
-        `[Discord] Channel ${context.channelId}: entity turn completed (tier: ${context.activeTier})`,
-      );
+      return { disposition: "failed" };
     }
   }
 
