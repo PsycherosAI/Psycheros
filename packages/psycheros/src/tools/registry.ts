@@ -32,6 +32,7 @@ import { pulseTool } from "./pulse-tools.ts";
 import { sendDiscordDmTool } from "./send-discord-dm.ts";
 // Discord action tool (reply, react)
 import { actInDiscordTool } from "./discord-action.ts";
+import { sendVoiceMessageTool } from "./send-voice-message.ts";
 // Home automation tool
 import { controlDeviceTool } from "./control-device.ts";
 // Lovense device control tool
@@ -85,6 +86,7 @@ export const AVAILABLE_TOOLS: Record<string, Tool> = {
   send_discord_dm: sendDiscordDmTool,
   // Discord action tool (reply, react in channels during Discord turns)
   act_in_discord: actInDiscordTool,
+  send_voice_message: sendVoiceMessageTool,
   // Home automation tool
   control_device: controlDeviceTool,
   // Lovense device control tool
@@ -130,10 +132,10 @@ export class ToolRegistry {
    * @param tool - The tool to register
    * @throws Error if a tool with the same name is already registered
    */
-  register(tool: Tool): void {
+  register(tool: Tool, options: { replace?: boolean } = {}): void {
     const name = tool.definition.function.name;
 
-    if (this.tools.has(name)) {
+    if (this.tools.has(name) && !options.replace) {
       throw new Error(`Tool '${name}' is already registered`);
     }
 

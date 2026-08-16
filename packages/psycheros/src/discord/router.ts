@@ -13,6 +13,20 @@ import type {
   DiscordGatewayConfig,
 } from "../llm/discord-settings.ts";
 import type { ConversationMapper } from "./conversation-map.ts";
+import type { ChatImageUrlPart } from "../llm/types.ts";
+import {
+  collectDiscordMediaCandidates,
+  prepareDiscordVisionImages,
+} from "./attachments.ts";
+import type { DiscordAttachment, DiscordEmbed } from "./gateway.ts";
+import type { DiscordDeliveryState } from "./delivery-state.ts";
+import type { VoiceProfile } from "../llm/voice-settings.ts";
+import {
+  type DiscordVoiceDeps,
+  prepareDiscordVoiceTranscript,
+} from "./voice-attachments.ts";
+import type { DiscordPluginHost } from "./plugin-host.ts";
+import type { DiscordMessageProcessor } from "../../../plugin-api/src/mod.ts";
 
 // =============================================================================
 // Types
@@ -28,6 +42,9 @@ export interface AccumulatedMessage {
   mentionsBot: boolean;
   replyToBot: boolean;
   referenceMessageId: string | null;
+  attachments: DiscordAttachment[];
+  embeds: DiscordEmbed[];
+  flags?: number;
 }
 
 export interface RouterDeps {
@@ -43,6 +60,12 @@ export interface RouterDeps {
     channelId: string,
     message: AccumulatedMessage,
   ) => Promise<void> | void;
+  getActiveVoiceProfile?: () => VoiceProfile | undefined;
+  voiceDeps?: DiscordVoiceDeps;
+  pluginHost?: DiscordPluginHost;
+  getPluginProcessors?: () => Array<
+    { pluginId: string; processor: DiscordMessageProcessor }
+  >;
 }
 
 export interface DiscordTurnContext {
@@ -58,6 +81,10 @@ export interface DiscordTurnContext {
   skipUserMessagePersist?: boolean;
   /** The active mode tier that triggered this turn (only set for active mode channels) */
   activeTier?: ActiveTier;
+  /** Transient Discord media normalized for EntityTurn's captioning path. */
+  visionImages?: ChatImageUrlPart[];
+  /** I use this turn-local state to prevent duplicate Discord deliveries. */
+  deliveryState?: DiscordDeliveryState;
 }
 
 // =============================================================================
@@ -83,15 +110,36 @@ export class MessageRouter {
   private pruneInterval: ReturnType<typeof setInterval> | null = null;
   /** DM channel IDs currently being tracked (not in server config) */
   private dmChannels: Set<string> = new Set();
+  /** I remember accepted message IDs briefly so gateway retries cannot duplicate a turn. */
+  private seenMessageIds: Map<string, number> = new Map();
+  private pluginDisposers: Array<() => void> = [];
 
   constructor(deps: RouterDeps) {
     this.deps = deps;
   }
 
   start(): void {
+    for (const registration of this.deps.getPluginProcessors?.() ?? []) {
+      this.pluginDisposers.push(
+        this.deps.pluginHost?.registerProcessor(
+          registration.pluginId,
+          registration.processor,
+        ) ?? (() => undefined),
+      );
+    }
     this.deps.gateway.on("MESSAGE_CREATE", (event, data) => {
       if (event === "MESSAGE_CREATE") {
         this.handleMessageCreate(data as unknown as DiscordMessage);
+      }
+    });
+    this.deps.gateway.on("MESSAGE_UPDATE", (event, data) => {
+      if (event === "MESSAGE_UPDATE") {
+        this.handleMessageUpdate(
+          data as Partial<DiscordMessage> & {
+            id: string;
+            channel_id: string;
+          },
+        );
       }
     });
     this.deps.gateway.on("GUILD_CREATE", (event, data) => {
@@ -114,6 +162,8 @@ export class MessageRouter {
   }
 
   stop(): void {
+    for (const dispose of this.pluginDisposers) dispose();
+    this.pluginDisposers = [];
     for (const timer of this.timers.values()) {
       clearTimeout(timer);
     }
@@ -131,6 +181,7 @@ export class MessageRouter {
     this.messageTimestamps.clear();
     this.channelTiers.clear();
     this.dmChannels.clear();
+    this.seenMessageIds.clear();
     console.log("[Discord] Message router stopped");
   }
 
@@ -173,14 +224,28 @@ export class MessageRouter {
   // -------------------------------------------------------------------------
 
   private handleMessageCreate(msg: DiscordMessage): void {
+    console.log(
+      `[Discord] Event received: MESSAGE_CREATE ${msg.id} in channel ${msg.channel_id}`,
+    );
+    console.log(`[Discord] Router begins handling message ${msg.id}`);
+    void this.deps.pluginHost?.publish("MESSAGE_CREATE", msg);
     // Ignore own messages
     if (msg.author.id === this.deps.gateway.getBotUserId()) return;
+
+    if (this.seenMessageIds.has(msg.id)) {
+      console.log(
+        `[Discord] Router exit for ${msg.id}: duplicate MESSAGE_CREATE`,
+      );
+      return;
+    }
 
     const isDM = msg.guild_id == null;
     const channelId = msg.channel_id;
 
     // --- DM handling ---
     if (isDM) {
+      this.seenMessageIds.set(msg.id, Date.now());
+      console.log(`[Discord] Router forwarding ${msg.id} to DM handler`);
       this.handleDm(msg);
       return;
     }
@@ -190,7 +255,13 @@ export class MessageRouter {
     const channelConfig = this.getChannelConfig(serverId, channelId);
 
     // Hard gate: channel must be in configured allowlist
-    if (!channelConfig) return;
+    if (!channelConfig) {
+      console.log(
+        `[Discord] Router exit for ${msg.id}: channel ${channelId} is not configured`,
+      );
+      return;
+    }
+    this.seenMessageIds.set(msg.id, Date.now());
 
     // Hard gate: filter command prefixes
     if (msg.content.startsWith("!") || msg.content.startsWith("/")) return;
@@ -228,6 +299,9 @@ export class MessageRouter {
       mentionsBot: mentionsBot || isEveryoneHere || replyToBot,
       replyToBot,
       referenceMessageId: msg.reference?.message_id ?? null,
+      attachments: msg.attachments ?? [],
+      embeds: msg.embeds ?? [],
+      flags: msg.flags,
     };
 
     this.addToBuffer(
@@ -263,9 +337,35 @@ export class MessageRouter {
         mentionsBot: true, // DMs always trigger
         replyToBot: false,
         referenceMessageId: msg.reference?.message_id ?? null,
+        attachments: msg.attachments ?? [],
+        embeds: msg.embeds ?? [],
+        flags: msg.flags,
       },
       "active",
       true,
+    );
+  }
+
+  private handleMessageUpdate(
+    update: Partial<DiscordMessage> & { id: string; channel_id: string },
+  ): void {
+    void this.deps.pluginHost?.publish("MESSAGE_UPDATE", update);
+    const buffer = this.buffers.get(update.channel_id);
+    const buffered = buffer?.find((message) => message.messageId === update.id);
+    if (!buffered) {
+      console.log(
+        `[DiscordVision] MESSAGE_UPDATE ${update.id} ignored: message is no longer buffered`,
+      );
+      return;
+    }
+    if (typeof update.content === "string") buffered.content = update.content;
+    if (typeof update.flags === "number") buffered.flags = update.flags;
+    if (Array.isArray(update.attachments)) {
+      buffered.attachments = update.attachments;
+    }
+    if (Array.isArray(update.embeds)) buffered.embeds = update.embeds;
+    console.log(
+      `[DiscordVision] MESSAGE_UPDATE ${update.id} merged: attachments=${buffered.attachments.length}, embeds=${buffered.embeds.length}`,
     );
   }
 
@@ -477,8 +577,75 @@ export class MessageRouter {
           buffer[0].authorUsername,
         );
 
+      const useLegacyMedia = !this.deps.pluginHost ||
+        this.deps.pluginHost.getMediaPipelineOwner() === "legacy-core";
+      // Transcribe my native Discord voice notes before formatting the turn.
+      const activeVoiceProfile = this.deps.getActiveVoiceProfile?.();
+      if (useLegacyMedia) {
+        for (const message of buffer) {
+          const voice = await prepareDiscordVoiceTranscript(
+            {
+              id: message.messageId,
+              flags: message.flags,
+              attachments: message.attachments,
+            },
+            activeVoiceProfile,
+            this.deps.voiceDeps,
+          );
+          if (voice.kind === "success") {
+            message.content = [
+              message.content.trim(),
+              `[Discord voice message transcript]\n${voice.transcript}`,
+            ].filter(Boolean).join("\n\n");
+          } else if (voice.kind === "failure") {
+            message.content = [message.content.trim(), voice.marker]
+              .filter(Boolean).join("\n\n");
+          }
+        }
+      }
+
       // Format accumulated messages
-      const userMessage = this.formatAccumulatedMessages(buffer);
+      let userMessage = this.formatAccumulatedMessages(buffer);
+      const mediaCandidates = useLegacyMedia
+        ? collectDiscordMediaCandidates(buffer)
+        : [];
+      let visionImages = useLegacyMedia
+        ? await prepareDiscordVisionImages(mediaCandidates)
+        : [];
+      if (
+        this.deps.pluginHost &&
+        this.deps.pluginHost.getMediaPipelineOwner() !== "legacy-core"
+      ) {
+        const pluginEvents = buffer.map((message) =>
+          this.deps.pluginHost!.sanitize("MESSAGE_CREATE", {
+            id: message.messageId,
+            channel_id: channelId,
+            content: message.content,
+            flags: message.flags,
+            attachments: message.attachments,
+            embeds: message.embeds,
+            author: {
+              id: message.authorId,
+              username: message.authorUsername,
+              discriminator: "0",
+              global_name: message.authorUsername,
+              bot: message.authorBot,
+            },
+          })
+        );
+        const pluginResult = await this.deps.pluginHost.process(
+          channelId,
+          pluginEvents,
+          AbortSignal.timeout(30_000),
+        );
+        if (pluginResult.appendedText?.trim()) {
+          userMessage = [userMessage, pluginResult.appendedText].join("\n\n");
+        }
+        visionImages = pluginResult.visionImages ?? [];
+      }
+      console.log(
+        `[DiscordVision] Prepared ${visionImages.length} image(s) from ${mediaCandidates.length} candidate(s)`,
+      );
 
       // Find the most relevant sender (the one who mentioned/replied to bot, or the last sender)
       const triggerMsg = [...buffer].reverse().find((m) => m.mentionsBot) ??
@@ -495,6 +662,8 @@ export class MessageRouter {
         senderUserId: triggerMsg.authorId,
         skipUserMessagePersist: false,
         activeTier: tier,
+        visionImages: visionImages.length > 0 ? visionImages : undefined,
+        deliveryState: {},
       };
 
       await this.deps.onTurn(conversationId, userMessage, context);
@@ -646,6 +815,10 @@ export class MessageRouter {
   }
 
   private pruneStaleTimestamps(): void {
+    const seenCutoff = Date.now() - 60 * 60 * 1000;
+    for (const [messageId, seenAt] of this.seenMessageIds) {
+      if (seenAt <= seenCutoff) this.seenMessageIds.delete(messageId);
+    }
     const tierConfig = this.deps.config.activeModeTiers;
     // Defensive guard: if activeModeTiers is missing or malformed (e.g. a
     // stale discord-gateway.json from before this field existed, or a config

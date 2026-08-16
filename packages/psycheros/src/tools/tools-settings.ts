@@ -49,6 +49,7 @@ export const DEFAULT_DISABLED_TOOLS: ReadonlySet<string> = new Set([
   "control_toy",
   "ble_device",
   "act_in_discord",
+  "send_voice_message",
 ]);
 
 /** Tools that are deprecated and hidden from both the UI and the LLM. Kept in AVAILABLE_TOOLS for potential resurrection. */
@@ -105,7 +106,7 @@ export const TOOL_CATEGORIES: ToolCategory[] = [
     id: "discord",
     name: "Discord",
     description: "Discord messaging, replies, and reactions",
-    toolNames: ["send_discord_dm", "act_in_discord"],
+    toolNames: ["send_discord_dm", "act_in_discord", "send_voice_message"],
   },
   {
     id: "home-automation",

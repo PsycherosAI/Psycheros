@@ -116,6 +116,7 @@ export function getDefaultDiscordGatewayConfig(): DiscordGatewayConfig {
       "create_significant_memory",
       "vault",
       "act_in_discord",
+      "send_voice_message",
     ],
     debounceWindowMs: 5000,
     maxBufferSize: 50,
