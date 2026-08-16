@@ -279,6 +279,14 @@ function compatibilityWarnings(manifest: PluginManifest): string[] {
   return warnings;
 }
 
+/** Plugin API v2 activation gate; v1 keeps its historical warning-only behavior. */
+export function isCurrentPsycherosCompatible(
+  manifest: PluginManifest,
+): boolean | null {
+  const range = manifest.compatibility?.psycheros;
+  return range ? satisfiesRange(PSYCHEROS_VERSION, range) : true;
+}
+
 function dependencyWarnings(manifest: PluginManifest): string[] {
   const dependencies = Object.keys(manifest.dependencies ?? {});
   if (dependencies.length === 0) return [];

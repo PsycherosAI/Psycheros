@@ -5,7 +5,8 @@
 import { basename, extname, isAbsolute, join, normalize } from "@std/path";
 import { parse } from "@std/dotenv";
 
-export const PLUGIN_API_VERSION = 1;
+export const PLUGIN_API_VERSION = 2;
+export const SUPPORTED_PLUGIN_API_VERSIONS = [1, 2] as const;
 export const DEFAULT_PROMPT_HOOK_TIMEOUT_MS = 15_000;
 export const DEFAULT_PROMPT_HOOK_MAX_CHARS = 12_000;
 
@@ -33,6 +34,8 @@ export interface PluginManifest {
     maxChars?: number;
   };
   capabilities?: PluginCapabilities;
+  /** Host capabilities that must exist before this plugin may activate. */
+  requiredHostCapabilities?: string[];
 }
 
 export interface PluginCompatibility {
@@ -65,6 +68,8 @@ export interface PluginCapabilities {
    * Settings page renders a "Configure" button that loads the fragment.
    */
   settings?: boolean;
+  /** The plugin contributes sanitized Discord event/message hooks. */
+  discord?: boolean;
 }
 
 export interface PluginCapabilityCounts {
@@ -116,6 +121,166 @@ export interface PluginStatus {
    */
   origin?: "installed" | "builtin";
   lastError?: string;
+}
+
+export type DiscordPluginEventType = "MESSAGE_CREATE" | "MESSAGE_UPDATE";
+
+/** Sanitized Discord data. Private CDN URLs and credentials are intentionally absent. */
+export interface DiscordPluginMessageEvent {
+  type: DiscordPluginEventType;
+  messageId: string;
+  channelId: string;
+  guildId: string | null;
+  authorId: string;
+  authorBot: boolean;
+  content: string;
+  flags?: number;
+  attachments: Array<{
+    reference: string;
+    id: string;
+    filename: string;
+    size: number;
+    contentType?: string;
+    width?: number | null;
+    height?: number | null;
+    durationSecs?: number;
+  }>;
+  embeds: Array<{
+    type?: string;
+    hasImage: boolean;
+    hasVideo: boolean;
+    references: string[];
+  }>;
+}
+
+export interface DiscordPreparedImage {
+  type: "image_url";
+  image_url: { url: string };
+}
+
+export interface DiscordMessageProcessorContext {
+  channelId: string;
+  messages: DiscordPluginMessageEvent[];
+  signal: AbortSignal;
+}
+
+export interface DiscordMessageProcessorResult {
+  appendedText?: string;
+  visionImages?: DiscordPreparedImage[];
+}
+
+export interface DiscordMessageProcessor {
+  name: string;
+  priority?: number;
+  timeoutMs?: number;
+  process(
+    context: DiscordMessageProcessorContext,
+  ): Promise<DiscordMessageProcessorResult | undefined>;
+}
+
+export interface DiscordCompanionInstruction {
+  name: string;
+  text: string;
+}
+
+export interface ServiceReadiness {
+  ready: boolean;
+  provider?: string;
+  reason?: string;
+  settingsSection: "Discord" | "Vision" | "Voice" | "Media";
+}
+
+export interface DiscordPluginHostServices {
+  readiness: {
+    discord(): ServiceReadiness;
+    vision(): ServiceReadiness;
+    stt(): ServiceReadiness;
+    tts(): ServiceReadiness;
+    gifSearch(): ServiceReadiness;
+    imageGeneration(): ServiceReadiness;
+  };
+  media: {
+    fetch(
+      reference: string,
+      options: { maxBytes: number; timeoutMs: number; signal?: AbortSignal },
+    ): Promise<{ bytes: Uint8Array; mediaType: string }>;
+    prepareImage(
+      bytes: Uint8Array,
+      declaredType?: string,
+    ): Promise<DiscordPreparedImage>;
+    extractAnimatedFrames(
+      bytes: Uint8Array,
+      options: { maxFrames: number; maxDecodedBytes: number },
+    ): Promise<DiscordPreparedImage[]>;
+  };
+  voice: {
+    transcribeEncoded(
+      audio: Uint8Array,
+      input: { mediaType: string; filename: string; signal?: AbortSignal },
+    ): Promise<{ text: string }>;
+    synthesizeEncoded(
+      text: string,
+      input: { format: "ogg_opus"; signal?: AbortSignal },
+    ): Promise<Uint8Array>;
+  };
+  transport: {
+    sendNativeVoiceMessage(
+      input: {
+        channelId: string;
+        audio: Uint8Array;
+        toolCallId: string;
+        replyToMessageId?: string;
+        fallbackText: string;
+      },
+    ): Promise<{ kind: "voice" | "text_fallback" }>;
+  };
+  outgoingMedia: {
+    searchGifs(query: string): Promise<
+      Array<{
+        selectionReference: string;
+        title: string;
+        width?: number;
+        height?: number;
+      }>
+    >;
+    retrieveGif(
+      selectionReference: string,
+    ): Promise<{ mediaReference: string }>;
+    generateImage(input: {
+      prompt: string;
+      negativePrompt?: string;
+      generatorId?: string;
+    }): Promise<
+      { mediaReference: string; provider: string; mediaType: string }
+    >;
+    deliver(input: {
+      channelId: string;
+      mediaReference: string;
+      toolCallId: string;
+      companionText?: string;
+      fallbackText: string;
+      replyToMessageId?: string;
+      mode?: "auto" | "attachment" | "embed";
+    }): Promise<{ kind: "media" | "text_fallback"; messageId?: string }>;
+    sendFallback(input: {
+      channelId: string;
+      toolCallId: string;
+      fallbackText: string;
+      replyToMessageId?: string;
+    }): Promise<{ kind: "media" | "text_fallback"; messageId?: string }>;
+  };
+  events: {
+    subscribe(
+      types: DiscordPluginEventType[],
+      handler: (event: DiscordPluginMessageEvent) => void | Promise<void>,
+    ): () => void;
+  };
+  mediaPipeline: {
+    /** The host binds ownership; plugin callers do not provide this value. */
+    claim(owner?: string): boolean;
+    release(owner?: string): void;
+    owner(): "legacy-core" | "plugin";
+  };
 }
 
 export interface DiscoveredPlugin {
@@ -293,7 +458,22 @@ function validateCapabilities(
     settings: input.settings === undefined
       ? undefined
       : input.settings === true,
+    discord: input.discord === undefined ? undefined : input.discord === true,
   };
+}
+
+function validateStringArray(
+  value: unknown,
+  field: string,
+): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (
+    !Array.isArray(value) ||
+    value.some((item) => typeof item !== "string" || !item.trim())
+  ) {
+    throw new Error(`${field} must be an array of non-empty strings`);
+  }
+  return [...new Set(value.map((item) => String(item).trim()))];
 }
 
 export function isSafePluginId(id: string): boolean {
@@ -339,7 +519,12 @@ export function validatePluginManifest(
   if (input.id !== directoryName) {
     throw new Error(`id must match directory name "${directoryName}"`);
   }
-  if (input.apiVersion !== PLUGIN_API_VERSION) {
+  if (
+    typeof input.apiVersion !== "number" ||
+    !(SUPPORTED_PLUGIN_API_VERSIONS as readonly number[]).includes(
+      input.apiVersion,
+    )
+  ) {
     throw new Error(`unsupported apiVersion: ${String(input.apiVersion)}`);
   }
 
@@ -419,6 +604,10 @@ export function validatePluginManifest(
       }
       : undefined,
     capabilities: validateCapabilities(input.capabilities),
+    requiredHostCapabilities: validateStringArray(
+      input.requiredHostCapabilities ?? input.required_host_capabilities,
+      "requiredHostCapabilities",
+    ),
   };
 }
 

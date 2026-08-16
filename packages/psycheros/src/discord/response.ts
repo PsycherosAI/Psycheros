@@ -184,26 +184,27 @@ export class ResponseHandler {
       };
     }
 
-    const resp = await fetch(
-      `https://discord.com/api/v10/channels/${channelId}/messages`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bot ${this.token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      },
+    const url = `https://discord.com/api/v10/channels/${channelId}/messages`;
+    const payload = JSON.stringify(body);
+    console.log(
+      `[Discord] HTTP POST begins: channel=${channelId}, bytes=${payload.length}, hasReply=${
+        Boolean(replyToMessageId)
+      }`,
     );
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      body: payload,
+    });
+    console.log(`[Discord] HTTP response: status=${resp.status}`);
 
     if (!resp.ok) {
-      const errorText = await resp.text();
-      console.error(
-        `[Discord] Failed to send message: ${resp.status} ${errorText}`,
-      );
-
+      await resp.body?.cancel();
+      console.error(`[Discord] Failed to send message: status=${resp.status}`);
       if (resp.status === 429) {
-        // Rate limited — retry after delay
         const retryAfter = resp.headers.get("Retry-After");
         const delay = retryAfter ? parseFloat(retryAfter) * 1000 : 5000;
         console.log(
@@ -212,11 +213,11 @@ export class ResponseHandler {
         await new Promise((resolve) => setTimeout(resolve, delay));
         return this.sendSingleMessage(channelId, content, replyToMessageId);
       }
-
       return null;
     }
 
     const data = await resp.json() as { id: string };
+    console.log(`[Discord] HTTP send succeeded: messageId=${data.id}`);
     return data.id;
   }
 

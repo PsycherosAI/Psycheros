@@ -12,6 +12,7 @@ import type { ToolResult } from "../types.ts";
 import type { Tool, ToolContext } from "./types.ts";
 import type { DiscordSettings } from "../llm/discord-settings.ts";
 import { encodeEmojiForApi, splitMessage } from "../discord/response.ts";
+import { claimDiscordDelivery } from "../discord/delivery-state.ts";
 
 const DISCORD_MAX_MESSAGE_LENGTH = 2000;
 
@@ -127,6 +128,18 @@ export const actInDiscordTool: Tool = {
 
       // Send reply if content is present
       if (hasContent) {
+        if (
+          !claimDiscordDelivery(
+            discordContext.deliveryState,
+            "act_in_discord",
+          )
+        ) {
+          results.push(
+            "I already chose a voice message for this turn, so I skipped this text message.",
+          );
+          hadError = true;
+          continue;
+        }
         const result = await executeReply(action, channelId, headers);
         results.push(result.content);
         if (result.isError) hadError = true;

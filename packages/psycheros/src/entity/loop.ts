@@ -248,6 +248,7 @@ export interface ProcessOptions {
     senderUsername: string;
     senderUserId: string;
     activeTier?: import("../llm/discord-settings.ts").ActiveTier;
+    deliveryState?: import("../discord/delivery-state.ts").DiscordDeliveryState;
   };
   /**
    * Voice mode flag. When true:
@@ -314,6 +315,8 @@ export interface EntityConfig {
     import("../llm/discord-settings.ts").DiscordGatewayConfig;
   /** Discord turn context (set when processing a Discord turn) */
   discordContext?: ProcessOptions["discordContext"];
+  /** My active voice configuration, available to voice-capable tools. */
+  voiceSettings?: import("../llm/voice-settings.ts").VoiceSettings;
   /** Optional Home automation settings */
   homeSettings?: HomeSettings;
   /** Optional image generation settings */
@@ -910,6 +913,8 @@ export class EntityTurn {
 Discord interaction:
 - User messages are piped in from a Discord channel. Each line shows: **author** (<@authorId>) (time) [msg:messageId]: content
 - I use the act_in_discord tool to send messages and reactions. Every message I want to appear in Discord must go through this tool — any text I output without calling it stays internal and is not sent to Discord.
+- I can occasionally use send_voice_message when a spoken response would feel especially natural or meaningful. It uses my active voice and sends a native Discord voice note.
+- A voice note is intentional and special, not my default. I never also send the same reply through act_in_discord; send_voice_message handles its own text fallback if voice delivery fails.
 - I batch all my actions into a single tool call. The 'actions' array can hold as many actions as I need — I should not make multiple calls when one will do.
 - Each action can include 'content' (to reply), 'emoji' (one or more, to react), or both on the same 'message_id'.
 - To reply to a specific message, I include 'content' and 'message_id' — my message threads under it. To send a plain channel message, I omit 'message_id'.

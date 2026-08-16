@@ -104,6 +104,11 @@ import {
   saveEntityCoreEmbeddingSettings,
 } from "../embeddings/mod.ts";
 import { setEmbedderConfig } from "../rag/embedder.ts";
+import {
+  DISCORD_PLUGIN_HOST_CAPABILITIES,
+  DiscordPluginHost,
+} from "../discord/plugin-host.ts";
+import { createDiscordPluginServices } from "../discord/plugin-services.ts";
 import { join } from "@std/path";
 import { MAX_REQUEST_BODY_SIZE, MAX_UPLOAD_BODY_SIZE } from "../constants.ts";
 import {
@@ -112,6 +117,7 @@ import {
   type PluginManager,
 } from "../plugins/mod.ts";
 import type { PluginStatus } from "../../../plugin-api/src/mod.ts";
+import { createGifPickerService } from "../media/gif-picker.ts";
 import {
   callTTS,
   handleBatchDeleteConversations,
@@ -368,6 +374,8 @@ import {
   handleRemoveInstalledPlugin,
 } from "./plugin-manager-routes.ts";
 
+const gifPickerService = createGifPickerService();
+
 /**
  * Server configuration options.
  */
@@ -498,6 +506,7 @@ export class Server {
   private customTools: Record<string, import("../tools/types.ts").Tool>;
   private pluginManager: PluginManager;
   private pluginInstaller: PluginInstaller;
+  private discordPluginHost = new DiscordPluginHost();
   private pulseEngine: PulseEngine | null = null;
   private scheduler: Scheduler | null = null;
   private eventRulesEngine: EventRulesEngine | null = null;
@@ -683,6 +692,16 @@ export class Server {
     this.toolSettings = await loadToolsSettings(this.config.dataRoot);
     this.customTools = await loadCustomTools(this.config.dataRoot);
     this.voiceSettings = await loadVoiceSettings(this.config.dataRoot);
+    this.pluginManager.configureHostCapabilities(
+      DISCORD_PLUGIN_HOST_CAPABILITIES,
+      createDiscordPluginServices({
+        host: this.discordPluginHost,
+        getDiscordSettings: () => this.discordSettings,
+        getImageGenSettings: () => this.imageGenSettings,
+        getVoiceSettings: () => this.voiceSettings,
+        gifPicker: gifPickerService,
+      }),
+    );
     await this.pluginManager.load();
     this.reloadLLMClient();
     this.reloadToolRegistry();
@@ -901,6 +920,15 @@ export class Server {
           this.handleDiscordTurn(conversationId, userMessage, context),
         onMessage: (channelId, message) =>
           this.handleDiscordMessage(channelId, message),
+        getActiveVoiceProfile: () =>
+          this.voiceSettings.enabled
+            ? this.voiceSettings.profiles.find((profile) =>
+              profile.id === this.voiceSettings.activeProfileId
+            )
+            : undefined,
+        pluginHost: this.discordPluginHost,
+        getPluginProcessors: () =>
+          this.pluginManager.getDiscordMessageProcessors(),
       });
 
       this.discordRouter.start();
@@ -1022,14 +1050,30 @@ export class Server {
     await this.discordResponseHandler.triggerTyping(context.channelId);
 
     // Build a scoped tool registry with Discord-allowed tools.
-    // Always include act_in_discord even if the user's saved config omits it
+    // I always keep my Discord delivery tools available for saved configs
     // (backwards compat for existing gateway configs).
     const { createDefaultRegistry } = await import("../tools/registry.ts");
     const allowedTools = [...this.discordGatewayConfig.allowedTools];
     if (!allowedTools.includes("act_in_discord")) {
       allowedTools.push("act_in_discord");
     }
+    if (!allowedTools.includes("send_voice_message")) {
+      allowedTools.push("send_voice_message");
+    }
     const discordTools = createDefaultRegistry(allowedTools);
+    for (const tool of Object.values(this.pluginManager.getDiscordTools())) {
+      const replace = this.discordPluginHost.getMediaPipelineOwner() !==
+        "legacy-core";
+      try {
+        discordTools.register(tool, { replace });
+      } catch (error) {
+        console.warn(
+          `[Plugins] Discord tool was not activated: name=${tool.definition.function.name}, reason=${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
 
     // Build the entity config for this turn
     const activeProfile = this.getActiveLLMProfile();
@@ -1050,6 +1094,7 @@ export class Server {
         discordSettings: this.discordSettings,
         discordGatewayConfig: this.discordGatewayConfig,
         discordContext: context,
+        voiceSettings: this.voiceSettings,
         homeSettings: this.homeSettings,
         imageGenSettings: this.imageGenSettings,
         lovenseSettings: this.lovenseSettings,
@@ -1077,9 +1122,15 @@ export class Server {
       const identity = botId
         ? ` My Discord identity is <@${botId}> (${botName ?? "unknown"}).`
         : "";
+      const pluginInstructions = this.pluginManager.getDiscordInstructions();
+      const instructionSuffix = pluginInstructions.length
+        ? `\n\n[My enabled Discord capabilities]\n${
+          pluginInstructions.join("\n")
+        }`
+        : "";
       const header =
         `[System Message: The following messages are piped in from a connected Discord channel (${location}). Each message shows the author, mention ID, timestamp, and message ID.${identity}]\n\n`;
-      const contextualizedMessage = header + userMessage;
+      const contextualizedMessage = header + userMessage + instructionSuffix;
 
       for await (
         const _ of turn.process(conversationId, contextualizedMessage, {
@@ -1087,6 +1138,7 @@ export class Server {
           discordContext: context,
           skipStickyDecrement: true,
           skipUserPersist: context.skipUserMessagePersist,
+          visionImages: context.visionImages,
         })
       ) {
         // Consume the generator — tool calls within the loop handle Discord output
@@ -3911,6 +3963,7 @@ export class Server {
             statePath: services.statePath,
             env: services.env,
             targetElementId,
+            readiness: services.discord?.readiness,
           },
         );
         const status = (await this.getPluginStatuses()).find((s) =>

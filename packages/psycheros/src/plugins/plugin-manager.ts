@@ -8,6 +8,9 @@ import {
   applyPluginEnv,
   DEFAULT_PROMPT_HOOK_MAX_CHARS,
   DEFAULT_PROMPT_HOOK_TIMEOUT_MS,
+  type DiscordCompanionInstruction,
+  type DiscordMessageProcessor,
+  type DiscordPluginHostServices,
   emptyPluginCapabilityCounts,
   getPluginEnvPath,
   isDeniedPluginEnvVar,
@@ -25,6 +28,8 @@ import type { LLMClient } from "../llm/mod.ts";
 import { PluginEventLogRegistry } from "./event-log.ts";
 import type { PluginEvent } from "./event-log.ts";
 import { resolveDependencies } from "./dependency-resolver.ts";
+import { isCurrentPsycherosCompatible } from "./installer.ts";
+import { claimDiscordDelivery } from "../discord/delivery-state.ts";
 
 /**
  * Default ceiling on the total prompt-hook context I internalize per turn.
@@ -84,6 +89,15 @@ export interface PsycherosPluginServices {
    * or to check whether a refresh token exists without throwing).
    */
   readSecrets: () => Promise<Record<string, string>>;
+  /** Safe host operations are present only when the host supports Plugin API v2 Discord capabilities. */
+  discord?: DiscordPluginHostServices;
+}
+
+export interface DiscordScopedPluginTool {
+  tool: Tool;
+  sources: Array<"discord">;
+  /** My normal text fallback must not run after this tool owns delivery. */
+  exclusiveDelivery?: boolean;
 }
 
 export interface PluginPromptHook {
@@ -123,12 +137,17 @@ export interface PluginSettingsContext {
    * for any in-fragment htmx swaps (e.g. re-rendering after a save).
    */
   targetElementId: string;
+  /** Credential-free readiness for existing host configuration. */
+  readiness?: DiscordPluginHostServices["readiness"];
 }
 
 interface PsycherosPluginModule {
   tools?: Tool[];
   promptHooks?: PluginPromptHook[];
   routes?: PluginRoute[];
+  discordTools?: DiscordScopedPluginTool[];
+  discordMessageProcessors?: DiscordMessageProcessor[];
+  discordInstructions?: DiscordCompanionInstruction[];
   /**
    * Returns an HTML fragment for the plugin's settings page. Declared in the
    * manifest via `capabilities.settings: true`. The host wraps the returned
@@ -152,6 +171,8 @@ interface LoadedPlugin {
    * and which UI affordances the Plugins Settings page renders.
    */
   origin: "installed" | "builtin";
+  disposers?: Array<() => void>;
+  claimedDiscordMediaPipeline?: boolean;
 }
 
 function getMimeType(path: string): string {
@@ -219,6 +240,8 @@ export class PluginManager {
    */
   private lastBudgetUsedChars: number | undefined;
   private lastBudgetCapChars: number | undefined;
+  private discordServices?: DiscordPluginHostServices;
+  private hostCapabilities = new Set<string>();
 
   constructor(
     private pluginRoot: string,
@@ -236,6 +259,14 @@ export class PluginManager {
     this.eventLog = new PluginEventLogRegistry(logDir);
   }
 
+  configureHostCapabilities(
+    capabilities: Iterable<string>,
+    discordServices?: DiscordPluginHostServices,
+  ): void {
+    this.hostCapabilities = new Set(capabilities);
+    this.discordServices = discordServices;
+  }
+
   /**
    * Directory holding plugin-secrets files. When `dataRoot` is provided,
    * always `<dataRoot>/.psycheros/plugin-secrets/` — both installed and
@@ -249,9 +280,12 @@ export class PluginManager {
   }
 
   private services(plugin: LoadedPlugin): PsycherosPluginServices {
-    // Bundled plugins load from `<projectRoot>/bundled-plugins/<id>/` which is
-    // source tree — state can't live there. Redirect to dataRoot.
-    const statePath = plugin.origin === "builtin" && this.dataRoot
+    // My bundled and API v2 executable trees are replaceable during update, so
+    // their durable state lives under dataRoot. Installed API v1 plugins retain
+    // their established in-tree state path for backwards compatibility.
+    const usesDurableState = plugin.origin === "builtin" ||
+      plugin.manifest.apiVersion >= 2;
+    const statePath = this.dataRoot && usesDurableState
       ? join(this.dataRoot, ".psycheros", "plugin-state", plugin.manifest.id)
       : join(plugin.directory, "state");
     const pluginId = plugin.manifest.id;
@@ -263,8 +297,46 @@ export class PluginManager {
     // per services() call but constant for the manager's lifetime.
     const secretsDir = this.secretsDir;
     const pluginDir = plugin.directory;
+    const discord = this.discordServices
+      ? {
+        ...this.discordServices,
+        events: {
+          subscribe: (
+            types: Parameters<
+              DiscordPluginHostServices["events"]["subscribe"]
+            >[0],
+            handler: Parameters<
+              DiscordPluginHostServices["events"]["subscribe"]
+            >[1],
+          ) => {
+            const dispose = this.discordServices!.events.subscribe(
+              types,
+              handler,
+            );
+            plugin.disposers ??= [];
+            plugin.disposers.push(dispose);
+            return () => {
+              dispose();
+              plugin.disposers = plugin.disposers?.filter((item) =>
+                item !== dispose
+              );
+            };
+          },
+        },
+        mediaPipeline: {
+          claim: () => {
+            const claimed = this.discordServices!.mediaPipeline.claim(pluginId);
+            if (claimed) plugin.claimedDiscordMediaPipeline = true;
+            return claimed;
+          },
+          release: () => this.discordServices!.mediaPipeline.release(pluginId),
+          owner: () => this.discordServices!.mediaPipeline.owner(),
+        },
+      }
+      : undefined;
     return {
       statePath,
+      discord,
       env: plugin.appliedEnv?.env ?? {
         get: (name) => Deno.env.get(name),
         has: (name) => Deno.env.has(name),
@@ -470,6 +542,32 @@ export class PluginManager {
         !plugin.manifest.enabled || !plugin.manifest.entrypoints?.psycheros
       ) continue;
 
+      const missingCapabilities =
+        (plugin.manifest.requiredHostCapabilities ?? [])
+          .filter((capability) => !this.hostCapabilities.has(capability));
+      if (missingCapabilities.length > 0) {
+        const reason = `missing required host capabilities: ${
+          missingCapabilities.join(", ")
+        }`;
+        plugin.status.degraded = true;
+        plugin.status.lastError = reason;
+        plugin.status.warnings = [...(plugin.status.warnings ?? []), reason];
+        continue;
+      }
+      if (
+        plugin.manifest.apiVersion >= 2 &&
+        isCurrentPsycherosCompatible(plugin.manifest) !== true
+      ) {
+        const reason = `this Psycheros version does not satisfy ${
+          plugin.manifest.compatibility?.psycheros ??
+            "the declared minimum version"
+        }`;
+        plugin.status.degraded = true;
+        plugin.status.lastError = reason;
+        plugin.status.warnings = [...(plugin.status.warnings ?? []), reason];
+        continue;
+      }
+
       let appliedEnv: AppliedPluginEnv | undefined;
       try {
         appliedEnv = await applyPluginEnv(
@@ -506,6 +604,7 @@ export class PluginManager {
         // initialization in start() (loading config, building clients) and
         // their get tools()/get promptHooks() getters return [] until
         // start() completes. Counting after ensures the real counts.
+        await Deno.mkdir(this.services(plugin).statePath, { recursive: true });
         await module.start?.(this.services(plugin));
         plugin.status.capabilities.tools = module.tools?.length ?? 0;
         plugin.status.capabilities.promptHooks = module.promptHooks?.length ??
@@ -560,6 +659,18 @@ export class PluginManager {
           message: `stop() failed: ${safeError(error)}`,
         });
       } finally {
+        if (plugin.claimedDiscordMediaPipeline) {
+          this.discordServices?.mediaPipeline.release(plugin.manifest.id);
+          plugin.claimedDiscordMediaPipeline = false;
+        }
+        for (const dispose of plugin.disposers ?? []) {
+          try {
+            dispose();
+          } catch {
+            // A plugin disposer is best-effort; all remaining disposers still run.
+          }
+        }
+        plugin.disposers = [];
         plugin.appliedEnv?.restore();
         plugin.appliedEnv = undefined;
       }
@@ -668,6 +779,63 @@ export class PluginManager {
       }
     }
     return tools;
+  }
+
+  getDiscordTools(): Record<string, Tool> {
+    const tools: Record<string, Tool> = {};
+    for (const plugin of this.plugins) {
+      if (!plugin.status.active) continue;
+      for (const entry of plugin.module?.discordTools ?? []) {
+        if (entry.sources.includes("discord")) {
+          const name = entry.tool.definition.function.name;
+          tools[name] = entry.exclusiveDelivery
+            ? {
+              ...entry.tool,
+              async execute(args, ctx) {
+                if (
+                  !claimDiscordDelivery(
+                    ctx.config.discordContext?.deliveryState,
+                    `${plugin.manifest.id}/${name}`,
+                  )
+                ) {
+                  return {
+                    toolCallId: ctx.toolCallId,
+                    content:
+                      "I already delivered a Discord response in this turn.",
+                    isError: true,
+                  };
+                }
+                return await entry.tool.execute(args, ctx);
+              },
+            }
+            : entry.tool;
+        }
+      }
+    }
+    return tools;
+  }
+
+  getDiscordMessageProcessors(): Array<
+    { pluginId: string; processor: DiscordMessageProcessor }
+  > {
+    return this.plugins.flatMap((plugin) =>
+      plugin.status.active
+        ? (plugin.module?.discordMessageProcessors ?? []).map((processor) => ({
+          pluginId: plugin.manifest.id,
+          processor,
+        }))
+        : []
+    );
+  }
+
+  getDiscordInstructions(): string[] {
+    return this.plugins.flatMap((plugin) =>
+      plugin.status.active
+        ? (plugin.module?.discordInstructions ?? []).map((instruction) =>
+          instruction.text
+        )
+        : []
+    );
   }
 
   getBrowserHeadHtml(): string {
