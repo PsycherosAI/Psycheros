@@ -468,6 +468,51 @@ async function* streamElevenLabs(
   yield* alignChunks(resp.body);
 }
 
+/**
+ * Synthesize my configured ElevenLabs voice as Discord-compatible Ogg Opus.
+ * My returned audio remains in memory and is discarded after use.
+ */
+export async function synthesizeElevenLabsOgg(
+  text: string,
+  settings: ElevenLabsTTSSettings,
+  fetcher: typeof fetch = fetch,
+): Promise<Uint8Array> {
+  ensureRealKey("ElevenLabs TTS", settings.apiKey);
+  if (!settings.apiKey?.trim()) {
+    throw new Error("ElevenLabs API key is missing");
+  }
+  if (!settings.voiceId?.trim()) {
+    throw new Error("ElevenLabs voice ID is missing");
+  }
+
+  const resp = await fetcher(
+    `https://api.elevenlabs.io/v1/text-to-speech/${settings.voiceId}?output_format=opus_48000_32`,
+    {
+      method: "POST",
+      headers: {
+        "xi-api-key": settings.apiKey,
+        "Content-Type": "application/json",
+        "Accept": "audio/ogg",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: settings.model,
+        voice_settings: { stability: 0.5, similarity_boost: 0.5 },
+      }),
+    },
+  );
+
+  if (!resp.ok) {
+    const detail = (await resp.text()).slice(0, 300);
+    throw new Error(
+      `ElevenLabs HTTP ${resp.status}${detail ? `: ${detail}` : ""}`,
+    );
+  }
+  const audio = new Uint8Array(await resp.arrayBuffer());
+  if (audio.length === 0) throw new Error("ElevenLabs returned empty audio");
+  return audio;
+}
+
 async function* streamOpenAICompatible(
   text: string,
   settings: OpenAITTSSettings | CustomTTSSettings,

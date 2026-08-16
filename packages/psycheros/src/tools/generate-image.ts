@@ -272,8 +272,8 @@ async function generateViaOpenRouter(
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
+    await response.body?.cancel();
+    throw new Error(`OpenRouter API error (${response.status})`);
   }
 
   const chatData = await response.json() as Record<string, unknown>;
@@ -310,7 +310,7 @@ async function generateViaOpenRouter(
   // Fallback: check message.content (some models/providers may return it there)
   const content = message?.content;
 
-  // Log what we received for debugging when image extraction fails
+  // Metadata only: provider responses can contain prompts, URLs, or media.
   console.error(
     `[ImageGen] OpenRouter: no image in message.images[]. ` +
       `content type=${typeof content}, hasImages=${
@@ -318,13 +318,6 @@ async function generateViaOpenRouter(
       }. ` +
       `message keys=${message ? Object.keys(message).join(",") : "undefined"}`,
   );
-  if (typeof content === "string") {
-    console.error(
-      `[ImageGen] OpenRouter content (first 200 chars): ${
-        content.slice(0, 200)
-      }`,
-    );
-  }
 
   try {
     return extractImageFromContent(content);
@@ -479,8 +472,8 @@ async function generateViaGemini(
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini API error (${response.status}): ${errorText}`);
+    await response.body?.cancel();
+    throw new Error(`Gemini API error (${response.status})`);
   }
 
   const data = await response.json() as {
@@ -569,8 +562,8 @@ async function generateViaVenice(
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Venice API error (${response.status}): ${errorText}`);
+    await response.body?.cancel();
+    throw new Error(`Venice API error (${response.status})`);
   }
 
   const data = await response.json() as { images?: string[] };
@@ -683,8 +676,8 @@ async function generateViaNanoGPT(
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`NanoGPT API error (${response.status}): ${errorText}`);
+    await response.body?.cancel();
+    throw new Error(`NanoGPT API error (${response.status})`);
   }
 
   const data = await response.json() as {
@@ -718,6 +711,68 @@ async function generateViaNanoGPT(
   }
 
   throw new Error("NanoGPT response did not contain b64_json or url");
+}
+
+export interface HostImageGenerationInput {
+  prompt: string;
+  negativePrompt?: string;
+  aspectRatio?: string;
+  anchorImages?: Array<{ data: string; mediaType: string }>;
+  userImage?: { data: string; mediaType: string };
+  inputImage?: { data: string; mediaType: string };
+}
+
+/** Generate image bytes without persisting chat history or exposing provider credentials. */
+export async function generateImageWithConfig(
+  sourceConfig: ImageGenConfig,
+  input: HostImageGenerationInput,
+): Promise<{ imageData: string; mediaType: string }> {
+  const config = structuredClone(sourceConfig);
+  if (input.aspectRatio) {
+    config.settings.params.aspect_ratio = input.aspectRatio;
+  }
+  const anchors = input.anchorImages ?? [];
+  switch (config.provider) {
+    case "openrouter":
+      return await generateViaOpenRouter(
+        config,
+        input.prompt,
+        input.negativePrompt,
+        anchors,
+        input.userImage,
+        input.inputImage,
+      );
+    case "gemini":
+      return await generateViaGemini(
+        config,
+        input.prompt,
+        input.negativePrompt,
+        anchors,
+        input.userImage,
+        input.inputImage,
+      );
+    case "venice":
+      return await generateViaVenice(
+        config,
+        input.prompt,
+        input.negativePrompt,
+      );
+    case "nanogpt":
+      return await generateViaNanoGPT(
+        config,
+        input.prompt,
+        input.negativePrompt,
+        anchors,
+        input.userImage,
+        input.inputImage,
+      );
+    case "comfyui":
+      throw new Error("ComfyUI provider is not yet implemented");
+    case "native":
+      throw new Error(
+        "Native image generation provider is not yet implemented",
+      );
+  }
 }
 
 // =============================================================================
@@ -860,76 +915,19 @@ async function execute(
   }
 
   try {
-    // Apply per-call aspect ratio override if provided
-    if (aspect_ratio) {
-      generator.settings.params.aspect_ratio = aspect_ratio;
-    }
-
-    let result: { imageData: string; mediaType: string };
-
     // Venice drops image references (inpaint deprecated May 2025). I track
     // whether any were provided so I can note it in the tool result.
     const veniceDroppedImages = generator.provider === "venice" &&
       (anchorImages.length > 0 || userImage || inputImage);
 
-    switch (generator.provider) {
-      case "openrouter":
-        result = await generateViaOpenRouter(
-          generator,
-          prompt,
-          negative_prompt,
-          anchorImages,
-          userImage,
-          inputImage,
-        );
-        break;
-      case "gemini":
-        result = await generateViaGemini(
-          generator,
-          prompt,
-          negative_prompt,
-          anchorImages,
-          userImage,
-          inputImage,
-        );
-        break;
-      case "venice":
-        result = await generateViaVenice(
-          generator,
-          prompt,
-          negative_prompt,
-        );
-        break;
-      case "nanogpt":
-        result = await generateViaNanoGPT(
-          generator,
-          prompt,
-          negative_prompt,
-          anchorImages,
-          userImage,
-          inputImage,
-        );
-        break;
-      case "comfyui":
-        return {
-          toolCallId: ctx.toolCallId,
-          content: "Error: ComfyUI provider is not yet implemented.",
-          isError: true,
-        };
-      case "native":
-        return {
-          toolCallId: ctx.toolCallId,
-          content:
-            "Error: Native image generation provider is not yet implemented.",
-          isError: true,
-        };
-      default:
-        return {
-          toolCallId: ctx.toolCallId,
-          content: `Error: Unknown provider '${generator.provider}'.`,
-          isError: true,
-        };
-    }
+    const result = await generateImageWithConfig(generator, {
+      prompt,
+      negativePrompt: negative_prompt,
+      aspectRatio: aspect_ratio,
+      anchorImages,
+      userImage,
+      inputImage,
+    });
 
     // Save the generated image to disk
     const ext = getExtensionFromMediaType(result.mediaType);

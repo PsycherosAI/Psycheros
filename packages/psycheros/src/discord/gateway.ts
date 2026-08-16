@@ -55,6 +55,37 @@ export interface DiscordMessage {
   timestamp: string;
   edited_timestamp: string | null;
   type: number;
+  flags?: number;
+  attachments?: DiscordAttachment[];
+  embeds?: DiscordEmbed[];
+}
+
+export interface DiscordAttachment {
+  id: string;
+  filename: string;
+  size: number;
+  url: string;
+  proxy_url?: string;
+  content_type?: string;
+  width?: number | null;
+  height?: number | null;
+  duration_secs?: number;
+  waveform?: string;
+}
+
+export interface DiscordEmbedMedia {
+  url?: string;
+  proxy_url?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface DiscordEmbed {
+  type?: string;
+  url?: string;
+  image?: DiscordEmbedMedia;
+  thumbnail?: DiscordEmbedMedia;
+  video?: DiscordEmbedMedia;
 }
 
 export interface DiscordGuild {

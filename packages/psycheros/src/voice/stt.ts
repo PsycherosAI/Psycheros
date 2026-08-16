@@ -91,6 +91,9 @@ async function transcribeDeepgram(
   audio: Uint8Array,
   settings: DeepgramSTTSettings,
   boostWords: string[],
+  contentType = "audio/wav",
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
   ensureRealKey("Deepgram STT", settings.apiKey);
   const params = new URLSearchParams({
@@ -103,13 +106,14 @@ async function transcribeDeepgram(
   if (settings.language) params.set("language", settings.language);
   if (boostWords.length) params.set("keywords", boostWords.join(","));
 
-  const resp = await fetch(`https://api.deepgram.com/v1/listen?${params}`, {
+  const resp = await fetcher(`https://api.deepgram.com/v1/listen?${params}`, {
     method: "POST",
     headers: {
       "Authorization": `Token ${settings.apiKey}`,
-      "Content-Type": "audio/wav",
+      "Content-Type": contentType,
     },
     body: asArrayBuffer(audio),
+    signal,
   });
 
   if (!resp.ok) {
@@ -132,22 +136,27 @@ async function transcribeDeepgram(
 async function transcribeOpenAICompatible(
   audio: Uint8Array,
   settings: OpenAISTTSettings | CustomSTTSettings,
+  mediaType = "audio/wav",
+  filename = "voice.wav",
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
   ensureRealKey("STT", settings.apiKey);
   const baseUrl = settings.baseUrl.replace(/\/+$/, "");
   const form = new FormData();
-  const file = new Blob([asArrayBuffer(audio)], { type: "audio/wav" });
-  form.append("file", file, "voice.wav");
+  const file = new Blob([asArrayBuffer(audio)], { type: mediaType });
+  form.append("file", file, filename);
   form.append("model", settings.model);
   if (settings.language) form.append("language", settings.language);
 
   const headers: Record<string, string> = {};
   if (settings.apiKey) headers["Authorization"] = `Bearer ${settings.apiKey}`;
 
-  const resp = await fetch(`${baseUrl}/audio/transcriptions`, {
+  const resp = await fetcher(`${baseUrl}/audio/transcriptions`, {
     method: "POST",
     headers,
     body: form,
+    signal,
   });
 
   if (!resp.ok) {
@@ -193,5 +202,62 @@ export async function transcribe(
     return transcribeOpenAICompatible(wav, stt.custom);
   }
 
+  throw new Error(`Unsupported server-side STT provider: ${stt.provider}`);
+}
+
+export interface EncodedAudioInput {
+  mediaType: string;
+  filename: string;
+}
+
+/**
+ * Transcribe my already-encoded audio without pretending it is microphone PCM.
+ * Discord voice notes use this path so their Ogg Opus container stays intact.
+ */
+export async function transcribeEncodedAudio(
+  audio: Uint8Array,
+  input: EncodedAudioInput,
+  profile: VoiceProfile,
+  options: { fetcher?: typeof fetch; signal?: AbortSignal } = {},
+): Promise<TranscriptionResult> {
+  const stt = profile.providerSettings.stt;
+  const boostWords = profile.sttCorrections
+    ?.map((correction) => correction.correct)
+    .filter((word) => word && !word.includes(" ")) ?? [];
+  const fetcher = options.fetcher ?? fetch;
+
+  if (stt.provider === "deepgram") {
+    if (!stt.deepgram) throw new Error("Deepgram STT settings missing");
+    return transcribeDeepgram(
+      audio,
+      stt.deepgram,
+      boostWords,
+      input.mediaType,
+      fetcher,
+      options.signal,
+    );
+  }
+  if (stt.provider === "openai") {
+    if (!stt.openai) throw new Error("OpenAI STT settings missing");
+    return transcribeOpenAICompatible(
+      audio,
+      stt.openai,
+      input.mediaType,
+      input.filename,
+      fetcher,
+      options.signal,
+    );
+  }
+  if (stt.provider === "custom") {
+    if (!stt.custom) throw new Error("Custom STT settings missing");
+    return transcribeOpenAICompatible(
+      audio,
+      stt.custom,
+      input.mediaType,
+      input.filename,
+      fetcher,
+      options.signal,
+    );
+  }
   throw new Error(`Unsupported server-side STT provider: ${stt.provider}`);
 }
