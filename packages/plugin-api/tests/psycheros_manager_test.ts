@@ -322,3 +322,109 @@ Deno.test("psycheros manager emits lifecycle events to its event log", async () 
   assertStringIncludes(fileContent, "[INFO] [lifecycle] loaded v1.0.0");
   assertStringIncludes(fileContent, "[INFO] [lifecycle] stopped");
 });
+
+Deno.test("Plugin API v2 enforces host capabilities and keeps durable state outside installed code", async () => {
+  const parent = await Deno.makeTempDir();
+  const root = join(parent, "plugins");
+  const dataRoot = join(parent, "data");
+  await Deno.mkdir(join(root, "discord-media"), { recursive: true });
+  await Deno.writeTextFile(
+    join(root, "discord-media", "plugin.json"),
+    JSON.stringify({
+      id: "discord-media",
+      name: "Discord Media",
+      version: "1.0.0",
+      apiVersion: 2,
+      requiredHostCapabilities: ["discord.events.v1"],
+      entrypoints: { psycheros: "./psycheros.ts" },
+    }),
+  );
+  await Deno.writeTextFile(
+    join(root, "discord-media", "psycheros.ts"),
+    `export default { async start(services) { await Deno.writeTextFile(services.statePath + "/ready", "yes"); } };`,
+  );
+
+  const unavailable = new PluginManager(
+    root,
+    () => ({}) as unknown as LLMClient,
+    undefined,
+    dataRoot,
+  );
+  await unavailable.load();
+  assertEquals(unavailable.getStatuses()[0].active, false);
+  assertStringIncludes(
+    unavailable.getStatuses()[0].lastError ?? "",
+    "discord.events.v1",
+  );
+
+  const available = new PluginManager(
+    root,
+    () => ({}) as unknown as LLMClient,
+    undefined,
+    dataRoot,
+  );
+  available.configureHostCapabilities(["discord.events.v1"]);
+  await available.load();
+  assertEquals(available.getStatuses()[0].active, true);
+  assertEquals(
+    await Deno.readTextFile(
+      join(dataRoot, ".psycheros", "plugin-state", "discord-media", "ready"),
+    ),
+    "yes",
+  );
+  assertEquals(
+    await Deno.stat(join(root, "discord-media", "state")).then(
+      () => true,
+      () => false,
+    ),
+    false,
+  );
+  await available.stop();
+});
+
+Deno.test("Discord-scoped exclusive plugin tools claim generic delivery ownership", async () => {
+  const root = await Deno.makeTempDir();
+  const directory = join(root, "discord-tool");
+  await Deno.mkdir(directory);
+  await Deno.writeTextFile(
+    join(directory, "plugin.json"),
+    JSON.stringify({
+      id: "discord-tool",
+      name: "Discord Tool",
+      version: "1.0.0",
+      apiVersion: 2,
+      entrypoints: { psycheros: "./psycheros.ts" },
+    }),
+  );
+  await Deno.writeTextFile(
+    join(directory, "psycheros.ts"),
+    `const tool = {
+      definition: { type: "function", function: { name: "plugin_voice", description: "I speak.", parameters: { type: "object", properties: {} } } },
+      async execute(_args, ctx) { return { toolCallId: ctx.toolCallId, content: "sent", isError: false }; }
+    };
+    export default { discordTools: [{ tool, sources: ["discord"], exclusiveDelivery: true }] };`,
+  );
+  const manager = new PluginManager(root, () => ({}) as unknown as LLMClient);
+  manager.configureHostCapabilities([]);
+  await manager.load();
+  const tool = manager.getDiscordTools().plugin_voice;
+  const deliveryState: { claimedBy?: string } = {};
+  const result = await tool.execute({}, {
+    toolCallId: "call-1",
+    conversationId: "conversation-1",
+    db: {} as never,
+    config: { discordContext: { deliveryState } } as never,
+  });
+  assertEquals(result.isError, false);
+  assertEquals(deliveryState.claimedBy, "discord-tool/plugin_voice");
+  const conflict = await tool.execute({}, {
+    toolCallId: "call-2",
+    conversationId: "conversation-1",
+    db: {} as never,
+    config: {
+      discordContext: { deliveryState: { claimedBy: "act_in_discord" } },
+    } as never,
+  });
+  assertEquals(conflict.isError, true);
+  await manager.stop();
+});

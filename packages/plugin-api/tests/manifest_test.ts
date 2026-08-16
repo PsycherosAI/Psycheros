@@ -124,6 +124,32 @@ Deno.test("plugin manifest parses capabilities.settings flag", () => {
   );
 });
 
+Deno.test("plugin manifest accepts v2 host capability requirements without breaking v1", () => {
+  const v2 = validatePluginManifest({
+    id: "discord-media",
+    name: "Discord Media",
+    version: "1.0.0",
+    apiVersion: 2,
+    capabilities: { discord: true, settings: true },
+    requiredHostCapabilities: ["discord.events.v1", "voice.encoded-stt.v1"],
+    entrypoints: { psycheros: "./psycheros.ts" },
+  }, "discord-media");
+  assertEquals(v2.capabilities?.discord, true);
+  assertEquals(v2.requiredHostCapabilities, [
+    "discord.events.v1",
+    "voice.encoded-stt.v1",
+  ]);
+
+  assertThrows(() =>
+    validatePluginManifest({
+      id: "future",
+      name: "Future",
+      version: "1.0.0",
+      apiVersion: 3,
+    }, "future")
+  );
+});
+
 Deno.test("portable plugin archives reject conventional credential files", () => {
   assertEquals(isPluginSecretFilename("speech/.env"), true);
   assertEquals(isPluginSecretFilename("speech/secrets.env"), true);
