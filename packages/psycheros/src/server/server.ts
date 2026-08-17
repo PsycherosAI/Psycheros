@@ -197,6 +197,7 @@ import {
   handleGetEventRules,
   handleGetGeneralSettings,
   handleGetGraphData,
+  handleGetHeldSkillsAPI,
   handleGetHomeSettings,
   handleGetImageGenSettings,
   handleGetLLMSettings,
@@ -4820,6 +4821,11 @@ export class Server {
       return await handleSkillsListFragment(ctx);
     }
 
+    // GET /api/skills/held - held skill names for chip strip polling
+    if (method === "GET" && path === "/api/skills/held") {
+      return handleGetHeldSkillsAPI(ctx, request);
+    }
+
     // POST /api/skills - Create or update a skill
     if (method === "POST" && path === "/api/skills") {
       return await handleSaveSkillAPI(ctx, request);
@@ -4828,7 +4834,7 @@ export class Server {
     // GET /api/skills/:name - Full skill JSON
     if (method === "GET" && path.startsWith("/api/skills/")) {
       const skillName = path.slice("/api/skills/".length);
-      if (skillName && skillName !== "list") {
+      if (skillName && skillName !== "list" && skillName !== "held") {
         return await handleGetSkillAPI(ctx, skillName);
       }
     }
@@ -4836,7 +4842,7 @@ export class Server {
     // DELETE /api/skills/:name - Delete a skill
     if (method === "DELETE" && path.startsWith("/api/skills/")) {
       const skillName = path.slice("/api/skills/".length);
-      if (skillName && skillName !== "list") {
+      if (skillName && skillName !== "list" && skillName !== "held") {
         return await handleDeleteSkillAPI(ctx, skillName);
       }
     }

@@ -6214,24 +6214,38 @@ function updateVoiceCallButtonVisibility() {
   }).catch(function() {});
 }
 
-// Held-skill chips are conversation state — hide the strip outside
-// conversation views (settings etc.). Returning to a conversation re-renders
-// the strip via the chat fragment's OOB swap, which replaces the element
-// fresh (no `hidden`), so this only ever hides.
-function updateHeldSkillsStripVisibility() {
+// Held-skill chips are conversation state, reconciled by polling like the BLE
+// connection badges — push updates (SSE dom_update + OOB swaps) make changes
+// instant when they land, and the poll guarantees the strip never goes stale
+// if one is missed.
+async function updateHeldSkillsStrip() {
   var strip = document.getElementById('held-skills-strip');
   if (!strip) return;
-  strip.hidden = document.getElementById('messages') === null;
+  if (!currentConversationId || document.getElementById('messages') === null) {
+    strip.hidden = true;
+    return;
+  }
+  try {
+    var resp = await fetch('/api/skills/held?conversationId=' + encodeURIComponent(currentConversationId));
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var skills = data.skills || [];
+    strip.innerHTML = skills.map(function(name) {
+      return '<div class="held-skill-chip" title="Skill: ' + name + '">Skill: ' + name + '</div>';
+    }).join('');
+    strip.hidden = false;
+  } catch (_) { /* poll retries */ }
 }
 
 updateVoiceCallButtonVisibility();
-updateHeldSkillsStripVisibility();
+updateHeldSkillsStrip();
+setInterval(updateHeldSkillsStrip, 5000);
 
 // Re-evaluate whenever #chat is swapped via HTMX (settings nav, sidebar, etc.).
 document.body.addEventListener('htmx:afterSwap', function(e) {
   if (e.detail.target && e.detail.target.id === 'chat') {
     updateVoiceCallButtonVisibility();
-    updateHeldSkillsStripVisibility();
+    updateHeldSkillsStrip();
   }
 });
 

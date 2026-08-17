@@ -41,10 +41,12 @@ Chips are **display-only** — no click-to-release, `pointer-events: none`,
 transparent background — just floating bubbles over the conversation, anchored
 top-left of `.main` like the FABs are anchored top-right (so they never push the
 conversation down). They are per-conversation (holds are stored in the
-`held_skills` table keyed by conversation), update live mid-turn via the
-`held-skills` UI region (`affectedRegions` on the skill tool → `dom_update`
-SSE), and re-render on conversation open via the chat fragment's OOB swaps.
-Design doc: [`design/held-skills-chips.md`](design/held-skills-chips.md).
+`held_skills` table keyed by conversation). Updates are push + reconcile:
+`dom_update` SSE events make changes instant mid-turn, the chat fragment's OOB
+swaps refresh on conversation open, and — like the BLE connection badges — a
+5-second poll of `GET /api/skills/held?conversationId=` re-renders the strip so
+a missed push event can never leave it stale. Design doc:
+[`design/held-skills-chips.md`](design/held-skills-chips.md).
 
 ## Context Inspector
 

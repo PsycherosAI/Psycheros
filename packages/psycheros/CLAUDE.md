@@ -265,10 +265,15 @@ mentions bundled skills at BOTH the supervisor's inline briefing composition
 (`supervisor.ts`, the real spawn path) and `composeBriefing` (kept in sync but
 not on the spawn path).
 
-**Settings:** third "Skills" tab in Settings > Tools. `/api/skills/list` must be
-route-matched before `/api/skills/:name` (prefix pattern ordering). Skill names
-are validated against `SKILL_NAME_RE` (`src/skills/loader.ts`) at every
+**Settings:** third "Skills" tab in Settings > Tools. `/api/skills/list` and
+`/api/skills/held` must be route-matched before `/api/skills/:name` (prefix
+pattern ordering — both are also excluded from the `:name` slice guards). Skill
+names are validated against `SKILL_NAME_RE` (`src/skills/loader.ts`) at every
 name→path boundary — that regex is the path-traversal defense.
+`GET /api/skills/held?conversationId=` feeds the chip strip's 5-second
+reconciliation poll (`updateHeldSkillsStrip` in psycheros.js — same pattern as
+the BLE status badges; push paths make updates instant, the poll guarantees the
+strip can't go stale).
 
 ## Wearable data pipeline
 

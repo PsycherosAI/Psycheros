@@ -33,10 +33,14 @@ in this conversation.
 
 ## Design decisions
 
-- **Server-rendered region, no new JS** — chips render via the existing
-  `held-skills` UI region (innerHTML swap of `#held-skills-strip`), updated by
-  the chat fragment's OOB swaps on conversation open and by `dom_update` events
-  mid-turn. No client fetch endpoint, nothing added to web/js.
+- **Push + poll reconciliation (revised 2026-08-16 after live reports of a stale
+  chip on release)** — push updates (`held-skills` UI region via `dom_update`
+  SSE mid-turn + OOB swaps on conversation open) make changes instant, and a
+  5-second client poll of `GET /api/skills/held?conversationId=` re-renders the
+  strip from server truth — the exact pattern the BLE connection badges use. A
+  missed or mishandled push event can no longer leave the strip lying until
+  reload. The original design was push-only with zero added JS; the poll costs
+  one tiny JSON request per 5s per open tab.
 - **`:empty` collapse instead of JS visibility** — the strip is `display:none`
   when empty (components.css), so release = swap in empty HTML. No hidden-flag
   juggling.

@@ -8526,6 +8526,19 @@ export async function handleSkillsListFragment(
 }
 
 /**
+ * Handle GET /api/skills/held?conversationId=... - held skill names for the
+ * chip strip's polling reconciliation (same pattern as /api/ble-status).
+ */
+export function handleGetHeldSkillsAPI(ctx: RouteContext, request: Request) {
+  const url = new URL(request.url);
+  const conversationId = url.searchParams.get("conversationId");
+  if (!conversationId) {
+    return jsonResp({ error: "conversationId is required" }, 400);
+  }
+  return jsonResp({ skills: ctx.db.getHeldSkills(conversationId) });
+}
+
+/**
  * Handle GET /fragments/settings/skills/new and
  * GET /fragments/settings/skills/edit/:name - Skill editor fragments.
  */

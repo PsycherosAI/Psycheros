@@ -242,6 +242,18 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  /* Wraps instead of inflating the message row's min-content past the
+     viewport — long titles + the action buttons otherwise force sideways
+     scroll on narrow screens. */
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.msg-header .msg-edit-btn,
+.msg-header .msg-action-btn,
+.msg-header .msg-timestamp,
+.msg-header .pulse-header-icon {
+  flex-shrink: 0;
 }
 
 .msg--user .msg-header {
@@ -286,7 +298,10 @@
   line-height: var(--line-height);
   border-radius: 8px;
   min-width: 0;
-  overflow-wrap: break-word;
+  /* `anywhere`, not `break-word`: break-word only breaks during layout —
+     intrinsic min-content still counts unbreakable tokens whole, so a long
+     code span or URL still inflates fit-content bubbles past the viewport. */
+  overflow-wrap: anywhere;
 }
 
 /* User messages - subtle, recede */
@@ -294,7 +309,6 @@
   background-color: var(--c-bubble);
   color: var(--c-fg);
   border: 1px solid var(--c-border);
-  word-wrap: break-word;
   font-size: var(--font-size-base);
   line-height: 1.6;
 }
@@ -521,8 +535,7 @@ body[data-decor="stamp"] .msg--user .msg-content,
 .assistant-text {
   color: var(--c-fg);
   white-space: normal;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   font-size: var(--font-size-base);
   line-height: var(--line-height);
   letter-spacing: -0.01em;
@@ -1418,6 +1431,9 @@ body[data-decor="stamp"] .msg--user .msg-content,
   background-color: var(--c-bg-sunken);
   padding: var(--sp-3);
   margin: var(--sp-2) 0;
+  /* overflow-x alone doesn't cap the box's intrinsic min-content — a long
+     nowrap line still inflates fit-content message rows. */
+  max-width: 100%;
   overflow-x: auto;
   border-radius: 6px;
   border: 1px solid var(--c-border);

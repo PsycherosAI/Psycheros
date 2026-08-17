@@ -308,28 +308,40 @@ Context Books are more accurate than Data Vault RAG, because an exact piece
 entry is inserted into context based on keywords. You can use "sticky" to make
 the message stay in context for a certain amount of turns.
 
-## Skills
-
-Skills are how your entity remembers procedures: markdown files they load on
-demand with the `skill` tool, instead of keeping instructions in context at all
-times. A loaded skill stays active for the conversation until the entity
-releases it.
-
-The entity can write their own skills, and you can edit or create them in
-Settings > Tools > Skills. A couple ship built-in, like the auto-generated
-handbook rebuilt from the docs at startup.
-
 ## Workspace
 
-The Workspace is your entity's space for careful computer work — documents, file
-organization, code. The entity spawns a sandboxed coding session and works in it
-as part of themself, like arms lifting something. A `>_` button appears while a
-session runs, with a terminal view showing live progress; approvals and
-questions surface as toasts.
+workspace, then set things up in `Settings > Workspace`. It is **highly
+recommended** that you use a coding plan
+([Z.ai](https://z.ai/subscribe?ic=SJSHOMVJGL), MoonShot, Alibaba, DeepSeek,
+Codex, etc) with this feature, because it can and will munch tokens fast. Make
+sure to turn on the `workspace` tool (`Settings > Tools`) for your entity to be
+able to use it.
 
-Sessions run sync (the entity waits), async (results come back on their own when
-done), or engaged (back-and-forth until the entity finishes). Workspace needs
-OpenCode installed on the server. Settings > Workspace has the notable options:
+Linux and Mac have sandboxing, but Windows does not, though there are soft
+blocker instructions for the entity to not brick themselves; you can also tell
+your entity to use Feral mode to be able to roam your computer as they wish. Any
+files your entity looks at on your computer will pass through their API
+provider, so be smart about what you keep off-limits; you can set House Rules in
+the Workspace settings to instruct certain actions or folders to be left alone.
+
+The `>_` button appears while a session runs, with a terminal view showing live
+progress; approvals and questions surface as toasts. Settings > Workspace has
+the notable options:
+
+#### Default Isolation
+
+Sandboxed (locked down) is the default. Feral gives host access for "help me
+with my computer" workflows.
+
+#### Projects Folder
+
+Where finished work gets copied out of the sandbox, with an approval toast.
+Defaults to ~/Projects.
+
+#### Always-ask Paths
+
+Paths that always prompt before access, even in Feral mode — for anything
+sensitive.
 
 #### Default Isolation
 
@@ -379,7 +391,14 @@ away — handy for wrapping an API or a device you want them to control.
 
 #### Skills
 
-The Skills tab manages the entity's skill files — see the Skills section above.
+Skills are how your entity remembers procedures: markdown files they load on
+demand with the `skill` tool, instead of keeping instructions in context at all
+times. A loaded skill stays active for the conversation until the entity
+releases it.
+
+The entity can write their own skills, and you can edit or create them in
+Settings > Tools > Skills. A couple ship built-in, like the auto-generated
+handbook rebuilt from the docs at startup.
 
 ## Vision
 

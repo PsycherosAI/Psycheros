@@ -6,6 +6,14 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-08-17
+
+### Fixed
+
+- Held-skill chips now reconcile by polling, so the UI stays in sync with the
+  entity's loaded skills without a manual refresh.
+- Message rows can no longer force horizontal scrolling on phones.
+
 ## [0.11.0] - 2026-08-16
 
 ### Added
