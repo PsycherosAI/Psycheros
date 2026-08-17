@@ -11,6 +11,7 @@ initLogCapture();
 import { Server } from "./server/mod.ts";
 import { createMCPClient, type MCPClient } from "./mcp-client/mod.ts";
 import { initialize } from "./init/mod.ts";
+import { generateHandbookSkill } from "./skills/mod.ts";
 import { prepareVectorExtension } from "./db/mod.ts";
 import { getDefaultWebSearchSettings } from "./llm/web-search-settings.ts";
 import { loadEntityCoreLLMSettings } from "./llm/entity-core-settings.ts";
@@ -86,6 +87,10 @@ console.log(`
 // Initialize user data directories from templates. Reads templates from
 // projectRoot (source bundle), writes to dataRoot (runtime state location).
 await initialize(config.projectRoot, config.dataRoot);
+
+// Regenerate the psycheros-handbook skill from the current docs so it always
+// matches the running version. Generated skill — overwrites itself each start.
+await generateHandbookSkill(config.projectRoot, config.dataRoot);
 
 // Load per-component log-level overrides from .psycheros/log-settings.json
 // (silent no-op when the file doesn't exist).

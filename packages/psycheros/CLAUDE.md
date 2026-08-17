@@ -36,457 +36,287 @@ capture, image and tool-arg fading. The chat HTTP route in
 `src/embeddings/` is the configuration surface for the user-selectable embedding
 model. Settings persist to `.psycheros/embedding-settings.json` and propagate to
 entity-core via `ENTITY_CORE_EMBEDDING_*` env vars at MCP spawn (same pattern as
-LLM settings).
+LLM settings). Deep reference — presets, re-embed orchestrator, dynamic vec0
+dimension, rebuild notification flow, settings UI:
+[`docs/embeddings.md`](docs/embeddings.md).
 
-Key files:
-
-- `presets.ts` — curated model catalog (MiniLM, BGE-small/base, jina, nomic,
-  mpnet) with metadata for the UI picker.
-- `settings.ts` / `entity-core-embedding-settings.ts` — load/save.
-- `entity-core-env.ts` — builds the env-var map pushed to entity-core.
-- `download-manager.ts` — pre-fetches models with progress events. Tracks
-  completed downloads in `.psycheros/downloaded-models.json` (Xenova's
-  filesystem cache is not reliably persistent in Deno — see below).
-- `re-embed.ts` — orchestrator that drops/recreates psycheros vec tables,
-  reindexes messages/memories/vault, and calls entity-core's
-  `embedding_rebuild_all` MCP tool.
-
-The vec0 dimension is **dynamic** —
-`src/db/schema.ts:getActiveEmbeddingDimension()` reads from
-`app_metadata.active_embedding_dimension`. All vec0 DDL sites read via this
-getter at call time. The orchestrator calls `setActiveEmbeddingDimension()`
-after a successful rebuild.
-
-**Xenova cache gotcha (load-bearing):** `@huggingface/transformers` defaults to
-`env.useBrowserCache = true`. In Deno the Web Cache API is available, so Xenova
-writes there and skips the filesystem entirely — leaving models in Deno's opaque
-`~/.cache/deno/...` and breaking any on-disk check. Both embedders
-(`src/rag/embedder.ts` for psycheros, entity-core's `src/embeddings/mod.ts`)
-force `env.useBrowserCache = false` so models persist at
-`${dataRoot}/.psycheros/model-cache/`. Don't remove this.
-
-**MCP ping pause invariant:** the re-embed orchestrator pauses health pings
-before restarting entity-core and resumes after. Loading the new model spikes
-psycheros's CPU enough that the ping watchdog would falsely trip and storm
-reconnect attempts that race with the explicit restart. Any new long-running
-maintenance task that spikes CPU should call `mcpClient.pausePings()` /
-`resumePings()` the same way.
-
-The UI lives in Settings > Model Settings > Embeddings (the "LLM Settings" card
-was renamed). Tabs are `LLM Profiles` and `Embeddings`; the shell is
-`renderModelSettingsShell()` in `src/server/templates.ts`. HTMX swaps the whole
-tab content, so the fragment ends with an inline `<script>` that calls
-`globalThis.initEmbeddingsTab()` to seed the recommended-chunk-size hint —
-`DOMContentLoaded` fires too early (before the swap).
+- **Xenova cache gotcha (load-bearing):** `@huggingface/transformers` defaults
+  to `env.useBrowserCache = true`. In Deno the Web Cache API is available, so
+  Xenova writes there and skips the filesystem entirely — leaving models in
+  Deno's opaque `~/.cache/deno/...` and breaking any on-disk check. Both
+  embedders (`src/rag/embedder.ts` for psycheros, entity-core's
+  `src/embeddings/mod.ts`) force `env.useBrowserCache = false` so models persist
+  at `${dataRoot}/.psycheros/model-cache/`. Don't remove this.
+- **MCP ping pause invariant:** any long-running maintenance task that spikes
+  CPU (the re-embed orchestrator, rebuilds) must call `mcpClient.pausePings()` /
+  `resumePings()` — loading a model falsely trips the ping watchdog and storms
+  reconnect attempts that race the explicit restart. `MCPClient` sets a
+  `fallbackNotificationHandler` **before** `client.connect()` and auto-pauses
+  pings on `notifications/embedding-rebuild` `started`/`progress`, resuming on
+  `done`/`failed`, so a boot-time rebuild in entity-core can no longer starve
+  pings into the watchdog-kill loop.
+- **Settings/index drift detection:** the save endpoint persists a new model to
+  the settings file _before_ the user confirms the re-embed, so a switch that
+  was never re-indexed (missed confirmation, failed run) leaves settings and
+  vec0 tables at different dimensions — every retrieval path then fails per-call
+  while chat keeps working. `Server.init()` logs the mismatch at boot and
+  `checkEmbeddingSync()` (`web/js/psycheros.js`, on page load) shows the
+  re-index banner. Keep at least one durable surfacing: the
+  `model_change_detected` SSE event is one-shot (entity-core boot) and stops
+  firing entirely once entity-core's fingerprint happens to match the settings
+  again even if its tables don't.
 
 ## Voice chat subsystem
 
 `src/voice/` manages voice chat using a **walkie-talkie model**: one user
 utterance → one STT call → one LLM call → one TTS response. The entire pipeline
 runs in-process in the Deno daemon — no Python sidecar, no real-time turn
-aggregator. This replaced an earlier Pipecat-based real-time pipeline that
-fought the high-latency stack; see `pipecat-shelved/SHELVED.md` for what was
-preserved and when to revive it.
+aggregator. An earlier Pipecat-based real-time pipeline is shelved; see
+`pipecat-shelved/SHELVED.md` for what was preserved and revival conditions. Full
+reference — architecture, design decisions, module layout, protocol, browser
+quirks: [`docs/VOICE_CHAT_UX.md`](docs/VOICE_CHAT_UX.md). API endpoints:
+[`docs/api-reference.md`](docs/api-reference.md) ("Voice Chat").
 
-```
-Browser (Web Speech API or PCM capture)
-  ──WebSocket──→ Psycheros (:3000)
-                   STT (server-side) → LLM (streaming) → TTS (streaming)
-                   audio frames back to browser as Int16 PCM 16kHz
-```
+Traps:
 
-**Key design decisions:**
-
-- **Opt-in and isolated** — master feature flag (`VoiceSettings.enabled`)
-  defaults to `false`. When off, the voice routes return 403 and no audio state
-  exists.
-- **Walkie-talkie turn model** — explicit
-  `IDLE → RECORDING → PROCESSING →
-  SPEAKING → IDLE` state machine. No
-  aggregator, no cascading responses. Latency doesn't drop, but the user expects
-  to wait in this model.
-- **Two STT paths**:
-  - `"browser"` — Web Speech API (`SpeechRecognition`). Browser transcribes;
-    daemon receives text. Zero server-side STT cost, works on phones.
-  - `"deepgram"` / `"openai"` / `"custom"` — server-side STT. Browser streams
-    PCM; daemon calls the provider. For local Whisper servers, point `"custom"`
-    at the server's `baseUrl`.
-- **Two input modes** (global, toggled mid-call from the overlay):
-  - Default: end-of-speech detection (browser-side energy VAD with a
-    configurable silence threshold for server-side STT; phrase-debounce for
-    browser STT).
-  - Opt-in push-to-talk: hold a button (or configured key binding) to record,
-    release to send. Useful for users who stutter, think before speaking, or are
-    in noisy environments. Configurable key bindings (keyboard codes, mouse
-    buttons, MediaSession actions for Bluetooth headsets).
-- **Saveable voice profiles** — follows the `ImageGenSettings` pattern. Each
-  `VoiceProfile` has TTS/STT provider config, TTS pronunciation, STT
-  corrections, custom instructions, audio effects, context window size, VAD
-  threshold (`vadThreshold`), end-of-turn silence (`endOfTurnSilence`),
-  browser-STT phrase debounce (`phraseDebounceMs`), STT debug toggle
-  (`sttDebug`), idle timeout, reasoning-disable toggle, voice effect preset
-  (`voiceEffect`). Storage: `.psycheros/voice-settings.json`.
-- **Phone-call UI** — dedicated overlay, not embedded in the chat. After a call
-  ends, the transcript is persisted as regular messages prefixed `[Voice Chat]`
-  via `db.addMessage` under the per-conversation write lock — so the text
-  conversation can continue naturally with the voice exchange as context.
-- **Voice call FAB lives in the app shell, not the chat fragment.** The trigger
-  button (`#voice-call-btn`) is a sibling of `#chat` inside `.main` so it
-  survives HTMX swaps of `#chat`. Visibility is JS-driven
-  (`updateVoiceCallButtonVisibility` in `web/js/psycheros.js`): shown only when
-  `/api/voice/status` reports enabled AND `#messages` exists in the DOM (i.e., a
-  conversation is actually open). Re-evaluated on every `htmx:afterSwap` into
-  `#chat`. Don't move the FAB into `renderChatView()` — the swap survival is
-  load-bearing. Renaming the `#messages` id silently breaks the gate.
-- **Multi-device lock** — one voice session per conversation. If a second client
-  tries to start voice on the same conversation, it's rejected.
-- **Independent context window** — voice mode uses its own rolling context
-  window (default 64k tokens) from the voice profile, not the text LLM profile's
-  setting.
-- **Reuses EntityTurn infrastructure** — voice mode constructs an `EntityTurn`
-  with the same `EntityConfig` as text chat (`handleChat` in `routes.ts`) and
-  drives `entityTurn.process()` from the voice pipeline. The entity gets
-  identical context for voice as for text: full situational awareness (current
-  time, devices, last interaction, conversation metadata, wearable data),
-  lorebook triggers, RAG-retrieved memories, chat history RAG, vault documents,
-  knowledge graph context, image-gen descriptions, context snapshots, metrics.
-  No bespoke system message — single source of truth.
-- **Voice-specific `ProcessOptions`** — `voiceMode: true`, `systemPromptSuffix`
-  (VOICE CHAT MODE note + per-profile custom instructions),
-  `messagePrefix: "[Voice Chat] "` (prepended to persisted messages so voice
-  attribution is visible in history; parrot-emitted copies stripped before
-  persist, same pattern as `<t>` tag handling). Tools are enabled for voice
-  turns (since `caf23a8`, June 2026) — the entity can call any tool during a
-  voice call. Pass `disableTools: true` explicitly to suppress tools for a
-  specific voice turn.
-- **Pulse queuing during voice** — Pulses that fire during a voice call are
-  queued and batched at the next conversational break.
-- **TTS pronunciation + STT corrections** — both are per-profile string
-  substitution maps applied at different pipeline stages. Pronunciation rewrites
-  LLM output before TTS (e.g. "Psycheros" → "sy-KEH-ros"). Corrections rewrite
-  STT output before the LLM sees it (e.g. "sih keh ros" → "Psycheros"). Same
-  matching rules (word-boundary, case-insensitive, preserves leading
-  capitalization).
-- **Reasoning disable** — profiles can opt out of LLM thinking tokens
-  (`disableReasoning: true`, the default for latency). Passed to the LLM client
-  as `thinkingEnabled: false`.
-- **Streaming TTS playback** — LLM tokens accumulate into a sentence buffer. At
-  sentence boundaries (`.`, `!`, `?`, newline) or 200 chars, the buffer is
-  flushed: `<t>` tags stripped, TTS pronunciation applied, then streamed to the
-  provider. Audio frames are sent to the browser as soon as they arrive so the
-  user hears speech while the rest of the response is still generating.
-- **`[Voice Chat]` parrot prevention** — three layers, all preserve the entity's
-  view of voice attribution (only LLM _output_ is cleaned, never its _input_):
-  1. **Persist-side strip** (`loop.ts`): strips ALL `[Voice Chat]` from LLM
-     output before persisting. Only re-adds the prefix in voice mode
-     (`options.messagePrefix` set).
-  2. **Streaming-side strip** (`loop.ts` chunk yield path): buffers the first 13
-     chars of each attempt, strips leading prefix before yielding chunks so
-     users never see it flash during the live response.
-  3. **TTS-side strip** (`pronunciation.ts`): defensive layer in the sentence
-     flush. History retains the prefix on legitimate voice messages — the entity
-     always knows which turns were voice. Same pattern as `<t>` timestamp tags.
-     **Don't strip all prefixes from LLM context** — that breaks the entity's
-     voice attribution awareness (see
-     `feedback_voice_attribution_decisions.md`).
-- **Browser STT on Chrome Android** — special handling required:
-  - Skip `getUserMedia` entirely in browser STT mode; an active stream silently
-    blocks `SpeechRecognition` from accessing the mic on Chrome Android.
-    Trade-off: waveform canvas stays blank. Server-side STT modes still acquire
-    the mic (needed for PCM streaming).
-  - 300ms delay before `onend` auto-restart on mobile to prevent overlapping
-    system tones. Desktop restarts immediately (in PTT mode) so words right
-    after a pause aren't lost in the gap.
-  - `interimResults: true` (still only send finals) — Chrome Android ends
-    recognition aggressively when `interimResults: false`.
-  - Phrase accumulator + `phraseDebounceMs` debounce (default 1200ms) — Chrome
-    fires finals at every phrase pause; batch into one utterance.
-  - Cumulative-result detection — Chrome Android also fires finals that contain
-    cumulative session text. If new transcript starts with the joined buffer,
-    REPLACE instead of append (otherwise snowballs).
-  - `sttDebug` profile flag (default off) gates diagnostic toasts.
-- **PTT settings** — `VoiceSettings.pttKeys` (string array of
-  `KeyboardEvent.code` or `MediaSession:action` or `Mouse3`/`Mouse4`) is the
-  only global PTT config. PTT enable/disable is per-call — toggled from the
-  voice overlay, initialized from `VoiceProfile.pushToTalk`, tracked in voice.js
-  module-local `pttEnabled` and server-side `session.pttMode`
-  (`"ptt" | "vanilla"` literal — see below). MediaSession bindings toggle
-  (single-press); keyboard/mouse bindings hold (keydown/keyup). Four
-  load-bearing PTT subtleties — silence-detector must re-check `pttEnabled`
-  every iteration (toggle-on mid-call), browser-STT `onend` must restart
-  recognition if still holding, phrase buffer must not flush mid-hold, and
-  `endPTT` flush must defer to `onend` (Chrome emits a trailing final between
-  `stop()` and `onend`). See `docs/VOICE_CHAT_UX.md` "Subtle PTT behaviors" for
-  the full rationale.
-- **Server-side audio gate** (`session-manager.ts` binary-frame handler) — gates
-  on `session.pttMode === "ptt" && !session.pttHolding`. Must be a literal
-  compare: `pttMode` is typed `"ptt" | "vanilla"`, both strings are truthy, so a
-  bare `if (session.pttMode)` silently drops all audio in vanilla mode. Same
-  trap applies to any union-of-string-literals field used as a flag.
+- **The voice call FAB lives in the app shell, not the chat fragment.** The
+  trigger button (`#voice-call-btn`) is a sibling of `#chat` inside `.main` so
+  it survives HTMX swaps of `#chat`. Visibility is JS-driven
+  (`updateVoiceCallButtonVisibility` in `web/js/psycheros.js`), re-evaluated on
+  every `htmx:afterSwap` into `#chat`. Don't move the FAB into
+  `renderChatView()` — the swap survival is load-bearing. Renaming the
+  `#messages` id silently breaks the gate.
 - **Mid-response audio gate** (`pipeline.ts` `pushAudio` + `session-manager.ts`
   `user_speech_start` handler) — TTS audio leaking back into the mic triggers
-  the browser VAD during speaking. Both call sites must check pipeline state
-  before acting: `pushAudio` drops frames while `processing`/`speaking`;
-  `user_speech_start` still sets `userSpeaking` (Pulse draining needs it) but
-  must NOT call `setState("recording")`. Otherwise state jumps `speaking` →
-  `recording`, `isEntityMidResponse()` then returns false, and the next
-  `user_silence` runs `processAudioTurn` on top of the in-flight turn — firing
-  the "sent" tone mid-speaking and letting the entity respond to its own echo.
-- **Yin Yang mode** — toggle button (☯) in the voice overlay switches from voice
-  input to text input mid-call. Typed text uses the same
-  `{type:
-  "transcript"}` message path as browser STT, so all infrastructure
-  works unchanged. Stops `MediaStreamTrack`s on entry so the browser releases
-  the hardware mic; re-acquires on exit (server-side STT only).
-- **Voice effects** — `VoiceProfile.voiceEffect` field applies a Web Audio
-  filter chain between `playbackGain` and destination. Six presets: `none`,
-  `comms` (sci-fi intercom), `robot` (ring mod), `telephone` (bandpass), `deep`
-  (lowpass + bass), `cavern` (feedback delay). All cheap (1–3 nodes each).
-  Per-profile "Test Effect" button in Audio settings.
-- **Screen wake lock** — `navigator.wakeLock.request('screen')` on call start,
-  released on call end. Prevents Android from killing the WebSocket when the
-  screen auto-times-out. Non-fatal if unsupported.
-- **Silent audio loop (mobile only)** — claims the OS media session so Bluetooth
-  headset buttons (Shokz etc.) route to the page. Mobile-only (UA sniff): on
-  desktop the empty WAV data URL we used previously spun Chrome's audio thread
-  (zero bytes per loop = infinite loop frequency = browser-wide freeze). Mobile
-  generates a real 1-second silent WAV via Web Audio + Blob URL so each loop has
-  real work.
-- **Voice attribution via `is_voice` column** — the `[Voice Chat]` prefix in
-  message content is now **derived** (regenerated from the `is_voice` column at
-  read time), not stored. Column is authoritative — the LLM can't mark itself as
-  voice. Same architectural pattern as timestamps (stored in `created_at`,
-  regenerated as `<t>` tags). Persist path strips both `[Voice Chat]` AND `<t>`
-  tags from LLM output before DB. Read paths (ChatRAG, history, browser
-  rendering) prepend the prefix when `isVoice=true`, strip stray prefixes as
-  defense-in-depth. See `docs/VOICE_CHAT_UX.md` for the full migration story.
+  the browser VAD during speaking. `pushAudio` drops frames while
+  `processing`/`speaking`; the `user_speech_start` handler still sets
+  `userSpeaking` (Pulse draining needs it) but must NOT call
+  `setState("recording")`. Otherwise the next `user_silence` runs
+  `processAudioTurn` on top of the in-flight turn — firing the "sent" tone
+  mid-speaking and letting the entity respond to its own echo.
+- **Server-side audio gate must literal-compare `session.pttMode`** — the field
+  is typed `"ptt" | "vanilla"`, both strings are truthy, so a bare
+  `if (session.pttMode)` silently drops all audio in vanilla mode. Same trap
+  applies to any union-of-string-literals field used as a flag.
+- **`is_voice` column is authoritative for voice attribution** — the
+  `[Voice Chat]` prefix in message content is derived (regenerated from the
+  column at read time), not stored; the LLM can't mark itself as voice. Persist
+  paths strip parroted prefixes (and `<t>` tags) from LLM _output_ only. **Never
+  strip the prefix from the LLM's input** — that breaks the entity's voice
+  attribution awareness (same pattern as `<t>` tags).
+- **Chrome Android browser-STT quirks** — skip `getUserMedia` entirely in
+  browser STT mode (an active stream silently blocks `SpeechRecognition` from
+  the mic). Before touching `web/js/voice.js` STT or PTT handling, read
+  `docs/VOICE_CHAT_UX.md` "Browser STT on Chrome Android" and "Subtle PTT
+  behaviors" — four load-bearing PTT subtleties (silence-detector re-check,
+  `onend` restart while holding, phrase-buffer mid-hold guard, `endPTT` defers
+  to `onend`) live there.
+- Voice turns are real `EntityTurn`s with the same context as text chat and hold
+  the per-conversation write lock from user-message persist through final
+  response. Tools are enabled during voice calls; pass `disableTools: true` to
+  suppress them for a specific turn.
 
-**Module layout:**
+## Workspace subsystem
 
-- `src/voice/session-manager.ts` — `VoiceSessionManager` singleton: session
-  lifecycle, browser message handling, multi-device lock, idle timeout. No
-  longer persists transcripts — EntityTurn persists per-message during the call
-  (with `[Voice Chat]` prefix via `messagePrefix`).
-- `src/voice/pipeline.ts` — `WalkieTalkieSession` class: the per-session state
-  machine. Drives `EntityTurn.process()` and routes content chunks to TTS. Emits
-  state/transcript/audio events the session manager forwards to the browser.
-- `src/voice/stt.ts` — server-side STT providers (Deepgram, OpenAI, custom).
-  Wraps PCM in a WAV header before upload. Browser-native STT never reaches this
-  module — text arrives pre-transcribed.
-- `src/voice/tts.ts` — streaming TTS providers (MiniMax, ElevenLabs, OpenAI,
-  custom). All output is normalized to Int16 PCM 16kHz mono so the browser's
-  playback queue can consume frames directly. MiniMax ported from the shelved
-  `FixedMiniMaxTTSService` (buffer_remaining flush).
-- `src/voice/pronunciation.ts` — `applyTTSPronunciation`, `applySTTCorrections`,
-  `stripTimestamps`, `stripTTag`. Ported from the shelved Pipecat `TTagStripper`
-  / `_strip_timestamps` / `PronunciationProcessor`.
-- `src/voice/mod.ts` — barrel.
-- `src/llm/voice-settings.ts` — types, persistence, masking, profile
-  normalization. Includes `ttsKeepAliveDays` and `lastKeepAlive` on
-  `VoiceProfile` for keep-alive scheduling.
-- `web/js/voice.js` — client-side voice logic: mic capture via `getUserMedia`,
-  PCM resampling (48kHz→16kHz), browser SpeechRecognition integration,
-  browser-side energy VAD for end-of-speech detection, PTT button handling,
-  audio playback queue, waveform canvas visualization, mute/deafen/end controls,
-  keyboard shortcuts. Exported via `globalThis` for HTMX onclick handlers.
-  Detects Tauri at runtime (`window.__TAURI__?.core?.invoke`) and calls the
-  launcher's `request_mic_permission` command before `getUserMedia` — works
-  around a macOS WKWebView bug where the system mic prompt never fires inside
-  the desktop app. Falls through cleanly in browser mode and on older launchers
-  without the command (try/catch logs a warning). See
-  [`launcher-v2/CLAUDE.md`](../launcher-v2/CLAUDE.md) "Traps that bite" for the
-  full bug + workaround context.
-- `web/css/voice.css` — phone-call overlay styles, waveform canvas, control
-  buttons, toast notifications, voice banner. Loaded via `@import "voice.css"`
-  in `main.css`.
-- `pipecat-shelved/` — the previous Pipecat-based pipeline, preserved for a
-  future real-time mode. See `pipecat-shelved/SHELVED.md` for revival conditions
-  and what was ported.
+`src/workspace/` is the entity's "faculty for careful, detailed work" — OpenCode
+sessions the entity spawns via the `workspace` omni-tool. The entity is the
+_user_ of the workspace; the workspace is framed as part of the entity, like
+arms lifting something — never a separate agent. **Off-by-default:** `workspace`
+and `ask_user` are in `DEFAULT_DISABLED_TOOLS`; enable via Settings > Tools once
+OpenCode is installed. Deep reference — modes, permissions, backups, module
+layout, UI, retention: [`docs/workspace.md`](docs/workspace.md). API endpoints:
+[`docs/api-reference.md`](docs/api-reference.md) ("Workspace").
 
-**Daemon ↔ Browser protocol** (JSON control messages + binary audio over
-WebSocket):
+Modes: **sync** (blocks the turn, summary inline), **async** (fire-and-forget;
+completion fires a transient Pulse carrying the summary back to the origin
+conversation), **engaged** (turn-based entity↔OpenCode loop in
+`engaged-runner.ts`; OpenCode never talks to the user directly —
+`ask_origin_conversation` / `ask_user` suspend the session behind a toast, and
+the answer resumes it).
 
-```
-Browser → Daemon:   { type: "ptt_start" } | { type: "ptt_end" }
-                   { type: "user_silence" }   (browser VAD ended speech)
-                   { type: "transcript", text }  (browser-native STT result)
-                   { type: "mute" } | { type: "unmute" }
-                   { type: "end_call" } | { type: "ping" }
-                   Binary: Int16 PCM 16kHz mono frames (server-side STT only)
+**Ephemeral principle (load-bearing):** the workspace conversation is a
+scratchpad. The full transcript exists only in the live SSE stream — it is never
+persisted, embedded, or summarized directly:
 
-Daemon → Browser:   { type: "state", state: "idle" | "recording" | "processing" | "speaking" }
-                   { type: "transcript", role, text }
-                   { type: "session_ended" }
-                   { type: "error", message } | { type: "pong" }
-                   Binary: Int16 PCM 16kHz mono TTS frames
-```
+- Only engaged-mode entity turns persist (loop continuity + terminal view).
+  ChatRAG indexing and cross-conversation retrieval exclude workspace
+  conversations (both index sites in `loop.ts`, both search paths in
+  `rag/conversation.ts`); daily memory summarization excludes
+  `sourceType: "workspace"` (`summarizer.ts`); Context Inspector snapshots are
+  skipped for workspace turns.
+- The completion summary → Pulse → the entity's own reflection in the origin
+  conversation is the ONLY channel workspace content reaches entity memory.
+  Don't add another.
 
-**Server wiring:** voice settings load in `Server.init()`, voice routes
-registered in `handleAPIRoute()`, cleanup in `Server.stop()`.
-`updateVoiceSettings()` closes in-flight sessions when voice is disabled — no
-subprocess lifecycle to manage anymore.
+Lifecycle invariants and wirings:
 
-**TTS keep-alive:** profiles with `ttsKeepAliveDays > 0` get a daily scheduler
-check (`voice.tts-keep-alive` at 4 AM) that calls TTS directly if the interval
-has elapsed, preventing voice deletion on providers like Minimax. The
-`lastKeepAlive` timestamp is persisted in `voice-settings.json`.
+- `getWorkspaceSupervisor()` returns null before `Server.init()` finishes and
+  after `Server.stop()`. The `workspace` tool checks for null and returns a
+  graceful "not available" message — don't add new callsites that assume it's
+  always set. The omni-tool uses the supervisor directly, not ToolContext — it's
+  a process-wide singleton; don't add it to EntityConfig / PulseEngineConfig.
+- `WorkspaceSupervisor.config_` is exposed read-only for the server's MCP route
+  handler. Don't mutate.
+- The MCP endpoint at `/api/workspace/mcp/:sessionId` takes the workspace
+  **conversation ID** — the handler looks up by either ID form. OpenCode's
+  sandbox config points at this URL.
+- Engaged-runner's entity turns are real `EntityTurn`s — full identity/RAG/
+  memories context, but the heartbeat map has no entry between iterations, so
+  entity thinking time never trips a false stall. Keep it that way. OpenCode's
+  session ID is captured from the first JSON event with a `sessionID` field; if
+  OpenCode changes its event schema, `invokeOpenCode`'s parse loop +
+  `streamEventToTerminalLine` are the places to update.
+- Sandbox dirs share ONE OpenCode runtime (`opencode-runtime.ts`): a single
+  node_modules at `<workspaceRoot>/.opencode-runtime/` symlinked into every
+  sandbox, outside session dirs so retention never follows the symlink.
+- The `>_` FAB (`#workspace-btn`) stacks BELOW `#voice-call-btn` in the app
+  shell — same HTMX swap-survival rule as the voice FAB; do NOT move into
+  `renderChatView()`.
+- Sandbox retention and the workspace-scoped backup system only ever delete
+  inside the workspace root / back up before writes — a corrupted `sandbox_path`
+  can never become an arbitrary delete.
 
-**TTS test endpoint:** `POST /api/voice/test-tts` calls the active profile's TTS
-provider directly (no walkie-talkie pipeline) and returns raw MP3 bytes. Used by
-the "Test TTS" button and the keep-alive scheduler (via `callTTS()` in
-`routes.ts`).
+**Per-turn tool visibility:** workspace-only tools are gated by `visibleIn`
+predicates on the `Tool` interface (tools/types.ts): `ask_user` appears only in
+engaged workspace conversations, `manage_message` only in workspace
+conversations (any mode). The `workspace` omni-tool has no predicate — always
+visible. `ToolRegistry.getDefinitions(ctx)` applies the filter; `EntityTurn`
+passes the conversation context.
 
-**API endpoints:**
+## Entity skills
 
-| Endpoint                                   | Method   | Purpose                                   |
-| ------------------------------------------ | -------- | ----------------------------------------- |
-| `/api/voice/status`                        | GET      | Subsystem status (enabled, session count) |
-| `/api/voice/settings`                      | GET      | Voice settings (API keys masked)          |
-| `/api/voice/settings`                      | POST     | Save voice settings                       |
-| `/api/voice/test-tts`                      | POST     | Test TTS provider (returns audio bytes)   |
-| `/api/voice/ws?conversationId=&profileId=` | GET (WS) | Voice session WebSocket                   |
+`src/skills/` + the `skill` tool: markdown procedure files at
+`dataRoot/.psycheros/skills/<name>/SKILL.md` (frontmatter `name` +
+`description`, optional `references/*.md`) that the entity loads on demand
+instead of carrying in every context.
+
+**Load holds (no fade for skills):** `skill({name})` holds the skill active —
+there is no plain-load-then-fade path for skill bodies; the entity decides
+duration, not a turn count. The tool result is a one-line confirmation; the body
+lives only in the system message. **Holds are live mid-turn**: the loop watches
+for `affectedRegions: ["held-skills"]` on tool results (`heldSkillsDirty` in
+`EntityTurn.process()`), and on a hold/release immediately rebuilds the block
+(`buildHeldSkillsContent()`), splices the new system message into `messages[0]`
+via the `composeSystemMessage` closure, and re-persists the context snapshot
+(`persistSnapshot`). The entity has the skill in the SAME turn it reached for
+it. Cost: one intra-turn prefix invalidation per hold/release event (rare;
+cross-turn caching is already defeated by the SA block). **References stay
+transient**: `skill({name, reference})` returns the reference content with
+`metadata.fade` so the generic fade sidecar (`buildFadeMap` in
+`src/entity/loop.ts`) collapses it after 5 turns, like `look_closer`.
+
+**Release:** `release: true` drops the hold when the entity decides the skill's
+work is done. Holds are per-conversation, stored in the `held_skills` table **as
+names only**: bodies re-resolve from disk inside the `EntityTurn.process()`
+skill gate each turn (so edits apply next turn), and a hold whose skill file is
+gone is lazily released there. The held bodies render in a `<held_skills>` block
+built by `buildHeldSkillsBlock` (`src/skills/index-block.ts`), passed as the
+LAST `buildSystemMessage` param and rendered after the SA section (dynamic
+region — keeps the static prefix intact). Load/release tool results return
+`affectedRegions: ["held-skills"]`, which drives the chip strip UI
+(`#held-skills-strip`, a sibling of `#chat` — see
+`docs/design/held-skills-chips.md`). Release works off the DB row even if the
+skill file was deleted; `release` can't combine with `body` or `reference`.
+
+**Authoring:** the same tool writes — `skill({name, description, body})`
+saves/updates a skill; `skill({name, reference, body})` writes a reference doc
+(body required before references). No approval gate (matches Hermes' default);
+the soft norm "mention new or changed skills to the user when practical" lives
+in the tool description. Writes to `generated: true` skills are refused —
+regeneration would clobber them. `name` accepts a single string **or a list** —
+batches load/release several skills in one call (partial success reports held
+vs. missing; all-missing is an error; batches refuse `body`/`reference`).
+
+**Starter templates:** `templates/skills/` seeds `repair-malformed-timestamps`
+(self-maintenance exemplar) and `my-skills` (a deliberately loose primer on the
+craft — mechanics that are true today + soft guidance + an explicit "this file
+is mine to rewrite" clause; do not tighten it into a rulebook).
+
+**Context index:** "My skills" (name + description per line) rides with the
+tools — `EntityTurn.process()` appends `buildSkillsIndexBlock()` output (a bare
+`My skills:` list, no preamble — the description carries the semantics) to the
+`skill` tool's **description** in the per-request tool definitions. The
+definition is CLONED before appending — mutating the registry's canonical
+definition would pollute the Settings UI and accumulate across turns. Gated on
+the `skill` tool actually being enabled and re-scanned per request, so Settings
+edits apply next turn with no restart. In the Context Inspector it's visible
+inside the `skill` tool's definition in the Tools tab (`tool_definitions_json`)
+— there is no separate Skills Index section or snapshot field.
+`buildSystemMessage`'s param list is fully positional — inserting a param
+mid-list type-checks while silently swapping sections; verify via Context
+Inspector, not just `deno check`.
+
+**psycheros-handbook:** a generated knowledge-base skill (lean SKILL.md index +
+curated `docs/*.md` as `references/`), regenerated at every daemon start
+(`generateHandbookSkill` in `src/skills/handbook.ts`, called from `main.ts`).
+Frontmatter `generated: true` drives the "auto-generated" badge in Settings and
+the authoring block. Overwrites itself by design — user edits don't survive
+restart. The starter template skill seeds from `templates/skills/` via
+`copyTemplateSkillDirs` (`src/init/mod.ts`), which never overwrites an installed
+skill.
+
+**Workspace bundling:** the `workspace` tool's `skills: ["name"]` param on
+`open` copies entity skills into the sandbox alongside the built-ins
+(`bundleSkills(skillsDir, extraSkills)` in `src/workspace/skills.ts`).
+Validation happens in `handleOpen` BEFORE spawn — unknown names and
+built-in-name collisions return errors with no orphaned session row.
+`WorkspaceBriefing.bundledSkills` persists on the session row; the briefing
+mentions bundled skills at BOTH the supervisor's inline briefing composition
+(`supervisor.ts`, the real spawn path) and `composeBriefing` (kept in sync but
+not on the spawn path).
+
+**Settings:** third "Skills" tab in Settings > Tools. `/api/skills/list` must be
+route-matched before `/api/skills/:name` (prefix pattern ordering). Skill names
+are validated against `SKILL_NAME_RE` (`src/skills/loader.ts`) at every
+name→path boundary — that regex is the path-traversal defense.
 
 ## Wearable data pipeline
 
-`src/wearable/` handles sensor data from entity-plexus (Android app connected to
-Bangle.js watches via BLE). Separate from the existing DeviceBridge (which
-serves web BLE gateway clients with a different protocol). Two singleton
-services:
-
-- **WearableConnectionManager** (`connection-manager.ts`) — WebSocket
-  connections from entity-plexus, fire-and-forget command push, implicit device
-  registration from first inbound message. Discovers data streams from incoming
-  readings and an optional capabilities message, persists them to BLE device
-  profiles in `.psycheros/ble-settings.json`.
-- **WearableDataCache** (`cache.ts`) — latest sensor reading per type per
-  device, synchronous `getSnapshot()` for zero-latency SA reads.
-
-The `ble_device` tool and `/api/device/command` endpoint try DeviceBridge first,
-then fall back to WearableConnectionManager. The wearable cache is included in
-`DeviceCacheSnapshot.wearableDevices` for SA reads.
-
-**Stream discovery and SA injection:** Data streams (sleep, hr, accel, etc.) are
-discovered dynamically when readings arrive — either from an explicit
-capabilities message or auto-detected from incoming data. Each stream gets a
-`BLEStreamConfig` entry (label, xmlTag, enabled) on the device's BLE profile.
-The user configures XML tag names and per-stream on/off toggles in two UIs: BLE
-settings (per-device stream config) and SA settings (global toggle view). The
-entity loop's `formatWearableData()` renders a `<wearable_data>` block in the SA
-XML using each stream's configured xmlTag, only including enabled streams with
-fresh readings (< 5 min). Known stream types (sleep, hr, accel, battery, gps,
-screen) get human-readable renderers; unknown types serialize as JSON.
-
-**Connection status** is tracked by
-`WearableConnectionManager.connectedDeviceIds` and surfaced in both BLE and SA
-settings UIs with Connected/Disconnected badges.
-
-**Event Rules (Webhooks):** The SA settings page has a Webhooks tab that lets
-the user define rules that trigger Pulses when sensor readings match conditions.
-Each rule has a single condition (stream ID + operator: `changes_to`,
-`goes_above`, `goes_below` + value) and a single action (`Run Pulse`). The
-`EventRulesEngine` (`event-rules-engine.ts`) evaluates incoming readings from
-`WearableConnectionManager.handleMessage()` (after `cache.ingest()`), calling
-`PulseEngine.triggerPulse(rule.action.pulseId, "data_event")` on match.
-Sustained tracking (`condition.sustainedMinutes`) requires the condition to hold
-continuously before firing; cooldown prevents re-triggering within
-`cooldownMinutes`. Types and persistence live in `event-rules.ts`. Config
-persists across device disconnects — all registered devices are always visible
-and editable regardless of connection state.
-
-**Production vs localhost routes:** The wearable endpoints are registered under
-two path sets. `/api/device/stream` and `/api/device/data` are for localhost/dev
-(no Authelia). `/api/ingest/stream` and `/api/ingest` are for production behind
-Authelia's `client_credentials` bearer auth — the access-control rule only
-allows authenticated requests on `/api/ingest`. Both path sets delegate to the
-same handlers. Route registration is in `server.ts` `handleAPIRoute()`.
+`src/wearable/` handles sensor data from entity-plexus (an Android app connected
+to Bangle.js watches via BLE) — separate from the DeviceBridge (which serves web
+BLE gateway clients with a different protocol). Two singletons:
+`WearableConnectionManager` (WebSocket connections, command push, stream
+discovery into BLE device profiles) and `WearableDataCache` (latest reading per
+type per device, synchronous SA reads). The `ble_device` tool and
+`/api/device/command` try DeviceBridge first, then fall back to the wearable
+manager. Event rules turn sensor conditions into Pulses. Full reference:
+[`docs/wearables.md`](docs/wearables.md); endpoints:
+[`docs/api-reference.md`](docs/api-reference.md) ("Wearable Data Streaming").
 
 ## LLM client and model capabilities
 
-`src/llm/client.ts` is the OpenAI-compatible LLM client. It handles chat
-completion (streaming and non-streaming), provider-specific headers, and model
-parameter filtering.
+`src/llm/client.ts` is the OpenAI-compatible LLM client (streaming and
+non-streaming chat completion, provider-specific headers, model parameter
+filtering). `src/llm/model-capabilities.ts` detects which sampling parameters a
+model supports from its name string (ordered rules, first match wins; unknown
+models get a permissive default) and gates vision via `supportsVision()` —
+extend those tables for new model families; don't add ad-hoc model-name checks
+elsewhere. Deep reference — capability rules, reasoning parameters and scopes,
+token-budget two-pass trim, provider headers:
+[`docs/llm-client.md`](docs/llm-client.md).
 
-**Model capabilities** (`src/llm/model-capabilities.ts`) — an ordered array of
-model-family rules that detects which sampling parameters a model supports from
-its name string. First match wins. `filterSamplingParams()` strips unsupported
-parameters before the API call and logs what was removed. Zero-value no-op
-params (`topK=0`, `frequencyPenalty=0`, `presencePenalty=0`) are silently
-skipped rather than stripped — they're defaults, not intentional user choices.
-Non-zero values on unsupported models still warn. Unknown models get a
-permissive default (send everything). The rules cover OpenAI o-series, GPT-5.x
-(including 5.5), GPT-4.x/3.5, Claude, DeepSeek, Gemini, Qwen, GLM, Llama,
-Mistral, Kimi, and Gemma — including OpenRouter-prefixed names like
-`anthropic/claude-sonnet-4-20250514`. GPT-5.x only supports `maxTokens`
-(sampling params rejected like o-series).
+Traps:
 
-**Reasoning parameters** are gated on provider in `buildRequest()`:
-
-- **Z.ai / NanoGPT**: sends `thinking: { type: "enabled" }` — enables Z.ai's
-  chain-of-thought return. When persistent reasoning is on (intra-turn), also
-  sends `clear_thinking: false` so Z.ai's Preserved Thinking retains reasoning
-  across iterations of the agent loop instead of wiping it.
-- **OpenRouter**: sends `reasoning: {}` — tells OpenRouter to return reasoning
-  tokens (ignored without it).
-- **Other providers**: no parameter sent; reasoning tokens returned
-  automatically if the model supports them.
-
-**Persistent reasoning** (two scopes, both opt-in per LLM profile):
-
-- **Intra-turn** (`persistentReasoningIntraTurn: "auto" | "on" | "off"` on
-  `LLMConnectionProfile`): threads `reasoning_content` back to the next
-  inference call within one entity turn — between tool-call iterations. Required
-  by DeepSeek's spec on tool-call turns and essential for Z.ai Preserved
-  Thinking coherence on multi-step tool chains. Without it, the agent loop at
-  `loop.ts:1519` would push assistant messages without their reasoning, and
-  DeepSeek would 400 on the next call. `"auto"` resolves to
-  `preset.supportsPersistentReasoning && thinkingEnabled` in
-  `createClientFromProfile`; `"on"` is an unconditional override for unverified
-  endpoints (Venice, Together, self-hosted vLLM, OpenRouter backing models known
-  to honor the field). Voice and worker clients force it off via
-  `createClientFromProfile`'s options override.
-- **Inter-turn** (`persistentReasoningInterTurns: number`): how many past entity
-  turns carry their `reasoning_content` into the next request. Counted in
-  user-visible turns (user→entity exchanges), not DB rows — each turn may
-  contribute multiple assistant rows from its agent loop.
-  `selectReasoningEligibleHistory()` in `loop.ts` walks newest→oldest treating
-  each user message as a turn boundary. 0 disables.
-
-**Token-budget two-pass trim** (`token-budget.ts`): when reasoning replay is
-enabled, a single assistant message can carry 1–5k tokens of reasoning
-(DeepSeek-R1 can hit 10k+). Naive FIFO would drop the whole turn plus cascade
-via sanitization (orphaned tool_calls). The walk does three branches per
-message: fits-with-reasoning → keep; fits-without-reasoning → strip
-`reasoning_content` and keep; fits-neither → break. Stripped messages get a
-fresh object with `reasoning_content: undefined` so input data isn't mutated.
-`BudgetResult.reasoningStripped` / `reasoningRetained` are recomputed after
-sanitization (the sanitizer may drop messages that were originally counted in
-either bucket). Both surface in the Context Inspector Metrics tab and the
-`[Context] Truncated` log line.
-
-**Reasoning response parsing** in `processChunk()` checks four SSE delta fields
-in priority order: `reasoning_content` (Z.ai), `reasoning`
-(OpenRouter/DeepSeek), `thinking` (Claude via OpenRouter), `reasoning_details`
-(OpenRouter structured array — extracts `text` from entries with
-`type: "reasoning.text"`). Adding a new provider that returns reasoning in a
-different field means extending this chain.
-
-**Provider misroute recovery** in `EntityTurn.process()` (loop.ts, after the
-retry loop) catches the case where the entire response — thinking and reply both
-— was routed through the reasoning field with `content` empty. Most commonly
-seen with GLM on OpenRouter; Z.ai direct does not exhibit this. Without recovery
-the reply hides inside the thinking section and the edit fallback reads the
-rendered thinking section's text (literal "▼ Thinking" UI labels in the
-textarea). The recovery splits at the last boundary marker
-(`</thinking>`/`</thought>`/`</reasoning>`/`</antml:thinking>`) if present, or
-promotes the reasoning to content when `finish_reason=stop`. A
-`thinking_corrected` SSE event tells the live UI to reset thinking and render
-the recovered reply as assistant-text.
-
-`buildProviderHeaders()` adds provider-specific HTTP headers:
-
-- **OpenRouter**: `HTTP-Referer` + `X-Title` (required, or requests fail with
-  "Missing Authentication header")
-- **Anthropic**: `anthropic-beta: prompt-caching-2024-07-31`
+- **Provider misroute recovery** in `EntityTurn.process()` (loop.ts, after the
+  retry loop) catches responses routed entirely through the reasoning field with
+  `content` empty (seen with GLM on OpenRouter; Z.ai direct does not exhibit
+  it). Without recovery the reply hides inside the thinking section and the edit
+  fallback reads the rendered thinking section's text. The recovery splits at
+  the last boundary marker
+  (`</thinking>`/`</thought>`/`</reasoning>`/`</antml:thinking>`) or promotes
+  the reasoning to content on `finish_reason=stop`; a `thinking_corrected` SSE
+  event tells the live UI to reset thinking and render the recovered reply.
+- **Reasoning response parsing** checks four SSE delta fields in priority order
+  (`reasoning_content` Z.ai, `reasoning` OpenRouter/DeepSeek, `thinking` Claude
+  via OpenRouter, `reasoning_details` OpenRouter structured) — a new provider
+  returning reasoning in a different field means extending the chain in
+  `processChunk()`.
+- **OpenRouter requires `HTTP-Referer` + `X-Title` headers**, or requests fail
+  with "Missing Authentication header".
+- **Intra-turn persistent reasoning is required on tool-call turns for
+  DeepSeek** — without threading `reasoning_content` back between agent-loop
+  iterations, the next call 400s. `"auto"` resolves via preset support; voice
+  and worker clients force it off.
 
 ## HTMX inline scripts
 
@@ -582,33 +412,39 @@ vetting guide lives in the User Guide at
    `start()` runs. A plugin whose dep failed resolution never imports — its
    `start()` cannot run before the dep it needs.
 
-**Surfacing in the UI and Context Inspector:**
-
-- Plugins Settings page at `/fragments/settings/plugins` — safety banner, health
-  card (counts + last-turn budget meter via `getLastBudgetReport()`), install
-  form, per-plugin rows with Recent Activity panel + Download log + Check for
-  updates, install-review modal.
-- Context Inspector Metrics tab — `pluginBudgetUsed` / `pluginBudgetMax` on
-  `LLMContextSnapshot.metrics`. Plugin Context added to the section breakdown.
-  Both persist per-turn via the `metrics_json` column.
-- Context Inspector Plugins tab — per-hook detail (output, chars used,
-  truncated/degraded/budget-skipped flags, elapsed ms) from
-  `LLMContextSnapshot.pluginHooks`, persisted in the `plugin_hooks_json` column.
-  Tabs ordered System → RAG → Messages → Tools → Plugins → Metrics.
-- API endpoints under `/api/plugin-manager/*`: health, events, log download,
-  check-update, apply-update, plus the original inspect/install /remove set.
-
 Plugin-owned credentials live under
 `dataRoot/.psycheros/plugin-secrets/<id>.env`, outside portable exports. Use
 `PSYCHEROS_PLUGIN_<ID>_*` names because trusted plugins share the process
 environment.
 
-**v1.1 deferred:** entity-core plugin events aren't surfaced in the UI (the
-event-log class lives in `packages/psycheros/src/plugins/`; moving it to
-`packages/plugin-api/src/` would let both hosts share one log file per plugin).
-Auto-updater has no scheduler integration. Install-review diff is manifest-field
-only — runtime capability diffs (tools/hooks/ routes between versions) require
-source comparison.
+**Surfacing:** Plugins Settings page at `/fragments/settings/plugins` (safety
+banner, health card with last-turn budget meter via `getLastBudgetReport()`,
+install form + install-review modal, per-plugin Recent Activity + log download +
+update checks); Context Inspector Metrics tab (`pluginBudgetUsed` /
+`pluginBudgetMax` on `LLMContextSnapshot.metrics`) and Plugins tab (per-hook
+detail from `LLMContextSnapshot.pluginHooks`, persisted in the
+`plugin_hooks_json` column); API endpoints under `/api/plugin-manager/*`
+(health, events, log download, check-update, apply-update, inspect/install /
+remove).
+
+**Discord media hooks (API v2):** `PLUGIN_API_VERSION` is 2, but validation
+accepts 1 or 2 — v1 manifests (google-suite) load unchanged, and
+`capabilities.discordMedia` on a v1 manifest fails validation. All three hosts
+(psycheros manager, installer, entity-core manager) share
+`validatePluginManifest`, so the acceptance list is the single switch. Inbound:
+`planTurnAttachments` records native-declined attachments as `pluginCandidates`;
+the router flush offers them to `deps.enrichAttachmentMarkers` (bound to
+`PluginManager.enrichAttachmentMarkers`) which replaces fallback markers with
+plugin text. Plugins never intercept the native vision path, and plugin markers
+never take `[image N]` numbers — the marker-N == `turnImages[N-1]` invariant
+only ever covered vision attachments. Enriched marker text persists in the
+transcript and is char-capped (4k per attachment, 16k per flush) and collapsed
+to one line — markers are single-line by construction. Outbound:
+`services.discord.sendAttachments` (`discord-send.ts`) posts multipart with the
+host's bot token, read lazily via the manager's 5th ctor arg — plugins capture
+services once in `start()`, before Discord settings load, so the token must not
+be gated at injection time. The token never reaches plugin code;
+`act_in_discord`'s raw-token pattern is host-only.
 
 ## Reactive UI: state-changes
 
@@ -626,6 +462,28 @@ Two SSE channels exist. `POST /api/chat` is the per-request stream (message_id,
 context, thinking, thinking_corrected, content, tool_call, metrics, done) and
 its retry sibling `POST /api/chat/retry`. `GET /api/events` is the persistent
 channel for background updates and Pulse streaming.
+
+Background toasts render above the chat bar (mobile-first, bottom-sheet
+pattern), never top-right.
+
+## Design system (frontend styling)
+
+- Never hardcode hex colors in `web/css/**`, `templates.ts` inline styles, or JS
+  DOM styling — use the `--c-*` tokens from `web/css/tokens.css`. No
+  `var(--c-x, #fallback)` fallbacks either (drift seeds). Full token table,
+  derivation rules, and the short exemption whitelist:
+  [`docs/design/design-system.md`](docs/design/design-system.md) — consult it
+  before any frontend change that touches color.
+- Themes are 7 picked slots (bg/fg/accent/highlight/success/warning/error);
+  every other color derives at apply time in `web/js/color.js`. `--c-*` token
+  names are load-bearing: `packages/launcher-v2/frontend/styles/tokens.css`
+  mirrors them — add tokens additively and sync its static defaults; never
+  rename.
+- Semantic colors are success/warning/error; never reuse accent for error
+  states. The stop button's double-tap confirm stays warning-linked (safety
+  color).
+- New frontend features get a design doc from
+  [`docs/design/TEMPLATE.md`](docs/design/TEMPLATE.md) before implementation.
 
 ## Concurrency: three locks to know about
 
@@ -673,6 +531,40 @@ recovery path short of a daemon restart.
 The watchdog also runs `try/catch` around its check body, matching the router's
 prune-timer pattern — an uncaught throw inside `setInterval` kills the Deno
 process.
+
+## Discord image attachments
+
+Image attachments from Discord messages flow through `src/discord/images.ts`:
+the router plans markers + selected images at flush (`planTurnAttachments`), and
+the server resolves them in `handleDiscordTurn` — vision pixels (transient) →
+captions (Settings > Vision captioning) → markers only. Three load-bearing
+wirings:
+
+- **Marker number N == index N-1 of the turn's vision/caption array.** The
+  numbered `[image N attached: ...]` markers in the persisted transcript
+  correlate with the images attached to that turn. Both walks in
+  `planTurnAttachments` must traverse messages/attachments in the same order —
+  reordering either breaks the correlation.
+- **Pixels are transient, captions persist.** Never persist image data or the
+  signed CDN URLs (they expire ~24h); the markers + caption text are the
+  transcript's permanent record of what was shared.
+- **The vision gate is `supportsVision()` in `src/llm/model-capabilities.ts`.**
+  Extend that table for new model families — don't add ad-hoc model-name checks
+  elsewhere. Unknown models default to vision-capable (permissive, same
+  philosophy as sampling params).
+
+**Outbound image sends (act_in_discord `image_path`, send_discord_dm
+`image_path`, describe_image `path`):** every entity-supplied media path
+resolves through `resolveDiscordImagePath` (`src/tools/discord-image-path.ts`) —
+the ONLY sanctioned gate. It contains the path strictly under
+`<dataRoot>/.psycheros/` and validates the extension set directly. Never
+reintroduce `getMediaType()` for path validation: it defaults unknown extensions
+to `image/png`, so "notes.txt" would pass a media-type allowlist (the bug this
+helper closed — LLM-controlled paths could exfiltrate arbitrary files to Discord
+or into the conversation). Sends carry AbortSignal timeouts (a hung fetch stalls
+the global tool mutex) and `enforce_nonce` idempotency keyed on
+`toolCallId:actionIndex` via `sendDiscordAttachments`' `idempotencyKey` —
+retried tool calls must not double-post.
 
 ## User data and runtime state
 
@@ -727,21 +619,29 @@ handlers, and operational details.
 
 ## Deep references
 
-| Topic                             | Doc                                                |
-| --------------------------------- | -------------------------------------------------- |
-| First-person philosophy           | [../../PHILOSOPHY.md](../../PHILOSOPHY.md)         |
-| Env vars, config, migrations      | [docs/configuration.md](docs/configuration.md)     |
-| Tool system, identity tiers       | [docs/tools-reference.md](docs/tools-reference.md) |
-| Memory + RAG (chat, vault, graph) | [docs/memory-and-rag.md](docs/memory-and-rag.md)   |
-| UI features                       | [docs/ui-features.md](docs/ui-features.md)         |
-| API endpoints, SSE architecture   | [docs/api-reference.md](docs/api-reference.md)     |
-| Durable scheduler                 | [docs/scheduler.md](docs/scheduler.md)             |
-| Security audit                    | [docs/security-audit.md](docs/security-audit.md)   |
-| Trusted plugins (authoring)       | [docs/plugins.md](docs/plugins.md)                 |
+| Topic                             | Doc                                                          |
+| --------------------------------- | ------------------------------------------------------------ |
+| First-person philosophy           | [../../PHILOSOPHY.md](../../PHILOSOPHY.md)                   |
+| Env vars, config, migrations      | [docs/configuration.md](docs/configuration.md)               |
+| Tool system, identity tiers       | [docs/tools-reference.md](docs/tools-reference.md)           |
+| Memory + RAG (chat, vault, graph) | [docs/memory-and-rag.md](docs/memory-and-rag.md)             |
+| Embedding model configuration     | [docs/embeddings.md](docs/embeddings.md)                     |
+| Voice chat                        | [docs/VOICE_CHAT_UX.md](docs/VOICE_CHAT_UX.md)               |
+| Workspace subsystem               | [docs/workspace.md](docs/workspace.md)                       |
+| Wearable data pipeline            | [docs/wearables.md](docs/wearables.md)                       |
+| LLM client, model capabilities    | [docs/llm-client.md](docs/llm-client.md)                     |
+| UI features                       | [docs/ui-features.md](docs/ui-features.md)                   |
+| API endpoints, SSE architecture   | [docs/api-reference.md](docs/api-reference.md)               |
+| Durable scheduler                 | [docs/scheduler.md](docs/scheduler.md)                       |
+| Design system, theming            | [docs/design/design-system.md](docs/design/design-system.md) |
+| Security audit                    | [docs/security-audit.md](docs/security-audit.md)             |
+| Trusted plugins (authoring)       | [docs/plugins.md](docs/plugins.md)                           |
 
 External Connections (Discord, web search, home, intimacy), Vision (image gen,
 captioning, gallery), Situational Awareness, and Pulse all have their feature
-surfaces documented in the relevant `docs/` files. Don't reproduce them here.
+surfaces documented in the relevant `docs/` files — as do the subsystem sections
+above. Don't reproduce feature surfaces here; CLAUDE.md carries the map and the
+traps.
 
 ## Companion packages
 

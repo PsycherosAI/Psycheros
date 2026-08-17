@@ -59,6 +59,14 @@ time.
 Used for: auto-title updates, background operations, and any UI changes that
 happen outside of a chat request.
 
+Notable event types: `mcp_status` (entity-core connection state),
+`workspace_stalled` / `workspace_resumed` (session watchdog), and
+`embedding_reindex` (embedding re-index progress — payload
+`{phase: started|progress|done|failed|model_change_detected, scope?,
+done?, total?, message?}`;
+emitted for both entity-core-driven rebuilds and the Settings re-embed
+orchestrator; drives the re-index banner).
+
 Managed by `EventBroadcaster` singleton in `src/server/broadcaster.ts`.
 
 ## API Endpoints
@@ -92,8 +100,7 @@ The `deviceType` field is used by the Situational Awareness system.
 | `POST`   | `/api/conversations`                        | Create conversation                                           |
 | `GET`    | `/api/conversations/:id/messages`           | Get messages                                                  |
 | `GET`    | `/api/conversations/:id/messages/paginated` | Get paginated messages (query: `before`, `beforeId`, `limit`) |
-| `GET`    | `/api/conversations/:id/context`            | Get all context snapshots                                     |
-| `GET`    | `/api/conversations/:id/context/latest`     | Get latest context snapshot                                   |
+| `GET`    | `/api/conversations/:id/context`            | Get current context snapshot (latest-only; 204 if none)       |
 | `PATCH`  | `/api/conversations/:id/title`              | Update title (auto-deduplicates with numeric suffix)          |
 | `DELETE` | `/api/conversations/:id`                    | Delete conversation                                           |
 | `DELETE` | `/api/conversations`                        | Batch delete conversations                                    |
@@ -182,9 +189,13 @@ The `deviceType` field is used by the Situational Awareness system.
 | `GET`  | `/api/appearance-settings` | Get current appearance settings |
 | `POST` | `/api/appearance-settings` | Save appearance settings        |
 
-Settings stored in `.psycheros/appearance-settings.json`. Shape:
-`{ "preset": string|null, "customAccent": string|null, "bgImage": string|null, "bgBlur": number, "bgOverlayOpacity": number, "glassEnabled": boolean }`.
-Defaults to violet preset with no background.
+Settings stored in `.psycheros/appearance-settings.json`. Shape (v2):
+`{ "version": 2, "source": "preset"|"generated"|"manual", "presetId": string|null, "slots": { "bg", "fg", "accent", "highlight", "success", "warning", "error" } (7 hexes), "generator": { "seed", "rule", "mode", "tintNeutrals" }|null, "computed": { "tokens": Record<string, string>, "isDark": boolean }|null, "bgImage": string|null, "bgBlur": number, "bgOverlayOpacity": number, "glassEnabled": boolean }`.
+
+`computed` is the derived-token snapshot echoed into the first-paint `<style>` —
+POST validation restricts token names/values strictly (the CSS-injection guard).
+Legacy v1 files (`preset` + `customAccent`) are normalized on read and upgraded
+client-side on first load. Defaults to the violet preset with no background.
 
 ### Data Vault
 
@@ -645,6 +656,41 @@ reloaded. Returns `{ "success": true, "toolName": "..." }` or
 | `GET`    | `/fragments/settings/pulse/list`      | Prompt list partial (for HTMX reload)                              |
 | `GET`    | `/fragments/settings/pulse/log`       | Execution log partial (paginated)                                  |
 
+### Voice Chat
+
+| Method | Path                                       | Purpose                                   |
+| ------ | ------------------------------------------ | ----------------------------------------- |
+| `GET`  | `/api/voice/status`                        | Subsystem status (enabled, session count) |
+| `GET`  | `/api/voice/settings`                      | Voice settings (API keys masked)          |
+| `POST` | `/api/voice/settings`                      | Save voice settings                       |
+| `POST` | `/api/voice/test-tts`                      | Test TTS provider (returns audio bytes)   |
+| `GET`  | `/api/voice/ws?conversationId=&profileId=` | Voice session WebSocket                   |
+
+The WebSocket carries JSON control messages plus binary Int16 PCM 16kHz mono
+audio frames in both directions. Protocol and architecture:
+[`VOICE_CHAT_UX.md`](VOICE_CHAT_UX.md).
+
+### Workspace
+
+| Method | Path                                     | Purpose                                        |
+| ------ | ---------------------------------------- | ---------------------------------------------- |
+| `GET`  | `/api/workspace/status`                  | Capabilities + active sessions + stalled flags |
+| `GET`  | `/api/workspace/sessions`                | Active sessions                                |
+| `GET`  | `/api/workspace/sessions/:id`            | Single session detail                          |
+| `POST` | `/api/workspace/sessions/:id/respond`    | Answer a pending query → resume                |
+| `POST` | `/api/workspace/sessions/:id/cancel`     | User killswitch                                |
+| `POST` | `/api/workspace/sessions/:id/pin`        | Toggle retention exemption (`{pinned: bool}`)  |
+| `GET`  | `/api/workspace/queries`                 | Pending questions (FAB `!` source of truth)    |
+| `POST` | `/api/workspace/queries/:id/suspend`     | Toast idle timer → resolve blocked tool call   |
+| `GET`  | `/api/workspace/approvals`               | Pending write proposals                        |
+| `POST` | `/api/workspace/approvals/:id/:decision` | Approve/deny a write proposal                  |
+| `POST` | `/api/workspace/settings`                | Save workspace settings                        |
+| `POST` | `/api/workspace/mcp/:conversationId`     | MCP JSON-RPC endpoint for OpenCode             |
+
+The `:sessionId` path params and the MCP endpoint's `:conversationId` accept
+either ID form — the handlers look up by workspace session ID or conversation
+ID. Subsystem deep reference: [`workspace.md`](workspace.md).
+
 ## Related Source Files
 
 | File                                 | Purpose                                                                                                     |
@@ -680,3 +726,7 @@ reloaded. Returns `{ "success": true, "toolName": "..." }` or
 | `src/llm/image-gen-settings.ts`      | Image generator + captioning config type, persistence, API key masking                                      |
 | `src/tools/generate-image.ts`        | Image generation tool (OpenRouter, Gemini), auto-captioning                                                 |
 | `src/tools/describe-image.ts`        | Image captioning tool (Gemini, OpenRouter), shared caption logic                                            |
+| `src/voice/session-manager.ts`       | VoiceSessionManager singleton — session lifecycle, multi-device lock, idle timeout                          |
+| `src/voice/pipeline.ts`              | WalkieTalkieSession — per-session walkie-talkie state machine                                               |
+| `src/workspace/supervisor.ts`        | WorkspaceSupervisor singleton — OpenCode spawn, event stream, stall watchdog                                |
+| `src/workspace/engaged-runner.ts`    | Turn-based entity↔OpenCode loop, suspend/resume                                                             |

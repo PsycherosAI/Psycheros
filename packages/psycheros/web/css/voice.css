@@ -14,8 +14,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-elevated, rgba(0, 0, 0, 0.92));
+  /* themed translucent surface — scrim-heavy is always black and left the
+     overlay unthemed (dark text on a black slab in light themes) */
+  background: var(--glass-bg);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .voice-overlay--hidden {
@@ -42,7 +45,7 @@
 
 .voice-status {
   font-size: 0.8rem;
-  color: var(--text-secondary, #888);
+  color: var(--c-fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   display: flex;
@@ -54,7 +57,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--text-secondary, #555);
+  background: var(--c-fg-subtle);
 }
 
 .voice-status-dot--connecting {
@@ -63,11 +66,11 @@
 }
 
 .voice-status-dot--active {
-  background: #4caf50;
+  background: var(--c-success);
 }
 
 .voice-status-dot--error {
-  background: #e53935;
+  background: var(--c-error);
 }
 
 @keyframes pulse-dot {
@@ -87,10 +90,10 @@
   min-height: 2.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: 8px;
-  background: var(--bg-card, rgba(255, 255, 255, 0.05));
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  background: var(--c-wash-strong);
+  border: 1px solid var(--c-wash-strong);
   font-size: 0.85rem;
-  color: var(--text-secondary, #aaa);
+  color: var(--c-fg-muted);
   overflow-wrap: break-word;
 }
 
@@ -100,16 +103,16 @@
 
 .voice-transcript__speaker {
   font-weight: 600;
-  color: var(--text-primary, #eee);
+  color: var(--c-fg);
   margin-right: 0.35rem;
 }
 
 .voice-transcript__speaker--user {
-  color: var(--c-accent, #a855f7);
+  color: var(--c-accent);
 }
 
 .voice-transcript__speaker--assistant {
-  color: var(--c-accent-hover, #c084fc);
+  color: var(--c-accent-hover);
 }
 
 /* ========================================================================== */
@@ -155,7 +158,7 @@
 
 .voice-hold-circle--active {
   background: var(--c-accent);
-  color: #000;
+  color: var(--c-on-accent);
   border-color: var(--c-accent);
   transform: scale(0.95);
   box-shadow: var(--glow-accent);
@@ -184,12 +187,12 @@
   justify-content: center;
   font-size: 1.2rem;
   transition: background-color 0.15s, transform 0.1s;
-  background: var(--bg-card, rgba(255, 255, 255, 0.1));
-  color: var(--text-primary, #fff);
+  background: var(--c-wash-strong);
+  color: var(--c-fg-strong);
 }
 
 .voice-btn:hover {
-  background: var(--bg-hover, rgba(255, 255, 255, 0.15));
+  background: var(--c-wash-strong);
 }
 
 .voice-btn:active {
@@ -203,19 +206,19 @@
 
 .voice-btn--active {
   background: var(--c-accent);
-  color: #000;
+  color: var(--c-on-accent);
 }
 
 .voice-btn--end {
   width: 64px;
   height: 64px;
-  background: #e53935;
-  color: #fff;
+  background: var(--c-error);
+  color: var(--c-on-error);
   font-size: 1.4rem;
 }
 
 .voice-btn--end:hover {
-  background: #c62828;
+  background: var(--c-error-hover);
 }
 
 /* ========================================================================== */
@@ -236,9 +239,9 @@
   font-size: 0.75rem;
   padding: 0.25rem 0.6rem;
   border-radius: 4px;
-  background: var(--bg-card, rgba(255, 255, 255, 0.08));
-  color: var(--text-secondary, #aaa);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  background: var(--c-wash-strong);
+  color: var(--c-fg-muted);
+  border: 1px solid var(--c-wash-strong);
   display: flex;
   align-items: center;
   gap: 0.3rem;
@@ -262,9 +265,9 @@
   padding: 0.5rem 1rem;
   border-radius: 8px;
   font-size: 0.8rem;
-  background: var(--bg-card, rgba(255, 255, 255, 0.12));
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
-  color: var(--text-primary, #fff);
+  background: var(--c-wash-strong);
+  border: 1px solid var(--c-wash-strong);
+  color: var(--c-fg-strong);
   animation: toast-in 0.3s ease, toast-out 0.3s ease 2.7s forwards;
   pointer-events: none;
   z-index: 10;
@@ -423,7 +426,7 @@
   height: 44px;
   flex-shrink: 0;
   background: var(--c-accent);
-  color: #000;
+  color: var(--c-on-accent);
   transition: background 0.15s ease, opacity 0.15s ease;
 }
 
@@ -526,7 +529,7 @@
   gap: 0.5rem;
   padding: 0.5rem;
   background: var(--c-accent);
-  color: #000;
+  color: var(--c-on-accent);
   font-size: 0.8rem;
   font-weight: 500;
   border-radius: 6px;

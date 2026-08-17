@@ -307,10 +307,10 @@ function ensureAppMetadata(db: Database): void {
  *
  * @param db - The SQLite database instance
  */
-export function initializeSchema(db: Database): void {
+export function initializeSchema(db: Database, dataRoot?: string): void {
   db.exec(SCHEMA);
   ensureAppMetadata(db);
-  runMigrations(db);
+  runMigrations(db, dataRoot);
   initializeVectorTables(db);
 }
 
@@ -318,7 +318,7 @@ export function initializeSchema(db: Database): void {
  * Run schema migrations for backward compatibility.
  * Each migration checks if it's needed before applying.
  */
-function runMigrations(db: Database): void {
+function runMigrations(db: Database, dataRoot?: string): void {
   // Migration: Add message_id column to turn_metrics if missing
   const hasMessageId = db
     .prepare(
@@ -650,6 +650,24 @@ function runMigrations(db: Database): void {
     );
   }
 
+  // Migration: Add held-skills column to context_snapshots for the Context
+  // Inspector's System tab. (A skills_index_content column existed briefly
+  // and is intentionally not created anymore — the skills index rides inside
+  // the skill tool's description, captured in tool_definitions_json.)
+  {
+    const hasCol = db
+      .prepare(
+        "SELECT 1 FROM pragma_table_info('context_snapshots') WHERE name = 'held_skills_content'",
+      )
+      .get();
+    if (!hasCol) {
+      db.exec(
+        "ALTER TABLE context_snapshots ADD COLUMN held_skills_content TEXT",
+      );
+      console.log("[DB] Added held_skills_content column to context_snapshots");
+    }
+  }
+
   // Migration: Add custom_content column to context_snapshots if missing
   const hasCustomContentCol = db
     .prepare(
@@ -816,6 +834,105 @@ function runMigrations(db: Database): void {
     console.log("[DB] Added metadata column to messages table");
   }
 
+  // deleted_at migration: soft-delete tombstones. When non-NULL, the message
+  // is considered deleted — content is replaced with a tombstone notice at
+  // read time, original content archived in the metadata JSON for recovery.
+  // ChatRAG and consolidation treat tombstoned messages as not-existing.
+  const hasDeletedAt = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('messages') WHERE name = 'deleted_at'",
+    )
+    .get();
+
+  if (!hasDeletedAt) {
+    db.exec("ALTER TABLE messages ADD COLUMN deleted_at TEXT");
+    console.log("[DB] Added deleted_at column to messages table");
+  }
+
+  // is_glitched migration: marks messages with corrupted/unreadable content
+  // (typically from past bugs). UI renders as `▒▒▒ MESSAGE CORRUPTED ▒▒▒`
+  // placeholder so the user can see something's wrong without breaking
+  // conversation flow. Entity can repair via write_entity_data Phase 2.
+  const hasIsGlitched = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('messages') WHERE name = 'is_glitched'",
+    )
+    .get();
+
+  if (!hasIsGlitched) {
+    db.exec(
+      "ALTER TABLE messages ADD COLUMN is_glitched INTEGER NOT NULL DEFAULT 0",
+    );
+    console.log("[DB] Added is_glitched column to messages table");
+  }
+
+  // Migration: Migrate entity_backup_snapshots table data to JSONL files
+  // outside psycheros.db, then drop the table.
+  //
+  // The original 2026-08-12 implementation put backups INSIDE psycheros.db.
+  // That was a design flaw — same-DB-as-data means DB corruption takes the
+  // backups with it. Migrated 2026-08-13 to filesystem JSONL under
+  // `<dataRoot>/.psycheros/backups/<surface>/<target_id>.jsonl`. Different
+  // file format, can't be hit by SQLite bugs.
+  //
+  // Migration is safe to run multiple times — table existence check guards
+  // the whole thing. Existing JSONL files aren't touched if the table is
+  // already gone.
+  {
+    const hasTable = db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'entity_backup_snapshots'",
+      )
+      .get();
+    if (hasTable) {
+      const rows = db.prepare(
+        "SELECT id, surface, target_id, content_snapshot, archived_at, reason FROM entity_backup_snapshots ORDER BY archived_at ASC",
+      ).all<{
+        id: string;
+        surface: string;
+        target_id: string;
+        content_snapshot: string;
+        archived_at: string;
+        reason: string | null;
+      }>();
+      if (rows.length > 0 && dataRoot) {
+        for (const row of rows) {
+          const safeTarget = row.target_id.replace(/[^a-zA-Z0-9._-]/g, "_")
+            .slice(0, 200);
+          const dir = `${dataRoot}/.psycheros/backups/${row.surface}`;
+          try {
+            Deno.mkdirSync(dir, { recursive: true });
+          } catch {
+            // exists
+          }
+          const path = `${dir}/${safeTarget}.jsonl`;
+          const snapshot = {
+            id: row.id,
+            surface: row.surface,
+            targetId: row.target_id,
+            contentSnapshot: row.content_snapshot,
+            archivedAt: row.archived_at,
+            ...(row.reason ? { reason: row.reason } : {}),
+          };
+          const line = JSON.stringify(snapshot) + "\n";
+          // Append to existing file
+          let existing = "";
+          try {
+            existing = Deno.readTextFileSync(path);
+          } catch {
+            // doesn't exist yet
+          }
+          Deno.writeTextFileSync(path, existing + line);
+        }
+        console.log(
+          `[DB] Migrated ${rows.length} backup snapshot(s) to JSONL files`,
+        );
+      }
+      db.exec("DROP TABLE IF EXISTS entity_backup_snapshots;");
+      console.log("[DB] Dropped legacy entity_backup_snapshots table");
+    }
+  }
+
   // Migration: Add push_subscriptions table if missing
   const hasPushSubscriptions = db
     .prepare(
@@ -965,6 +1082,33 @@ function runMigrations(db: Database): void {
       );
     }
     console.log("[DB] Created dm_whitelist table");
+  }
+
+  // Migration: context snapshots are now latest-only per conversation.
+  // Idempotent — keeps the highest turn_index snapshot per conversation;
+  // a no-op once every conversation has at most one row.
+  {
+    const before = (db.prepare("SELECT COUNT(*) AS n FROM context_snapshots")
+      .get() as { n: number } | undefined)?.n ?? 0;
+    if (before > 0) {
+      db.exec(`
+        DELETE FROM context_snapshots
+        WHERE id NOT IN (
+          SELECT id FROM context_snapshots cs
+          WHERE cs.turn_index = (
+            SELECT MAX(c2.turn_index) FROM context_snapshots c2
+            WHERE c2.conversation_id = cs.conversation_id
+          )
+        )
+      `);
+      const after = (db.prepare("SELECT COUNT(*) AS n FROM context_snapshots")
+        .get() as { n: number } | undefined)?.n ?? 0;
+      if (after < before) {
+        console.log(
+          `[DB] Pruned context snapshots to latest-only: ${before} → ${after}`,
+        );
+      }
+    }
   }
 
   // Scheduler tables (durable job queue + schedule definitions)
@@ -1535,6 +1679,280 @@ function verifyVectorTableSync(db: Database): void {
       console.log(
         `[DB] Tagged ${tagged} entity-loom imported conversation(s) with source_type='import'`,
       );
+    }
+  }
+
+  // Migration: Add workspace_sessions table.
+  // Each row links a workspace-type conversation to its sandbox, OpenCode
+  // session, briefing, and summary. Mirrors the pulse migration pattern.
+  const hasWorkspaceSessions = db
+    .prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workspace_sessions'",
+    )
+    .get();
+
+  if (!hasWorkspaceSessions) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workspace_sessions (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        origin_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+        sandbox_path TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'running', 'paused', 'suspended', 'complete', 'failed', 'cancelled')),
+        mode TEXT NOT NULL DEFAULT 'sync'
+          CHECK (mode IN ('sync', 'async', 'collaborative', 'engaged')),
+        partyhard INTEGER NOT NULL DEFAULT 0,
+        opencode_session_id TEXT,
+        briefing_json TEXT NOT NULL,
+        summary_text TEXT,
+        token_usage INTEGER NOT NULL DEFAULT 0,
+        error_text TEXT,
+        created_at TEXT NOT NULL,
+        ended_at TEXT,
+        last_activity_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workspace_sessions_conversation
+        ON workspace_sessions(conversation_id);
+
+      CREATE INDEX IF NOT EXISTS idx_workspace_sessions_origin
+        ON workspace_sessions(origin_conversation_id);
+
+      CREATE INDEX IF NOT EXISTS idx_workspace_sessions_status
+        ON workspace_sessions(status);
+    `);
+    console.log("[DB] Created workspace_sessions table");
+  }
+
+  // Migration: Add isolation column to workspace_sessions (Sandboxed/Feral).
+  // Falls back to 'sandboxed' for existing rows — the safer default.
+  {
+    const hasIsolation = db
+      .prepare(
+        "SELECT 1 FROM pragma_table_info('workspace_sessions') WHERE name = 'isolation'",
+      )
+      .get();
+    if (!hasIsolation) {
+      db.exec(
+        "ALTER TABLE workspace_sessions ADD COLUMN isolation TEXT NOT NULL DEFAULT 'sandboxed' " +
+          "CHECK (isolation IN ('sandboxed', 'feral'))",
+      );
+      console.log(
+        "[DB] Added isolation column to workspace_sessions table",
+      );
+    }
+  }
+
+  // Migration: Update mode CHECK constraint to include 'engaged'.
+  // SQLite doesn't support ALTER CHECK — table rebuild is the standard path.
+  // Detect via the table's DDL from sqlite_master. (An earlier version
+  // probe-inserted a dummy row in a savepoint, but that failed on the
+  // conversation_id FK — not the CHECK — so it rebuilt on EVERY boot and
+  // silently dropped any columns added by later ALTER migrations.)
+  {
+    const ddlStmt = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='workspace_sessions'",
+    );
+    const ddlRow = ddlStmt.get<{ sql?: string }>();
+    ddlStmt.finalize();
+    const needsRebuild = !(ddlRow?.sql ?? "").includes("'engaged'");
+
+    if (needsRebuild) {
+      db.exec(`
+        BEGIN;
+        CREATE TABLE workspace_sessions_new (
+          id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          origin_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          sandbox_path TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'running', 'paused', 'suspended', 'complete', 'failed', 'cancelled')),
+          mode TEXT NOT NULL DEFAULT 'sync'
+            CHECK (mode IN ('sync', 'async', 'collaborative', 'engaged')),
+          isolation TEXT NOT NULL DEFAULT 'sandboxed'
+            CHECK (isolation IN ('sandboxed', 'feral')),
+          partyhard INTEGER NOT NULL DEFAULT 0,
+          opencode_session_id TEXT,
+          briefing_json TEXT NOT NULL,
+          summary_text TEXT,
+          token_usage INTEGER NOT NULL DEFAULT 0,
+          error_text TEXT,
+          created_at TEXT NOT NULL,
+          ended_at TEXT,
+          last_activity_at TEXT NOT NULL,
+          end_requested INTEGER NOT NULL DEFAULT 0,
+          pinned INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO workspace_sessions_new
+          (id, conversation_id, origin_conversation_id, sandbox_path, status, mode, isolation,
+           partyhard, opencode_session_id, briefing_json, summary_text, token_usage, error_text,
+           created_at, ended_at, last_activity_at)
+        SELECT
+          id, conversation_id, origin_conversation_id, sandbox_path, status, mode,
+          COALESCE(isolation, 'sandboxed'),
+          partyhard, opencode_session_id, briefing_json, summary_text, token_usage, error_text,
+          created_at, ended_at, last_activity_at
+        FROM workspace_sessions;
+        DROP TABLE workspace_sessions;
+        ALTER TABLE workspace_sessions_new RENAME TO workspace_sessions;
+        CREATE INDEX IF NOT EXISTS idx_workspace_sessions_conversation
+          ON workspace_sessions(conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_workspace_sessions_origin
+          ON workspace_sessions(origin_conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_workspace_sessions_status
+          ON workspace_sessions(status);
+        COMMIT;
+      `);
+      console.log(
+        "[DB] Rebuilt workspace_sessions table to include 'engaged' mode + isolation column",
+      );
+    }
+  }
+
+  // Migration: Add end_requested column to workspace_sessions.
+  // Used by engaged mode (§13a) — entity signals done via workspace
+  // end_session action. Engaged-runner polls this after each entity turn
+  // to decide whether to continue the loop. Defaults to 0 (not requested).
+  {
+    const hasEndRequested = db
+      .prepare(
+        "SELECT 1 FROM pragma_table_info('workspace_sessions') WHERE name = 'end_requested'",
+      )
+      .get();
+    if (!hasEndRequested) {
+      db.exec(
+        "ALTER TABLE workspace_sessions ADD COLUMN end_requested INTEGER NOT NULL DEFAULT 0",
+      );
+      console.log(
+        "[DB] Added end_requested column to workspace_sessions table",
+      );
+    }
+  }
+
+  // Migration: Add pinned column to workspace_sessions.
+  // Pinned sessions are exempt from sandbox retention — the user/entity
+  // marked them as long-running projects to pick back up later. Defaults
+  // to 0 (not pinned).
+  {
+    const hasPinned = db
+      .prepare(
+        "SELECT 1 FROM pragma_table_info('workspace_sessions') WHERE name = 'pinned'",
+      )
+      .get();
+    if (!hasPinned) {
+      db.exec(
+        "ALTER TABLE workspace_sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+      );
+      console.log("[DB] Added pinned column to workspace_sessions table");
+    }
+  }
+
+  // Migration: Add workdir column to workspace_sessions — an existing host
+  // folder the session works on in place (bound rw via the OS sandbox).
+  // NULL for plain scratch sessions. Must come AFTER the table-rebuild
+  // migrations so nothing later drops it.
+  {
+    const hasWorkdir = db
+      .prepare(
+        "SELECT 1 FROM pragma_table_info('workspace_sessions') WHERE name = 'workdir'",
+      )
+      .get();
+    if (!hasWorkdir) {
+      db.exec("ALTER TABLE workspace_sessions ADD COLUMN workdir TEXT");
+      console.log("[DB] Added workdir column to workspace_sessions table");
+    }
+  }
+
+  // Migration: Update status CHECK constraint to include 'suspended'.
+  // Sessions in `suspended` status survive server restarts (orphan cleanup
+  // skips them) so the user can resume via the FAB `!` badge recovery path.
+  // DDL-based detection — see the 'engaged' mode migration for why
+  // insert-probing is wrong here.
+  {
+    const ddlStmt = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='workspace_sessions'",
+    );
+    const ddlRow = ddlStmt.get<{ sql?: string }>();
+    ddlStmt.finalize();
+    const needsRebuild = !(ddlRow?.sql ?? "").includes("'suspended'");
+
+    if (needsRebuild) {
+      db.exec(`
+        BEGIN;
+        CREATE TABLE workspace_sessions_new (
+          id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          origin_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          sandbox_path TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'running', 'paused', 'suspended', 'complete', 'failed', 'cancelled')),
+          mode TEXT NOT NULL DEFAULT 'sync'
+            CHECK (mode IN ('sync', 'async', 'collaborative', 'engaged')),
+          isolation TEXT NOT NULL DEFAULT 'sandboxed'
+            CHECK (isolation IN ('sandboxed', 'feral')),
+          partyhard INTEGER NOT NULL DEFAULT 0,
+          opencode_session_id TEXT,
+          briefing_json TEXT NOT NULL,
+          summary_text TEXT,
+          token_usage INTEGER NOT NULL DEFAULT 0,
+          error_text TEXT,
+          created_at TEXT NOT NULL,
+          ended_at TEXT,
+          last_activity_at TEXT NOT NULL,
+          end_requested INTEGER NOT NULL DEFAULT 0,
+          pinned INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO workspace_sessions_new
+          (id, conversation_id, origin_conversation_id, sandbox_path, status, mode, isolation,
+           partyhard, opencode_session_id, briefing_json, summary_text, token_usage, error_text,
+           created_at, ended_at, last_activity_at, end_requested)
+        SELECT
+          id, conversation_id, origin_conversation_id, sandbox_path, status, mode,
+          COALESCE(isolation, 'sandboxed'),
+          partyhard, opencode_session_id, briefing_json, summary_text, token_usage, error_text,
+          created_at, ended_at, last_activity_at,
+          COALESCE(end_requested, 0)
+        FROM workspace_sessions;
+        DROP TABLE workspace_sessions;
+        ALTER TABLE workspace_sessions_new RENAME TO workspace_sessions;
+        CREATE INDEX IF NOT EXISTS idx_workspace_sessions_conversation
+          ON workspace_sessions(conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_workspace_sessions_origin
+          ON workspace_sessions(origin_conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_workspace_sessions_status
+          ON workspace_sessions(status);
+        COMMIT;
+      `);
+      console.log(
+        "[DB] Rebuilt workspace_sessions table to include 'suspended' status",
+      );
+    }
+  }
+
+  // Migration: Add held_skills table. Names only — content is re-resolved
+  // from the skills dir at system-message build time, so edits apply next
+  // turn and deleted skills drop out via lazy row cleanup in the entity loop.
+  {
+    const hasHeldSkills = db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'held_skills'",
+      )
+      .get();
+
+    if (!hasHeldSkills) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS held_skills (
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          skill_name TEXT NOT NULL,
+          held_at TEXT NOT NULL,
+          PRIMARY KEY (conversation_id, skill_name)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_held_skills_conversation
+          ON held_skills(conversation_id);
+      `);
+      console.log("[DB] Created held_skills table");
     }
   }
 }

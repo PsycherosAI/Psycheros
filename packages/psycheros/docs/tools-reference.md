@@ -362,6 +362,123 @@ the conversation it's already in.
 | -------------------------------- | ------------------------------------------------- |
 | `src/tools/conversation-peek.ts` | `conversation_peek` — search, truncate, summarize |
 
+## Entity Skills Tool
+
+Markdown procedure files at `dataRoot/.psycheros/skills/<name>/SKILL.md` that
+the entity loads on demand instead of carrying in every context. The discovery
+list ("My skills" — name + description per skill) is appended to the `skill`
+tool's description in the per-request tool definitions, so it loads with the
+tools; loading a skill holds it active until released.
+
+| Tool    | Description                                               |
+| ------- | --------------------------------------------------------- |
+| `skill` | Load (holds), release, or author one of my skills on disk |
+
+**Parameters:** `name` (string **or list of strings**, required) — passing a
+list loads or releases several skills in one call (batches can't combine with
+`body` or `reference`). Optional `reference` (string) loads one of the skill's
+deep-dive reference docs instead of the body. Optional `release` (boolean) drops
+a held skill. `body` + `description` make the call an authoring write instead of
+a load.
+
+**Lifecycle:**
+
+1. **Load (default):** the skill stays active in a `<held_skills>` block in the
+   system message's dynamic region (after situational awareness) every turn
+   until released — there is no fade path for skill bodies; the entity decides
+   when a skill's work is done. The block is spliced in **immediately** — a
+   skill loaded mid-turn is part of the entity's context for its very next
+   inference in that same turn. The tool result is a one-line confirmation; the
+   body lives in the system block only. Holds are per-conversation, persisted in
+   the `held_skills` table (survive daemon restarts), and store names only:
+   bodies re-resolve from disk each build, so edits apply on the next rebuild
+   and a deleted skill's hold row is lazily cleaned up.
+2. **Reference load:** returns the reference content with fade metadata — a
+   transient lookup that collapses to a reload stub after 5 turns
+   (`buildFadeMap`).
+3. **Release (`release: true`):** drops the hold. Works even if the skill file
+   has been deleted — the DB row is the source of truth. Releasing a skill that
+   isn't held is a non-error note.
+
+**Validation:** `release` cannot combine with `body` (authoring) or with
+`reference` (releasing applies to the skill itself).
+
+**Authoring:** `skill({name, description, body})` saves/updates a skill;
+`skill({name, reference, body})` writes a reference doc. Writes to
+`generated:
+true` skills are refused (startup regeneration would clobber). No
+approval gate; the tool description carries the soft norm to mention new or
+changed skills to the user.
+
+### Related Source Files
+
+| File                        | Purpose                                            |
+| --------------------------- | -------------------------------------------------- |
+| `src/tools/skill.ts`        | `skill` — load, hold/release, author               |
+| `src/skills/loader.ts`      | on-disk layout, name validation (`SKILL_NAME_RE`)  |
+| `src/skills/index-block.ts` | "My skills" index + `<held_skills>` block builders |
+
+## Workspace Tool
+
+The entity can spawn sub-agent coding/research sessions via OpenCode — its
+"faculty for careful, detailed work." The entity is the _user_ of the workspace
+(philosophical flip from sub-agent framing); the workspace is framed as part of
+the entity, not a separate agent. Noisy workspace context (file contents,
+command output, search results) stays sandboxed — only the final summary flows
+back to main context.
+
+| Tool        | Description                                                               |
+| ----------- | ------------------------------------------------------------------------- |
+| `workspace` | Open/resume/cancel/status sub-agent OpenCode sessions, respond to queries |
+
+**Actions:** `open`, `resume`, `respond`, `status`, `cancel`, `propose_install`.
+Single omni-tool with an `action` parameter rather than one tool per action —
+keeps the entity's tool list uncrowded.
+
+**`open` parameters:**
+
+- `mode` (`sync` | `async` | `collaborative`): sync blocks the entity's turn,
+  async runs in background and emits a Pulse on completion (Phase 3),
+  collaborative lets the user join the workspace conversation.
+- `goal` (string, required): what to accomplish. Written as the first user
+  message to the workspace — the entity's active recall of what's needed.
+- `context` (string, optional): background context the entity chose to share.
+  There is no auto-summary of origin conversation.
+- `pinned` (string[], optional): message IDs from origin to include verbatim in
+  the briefing, when precision matters.
+
+**Permissions tiers (5 levels):** free sandbox; warned writes to entity data
+(routes back to main context for approval); read-only codebase; approved
+computer paths (per-session); always-protected paths (DB, daemon internals).
+
+**Partyhard mode:** bypasses Tier 2/4 prompts. Does NOT bypass OS sandbox or
+Tier 5 protected paths. Toggled per-session or per-entity default.
+
+**Off-by-default.** Requires OpenCode installed locally. Enable via Settings >
+Tools once installed.
+
+**Phase 1 scope:** sync + collaborative modes; `read_entity_data` +
+`read_codebase` workspace tools implemented.
+
+**Phase 2 (now in place):** `write_entity_data` (message writes only —
+identity/memory/conversation writes route to entity-core MCP in Phase 3),
+`ask_origin_conversation` query-back flow, soft-delete + glitched message
+rendering. `resume` and `propose_install` still return graceful Phase 2/4 stubs.
+
+**Full design and phasing:** `~/.claude/plans/recompiled-coding-faculty.md`.
+
+### Related Source Files
+
+| File                                  | Purpose                                                 |
+| ------------------------------------- | ------------------------------------------------------- |
+| `src/tools/workspace.ts`              | `workspace` omni-tool — entity-facing action dispatcher |
+| `src/workspace/supervisor.ts`         | OpenCode subprocess supervisor + singleton getter       |
+| `src/workspace/coordination-layer.ts` | Daemon-side MCP JSON-RPC dispatcher (4 workspace tools) |
+| `src/workspace/briefing.ts`           | First user message composition (active recall)          |
+| `src/workspace/summary.ts`            | Worker-LLM summary distillation                         |
+| `src/workspace/sandbox.ts`            | Per-session sandbox dir + OpenCode config               |
+| `src/workspace/agent-template.ts`     | First-person agent file template (self-understanding)   |
+
 ## Discord DM Tool
 
 The entity can send Discord DMs to the user as a notification channel. Uses a
@@ -437,12 +554,13 @@ internal and is not sent to Discord.
 
 ### Tool: `act_in_discord`
 
-| Field          | Type            | Description                                                                                                                                                |
-| -------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `actions`      | array           | All actions the entity wants to take. Batch everything into a single call.                                                                                 |
-| ↳ `message_id` | string          | Target message ID. If `content` is set, the reply threads under this message. If `emoji` is set, reacts to this message. Omit for a plain channel message. |
-| ↳ `content`    | string          | Text to send as a message (2000-char limit). Auto-splits if longer.                                                                                        |
-| ↳ `emoji`      | string or array | One or more emoji to react with. Requires `message_id`.                                                                                                    |
+| Field          | Type            | Description                                                                                                                                                                                                    |
+| -------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `actions`      | array           | All actions the entity wants to take. Batch everything into a single call.                                                                                                                                     |
+| ↳ `message_id` | string          | Target message ID. If `content` is set, the reply threads under this message. If `emoji` is set, reacts to this message. Omit for a plain channel message.                                                     |
+| ↳ `content`    | string          | Text to send as a message (2000-char limit). Auto-splits if longer.                                                                                                                                            |
+| ↳ `image_path` | string          | Optional image to attach, relative to `.psycheros/` (e.g. `generated-images/abc.png`). Pass the `File path:` line from `generate_image` through unchanged. May combine with `content` (either may be omitted). |
+| ↳ `emoji`      | string or array | One or more emoji to react with. Requires `message_id`.                                                                                                                                                        |
 
 **Example — reply to a message and react to another:**
 
@@ -461,6 +579,20 @@ internal and is not sent to Discord.
 {
   "actions": [
     { "message_id": "987654321", "content": "Great idea!", "emoji": "heart" }
+  ]
+}
+```
+
+**Example — reply with a generated image attached:**
+
+```json
+{
+  "actions": [
+    {
+      "message_id": "987654321",
+      "content": "made you this",
+      "image_path": "generated-images/art.png"
+    }
   ]
 }
 ```

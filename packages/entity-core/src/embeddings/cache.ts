@@ -149,22 +149,38 @@ function computeSchemaFingerprint(): EmbeddingSchemaFingerprint {
 }
 
 /**
- * Compare a stored fingerprint (raw TEXT from embedding_metadata) against the
- * currently-active fingerprint. Returns true if a rebuild is needed — either
- * because no fingerprint is stored, the value can't be parsed (legacy integer
- * format), or any field of the composite differs.
+ * Why a rebuild is (or isn't) needed. A `model` change is never auto-rebuilt
+ * at boot — model swaps are migrations my Psycheros parent must own (graph
+ * nodes included, via `embedding_rebuild_all`), not something I grind through
+ * unsupervised at startup.
  */
-function fingerprintNeedsRebuild(stored: string | undefined): boolean {
-  if (!stored) return true;
+export type RebuildReason =
+  | "none"
+  | "model"
+  | "algorithm"
+  | "chunk_params"
+  | "unparseable";
+
+/**
+ * Compare a stored fingerprint (raw TEXT from embedding_metadata) against the
+ * currently-active fingerprint and classify the difference. `model` takes
+ * precedence: even when algorithm or chunk params also differ, a model swap
+ * routes to the parent orchestrator.
+ */
+function diffFingerprint(stored: string | undefined): RebuildReason {
+  if (!stored) return "unparseable";
   try {
     const parsed = JSON.parse(stored) as Partial<EmbeddingSchemaFingerprint>;
     const active = computeSchemaFingerprint();
-    return parsed.algorithm !== active.algorithm ||
-      parsed.chunkParamsHash !== active.chunkParamsHash ||
-      parsed.modelRepoId !== active.modelRepoId;
+    if (parsed.modelRepoId !== active.modelRepoId) return "model";
+    if (parsed.algorithm !== active.algorithm) return "algorithm";
+    if (parsed.chunkParamsHash !== active.chunkParamsHash) {
+      return "chunk_params";
+    }
+    return "none";
   } catch {
     // Legacy integer format or corrupt JSON — rebuild.
-    return true;
+    return "unparseable";
   }
 }
 
@@ -175,7 +191,7 @@ export class EmbeddingCache {
   private dbPath: string;
   private vectorAvailable = false;
   private initialized = false;
-  private rebuildNeeded = false;
+  private rebuildReason: RebuildReason = "none";
 
   constructor(dataDir: string) {
     this.dbPath = join(dataDir, "graph.db");
@@ -217,7 +233,7 @@ export class EmbeddingCache {
     this.initialized = true;
 
     // Check if embedding schema version changed — flag rebuild if so
-    this.rebuildNeeded = this.checkSchemaVersion();
+    this.rebuildReason = this.checkSchemaVersion();
   }
 
   /**
@@ -621,10 +637,18 @@ export class EmbeddingCache {
    * that all cached embeddings need to be rebuilt.
    */
   needsRebuild(): boolean {
-    return this.rebuildNeeded;
+    return this.rebuildReason !== "none";
   }
 
-  private checkSchemaVersion(): boolean {
+  /**
+   * Classify WHY a rebuild is needed. `model` means the boot path must refuse
+   * and defer to the parent orchestrator; the other reasons auto-rebuild.
+   */
+  getRebuildReason(): RebuildReason {
+    return this.rebuildReason;
+  }
+
+  private checkSchemaVersion(): RebuildReason {
     // Ensure metadata table exists
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS embedding_metadata (key TEXT PRIMARY KEY, value TEXT)`,
@@ -636,7 +660,7 @@ export class EmbeddingCache {
     const row = stmt.get<{ value: string }>();
     stmt.finalize();
 
-    return fingerprintNeedsRebuild(row?.value);
+    return diffFingerprint(row?.value);
   }
 
   /**
@@ -655,7 +679,7 @@ export class EmbeddingCache {
     );
     stmt.run(fingerprint);
     stmt.finalize();
-    this.rebuildNeeded = false;
+    this.rebuildReason = "none";
   }
 
   /**

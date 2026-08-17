@@ -5,6 +5,8 @@
  * tools, SSE events, and conversations.
  */
 
+import type { SkillFile } from "./workspace/skills.ts";
+
 // =============================================================================
 // Message Types
 // =============================================================================
@@ -39,6 +41,20 @@ export interface Message {
    * text without `[IMAGE:...]` markers. Parsed from JSON in rowToMessage.
    */
   metadata?: MessageMetadata;
+  /**
+   * When non-undefined, this message has been soft-deleted (tombstoned).
+   * The row stays for conversation-flow continuity; content is replaced
+   * with a tombstone notice at read time. Original content is archived
+   * inside `metadata.tombstone` for recovery.
+   */
+  deletedAt?: Date;
+  /**
+   * True if this message's content is corrupted/unreadable (typically from
+   * past bugs). UI renders as a placeholder so the user can see something
+   * is wrong without breaking conversation flow. Entity can repair via
+   * write_entity_data.
+   */
+  isGlitched?: boolean;
 }
 
 /**
@@ -61,6 +77,20 @@ export interface MessageMetadata {
   fade?: {
     /** Content text to swap in after IMAGE_DESCRIPTION_FADE_TURNS */
     replacementContent: string;
+  };
+  /**
+   * Tombstone metadata — populated when a message is soft-deleted. The
+   * original content lives here so it can be recovered if the deletion
+   * was a mistake. The visible `content` field is replaced with a
+   * "[deleted by ...]" notice at read time.
+   */
+  tombstone?: {
+    /** Original content before deletion. */
+    originalContent: string;
+    /** Who initiated the deletion ("entity", "user", "system"). */
+    deletedBy: string;
+    /** Optional reason for the deletion. */
+    reason?: string;
   };
 }
 
@@ -153,7 +183,8 @@ export interface SSEEvent {
     | "done"
     | "message_id"
     | "image_generated"
-    | "thinking_corrected";
+    | "thinking_corrected"
+    | "ping";
   data: string;
 }
 
@@ -169,8 +200,8 @@ export interface Conversation {
   title?: string;
   createdAt: Date;
   updatedAt: Date;
-  /** Where this conversation originated: "web", "discord", or "pulse" */
-  sourceType?: "web" | "discord" | "pulse";
+  /** Where this conversation originated: "web", "discord", "pulse", or "workspace" */
+  sourceType?: "web" | "discord" | "pulse" | "workspace";
   /** Discord server (guild) ID when sourceType is "discord" */
   sourceServerId?: string;
   /** Discord server name */
@@ -253,6 +284,8 @@ export interface LLMContextSnapshot {
   vaultContent?: string;
   /** Situational awareness content injected into context */
   situationalAwarenessContent?: string;
+  /** "Skills I'm holding" block injected into the dynamic system section */
+  heldSkillsContent?: string;
   /** Trusted local plugin context I add to my prompt */
   pluginContent?: string;
   /** Per-hook detail for Context Inspector — what each hook contributed */
@@ -333,6 +366,7 @@ export interface ContextSnapshotRecord {
   graphContent?: string;
   vaultContent?: string;
   situationalAwarenessContent?: string;
+  heldSkillsContent?: string;
   messagesJson: string;
   toolDefinitionsJson: string;
   metricsJson: string;
@@ -465,4 +499,138 @@ export interface UpdatePulseInput {
   maxChainDepth?: number;
   autoDelete?: boolean;
   filesystemWatchPath?: string | null;
+}
+
+// =============================================================================
+// Workspace Types
+// =============================================================================
+//
+// Workspace sessions are OpenCode-as-faculty: supervised subprocesses the entity
+// spawns via the `workspace` omni-tool for detailed technical work. Each session
+// is its own conversation (sourceType: "workspace") with workspace_sessions
+// holding the workspace-specific metadata (sandbox path, OpenCode session ID,
+// status, briefing, summary).
+
+export type WorkspaceMode = "sync" | "async" | "collaborative" | "engaged";
+
+/**
+ * Isolation axis — orthogonal to WorkspaceMode. Controls whether the OpenCode
+ * subprocess runs inside an OS-level sandbox (Sandboxed) or directly on the
+ * host (Feral).
+ *
+ * Per plan §4: Sandboxed uses bwrap (Linux) / sandbox-exec (macOS) for
+ * kernel-level isolation. Feral skips OS sandbox for "help me with my
+ * computer" workflows. Tier 5 protection (daemon files) holds across both —
+ * enforced via classifyPath() in the coordination layer, not the OS sandbox.
+ */
+export type WorkspaceIsolation = "sandboxed" | "feral";
+
+export type WorkspaceStatus =
+  | "pending" // created, not yet started
+  | "running" // OpenCode session in progress
+  | "paused" // legacy: waiting on approval — superseded by `suspended` for query-back
+  | "suspended" // waiting on user answer to ask_origin/ask_user (plan §14 suspend model)
+  | "complete" // finished normally, summary available
+  | "failed" // OpenCode crashed or errored
+  | "cancelled"; // user or entity cancelled
+
+/**
+ * The briefing the entity writes when opening a workspace session. The entity's
+ * active-recall of relevant context — there is no auto-summary of the origin
+ * conversation. Pinned messages are verbatim quotes from origin.
+ */
+export interface WorkspaceBriefing {
+  /** What the entity wants the workspace to accomplish. */
+  goal: string;
+  /** Background context the entity chose to share (active recall). */
+  context?: string;
+  /** Message IDs from the origin conversation to include verbatim. */
+  pinnedMessageIds?: string[];
+  /** ID of the conversation this workspace was spawned from. */
+  originConversationId?: string;
+  /** Optional timeout for sync mode, in milliseconds. */
+  timeoutMs?: number;
+  /**
+   * Names of my skills bundled into the sandbox at spawn (via the workspace
+   * tool's `skills` param) so OpenCode follows the same procedures.
+   */
+  bundledSkills?: string[];
+}
+
+/**
+ * A workspace session row. Mirrors the `workspace_sessions` table.
+ */
+export interface WorkspaceSession {
+  id: string;
+  /** The workspace conversation (sourceType: "workspace"). */
+  conversationId: string;
+  /** Conversation that spawned this workspace, if any. */
+  originConversationId?: string;
+  /** Filesystem path to the sandbox dir. */
+  sandboxPath: string;
+  status: WorkspaceStatus;
+  mode: WorkspaceMode;
+  /** Isolation level for this session — 'sandboxed' (default, OS sandbox active) or 'feral' (no OS sandbox). */
+  isolation: WorkspaceIsolation;
+  /** Whether partyhard (skip Tier 2/4 prompts) is active for this session. */
+  partyhard: boolean;
+  /** OpenCode's session ID once spawned (ses_...). */
+  opencodeSessionId?: string;
+  /** The original briefing. */
+  briefing: WorkspaceBriefing;
+  /** Final summary — set when status becomes "complete". */
+  summary?: string;
+  /** Token usage counter. */
+  tokenUsage: number;
+  createdAt: string;
+  /** When the session ended (any terminal status). */
+  endedAt?: string;
+  /** Last activity timestamp (heartbeat). */
+  lastActivityAt: string;
+  /** Error message if status is "failed". */
+  error?: string;
+  /**
+   * True if the entity has signaled end-of-session via workspace end_session
+   * action. Engaged-runner polls this after each entity turn (per §13a) to
+   * decide whether to continue the turn-based loop. Always false for sync /
+   * async (delegation) modes — those don't have an entity in the loop.
+   */
+  endRequested: boolean;
+  /**
+   * Exempt from sandbox retention — the user/entity marked this session as
+   * a long-running project to pick back up later. Pin via the workspace
+   * `pin` action or the Settings > Workspace management list.
+   */
+  pinned?: boolean;
+  /**
+   * Existing host folder this session works on in place (bound rw via the
+   * OS sandbox). Undefined for plain scratch sessions.
+   */
+  workdir?: string;
+}
+
+/**
+ * Input for opening a new workspace session.
+ */
+export interface CreateWorkspaceInput {
+  mode: WorkspaceMode;
+  briefing: WorkspaceBriefing;
+  partyhard?: boolean;
+  /**
+   * Isolation level for this session. Falls back to the per-entity default
+   * from workspace-settings.json (`defaultIsolation`) when unset.
+   */
+  isolation?: WorkspaceIsolation;
+  /**
+   * Existing host folder to work on in place (e.g. reorganizing an existing
+   * project). Bound read-write via the OS sandbox — the kernel-scoped
+   * alternative to Feral. Refused for Tier 5 / protected paths; every bind
+   * passes a user approval toast before the session spawns.
+   */
+  workdir?: string;
+  /**
+   * Entity skills to copy into the sandbox alongside the built-in workspace
+   * skills (validated + loaded by the workspace tool before spawn).
+   */
+  skillFiles?: SkillFile[];
 }

@@ -11,6 +11,12 @@ import type { GraphStore } from "../graph/mod.ts";
 import type { Granularity, MemoryEntry } from "../types.ts";
 import { getEmbedder, resetEmbedder } from "../embeddings/mod.ts";
 import type { EmbeddingCache } from "../embeddings/mod.ts";
+import {
+  notifyRebuild,
+  releaseRebuild,
+  tryAcquireRebuild,
+  yieldToEventLoop,
+} from "../embeddings/mod.ts";
 import { computeMemoryKey } from "../embeddings/mod.ts";
 import { chunkContent, shouldChunk } from "../embeddings/chunker.ts";
 
@@ -1302,60 +1308,101 @@ export function createMemoryEmbeddingRebuildHandler(
   cache: EmbeddingCache,
 ) {
   return async (): Promise<MemoryEmbeddingRebuildOutput> => {
-    const statsBefore = cache.getStats();
-    const total = statsBefore.totalCached;
-
-    // Clear all cached embeddings
-    cache.clearAll();
-
-    const embedder = getEmbedder();
-    let rebuilt = 0;
-    let failed = 0;
-
-    const granularities: Granularity[] = [
-      "daily",
-      "weekly",
-      "monthly",
-      "yearly",
-      "significant",
-    ];
-
-    for (const granularity of granularities) {
-      const memories = await store.listMemories(granularity);
-      for (const memory of memories) {
-        try {
-          const result = await cache.getOrCompute(
-            {
-              granularity: memory.granularity,
-              date: memory.date,
-              sourceInstance: memory.sourceInstance || undefined,
-              slug: memory.slug || undefined,
-              content: memory.content,
-            },
-            embedder,
-          );
-          if (result) {
-            rebuilt++;
-          } else {
-            failed++;
-          }
-        } catch (err) {
-          console.error(
-            `[Memory] Failed to rebuild embedding for ${granularity}/${memory.date}: ${err}`,
-          );
-          failed++;
-        }
-      }
+    if (!tryAcquireRebuild("memory")) {
+      return {
+        rebuilt: 0,
+        failed: 0,
+        total: 0,
+        message: "Another rebuild is already in progress.",
+      };
     }
 
-    return {
-      rebuilt,
-      failed,
-      total,
-      message: failed === 0
-        ? `Rebuilt ${rebuilt} embedding(s) from ${rebuilt} memory files.`
-        : `Rebuilt ${rebuilt} embedding(s), ${failed} failed.`,
-    };
+    try {
+      // Pre-list every memory file so `total` reflects the work ahead, not
+      // the size of the (about-to-be-cleared) cache.
+      const granularities: Granularity[] = [
+        "daily",
+        "weekly",
+        "monthly",
+        "yearly",
+        "significant",
+      ];
+      const perGranularity = await Promise.all(
+        granularities.map((g) => store.listMemories(g)),
+      );
+      const total = perGranularity.reduce((n, list) => n + list.length, 0);
+
+      notifyRebuild({ phase: "started", scope: "memory", total });
+
+      // Clear all cached embeddings
+      cache.clearAll();
+
+      const embedder = getEmbedder();
+      let rebuilt = 0;
+      let failed = 0;
+
+      for (const memories of perGranularity) {
+        for (const memory of memories) {
+          try {
+            const result = await cache.getOrCompute(
+              {
+                granularity: memory.granularity,
+                date: memory.date,
+                sourceInstance: memory.sourceInstance || undefined,
+                slug: memory.slug || undefined,
+                content: memory.content,
+              },
+              embedder,
+            );
+            if (result) {
+              rebuilt++;
+            } else {
+              failed++;
+            }
+          } catch (err) {
+            console.error(
+              `[Memory] Failed to rebuild embedding for ${memory.granularity}/${memory.date}: ${err}`,
+            );
+            failed++;
+          }
+          // Keep answering requests (and pings) while I re-embed.
+          await yieldToEventLoop();
+          if ((rebuilt + failed) % 25 === 0) {
+            notifyRebuild({
+              phase: "progress",
+              scope: "memory",
+              done: rebuilt + failed,
+              total,
+            });
+          }
+        }
+      }
+
+      notifyRebuild({
+        phase: "done",
+        scope: "memory",
+        done: rebuilt + failed,
+        total,
+      });
+
+      return {
+        rebuilt,
+        failed,
+        total,
+        message: failed === 0
+          ? `Rebuilt ${rebuilt} embedding(s) from ${rebuilt} memory files.`
+          : `Rebuilt ${rebuilt} embedding(s), ${failed} failed.`,
+      };
+    } catch (error) {
+      notifyRebuild({
+        phase: "failed",
+        scope: "memory",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    } finally {
+      releaseRebuild();
+    }
   };
 }
 
@@ -1392,128 +1439,167 @@ export function createEmbeddingRebuildAllHandler(
   graphStore: GraphStore,
 ) {
   return async (): Promise<EmbeddingRebuildAllOutput> => {
-    console.error("[Embeddings] rebuild_all: starting");
-    // Pick up new env vars if my parent restarted me with them.
-    resetEmbedder();
-    const embedder = getEmbedder();
-    console.error("[Embeddings] rebuild_all: initializing embedder");
-    await embedder.initialize();
-    console.error("[Embeddings] rebuild_all: embedder ready");
+    if (!tryAcquireRebuild("all")) {
+      return {
+        memoriesRebuilt: 0,
+        memoriesFailed: 0,
+        memoriesTotal: 0,
+        nodesRebuilt: 0,
+        nodesFailed: 0,
+        nodesTotal: 0,
+        message: "Another rebuild is already in progress.",
+      };
+    }
 
-    // ---- Memory cache rebuild ----
-    console.error("[Embeddings] rebuild_all: clearing cache");
-    cache.clearAll();
-    console.error("[Embeddings] rebuild_all: cache cleared");
-
-    const granularities: Granularity[] = [
-      "daily",
-      "weekly",
-      "monthly",
-      "yearly",
-      "significant",
-    ];
-    let memoriesRebuilt = 0;
-    let memoriesFailed = 0;
-    let memoriesTotal = 0;
-
-    for (const granularity of granularities) {
-      const memories = await store.listMemories(granularity);
-      memoriesTotal += memories.length;
-      console.error(
-        `[Embeddings] rebuild_all: ${granularity} — ${memories.length} entries`,
+    try {
+      console.error("[Embeddings] rebuild_all: starting");
+      // Pre-list everything so the started notification carries a real total.
+      const granularities: Granularity[] = [
+        "daily",
+        "weekly",
+        "monthly",
+        "yearly",
+        "significant",
+      ];
+      const perGranularity = await Promise.all(
+        granularities.map((g) => store.listMemories(g)),
       );
-      for (const memory of memories) {
-        try {
-          const result = await cache.getOrCompute(
-            {
-              granularity: memory.granularity,
-              date: memory.date,
-              sourceInstance: memory.sourceInstance || undefined,
-              slug: memory.slug || undefined,
-              content: memory.content,
-            },
-            embedder,
-          );
-          if (result) {
-            memoriesRebuilt++;
-            if (memoriesRebuilt % 25 === 0) {
-              console.error(
-                `[Embeddings] rebuild_all: ${granularity} progress ${memoriesRebuilt}/${memories.length}`,
-              );
+      const memoriesTotal = perGranularity.reduce(
+        (n, list) => n + list.length,
+        0,
+      );
+      const nodesTotal = graphStore.listNodeLabels().length;
+      const total = memoriesTotal + nodesTotal;
+
+      // Before any embedder work — the model load is part of the CPU spike
+      // my parent must pause its watchdog across.
+      notifyRebuild({ phase: "started", scope: "all", total });
+
+      // Pick up new env vars if my parent restarted me with them.
+      resetEmbedder();
+      const embedder = getEmbedder();
+      console.error("[Embeddings] rebuild_all: initializing embedder");
+      await embedder.initialize();
+      console.error("[Embeddings] rebuild_all: embedder ready");
+
+      // ---- Memory cache rebuild ----
+      console.error("[Embeddings] rebuild_all: clearing cache");
+      cache.clearAll();
+      console.error("[Embeddings] rebuild_all: cache cleared");
+
+      let memoriesRebuilt = 0;
+      let memoriesFailed = 0;
+      let done = 0;
+
+      const reportProgress = () => {
+        if (done % 25 === 0 && done > 0) {
+          notifyRebuild({ phase: "progress", scope: "all", done, total });
+        }
+      };
+
+      for (const memories of perGranularity) {
+        for (const memory of memories) {
+          try {
+            const result = await cache.getOrCompute(
+              {
+                granularity: memory.granularity,
+                date: memory.date,
+                sourceInstance: memory.sourceInstance || undefined,
+                slug: memory.slug || undefined,
+                content: memory.content,
+              },
+              embedder,
+            );
+            if (result) {
+              memoriesRebuilt++;
+            } else {
+              memoriesFailed++;
             }
-          } else {
+          } catch (err) {
+            console.error(
+              `[Embeddings] rebuild_all: memory failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
             memoriesFailed++;
           }
-        } catch (err) {
-          console.error(
-            `[Embeddings] rebuild_all: memory failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-          memoriesFailed++;
+          done++;
+          await yieldToEventLoop();
+          reportProgress();
         }
       }
-    }
-    console.error(
-      `[Embeddings] rebuild_all: memories done (${memoriesRebuilt} ok, ${memoriesFailed} failed)`,
-    );
+      console.error(
+        `[Embeddings] rebuild_all: memories done (${memoriesRebuilt} ok, ${memoriesFailed} failed)`,
+      );
 
-    // ---- Graph node rebuild ----
-    console.error("[Embeddings] rebuild_all: dropping vec_graph_nodes");
-    const { total: nodesTotal } = graphStore.reembedAllGraphNodes();
-    console.error(
-      `[Embeddings] rebuild_all: ${nodesTotal} graph nodes to re-embed`,
-    );
-    let nodesRebuilt = 0;
-    let nodesFailed = 0;
+      // ---- Graph node rebuild ----
+      console.error("[Embeddings] rebuild_all: dropping vec_graph_nodes");
+      graphStore.reembedAllGraphNodes();
+      console.error(
+        `[Embeddings] rebuild_all: ${nodesTotal} graph nodes to re-embed`,
+      );
+      let nodesRebuilt = 0;
+      let nodesFailed = 0;
 
-    if (nodesTotal > 0) {
-      const nodes = graphStore.listNodeLabels();
-      for (const node of nodes) {
-        try {
-          const vec = await embedder.embed(node.label);
-          if (!vec) {
-            nodesFailed++;
-            continue;
-          }
-          graphStore.updateNodeEmbedding(node.id, vec);
-          nodesRebuilt++;
-          if (nodesRebuilt % 25 === 0) {
+      if (nodesTotal > 0) {
+        const nodes = graphStore.listNodeLabels();
+        for (const node of nodes) {
+          try {
+            const vec = await embedder.embed(node.label);
+            if (!vec) {
+              nodesFailed++;
+            } else {
+              graphStore.updateNodeEmbedding(node.id, vec);
+              nodesRebuilt++;
+            }
+          } catch (err) {
             console.error(
-              `[Embeddings] rebuild_all: graph progress ${nodesRebuilt}/${nodesTotal}`,
+              `[Embeddings] rebuild_all: graph node failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
             );
+            nodesFailed++;
           }
-        } catch (err) {
-          console.error(
-            `[Embeddings] rebuild_all: graph node failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-          nodesFailed++;
+          done++;
+          await yieldToEventLoop();
+          reportProgress();
         }
       }
+      console.error(
+        `[Embeddings] rebuild_all: graph done (${nodesRebuilt} ok, ${nodesFailed} failed)`,
+      );
+
+      // Success path only — a failed rebuild must leave the fingerprint
+      // stale so the next boot retries.
+      cache.markSchemaUpToDate();
+      console.error("[Embeddings] rebuild_all: complete");
+
+      notifyRebuild({ phase: "done", scope: "all", done, total });
+
+      const ok = memoriesFailed === 0 && nodesFailed === 0;
+      return {
+        memoriesRebuilt,
+        memoriesFailed,
+        memoriesTotal,
+        nodesRebuilt,
+        nodesFailed,
+        nodesTotal,
+        message: ok
+          ? `Rebuilt ${memoriesRebuilt} memory + ${nodesRebuilt} node embeddings.`
+          : `Rebuilt ${memoriesRebuilt} memory + ${nodesRebuilt} node embeddings; ${
+            memoriesFailed + nodesFailed
+          } failed.`,
+      };
+    } catch (error) {
+      notifyRebuild({
+        phase: "failed",
+        scope: "all",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    } finally {
+      releaseRebuild();
     }
-    console.error(
-      `[Embeddings] rebuild_all: graph done (${nodesRebuilt} ok, ${nodesFailed} failed)`,
-    );
-
-    cache.markSchemaUpToDate();
-    console.error("[Embeddings] rebuild_all: complete");
-
-    const ok = memoriesFailed === 0 && nodesFailed === 0;
-    return {
-      memoriesRebuilt,
-      memoriesFailed,
-      memoriesTotal,
-      nodesRebuilt,
-      nodesFailed,
-      nodesTotal,
-      message: ok
-        ? `Rebuilt ${memoriesRebuilt} memory + ${nodesRebuilt} node embeddings.`
-        : `Rebuilt ${memoriesRebuilt} memory + ${nodesRebuilt} node embeddings; ${
-          memoriesFailed + nodesFailed
-        } failed.`,
-    };
   };
 }
 

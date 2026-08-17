@@ -58,6 +58,7 @@ export interface ImportResult {
       background_files_restored?: number;
       plugins_restored?: number;
       plugin_restart_required?: boolean;
+      workspace_pending_queries_restored?: boolean;
     };
     entity_core?: {
       success: boolean;
@@ -262,6 +263,7 @@ export async function exportEntityData(
   let chatAttachmentFileCount = 0;
   let customToolFileCount = 0;
   let backgroundFileCount = 0;
+  let workspacePendingQueriesIncluded = false;
   let pluginFileCount = 0;
 
   // Conversations + messages
@@ -537,6 +539,25 @@ export async function exportEntityData(
     "psycheros/backgrounds",
   );
 
+  // Workspace pending queries — per plan §14 suspend model, in-flight
+  // ask_origin_conversation / ask_user questions persist to
+  // `.psycheros/workspace-pending-queries.json` so they survive server
+  // restarts. Include in entity-data export so a backup/restore cycle
+  // doesn't silently drop them. Without this, a user restoring from
+  // backup would lose any pending workspace question.
+  const pendingQueriesPath = join(
+    ctx.dataRoot,
+    ".psycheros",
+    "workspace-pending-queries.json",
+  );
+  try {
+    const bytes = await Deno.readFile(pendingQueriesPath);
+    zip.file("psycheros/workspace-pending-queries.json", bytes);
+    workspacePendingQueriesIncluded = true;
+  } catch {
+    // File doesn't exist (no pending queries have ever been enqueued) — skip.
+  }
+
   // Build manifest
   const manifest: Record<string, unknown> = {
     schema_version: 1,
@@ -557,6 +578,7 @@ export async function exportEntityData(
         chat_attachments: true,
         custom_tools: true,
         backgrounds: true,
+        workspace_pending_queries: workspacePendingQueriesIncluded,
       },
     },
     counts: {
@@ -1223,6 +1245,36 @@ export async function importEntityData(
       ["backgrounds"],
       "background_files_restored",
     );
+
+    // Restore workspace-pending-queries.json (single file, not a directory).
+    // Per plan §14: persists in-flight ask_origin_conversation / ask_user
+    // questions across backup/restore. Without this, restoring from backup
+    // silently drops any pending query, and the FAB `!` recovery path
+    // surfaces nothing.
+    const pendingQueriesFile = zip.file(
+      "psycheros/workspace-pending-queries.json",
+    );
+    if (pendingQueriesFile) {
+      try {
+        const bytes = await pendingQueriesFile.async("uint8array");
+        const destPath = join(
+          ctx.dataRoot,
+          ".psycheros",
+          "workspace-pending-queries.json",
+        );
+        await ensureDir(join(destPath, ".."));
+        await Deno.writeFile(destPath, bytes);
+        details.psycheros.workspace_pending_queries_restored = true;
+      } catch (err) {
+        console.error(
+          "[entity-data] failed to restore workspace-pending-queries.json:",
+          err instanceof Error ? err.message : err,
+        );
+        details.psycheros.workspace_pending_queries_restored = false;
+      }
+    } else {
+      details.psycheros.workspace_pending_queries_restored = false;
+    }
 
     // --- Import entity-core data via MCP ---
     if (entityCoreParts && ctx.mcpClient?.isConnected()) {

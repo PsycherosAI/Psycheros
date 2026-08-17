@@ -185,6 +185,58 @@ async function initializeCustomToolsDir(
 }
 
 /**
+ * Seed `.psycheros/skills/` with template skill directories. Per-skill
+ * existence check: a skill already present in the target is never
+ * overwritten (user edits win), and one template seeding never blocks
+ * another.
+ */
+async function initializeSkillsDir(
+  projectRoot: string,
+  dataRoot: string,
+): Promise<void> {
+  const templateDir = join(projectRoot, "templates", "skills");
+  const targetDir = join(dataRoot, ".psycheros", "skills");
+
+  try {
+    let seeded = 0;
+    for await (const entry of Deno.readDir(templateDir)) {
+      if (!entry.isDirectory) continue;
+      const srcSkillDir = join(templateDir, entry.name);
+      const destSkillDir = join(targetDir, entry.name);
+      try {
+        await Deno.stat(join(destSkillDir, "SKILL.md"));
+        continue; // already installed — never clobber
+      } catch {
+        // Not installed — seed it.
+      }
+      await copySkillDir(srcSkillDir, destSkillDir);
+      seeded++;
+    }
+    if (seeded > 0) {
+      console.log(
+        `[Init] Seeded .psycheros/skills/ with ${seeded} template skill(s)`,
+      );
+    }
+  } catch {
+    // Template dir doesn't exist, skip
+  }
+}
+
+/** Recursively copy a template skill directory (SKILL.md + references/). */
+async function copySkillDir(src: string, dest: string): Promise<void> {
+  await ensureDir(dest);
+  for await (const entry of Deno.readDir(src)) {
+    const srcPath = join(src, entry.name);
+    const destPath = join(dest, entry.name);
+    if (entry.isFile) {
+      await Deno.copyFile(srcPath, destPath);
+    } else if (entry.isDirectory) {
+      await copySkillDir(srcPath, destPath);
+    }
+  }
+}
+
+/**
  * Run all initialization tasks
  *
  * @param projectRoot - Source root, where `templates/` lives
@@ -197,4 +249,5 @@ export async function initialize(
 ): Promise<void> {
   await initializeFromTemplates(projectRoot, dataRoot);
   await initializeCustomToolsDir(projectRoot, dataRoot);
+  await initializeSkillsDir(projectRoot, dataRoot);
 }

@@ -31,6 +31,11 @@ const UI_REGIONS: Record<string, UIRegionConfig> = {
     swap: "innerHTML",
     classes: "logo-sub",
   },
+  "held-skills": {
+    target: "#held-skills-strip",
+    swap: "innerHTML",
+    classes: "held-skills-strip",
+  },
 };
 
 /**
@@ -108,6 +113,18 @@ function renderRegion(
       }
       const conversation = db.getConversation(conversationId);
       return renderHeaderTitle(conversation?.title);
+    }
+    case "held-skills": {
+      // Held-skill chips are per-conversation — skip without a conversationId
+      if (!conversationId) {
+        return null;
+      }
+      const held = db.getHeldSkills(conversationId);
+      return held
+        .map((name) =>
+          `<div class="held-skill-chip" title="Skill: ${name}">Skill: ${name}</div>`
+        )
+        .join("");
     }
     default:
       return null;

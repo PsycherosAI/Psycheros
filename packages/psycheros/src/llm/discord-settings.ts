@@ -55,6 +55,11 @@ export interface DiscordGatewayConfig {
   blockedBotIds: string[];
   respondToEveryoneHere: boolean;
   allowedTools: string[];
+  /**
+   * LLM profile used for server-channel turns. Empty/absent = use the
+   * globally active profile. DMs always use the active profile regardless.
+   */
+  llmProfileId?: string;
   debounceWindowMs: number;
   maxBufferSize: number;
   activeModeTiers: ActiveModeTierConfig;

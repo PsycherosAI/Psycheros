@@ -2,6 +2,7 @@ import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import {
   applyPluginEnv,
+  contentTypeMatchesGlob,
   getPluginEnvPath,
   isDeniedPluginEnvVar,
   isPluginSecretFilename,
@@ -122,6 +123,151 @@ Deno.test("plugin manifest parses capabilities.settings flag", () => {
       capabilities: "yes",
     }, "calendar-caldav")
   );
+});
+
+Deno.test("plugin manifest accepts apiVersion 2 with discordMedia capability", () => {
+  const base = {
+    id: "discord-media",
+    name: "Discord Media",
+    version: "1.0.0",
+    entrypoints: { psycheros: "./psycheros.ts" },
+  };
+
+  const manifest = validatePluginManifest({
+    ...base,
+    apiVersion: 2,
+    capabilities: {
+      discordMedia: {
+        attachmentTypes: ["audio/*", "image/gif"],
+        send: true,
+      },
+    },
+  }, "discord-media");
+
+  assertEquals(manifest.apiVersion, 2);
+  assertEquals(manifest.capabilities?.discordMedia?.attachmentTypes, [
+    "audio/*",
+    "image/gif",
+  ]);
+  assertEquals(manifest.capabilities?.discordMedia?.send, true);
+
+  // Version 2 without discordMedia is fine — the capability is optional.
+  const plain = validatePluginManifest({
+    ...base,
+    apiVersion: 2,
+  }, "discord-media");
+  assertEquals(plain.capabilities, undefined);
+
+  // Version 3 is not (yet) a thing.
+  assertThrows(() =>
+    validatePluginManifest({ ...base, apiVersion: 3 }, "discord-media")
+  );
+});
+
+Deno.test("discordMedia capability requires apiVersion 2", () => {
+  assertThrows(
+    () =>
+      validatePluginManifest({
+        id: "discord-media",
+        name: "Discord Media",
+        version: "1.0.0",
+        apiVersion: 1,
+        entrypoints: { psycheros: "./psycheros.ts" },
+        capabilities: { discordMedia: { send: true } },
+      }, "discord-media"),
+    Error,
+    "requires apiVersion 2",
+  );
+});
+
+Deno.test("discordMedia capability validates globs and shape", () => {
+  const base = {
+    id: "discord-media",
+    name: "Discord Media",
+    version: "1.0.0",
+    apiVersion: 2,
+    entrypoints: { psycheros: "./psycheros.ts" },
+  };
+
+  const withTypes = (attachmentTypes: unknown) =>
+    validatePluginManifest({
+      ...base,
+      capabilities: { discordMedia: { attachmentTypes } },
+    }, "discord-media");
+
+  // Valid globs.
+  assertEquals(
+    withTypes(["audio/*", "image/gif", "*", "video/mp4", "*/*"])
+      .capabilities?.discordMedia?.attachmentTypes?.length,
+    5,
+  );
+
+  // Invalid: missing subtype, empty, whitespace, partial wildcards, non-strings.
+  assertThrows(() => withTypes(["audio"]), Error, "invalid content-type glob");
+  assertThrows(() => withTypes([""]), Error, "invalid content-type glob");
+  assertThrows(() => withTypes(["a b/c"]), Error, "invalid content-type glob");
+  assertThrows(() => withTypes(["audio/"]), Error, "invalid content-type glob");
+  assertThrows(
+    () => withTypes(["aud*o/mp3"]),
+    Error,
+    "invalid content-type glob",
+  );
+  assertThrows(() => withTypes([5]), Error, "invalid content-type glob");
+  // Empty array and over-cap arrays are rejected.
+  assertThrows(
+    () => withTypes([]),
+    Error,
+    "non-empty array",
+  );
+  assertThrows(
+    () => withTypes(Array<string>(33).fill("audio/*")),
+    Error,
+    "non-empty array",
+  );
+
+  // Empty discordMedia object declares neither claim — rejected.
+  assertThrows(
+    () =>
+      validatePluginManifest({
+        ...base,
+        capabilities: { discordMedia: {} },
+      }, "discord-media"),
+    Error,
+    "must declare attachmentTypes, send, or both",
+  );
+
+  // Wrong shape entirely.
+  assertThrows(
+    () =>
+      validatePluginManifest({
+        ...base,
+        capabilities: { discordMedia: "audio/*" },
+      }, "discord-media"),
+    Error,
+    "must be an object",
+  );
+});
+
+Deno.test("contentTypeMatchesGlob strips params, ignores case, honors wildcards", () => {
+  assertEquals(contentTypeMatchesGlob("audio/*", "audio/ogg"), true);
+  assertEquals(contentTypeMatchesGlob("audio/*", "audio/mpeg"), true);
+  assertEquals(
+    contentTypeMatchesGlob("audio/ogg", "audio/ogg; codecs=opus"),
+    true,
+  );
+  assertEquals(contentTypeMatchesGlob("Image/GIF", "image/gif"), true);
+  assertEquals(contentTypeMatchesGlob("*", "application/pdf"), true);
+  assertEquals(contentTypeMatchesGlob("*/*", "application/pdf"), true);
+
+  assertEquals(contentTypeMatchesGlob("image/*", "audio/ogg"), false);
+  assertEquals(contentTypeMatchesGlob("image/gif", "image/png"), false);
+  assertEquals(contentTypeMatchesGlob("audio/*", ""), false);
+  assertEquals(contentTypeMatchesGlob("", "audio/ogg"), false);
+  assertEquals(
+    contentTypeMatchesGlob("audio/ogg", "audio/ogg; codecs=opus"),
+    true,
+  );
+  assertEquals(contentTypeMatchesGlob("audio/*", "video/ogg"), false);
 });
 
 Deno.test("portable plugin archives reject conventional credential files", () => {

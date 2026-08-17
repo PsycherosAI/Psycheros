@@ -5,11 +5,10 @@
  * Uses a Discord bot token to send messages via the Discord REST API.
  */
 
-import { join } from "@std/path";
 import type { ToolResult } from "../types.ts";
 import type { Tool, ToolContext } from "./types.ts";
 import type { DiscordSettings } from "../llm/discord-settings.ts";
-import { getMediaType } from "./generate-image.ts";
+import { resolveDiscordImagePath } from "./discord-image-path.ts";
 import { withConversationLock } from "../utils/conversation-lock.ts";
 
 /**
@@ -115,6 +114,7 @@ export const sendDiscordDmTool: Tool = {
           method: "POST",
           headers,
           body: JSON.stringify({ recipient_id: channelId }),
+          signal: AbortSignal.timeout(15_000),
         },
       );
 
@@ -158,42 +158,34 @@ export const sendDiscordDmTool: Tool = {
       if (typeof imagePath === "string" && imagePath.trim()) {
         // Send with image attachment via multipart/form-data
         const relativePath = imagePath.trim();
-        const absolutePath = join(
-          ctx.config.dataRoot,
-          ".psycheros",
-          relativePath,
-        );
-
-        // Validate supported image type
-        const mediaType = getMediaType(relativePath);
-        if (
-          !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(
-            mediaType,
-          )
-        ) {
+        let resolved;
+        try {
+          resolved = resolveDiscordImagePath(ctx.config.dataRoot, relativePath);
+        } catch (error) {
           return {
             toolCallId: ctx.toolCallId,
-            content:
-              `Error: Unsupported image type '${mediaType}'. Supported formats: png, jpg/jpeg, webp, gif.`,
+            content: `Error: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
             isError: true,
           };
         }
 
         let imageBytes: Uint8Array;
         try {
-          imageBytes = await Deno.readFile(absolutePath);
+          imageBytes = await Deno.readFile(resolved.absolutePath);
         } catch {
           return {
             toolCallId: ctx.toolCallId,
             content:
-              `Error: Could not read image file at '${absolutePath}'. Make sure the path is correct relative to .psycheros/.`,
+              `Error: Could not read image file at '${relativePath}'. Make sure the path is correct relative to .psycheros/.`,
             isError: true,
           };
         }
 
-        const filename = relativePath.split("/").pop() || "image.png";
+        const filename = resolved.filename;
         const imageBlob = new Blob([imageBytes.buffer as ArrayBuffer], {
-          type: mediaType,
+          type: resolved.mediaType,
         });
 
         const formData = new FormData();
@@ -213,6 +205,7 @@ export const sendDiscordDmTool: Tool = {
           method: "POST",
           headers: noContentType,
           body: formData,
+          signal: AbortSignal.timeout(30_000),
         });
       } else {
         // Send text-only message
@@ -222,6 +215,7 @@ export const sendDiscordDmTool: Tool = {
           body: JSON.stringify({
             content: trimmedMessage,
           }),
+          signal: AbortSignal.timeout(15_000),
         });
       }
 

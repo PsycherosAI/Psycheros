@@ -5,9 +5,16 @@
 import { basename, extname, isAbsolute, join, normalize } from "@std/path";
 import { parse } from "@std/dotenv";
 
-export const PLUGIN_API_VERSION = 1;
+export const PLUGIN_API_VERSION = 2;
+/**
+ * apiVersions `validatePluginManifest` accepts. Version 1 manifests load
+ * unchanged; discordMedia capabilities require version 2.
+ */
+export const SUPPORTED_PLUGIN_API_VERSIONS: readonly number[] = [1, 2];
 export const DEFAULT_PROMPT_HOOK_TIMEOUT_MS = 15_000;
 export const DEFAULT_PROMPT_HOOK_MAX_CHARS = 12_000;
+export const DEFAULT_ATTACHMENT_HOOK_TIMEOUT_MS = 15_000;
+export const DEFAULT_ATTACHMENT_HOOK_MAX_CHARS = 4_000;
 
 export interface PluginManifest {
   id: string;
@@ -65,6 +72,31 @@ export interface PluginCapabilities {
    * Settings page renders a "Configure" button that loads the fragment.
    */
   settings?: boolean;
+  /**
+   * Claims on Discord gateway media. Requires apiVersion 2 — declaring it on
+   * a version 1 manifest fails validation.
+   */
+  discordMedia?: PluginDiscordMediaCapability;
+}
+
+/**
+ * Claims on Discord gateway media, declared in the manifest so install-review
+ * UI can show them before the entrypoint is imported.
+ *
+ * - `attachmentTypes` claims INBOUND processing for attachments the host's
+ *   native walk declined (non-vision image formats like GIF, or non-image
+ *   files like voice notes). The host consults the plugin's `attachmentHook`
+ *   only for declined attachments whose effective content type matches a
+ *   glob. Native vision handling (jpeg/png/webp) is never intercepted.
+ * - `send` gates the outbound Discord attachment service injected into the
+ *   psycheros entrypoint's `start()` services object. The host's bot token
+ *   is used and never exposed to plugin code.
+ */
+export interface PluginDiscordMediaCapability {
+  /** Content-type globs, e.g. `["audio/*", "image/gif"]`. Bare `"*"` claims all. */
+  attachmentTypes?: string[];
+  /** When true, the host injects the outbound Discord send service. */
+  send?: boolean;
 }
 
 export interface PluginCapabilityCounts {
@@ -76,6 +108,8 @@ export interface PluginCapabilityCounts {
   browserStyles: number;
   /** 0 or 1 — whether the plugin's entrypoint exports `settingsFragment`. */
   settings: number;
+  /** 0 or 1 — whether the manifest declares `capabilities.discordMedia`. */
+  discordMedia: number;
 }
 
 export type PluginPendingAction = "install" | "remove";
@@ -108,6 +142,12 @@ export interface PluginStatus {
    * operators can configure credentials before enabling.
    */
   declaresSettings?: boolean;
+  /**
+   * True when the manifest declares `capabilities.discordMedia`. Populated
+   * during DISCOVER like `declaresSettings`, so install review can surface
+   * the claim before the entrypoint is imported.
+   */
+  declaresDiscordMedia?: boolean;
   /**
    * Where the plugin was discovered. `builtin` plugins ship with Psycheros
    * and load from `<projectRoot>/bundled-plugins/`; `installed` plugins are
@@ -283,17 +323,106 @@ function validateUpdateMetadata(
 
 function validateCapabilities(
   value: unknown,
+  apiVersion: number,
 ): PluginCapabilities | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("capabilities must be an object");
   }
   const input = value as Record<string, unknown>;
+  if (input.discordMedia !== undefined && apiVersion < 2) {
+    throw new Error(
+      "capabilities.discordMedia requires apiVersion 2 — bump the manifest's apiVersion or remove the field",
+    );
+  }
+  const discordMedia = validateDiscordMediaCapability(input.discordMedia);
+  if (
+    discordMedia && !discordMedia.attachmentTypes &&
+    discordMedia.send === undefined
+  ) {
+    throw new Error(
+      "capabilities.discordMedia must declare attachmentTypes, send, or both",
+    );
+  }
   return {
     settings: input.settings === undefined
       ? undefined
       : input.settings === true,
+    discordMedia,
   };
+}
+
+function validateDiscordMediaCapability(
+  value: unknown,
+): PluginDiscordMediaCapability | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("capabilities.discordMedia must be an object");
+  }
+  const input = value as Record<string, unknown>;
+  const attachmentTypes = input.attachmentTypes;
+  if (attachmentTypes !== undefined) {
+    if (
+      !Array.isArray(attachmentTypes) || attachmentTypes.length === 0 ||
+      attachmentTypes.length > 32
+    ) {
+      throw new Error(
+        "capabilities.discordMedia.attachmentTypes must be a non-empty array (max 32)",
+      );
+    }
+    for (const glob of attachmentTypes) {
+      if (typeof glob !== "string" || !isValidContentTypeGlob(glob)) {
+        throw new Error(
+          `invalid content-type glob: ${
+            String(glob)
+          } — expected "type/subtype" with optional "*" (e.g. "audio/*", "image/gif", or "*")`,
+        );
+      }
+    }
+  }
+  return {
+    attachmentTypes: attachmentTypes as string[] | undefined,
+    send: input.send === undefined ? undefined : input.send === true,
+  };
+}
+
+const CONTENT_TYPE_SEGMENT_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]*$/i;
+
+/**
+ * A glob is valid when it is a bare `"*"`, a plain `type/subtype`, or one of
+ * those with `*` replacing a whole segment. No other wildcard positions — a
+ * partial-segment wildcard would be easy to misread and hard to review.
+ */
+function isValidContentTypeGlob(glob: string): boolean {
+  const g = glob.trim();
+  if (!g || /\s/.test(g)) return false;
+  if (g === "*") return true;
+  const parts = g.split("/");
+  if (parts.length !== 2) return false;
+  const validSegment = (segment: string) =>
+    segment === "*" || CONTENT_TYPE_SEGMENT_RE.test(segment);
+  return validSegment(parts[0]!) && validSegment(parts[1]!);
+}
+
+/**
+ * Case-insensitive content-type glob match. Parameters are stripped from the
+ * content type (`audio/ogg; codecs=opus` matches `audio/*`). Supports `*`
+ * segments only — see {@link isValidContentTypeGlob}.
+ */
+export function contentTypeMatchesGlob(
+  glob: string,
+  contentType: string,
+): boolean {
+  const g = glob.trim().toLowerCase();
+  const c = contentType.trim().toLowerCase().split(";")[0]?.trim() ?? "";
+  if (!g || !c) return false;
+  if (g === "*") return true;
+  if (!g.includes("*")) return g === c;
+  const [typeGlob = "", subtypeGlob = ""] = g.split("/");
+  const [type = "", subtype = ""] = c.split("/");
+  const typeMatches = typeGlob === "*" || typeGlob === type;
+  const subtypeMatches = subtypeGlob === "*" || subtypeGlob === subtype;
+  return typeMatches && subtypeMatches;
 }
 
 export function isSafePluginId(id: string): boolean {
@@ -339,8 +468,15 @@ export function validatePluginManifest(
   if (input.id !== directoryName) {
     throw new Error(`id must match directory name "${directoryName}"`);
   }
-  if (input.apiVersion !== PLUGIN_API_VERSION) {
-    throw new Error(`unsupported apiVersion: ${String(input.apiVersion)}`);
+  if (
+    typeof input.apiVersion !== "number" ||
+    !SUPPORTED_PLUGIN_API_VERSIONS.includes(input.apiVersion)
+  ) {
+    throw new Error(
+      `unsupported apiVersion: ${String(input.apiVersion)} (supported: ${
+        SUPPORTED_PLUGIN_API_VERSIONS.join(", ")
+      })`,
+    );
   }
 
   const entrypoints = input.entrypoints as
@@ -418,7 +554,7 @@ export function validatePluginManifest(
         ),
       }
       : undefined,
-    capabilities: validateCapabilities(input.capabilities),
+    capabilities: validateCapabilities(input.capabilities, input.apiVersion),
   };
 }
 
@@ -431,6 +567,7 @@ export function emptyPluginCapabilityCounts(): PluginCapabilityCounts {
     browserScripts: 0,
     browserStyles: 0,
     settings: 0,
+    discordMedia: 0,
   };
 }
 

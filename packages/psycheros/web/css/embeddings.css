@@ -50,15 +50,15 @@
 }
 
 .embedding-current-status--ok {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: var(--c-success-subtle);
+  color: var(--c-success);
+  border: 1px solid var(--c-success-glow);
 }
 
 .embedding-current-status--missing {
-  background: rgba(255, 170, 0, 0.15);
+  background: var(--c-warning-subtle);
   color: var(--c-warning);
-  border: 1px solid rgba(255, 170, 0, 0.3);
+  border: 1px solid var(--c-warning-glow);
 }
 
 .embedding-current-repo {
@@ -83,9 +83,9 @@
   display: block;
   margin-top: 8px;
   padding: 8px 12px;
-  background: rgba(255, 170, 0, 0.1);
+  background: var(--c-warning-subtle);
   color: var(--c-warning);
-  border: 1px solid rgba(255, 170, 0, 0.4);
+  border: 1px solid var(--c-warning-glow);
   border-left: 3px solid var(--c-warning);
   border-radius: 4px;
   font-size: 0.85rem;
@@ -95,9 +95,9 @@
 .embedding-download-success {
   display: inline-block;
   padding: 4px 10px;
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: var(--c-success-subtle);
+  color: var(--c-success);
+  border: 1px solid var(--c-success-glow);
   border-radius: 4px;
   font-size: 0.85rem;
   font-weight: 500;
@@ -106,9 +106,9 @@
 .embedding-download-error {
   display: inline-block;
   padding: 4px 10px;
-  background: rgba(255, 68, 68, 0.15);
+  background: var(--c-error-subtle);
   color: var(--c-error);
-  border: 1px solid rgba(255, 68, 68, 0.4);
+  border: 1px solid var(--c-error-glow);
   border-radius: 4px;
   font-size: 0.85rem;
 }

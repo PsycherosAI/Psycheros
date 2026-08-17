@@ -317,8 +317,11 @@ function collectConversationsForDate(
     conversationMap.set(msg.conversationId, existing);
   }
 
-  // Build conversation objects with titles, excluding non-chat sources
-  const EXCLUDED_SOURCE_TYPES = ["discord", "import"];
+  // Build conversation objects with titles, excluding non-chat sources.
+  // Workspace conversations are the scratchpad — their content reaches
+  // memory only via the completion summary → Pulse → the entity's own
+  // reflection in the origin conversation (ephemeral principle).
+  const EXCLUDED_SOURCE_TYPES = ["discord", "import", "workspace"];
   const conversations: ConversationForSummary[] = [];
   for (const [convId, msgs] of conversationMap) {
     const conv = db.getConversation(convId);

@@ -6,6 +6,7 @@ import { assert, assertEquals, assertFalse } from "@std/assert";
 import {
   detectModelCapabilities,
   filterSamplingParams,
+  supportsVision,
 } from "../src/llm/model-capabilities.ts";
 
 // =============================================================================
@@ -368,4 +369,81 @@ Deno.test("filterSamplingParams: Qwen supports presencePenalty but not frequency
   assertEquals(params.frequencyPenalty, undefined);
   assertEquals(stripped.length, 1);
   assertEquals(stripped[0].param, "frequencyPenalty");
+});
+
+// =============================================================================
+// supportsVision
+// =============================================================================
+
+Deno.test("supportsVision: vision-capable models", () => {
+  const visionModels = [
+    "gpt-4o",
+    "openai/gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4.1",
+    "gpt-4-turbo",
+    "gpt-4-vision-preview",
+    "gpt-5-turbo",
+    "openai/gpt-5.5",
+    "o3-mini",
+    "o1-preview",
+    "claude-sonnet-4-20250514",
+    "anthropic/claude-opus-4-7",
+    "gemini-2.0-flash-001",
+    "google/gemini-2.5-pro",
+    "qwen-vl-plus",
+    "qwen2.5-vl-72b-instruct",
+    "qwen3-vl-plus",
+    "glm-4v",
+    "glm-4.5v",
+    "z-ai/glm-4v-flash",
+    "llama-3.2-11b-vision",
+    "llama-4-maverick",
+    "meta-llama/llama-4-scout",
+    "pixtral-12b",
+    "mistral-small-3.1",
+    "kimi-vl-a3b-thinking",
+    "moonshot-v1-8k-vision-preview",
+  ];
+  for (const model of visionModels) {
+    assert(supportsVision(model), `expected vision support: ${model}`);
+  }
+});
+
+Deno.test("supportsVision: text-only models", () => {
+  const textModels = [
+    "gpt-3.5-turbo",
+    "gpt-4-0613",
+    "deepseek-chat",
+    "deepseek-r1",
+    "deepseek/deepseek-chat-v3-0324",
+    "glm-4.7",
+    "z-ai/glm-4.5-air",
+    "GLM-4.5-Air",
+    "qwen-max",
+    "llama-3.1-405b",
+    "meta-llama/llama-3.1-8b-instruct",
+    "mistral-large-latest",
+    "mistral-small-2409",
+    "kimi-latest",
+    "moonshot-v1-8k",
+    "gemma-3-27b-it",
+  ];
+  for (const model of textModels) {
+    assertFalse(supportsVision(model), `expected no vision support: ${model}`);
+  }
+});
+
+Deno.test("supportsVision: unknown model is permissive", () => {
+  assert(supportsVision("my-custom-finetune-v2"));
+  assert(supportsVision("some-internal-model"));
+});
+
+Deno.test("supportsVision: vision-splitting rules keep the family unchanged", () => {
+  assertEquals(detectModelCapabilities("gpt-4o").family, "openai-gpt");
+  assertEquals(detectModelCapabilities("qwen2.5-vl-72b").family, "qwen");
+  assertEquals(detectModelCapabilities("glm-4.5v").family, "glm");
+  assertEquals(detectModelCapabilities("llama-4-maverick").family, "llama");
+  assertEquals(detectModelCapabilities("pixtral-12b").family, "mistral");
+  assertEquals(detectModelCapabilities("kimi-vl-a3b").family, "kimi");
 });

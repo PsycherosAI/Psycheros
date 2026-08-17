@@ -450,6 +450,8 @@ export async function buildIdentitySystemMessage(
  * @param lorebookContent - Optional lorebook-triggered content
  * @param graphContent - Optional knowledge graph context
  * @param vaultContent - Optional vault document content from Data Vault RAG
+ * @param heldSkillsContent - Optional "Skills I'm holding" block (XML-wrapped,
+ * rendered in the dynamic region after situational awareness)
  * @returns The formatted system message
  */
 export function buildSystemMessage(
@@ -467,6 +469,7 @@ export function buildSystemMessage(
   situationalAwarenessContent?: string,
   discordChannelContent?: string,
   pluginContent?: string,
+  heldSkillsContent?: string,
 ): string {
   // Build sections — base instructions always first
   const sections: string[] = [];
@@ -511,6 +514,14 @@ ${customContent}`);
     sections.push(`---
 
 ${situationalAwarenessContent}`);
+  }
+
+  // Add held skills if present — dynamic region after SA (keeps the static
+  // prefix intact for the day cross-turn caching is restructured)
+  if (heldSkillsContent?.trim()) {
+    sections.push(`---
+
+${heldSkillsContent}`);
   }
 
   // Add Discord channel context if present

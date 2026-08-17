@@ -258,6 +258,17 @@ export type {
   CacheSearchResult,
   EmbeddingCacheStats,
 } from "./cache.ts";
+export type { RebuildReason } from "./cache.ts";
+export {
+  EMBEDDING_REBUILD_METHOD,
+  isRebuildRunning,
+  notifyRebuild,
+  releaseRebuild,
+  setRebuildNotifier,
+  tryAcquireRebuild,
+  yieldToEventLoop,
+} from "./rebuild-notify.ts";
+export type { RebuildNotification, RebuildPhase } from "./rebuild-notify.ts";
 export { computeMemoryKey } from "./cache.ts";
 export { chunkContent, shouldChunk } from "./chunker.ts";
 export type { MemoryChunk } from "./chunker.ts";

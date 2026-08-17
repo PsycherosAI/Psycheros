@@ -11,6 +11,7 @@ import { DBClient } from "../db/mod.ts";
 import {
   type BLESettings,
   type ButtplugSettings,
+  type ChatImageUrlPart,
   createClientFromProfile,
   createDefaultClient,
   type DiscordGatewayConfig,
@@ -52,6 +53,7 @@ import {
   saveWebSearchSettings,
   type WebSearchSettings,
 } from "../llm/mod.ts";
+import { supportsVision } from "../llm/model-capabilities.ts";
 import {
   AVAILABLE_TOOLS,
   createDefaultRegistry,
@@ -84,8 +86,10 @@ import { PulseEngine } from "../pulse/mod.ts";
 import { setPulseEngine } from "../tools/pulse-tools.ts";
 import { DeviceStatusCache } from "./device-cache.ts";
 import {
+  captionTurnImages,
   ConversationMapper,
   DiscordGatewayClient,
+  downloadTurnImages,
   MessageRouter,
   ResponseHandler,
 } from "../discord/mod.ts";
@@ -97,6 +101,7 @@ import {
   getDefaultEntityCoreEmbeddingSettings,
   loadEmbeddingSettings,
   loadEntityCoreEmbeddingSettings,
+  readActiveDimension,
   ReEmbedOrchestrator,
   type ReEmbedSnapshot,
   resolveDimension,
@@ -121,6 +126,7 @@ import {
   handleChatRetry,
   handleChatStop,
   handleClearConversationContext,
+  handleClearGlitchedMessage,
   handleConfirmReembed,
   handleConnectionsButtplugFragment,
   handleConnectionsDiscordFragment,
@@ -154,7 +160,9 @@ import {
   handleDeleteImageGenSlot,
   handleDeleteLorebook,
   handleDeleteLorebookEntry,
+  handleDeleteMessage,
   handleDeleteSignificantMemory,
+  handleDeleteSkillAPI,
   handleDeleteVault,
   handleDeviceBridge,
   handleDeviceCommand,
@@ -174,6 +182,7 @@ import {
   handleEntityCoreSnapshots,
   handleEntityCoreSync,
   handleEvents,
+  handleFlagGlitchedMessage,
   handleGalleryImages,
   handleGeneralSettingsFragment,
   handleGetAppearanceSettings,
@@ -195,6 +204,7 @@ import {
   handleGetLovenseSettings,
   handleGetMessages,
   handleGetSASettings,
+  handleGetSkillAPI,
   handleGetSnapshot,
   handleGetToolsSettings,
   handleGetVault,
@@ -231,6 +241,7 @@ import {
   handlePushVapidKey,
   handleReembedStatusSSE,
   handleResetLorebookState,
+  handleRestoreMessage,
   handleRestoreSnapshot,
   handleSASettingsFragment,
   handleSaveAppearanceSettings,
@@ -252,6 +263,7 @@ import {
   handleSavePromptLabel,
   handleSaveSASettings,
   handleSaveSettingsFile,
+  handleSaveSkillAPI,
   handleSaveToolsSettings,
   handleSaveVoiceSettings,
   handleSaveWebSearchSettings,
@@ -264,6 +276,8 @@ import {
   handleSettingsFileListFragment,
   handleSettingsFragment,
   handleSettingsHubFragment,
+  handleSkillEditorFragment,
+  handleSkillsListFragment,
   handleSnapshotPreviewFragment,
   handleSnapshotsFragment,
   handleStartEmbeddingDownload,
@@ -327,6 +341,20 @@ import { getDeviceBridge } from "./device-bridge.ts";
 import { getWearableConnectionManager } from "../wearable/mod.ts";
 import { VoiceSessionManager } from "../voice/mod.ts";
 import {
+  getApprovalQueue,
+  getQueryQueue,
+  getWorkspaceSupervisor,
+  readProjectsPath,
+  readSandboxRetentionDays,
+  readWorkspaceEntityName,
+  runSandboxRetention,
+  setWorkspaceSupervisor,
+  truncateForEntityContext,
+  WorkspaceSupervisor,
+} from "../workspace/mod.ts";
+import { handleWorkspaceMcpRequest } from "../workspace/mod.ts";
+import { initBackupService } from "../backup/mod.ts";
+import {
   getDefaultVoiceSettings,
   loadVoiceSettings,
   saveVoiceSettings,
@@ -367,6 +395,72 @@ import {
   handlePluginManagerHealth,
   handleRemoveInstalledPlugin,
 } from "./plugin-manager-routes.ts";
+
+/**
+ * Minimal JSON response helper for workspace routes. Avoids touching the
+ * main app's response patterns. Returns application/json with CORS header
+ * so the OpenCode MCP client and the workspace UI can both consume it.
+ */
+function workspaceJsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    },
+  });
+}
+
+/**
+ * Strip OpenAI-compatible endpoint suffixes from a profile's baseUrl.
+ *
+ * Psycheros LLM profiles often store the full chat-completions URL (the daemon
+ * uses it as-is). OpenCode follows OpenAI SDK convention and appends the
+ * endpoint path itself, so forwarding the full URL would produce a doubled
+ * path and a 404. Normalize by stripping known suffixes before writing to
+ * the sandbox's opencode.json.
+ */
+function stripEndpointSuffix(url: string): string {
+  const suffixes = [
+    "/chat/completions",
+    "/completions",
+    "/embeddings",
+    "/responses",
+  ];
+  for (const suffix of suffixes) {
+    if (url.endsWith(suffix)) {
+      return url.slice(0, -suffix.length);
+    }
+  }
+  return url;
+}
+
+/**
+ * Read house rules (plan §13c) for the entity's workspace-context turn.
+ * Same source as opencode's agent file — workspace-settings.json.
+ * Returns undefined if no rules configured.
+ */
+async function readHouseRulesForEntityTurn(
+  dataRoot: string,
+): Promise<string | undefined> {
+  try {
+    const text = await Deno.readTextFile(
+      `${dataRoot}/.psycheros/workspace-settings.json`,
+    );
+    const settings = JSON.parse(text) as { houseRules?: string };
+    if (
+      typeof settings.houseRules !== "string" ||
+      settings.houseRules.trim().length === 0
+    ) {
+      return undefined;
+    }
+    return settings.houseRules;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Server configuration options.
@@ -576,6 +670,9 @@ export class Server {
       () => this.llm,
       join(config.projectRoot, "bundled-plugins"),
       config.dataRoot,
+      // Read at send time — plugins capture their services object in
+      // start(), which runs before discord settings load.
+      () => this.discordSettings.botToken || undefined,
     );
     this.pluginInstaller = new PluginInstaller(config.dataRoot);
 
@@ -602,6 +699,25 @@ export class Server {
 
     // Store MCP client if provided
     this.mcpClient = config.mcpClient ?? null;
+
+    // entity-core embedding-rebuild notifications → SSE `embedding_reindex`
+    // events for the re-index banner. Suppressed while the re-embed
+    // orchestrator runs — it emits its own events with its own phase totals.
+    this.mcpClient?.setRebuildListener((e) => {
+      if (this.reEmbedOrchestrator?.isRunning()) return;
+      try {
+        getBroadcaster().broadcastEvent(
+          "embedding_reindex",
+          e as unknown as Record<string, unknown>,
+          null,
+        );
+      } catch {
+        // Broadcaster not ready yet (early startup). Safe to drop — except
+        // for `model_change_detected`, which is terminal and never re-sent.
+        // That case is covered durably by the init() dimension check + the
+        // app shell's load-time sync check.
+      }
+    });
 
     // Initialize lorebook manager
     this.lorebookManager = new LorebookManager(this.db);
@@ -660,6 +776,22 @@ export class Server {
       resolveDimension(this.embeddingSettings),
     );
 
+    // Reconciliation check: the settings file is the embedder's truth, the
+    // app_metadata row is the vec0 tables' truth. They diverge when a model
+    // switch persisted settings but the re-embed never completed (or failed).
+    // Every retrieval path then fails with dimension mismatches while turns
+    // keep working — so surface it loudly here. The app shell re-checks this
+    // on page load (see checkEmbeddingSync in psycheros.js) and offers the
+    // re-index banner; this log line is the daemon-side trace.
+    const settingsDim = resolveDimension(this.embeddingSettings);
+    const tableDim = readActiveDimension(this.db.getRawDb());
+    if (settingsDim !== tableDim) {
+      console.error(
+        `[Embeddings] Index out of sync: settings model is ${settingsDim}d but vec tables are ${tableDim}d. ` +
+          `RAG, memory, vault, and graph retrieval will fail until re-indexed (Settings > Model Settings > Embeddings).`,
+      );
+    }
+
     // Wire the re-embed orchestrator. The entity-core trigger callback is
     // attached lazily on first run — mcpClient may still be connecting at
     // Server.init() time.
@@ -677,12 +809,125 @@ export class Server {
             }
           }
         }
-        void p; // progress is surfaced via snapshot
+        // Unified re-index banner event — same shape as entity-core's
+        // rebuild notifications, so the UI has one event type for both
+        // journeys.
+        const phase: import("../embeddings/reindex-event.ts").ReindexPhase =
+          p.phase === "complete"
+            ? "done"
+            : p.phase === "error"
+            ? "failed"
+            : p.phase === "preparing"
+            ? "started"
+            : "progress";
+        try {
+          getBroadcaster().broadcastEvent(
+            "embedding_reindex",
+            { phase, done: p.current, total: p.total, message: p.message },
+            null,
+          );
+        } catch {
+          // Broadcaster not ready (early startup) — non-fatal
+        }
       },
     });
     this.toolSettings = await loadToolsSettings(this.config.dataRoot);
     this.customTools = await loadCustomTools(this.config.dataRoot);
     this.voiceSettings = await loadVoiceSettings(this.config.dataRoot);
+
+    // Initialize the workspace supervisor (sub-agent OpenCode sessions).
+    // Off-by-default — only takes effect when the `workspace` tool is enabled
+    // and OpenCode is installed locally. Failure here doesn't break startup;
+    // the supervisor just reports capabilities=disabled in that case.
+    try {
+      const workspaceRoot = join(
+        this.config.dataRoot,
+        ".psycheros",
+        "workspace",
+      );
+      await Deno.mkdir(workspaceRoot, { recursive: true }).catch(() => {});
+      const supervisor = new WorkspaceSupervisor({
+        workspaceRoot,
+        selfOrigin: `http://127.0.0.1:${this.config.port ?? 3000}`,
+        db: this.db,
+        projectRoot: this.config.projectRoot,
+        dataRoot: this.config.dataRoot,
+        entityName: await this.readEntityName(),
+        contextBlock: await this.readWorkspaceContextBlock(),
+        getWorkspaceLlmProfile: async () => this.readWorkspaceLlmProfile(),
+        onAsyncComplete: (sessionId, conversationId, ok, summary) => {
+          this.handleWorkspaceAsyncComplete(
+            sessionId,
+            conversationId,
+            ok,
+            summary,
+          );
+        },
+        runEntityTurn: async (conversationId, userMessage, options) =>
+          await this.runWorkspaceEntityTurn(
+            conversationId,
+            userMessage,
+            options,
+          ),
+        // (sessionId travels inside options.sessionId — set by engaged-runner)
+      });
+      setWorkspaceSupervisor(supervisor);
+
+      // Establish the shared OpenCode runtime (one node_modules, symlinked
+      // into every sandbox) — promotes from an existing sandbox and sweeps
+      // redundant copies. Best-effort; failure never blocks startup.
+      try {
+        const { ensureOpencodeRuntime } = await import(
+          "../workspace/opencode-runtime.ts"
+        );
+        await ensureOpencodeRuntime(workspaceRoot, this.db);
+      } catch (err) {
+        console.warn(
+          "[workspace] shared OpenCode runtime setup failed:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+
+      // Clean up sessions stuck in "running" from a previous server lifecycle.
+      // When the server restarts (--watch, crash, manual restart), any in-flight
+      // sync/async sessions are orphaned — the OpenCode subprocess is dead but
+      // the DB row still says "running." Mark them as failed so the entity and
+      // UI don't wait forever.
+      // NOTE: `suspended` sessions are intentionally NOT cleaned up — they
+      // represent workspaces blocked on an ask_origin_conversation answer,
+      // waiting for the user to respond. The user can resume them after a
+      // restart via the FAB `!` badge recovery path. Once the suspend model
+      // is fully wired, the runner will be able to pick the session back up.
+      const stuck = this.db.listWorkspaceSessions({
+        status: ["pending", "running", "paused"],
+      });
+      for (const s of stuck) {
+        this.db.updateWorkspaceSessionStatus(s.id, "failed", {
+          error:
+            "Server restarted while session was running — process was orphaned.",
+        });
+        console.log(
+          `[workspace] cleaned up orphaned session ${s.id} (was ${s.status})`,
+        );
+      }
+
+      // Recover any pending ask_origin_conversation queries from disk. The
+      // queue persists pending queries to `<dataRoot>/.psycheros/workspace-pending-queries.json`
+      // so they survive restarts. Re-enqueue + re-broadcast so the UI picks
+      // them up (FAB badge, toast recovery) without the user losing the
+      // question.
+      getQueryQueue().initPersistence(this.config.dataRoot);
+      getQueryQueue().recoverFromDisk();
+    } catch (err) {
+      console.error("[server] workspace supervisor init failed:", err);
+    }
+
+    // Initialize the unified backup service. Lives outside psycheros.db —
+    // JSONL files under <dataRoot>/.psycheros/backups/. Every entity-data
+    // write (messages, pulses, lorebooks, vault docs, custom tools) archives
+    // the pre-edit state through this service before applying.
+    initBackupService(this.config.dataRoot);
+
     await this.pluginManager.load();
     this.reloadLLMClient();
     this.reloadToolRegistry();
@@ -702,6 +947,1145 @@ export class Server {
     } catch {
       // No settings file yet — use system default
     }
+  }
+
+  /**
+   * Read the entity's display name for the workspace agent file + terminal
+   * view. Single source of truth: the general-settings entityName (same name
+   * used across the app).
+   */
+  private async readEntityName(): Promise<string> {
+    return await readWorkspaceEntityName(this.config.dataRoot);
+  }
+
+  /**
+   * Read the per-entity context block for the workspace agent file. Pulls
+   * from workspace-settings.json; falls back to a minimal default.
+   */
+  private async readWorkspaceContextBlock(): Promise<string> {
+    try {
+      const text = await Deno.readTextFile(
+        `${this.config.dataRoot}/.psycheros/workspace-settings.json`,
+      );
+      const settings = JSON.parse(text) as { contextBlock?: string };
+      if (settings.contextBlock && typeof settings.contextBlock === "string") {
+        return settings.contextBlock;
+      }
+    } catch {
+      // No settings file — fall through
+    }
+    return "I am working with my human on this computer.";
+  }
+
+  /**
+   * Read the LLM profile to forward to OpenCode at session spawn.
+   *
+   * Looks up `llmProfileId` from workspace-settings.json, then resolves it
+   * against the in-memory `llmProfileSettings.profiles`. Returns undefined
+   * if no profile is selected or the selected ID no longer exists.
+   *
+   * Called fresh on each session spawn (and resume), so changes to either
+   * the workspace settings or the underlying profile propagate automatically.
+   */
+  private async readWorkspaceLlmProfile(): Promise<
+    | { baseUrl: string; apiKey: string; model: string }
+    | undefined
+  > {
+    let profileId: string | undefined;
+    try {
+      const text = await Deno.readTextFile(
+        `${this.config.dataRoot}/.psycheros/workspace-settings.json`,
+      );
+      const settings = JSON.parse(text) as { llmProfileId?: string };
+      if (
+        settings.llmProfileId && typeof settings.llmProfileId === "string"
+      ) {
+        profileId = settings.llmProfileId;
+      }
+    } catch {
+      // No settings file — fall through
+    }
+    if (!profileId) return undefined;
+
+    const profile = this.llmProfileSettings?.profiles.find((p) =>
+      p.id === profileId
+    );
+    if (!profile) return undefined;
+
+    return {
+      // Strip endpoint suffixes — Psycheros profiles often store the full
+      // chat-completions URL (used as-is by the daemon's LLM client), but
+      // OpenCode follows OpenAI SDK convention and appends `/chat/completions`
+      // itself. Without stripping, OpenCode would request the doubled path
+      // and get a 404.
+      baseUrl: stripEndpointSuffix(profile.baseUrl),
+      apiKey: profile.apiKey,
+      model: profile.model,
+    };
+  }
+
+  // ===========================================================================
+  // Workspace route handlers
+  // ===========================================================================
+
+  private async handleWorkspaceStatus(): Promise<Response> {
+    const supervisor = getWorkspaceSupervisor();
+    if (!supervisor) {
+      return workspaceJsonResponse({
+        enabled: false,
+        reason: "supervisor_not_initialized",
+      });
+    }
+    const capabilities = await supervisor.detectCapabilities();
+    const activeSessions = supervisor.listActiveSessions();
+    const pinnedSessions = this.db.listPinnedWorkspaceSessions();
+    return workspaceJsonResponse({
+      enabled: capabilities.opencodeInstalled,
+      capabilities,
+      activeSessionCount: activeSessions.length,
+      activeSessions: activeSessions.map((s) => ({
+        id: s.id,
+        conversationId: s.conversationId,
+        status: s.status,
+        mode: s.mode,
+        goal: s.briefing.goal.slice(0, 80),
+        stalled: supervisor.isStalled(s.id),
+      })),
+      pinnedSessions: pinnedSessions.map((s) => ({
+        id: s.id,
+        conversationId: s.conversationId,
+        status: s.status,
+        mode: s.mode,
+        goal: s.briefing.goal.slice(0, 80),
+      })),
+    });
+  }
+
+  private async handleWorkspaceListSessions(): Promise<Response> {
+    const supervisor = getWorkspaceSupervisor();
+    if (!supervisor) {
+      return workspaceJsonResponse({ sessions: [] });
+    }
+    const sessions = supervisor.listActiveSessions();
+    return workspaceJsonResponse({ sessions });
+  }
+
+  private async handleWorkspaceGetSession(
+    sessionId: string,
+  ): Promise<Response> {
+    const supervisor = getWorkspaceSupervisor();
+    if (!supervisor) {
+      return workspaceJsonResponse(
+        { error: "supervisor_not_initialized" },
+        503,
+      );
+    }
+    const session = supervisor.getSession(sessionId);
+    if (!session) {
+      return workspaceJsonResponse({ error: "session_not_found" }, 404);
+    }
+    return workspaceJsonResponse({ session });
+  }
+
+  private async handleWorkspaceRespond(
+    sessionId: string,
+    request: Request,
+  ): Promise<Response> {
+    let body: { answer?: string; queryId?: string } = {};
+    try {
+      body = await request.json() as { answer?: string; queryId?: string };
+    } catch {
+      return workspaceJsonResponse(
+        { ok: false, error: "Invalid JSON body" },
+        400,
+      );
+    }
+
+    const queue = getQueryQueue();
+    // If a specific queryId given, answer that one; else find the pending
+    // query for this session (Phase 2 supports one pending query per session).
+    const target = body.queryId
+      ? queue.get(body.queryId)
+      : queue.getPendingForSession(sessionId);
+
+    if (!target) {
+      return workspaceJsonResponse(
+        { ok: false, error: "No pending query for this session", sessionId },
+        404,
+      );
+    }
+    if (target.status !== "pending") {
+      return workspaceJsonResponse(
+        { ok: false, error: `Query already ${target.status}`, sessionId },
+        409,
+      );
+    }
+
+    const answer = typeof body.answer === "string" ? body.answer : "";
+    if (!answer.trim()) {
+      return workspaceJsonResponse(
+        { ok: false, error: "Answer cannot be empty" },
+        400,
+      );
+    }
+
+    const resolved = queue.answer(target.id, answer);
+
+    // Per plan §14 suspend model: the workspace was suspended waiting for
+    // this answer. Resume it — the answer becomes the new instruction. For
+    // engaged mode this re-invokes runEngagedSession with `resumeFrom`; for
+    // sync/async it spawns a fresh opencode run with --continue.
+    const supervisor = getWorkspaceSupervisor();
+    if (supervisor) {
+      try {
+        await supervisor.resumeSession(sessionId, answer);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(
+          `[workspace] resume after respond failed for ${sessionId}: ${msg}`,
+        );
+        // Query is resolved — return ok with the warning. The user can retry
+        // via the workspace resume action if needed.
+        return workspaceJsonResponse({
+          ok: true,
+          query: resolved,
+          warning: `Query resolved but resume failed: ${msg}`,
+        });
+      }
+    }
+
+    return workspaceJsonResponse({ ok: true, query: resolved });
+  }
+
+  private async handleWorkspaceApprovalDecision(
+    approvalId: string,
+    approve: boolean,
+    request: Request,
+  ): Promise<Response> {
+    let body: { reason?: string; decidedBy?: string } = {};
+    try {
+      body = await request.json() as { reason?: string; decidedBy?: string };
+    } catch {
+      // Body is optional — empty JSON or no body is fine.
+    }
+
+    const queue = getApprovalQueue();
+    const proposal = queue.get(approvalId);
+    if (!proposal) {
+      return workspaceJsonResponse(
+        { ok: false, error: "Unknown approval proposal", approvalId },
+        404,
+      );
+    }
+    if (proposal.status !== "pending") {
+      return workspaceJsonResponse(
+        {
+          ok: false,
+          error: `Proposal already ${proposal.status}`,
+          approvalId,
+        },
+        409,
+      );
+    }
+
+    const decidedBy = typeof body.decidedBy === "string"
+      ? body.decidedBy
+      : "user";
+    const reason = typeof body.reason === "string" ? body.reason : undefined;
+
+    const resolved = approve
+      ? queue.approve(approvalId, decidedBy, reason)
+      : queue.deny(approvalId, decidedBy, reason);
+
+    return workspaceJsonResponse({ ok: true, proposal: resolved });
+  }
+
+  private handleWorkspaceListApprovals(): Response {
+    const queue = getApprovalQueue();
+    return workspaceJsonResponse({
+      pending: queue.listPending(),
+    });
+  }
+
+  /**
+   * List pending query-back questions. Used by the browser on init / SSE
+   * reconnect to re-render toasts that would otherwise be invisible after a
+   * page refresh (EventSource doesn't replay missed events).
+   */
+  private handleWorkspaceListQueries(): Response {
+    const queue = getQueryQueue();
+    return workspaceJsonResponse({
+      pending: queue.listPending(),
+    });
+  }
+
+  /**
+   * Toast idle timer fired — the user hasn't engaged with the toast for
+   * 5 min. Signal the blocked ask_origin_conversation / ask_user tool call
+   * to unblock (OpenCode / entity gets "[timed out]" and ends its turn),
+   * then mark the session suspended. The query stays pending so the user
+   * can still answer via the FAB `!` recovery path.
+   *
+   * Per plan §14 (revised 2026-08-10): this is the suspend trigger. While
+   * the toast is up the workspace stays RUNNING with the process alive
+   * (blocking on the tool call). Only this signal transitions to suspended.
+   */
+  private handleWorkspaceSuspendQuery(queryId: string): Response {
+    const queue = getQueryQueue();
+    const query = queue.get(queryId);
+    if (!query) {
+      return workspaceJsonResponse(
+        { ok: false, error: "Query not found" },
+        404,
+      );
+    }
+    if (query.status !== "pending") {
+      return workspaceJsonResponse(
+        { ok: false, error: `Query already ${query.status}` },
+        409,
+      );
+    }
+
+    // Signal any blocked waitForAnswer callers. They'll see the query is
+    // still pending and return their "[timed out]" text — OpenCode / entity
+    // ends its turn naturally.
+    queue.signalSuspend(queryId);
+
+    // Mark the session suspended. The supervisor's pending-query check
+    // would also catch this on OpenCode exit, but setting it here is
+    // defensive in case OpenCode is slow to exit or the entity needs
+    // extra turns to wind down.
+    const supervisor = getWorkspaceSupervisor();
+    if (supervisor) {
+      const session = supervisor.getSession(query.sessionId);
+      if (session && session.status === "running") {
+        this.db.updateWorkspaceSessionStatus(query.sessionId, "suspended", {
+          opencodeSessionId: session.opencodeSessionId,
+        });
+      }
+    }
+
+    return workspaceJsonResponse({
+      ok: true,
+      queryId,
+      sessionId: query.sessionId,
+    });
+  }
+
+  /**
+   * User-initiated session cancel — kills the OpenCode subprocess (SIGTERM)
+   * and marks the session cancelled. This is the killswitch the user can
+   * trigger from the >_ FAB dropdown when a session is stuck or unwanted.
+   */
+  private handleWorkspaceCancel(sessionId: string): Response {
+    const supervisor = getWorkspaceSupervisor();
+    if (!supervisor) {
+      return workspaceJsonResponse(
+        { ok: false, error: "supervisor not initialized" },
+        503,
+      );
+    }
+    const killed = supervisor.killSession(sessionId);
+    return workspaceJsonResponse({
+      ok: true,
+      sessionId,
+      killed,
+      message: killed
+        ? "OpenCode subprocess killed (SIGTERM). Session marked cancelled."
+        : "No active subprocess found — session marked cancelled in DB only.",
+    });
+  }
+
+  /**
+   * Debug endpoint — directly invokes supervisor.openSession without going
+   * through the entity/LLM. Lets us test the workspace plumbing in isolation.
+   * Body: {goal: string, context?: string, mode?: "sync"|"async"|"collaborative"}.
+   *
+   * Not part of the public API — for local testing only.
+   */
+  private async handleWorkspaceDebugTestOpen(
+    request: Request,
+  ): Promise<Response> {
+    const supervisor = getWorkspaceSupervisor();
+    if (!supervisor) {
+      return workspaceJsonResponse(
+        { ok: false, error: "supervisor not initialized" },
+        503,
+      );
+    }
+
+    let body: { goal?: string; context?: string; mode?: string };
+    try {
+      body = await request.json() as {
+        goal?: string;
+        context?: string;
+        mode?: string;
+      };
+    } catch {
+      return workspaceJsonResponse({ ok: false, error: "Invalid JSON" }, 400);
+    }
+
+    if (!body.goal) {
+      return workspaceJsonResponse(
+        { ok: false, error: "Missing required field: goal" },
+        400,
+      );
+    }
+
+    try {
+      const result = await supervisor.openSession({
+        mode: (body.mode as "sync" | "async" | "collaborative") ?? "sync",
+        briefing: {
+          goal: body.goal,
+          context: body.context,
+        },
+      });
+      return workspaceJsonResponse({
+        ok: true,
+        session: result.session,
+        run: {
+          ok: result.run.ok,
+          sessionId: result.run.sessionId,
+          tokensUsed: result.run.tokensUsed,
+          finalTextLength: result.run.finalText?.length ?? 0,
+          finalTextPreview: result.run.finalText?.slice(0, 500),
+          error: result.run.error,
+          eventCount: result.run.rawEvents.length,
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return workspaceJsonResponse(
+        { ok: false, error: message },
+        500,
+      );
+    }
+  }
+
+  /**
+   * Persist workspace settings to <dataRoot>/.psycheros/workspace-settings.json.
+   * The supervisor reads from this file at init; the read helpers here also
+   * read on each request so changes take effect without restart for new sessions.
+   */
+  private async handleSaveWorkspaceSettings(
+    request: Request,
+  ): Promise<Response> {
+    let body: Record<string, unknown> = {};
+    try {
+      body = await request.json() as Record<string, unknown>;
+    } catch {
+      return workspaceJsonResponse({ ok: false, error: "Invalid JSON" }, 400);
+    }
+
+    const settingsPath =
+      `${this.config.dataRoot}/.psycheros/workspace-settings.json`;
+    const existing = await this.readWorkspaceSettingsFile();
+    const updated: Record<string, unknown> = { ...existing };
+
+    if (typeof body.contextBlock === "string") {
+      updated.contextBlock = body.contextBlock;
+    }
+    if (typeof body.partyhardDefault === "boolean") {
+      updated.partyhardDefault = body.partyhardDefault;
+    }
+    // defaultIsolation: 'sandboxed' or 'feral'. Reject other values.
+    if (
+      typeof body.defaultIsolation === "string" &&
+      (body.defaultIsolation === "sandboxed" ||
+        body.defaultIsolation === "feral")
+    ) {
+      updated.defaultIsolation = body.defaultIsolation;
+    }
+    // llmProfileId: empty string clears it, valid string sets it.
+    if (typeof body.llmProfileId === "string") {
+      updated.llmProfileId = body.llmProfileId;
+    }
+    // opencodeBinaryPath: empty string clears it, valid string sets it.
+    if (typeof body.opencodeBinaryPath === "string") {
+      updated.opencodeBinaryPath = body.opencodeBinaryPath.trim() || undefined;
+    }
+    // projectsPath: empty string resets to the per-OS default.
+    if (typeof body.projectsPath === "string") {
+      updated.projectsPath = body.projectsPath.trim() || undefined;
+    }
+    // forwardLlmProfile: when false, Psycheros stops injecting its LLM
+    // profile into per-session opencode.json and trusts the user's existing
+    // OpenCode auth. Useful for users who already run OpenCode independently.
+    if (typeof body.forwardLlmProfile === "boolean") {
+      updated.forwardLlmProfile = body.forwardLlmProfile;
+    }
+    // alwaysAskPaths: array of path prefixes that ALWAYS prompt before
+    // access (per plan §13b). Even Feral/partyhard respects this. Stored
+    // as array of strings; UI sends newline-separated text, we split here.
+    if (typeof body.alwaysAskPaths === "string") {
+      updated.alwaysAskPaths = body.alwaysAskPaths
+        .split("\n")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+    }
+    // houseRules: free-form prose rules injected into both opencode agent
+    // file AND entity workspace-context systemPromptSuffix (per plan §13c).
+    if (typeof body.houseRules === "string") {
+      updated.houseRules = body.houseRules;
+    }
+    if (
+      typeof body.sandboxRetentionDays === "number" &&
+      body.sandboxRetentionDays >= 0 && body.sandboxRetentionDays <= 365
+    ) {
+      updated.sandboxRetentionDays = Math.floor(body.sandboxRetentionDays);
+    }
+    // Migrate away the deprecated opencodeModel field if it lingered.
+    delete updated.opencodeModel;
+
+    try {
+      await Deno.writeTextFile(settingsPath, JSON.stringify(updated, null, 2));
+    } catch (err) {
+      return workspaceJsonResponse(
+        {
+          ok: false,
+          error: `Failed to save: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        },
+        500,
+      );
+    }
+
+    return workspaceJsonResponse({ ok: true, settings: updated });
+  }
+
+  /**
+   * Read the raw workspace-settings.json (or empty object if missing).
+   * Unlike readEntityName/readWorkspaceContextBlock which return defaults,
+   * this returns the raw shape for the settings fragment to render.
+   */
+  private async readWorkspaceSettingsFile(): Promise<Record<string, unknown>> {
+    try {
+      const text = await Deno.readTextFile(
+        `${this.config.dataRoot}/.psycheros/workspace-settings.json`,
+      );
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Render the workspace settings fragment. Reads current settings (or defaults)
+   * and renders a form. Save goes to POST /api/workspace/settings.
+   */
+  /**
+   * Render the pinned-projects management list for the workspace settings
+   * fragment: pinned sessions (Unpin + Open) plus recent finished sessions
+   * (Pin) so the user has a pin path that doesn't depend on the entity.
+   */
+  private renderPinnedProjectsList(): string {
+    const esc = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+    const rowHtml = (
+      s: {
+        id: string;
+        conversationId: string;
+        mode: string;
+        status: string;
+        briefing: { goal: string };
+        lastActivityAt: string;
+      },
+      pinned: boolean,
+    ): string => {
+      const goal = s.briefing.goal.length > 70
+        ? s.briefing.goal.slice(0, 67) + "..."
+        : s.briefing.goal;
+      return `<div class="pin-row" data-session-id="${esc(s.id)}">
+  <div class="pin-row-body">
+    <span class="pin-row-goal">${esc(goal)}</span>
+    <span class="pin-row-meta">${esc(s.mode)} · ${esc(s.status)} · ${
+        esc(s.lastActivityAt.slice(0, 10))
+      }</span>
+  </div>
+  <a class="btn btn--ghost btn--xs" href="/c/${esc(s.conversationId)}">Open</a>
+  <button type="button" class="btn btn--ghost btn--xs" onclick="Psycheros.toggleWorkspacePin('${
+        esc(s.id)
+      }', ${!pinned}, this)">${pinned ? "Unpin" : "Pin"}</button>
+</div>`;
+    };
+
+    const pinned = this.db.listPinnedWorkspaceSessions();
+    const recent = this.db
+      .listWorkspaceSessions({
+        status: ["complete", "failed", "cancelled"],
+      })
+      .filter((s) => !s.pinned)
+      .slice(0, 8);
+
+    const parts: string[] = [];
+    if (pinned.length > 0) {
+      parts.push(pinned.map((s) => rowHtml(s, true)).join("\n"));
+    } else {
+      parts.push(`<div class="pin-row-empty">No pinned projects.</div>`);
+    }
+    if (recent.length > 0) {
+      parts.push(`<div class="pin-list-label">Recent sessions</div>`);
+      parts.push(recent.map((s) => rowHtml(s, false)).join("\n"));
+    }
+    return parts.join("\n");
+  }
+
+  private async renderWorkspaceSettingsFragment(): Promise<Response> {
+    const { renderSettingsBackButton } = await import("./templates.ts");
+    // Read sync — the file is small and we don't want to make this method async
+    // just for that. If read fails, fall back to empty defaults.
+    let settings: Record<string, unknown> = {};
+    try {
+      const text = Deno.readTextFileSync(
+        `${this.config.dataRoot}/.psycheros/workspace-settings.json`,
+      );
+      settings = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      // defaults
+    }
+
+    const contextBlock = typeof settings.contextBlock === "string"
+      ? settings.contextBlock
+      : "";
+    const partyhardDefault = settings.partyhardDefault === true;
+    const sandboxRetentionDays =
+      typeof settings.sandboxRetentionDays === "number" &&
+        settings.sandboxRetentionDays >= 0
+        ? Math.floor(settings.sandboxRetentionDays)
+        : 7;
+    const defaultIsolation = settings.defaultIsolation === "feral"
+      ? "feral"
+      : "sandboxed";
+    const opencodeBinaryPath = typeof settings.opencodeBinaryPath === "string"
+      ? settings.opencodeBinaryPath
+      : "";
+    // Show the resolved default as the concrete value so saving keeps it.
+    const projectsPath = await readProjectsPath(this.config.dataRoot);
+    const forwardLlmProfile = settings.forwardLlmProfile !== false;
+    const alwaysAskPaths = Array.isArray(settings.alwaysAskPaths)
+      ? (settings.alwaysAskPaths as string[]).join("\n")
+      : "";
+    const houseRules = typeof settings.houseRules === "string"
+      ? settings.houseRules
+      : "";
+    const selectedProfileId = typeof settings.llmProfileId === "string"
+      ? settings.llmProfileId
+      : "";
+
+    const esc = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+    // Build the LLM profile dropdown options from the in-memory profile list.
+    // The active profile is marked as the suggested default if no workspace-
+    // specific selection exists yet.
+    const profileOptions = this.llmProfileSettings?.profiles ?? [];
+    const activeProfileId = this.llmProfileSettings?.activeProfileId;
+    const profileDropdown = profileOptions.length === 0
+      ? `<p class="settings-field-hint">
+          No LLM profiles configured. Create one in
+          <a href="/fragments/settings/model">Model Settings</a> first.
+        </p>`
+      : `<select id="llmProfileId" name="llmProfileId">
+          <option value="">— Select a profile —</option>
+          ${
+        profileOptions.map((p) => {
+          const isSelected = p.id === selectedProfileId ||
+            (selectedProfileId === "" && p.id === activeProfileId);
+          return `<option value="${esc(p.id)}"${
+            isSelected ? " selected" : ""
+          }>${esc(p.name)} (${esc(p.model)})</option>`;
+        }).join("")
+      }
+        </select>`;
+
+    const html = `<div class="settings-view workspace-settings">
+      <div class="settings-header">
+        <div class="settings-header-row">
+          ${renderSettingsBackButton()}
+          <div>
+            <h1 class="settings-title">Workspace</h1>
+            <p class="settings-desc">The entity's OpenCode faculty — configuration, cleanup, and past sessions.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-tabs">
+        <button type="button" class="settings-tab active" data-tab="general" onclick="Psycheros.switchWorkspaceTab('general')">General</button>
+        <button type="button" class="settings-tab" data-tab="sessions" onclick="Psycheros.switchWorkspaceTab('sessions')">Sessions</button>
+      </div>
+
+      <div class="settings-content" id="settings-content">
+      <div id="workspace-tab-general">
+      <form id="workspace-settings-form">
+        <div class="settings-field">
+          <label for="contextBlock">Context block</label>
+          <textarea id="contextBlock" name="contextBlock" rows="4" placeholder="">${
+      esc(contextBlock)
+    }</textarea>
+          <p class="settings-field-hint">Passed to the coding harness as standing context every turn.</p>
+        </div>
+
+        <div class="settings-field">
+          <label for="llmProfileId">LLM profile</label>
+          ${profileDropdown}
+          <p class="settings-field-hint">
+            Forwarded to OpenCode at session spawn — no separate
+            <code>opencode auth</code> setup needed. Changes propagate to new
+            sessions automatically.
+          </p>
+        </div>
+
+        <div class="settings-field">
+          <label>
+            <input type="checkbox" id="forwardLlmProfile" name="forwardLlmProfile" ${
+      forwardLlmProfile ? "checked" : ""
+    } />
+            Forward Psycheros LLM profile to OpenCode
+          </label>
+          <p class="settings-field-hint">
+            Default ON — Psycheros writes its LLM profile into each
+            per-session opencode.json and passes the API key via env var.
+            Turn OFF if you already have OpenCode configured separately
+            (via <code>opencode auth login</code> or your own config) and
+            want Psycheros to use that as-is instead. When OFF, no provider
+            or credentials are injected — OpenCode uses whatever auth it
+            finds in <code>~/.config/opencode/</code>.
+          </p>
+        </div>
+
+        <!-- Partyhard toggle disabled — OpenCode's --auto doesn't reliably
+             gate in headless mode (opencode issues #13851, #16367). Kept in
+             the settings JSON schema for compatibility; field hardcodes to
+             false on save. Re-enable here + in workspace.ts if the
+             coordination layer can enforce the bypass. -->
+        <!--
+        <div class="settings-field">
+          <label>
+            <input type="checkbox" id="partyhardDefault" name="partyhardDefault" ${
+      partyhardDefault ? "checked" : ""
+    } />
+            Partyhard by default
+          </label>
+          <p class="settings-field-hint">
+            Bypasses Tier 2/4 permission prompts (entity-data writes, computer path access).
+            Does NOT bypass Tier 5 protected paths or OS sandbox.
+          </p>
+        </div>
+        -->
+
+        <div class="settings-field">
+          <label for="defaultIsolation">Default isolation</label>
+          <select id="defaultIsolation" name="defaultIsolation">
+            <option value="sandboxed"${
+      defaultIsolation === "sandboxed" ? " selected" : ""
+    }>Sandboxed (locked down, work stays in workspace)</option>
+            <option value="feral"${
+      defaultIsolation === "feral" ? " selected" : ""
+    }>Feral (host access — for "help me with my computer" workflows)</option>
+          </select>
+          <p class="settings-field-hint">
+            Sandboxed wraps OpenCode in bwrap/sandbox-exec for kernel-level
+            isolation — safe default. Feral runs OpenCode directly on the host
+            so the entity can access your real files, projects, and SSH config.
+            Tier 5 (daemon files) protected in both via classifyPath.
+          </p>
+          <p class="settings-field-hint">
+            <strong>Windows:</strong> no OS sandbox yet — Sandboxed mode falls
+            back to soft enforcement only (permission config + path
+            classification), equivalent to Feral.
+          </p>
+        </div>
+
+        <div class="settings-field">
+          <label for="opencodeBinaryPath">OpenCode binary path (optional)</label>
+          <input type="text" id="opencodeBinaryPath" name="opencodeBinaryPath" value="${
+      esc(opencodeBinaryPath)
+    }" placeholder="Auto-detected — set only if Psycheros can't find opencode" />
+          <p class="settings-field-hint">
+            Psycheros looks for <code>opencode</code> on PATH with
+            <code>~/.opencode/bin/opencode</code> as fallback. Set this only
+            if your OpenCode install lives elsewhere (npm/brew/scoop/choco/AUR
+            installs, custom locations). Absolute path to the binary.
+          </p>
+        </div>
+
+        <div class="settings-field">
+          <label for="projectsPath">Projects folder</label>
+          <input type="text" id="projectsPath" name="projectsPath" value="${
+      esc(projectsPath)
+    }" />
+          <p class="settings-field-hint">
+            Where <code>export_project</code> copies finished artifacts
+            (documents, scripts, project dirs) out of workspace sandboxes —
+            always with an approval toast. Defaults to <code>~/Projects</code>.
+          </p>
+        </div>
+
+        <div class="settings-field">
+          <label for="alwaysAskPaths">Always-ask paths</label>
+          <textarea id="alwaysAskPaths" name="alwaysAskPaths" rows="4" placeholder="One path prefix per line — e.g.&#10;~/Documents/Taxes&#10;~/.password-store">${
+      esc(alwaysAskPaths)
+    }</textarea>
+          <p class="settings-field-hint">
+            Paths listed here ALWAYS prompt before access, even in Feral mode or with partyhard on.
+            One prefix per line. Different from Tier 5 (which is hardcoded daemon files). Use for
+            tax documents, password vaults, work product — anything too sensitive to auto-allow.
+          </p>
+        </div>
+
+        <div class="settings-field">
+          <label for="houseRules">House rules</label>
+          <textarea id="houseRules" name="houseRules" rows="4" placeholder="Free-form rules for the entity and workspace. e.g.&#10;Don't git push to main&#10;Don't open Slack and send messages&#10;Don't run commands longer than 30 seconds without asking">${
+      esc(houseRules)
+    }</textarea>
+          <p class="settings-field-hint">
+            Plain-language rules injected into both OpenCode's agent file AND the entity's
+            workspace-context prompt. Catches behavioral constraints no classifier can derive.
+            These are prose — cooperative LLMs follow them; structural enforcement still
+            requires Tier 5 / OS sandbox / approval queue.
+          </p>
+        </div>
+
+        <div class="settings-field">
+          <label for="sandboxRetentionDays">Sandbox retention (days)</label>
+          <input type="number" id="sandboxRetentionDays" name="sandboxRetentionDays" min="0" max="365" value="${sandboxRetentionDays}" />
+          <p class="settings-field-hint">
+            Sandbox dirs for finished sessions older than this are deleted
+            nightly (~63MB each — OpenCode installs its dependencies per
+            session). Briefings and summaries are kept; only resuming a
+            cleaned session stops being possible. 0 disables cleanup. Pin a
+            session (Sessions tab) to exempt it from cleanup.
+          </p>
+        </div>
+
+        <button type="button" class="btn btn--primary" onclick="Psycheros.saveWorkspaceSettings(document.getElementById('workspace-settings-form'));">Save settings</button>
+      </form>
+
+      <div class="workspace-status-card">
+        <h3>OpenCode install</h3>
+        <p id="workspace-opencode-status">Checking...</p>
+        <script>
+          (function() {
+            fetch('/api/workspace/status').then(r => r.json()).then(data => {
+              const el = document.getElementById('workspace-opencode-status');
+              if (!el) return;
+              if (data.enabled) {
+                el.textContent = '✓ OpenCode ' + (data.capabilities && data.capabilities.opencodeVersion || '') + ' detected.';
+              } else {
+                el.textContent = '✕ OpenCode not found on PATH. Install from opencode.ai.';
+              }
+            }).catch(e => {
+              const el = document.getElementById('workspace-opencode-status');
+              if (el) el.textContent = 'Status check failed: ' + e.message;
+            });
+          })();
+        </script>
+      </div>
+      </div>
+
+      <div id="workspace-tab-sessions" style="display:none">
+        <p class="settings-field-hint">
+          <strong>Finished sessions are auto-deleted after the retention
+          window (General tab) unless pinned.</strong> Pin a session to keep
+          its files resumable no matter how long it sits idle. The entity can
+          pin a session itself; manage pins here. Transcripts are ephemeral —
+          Open links show the briefing, turns, and summary.
+        </p>
+        <div class="workspace-pin-list">${this.renderPinnedProjectsList()}</div>
+      </div>
+      </div>
+    </div>`;
+
+    return new Response(html, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  /**
+   * Called when an async workspace completes. Broadcasts UI event + creates a
+   * transient Pulse that triggers entity inference about the completed work.
+   */
+  private handleWorkspaceAsyncComplete(
+    sessionId: string,
+    conversationId: string,
+    ok: boolean,
+    summary: string | undefined,
+  ): void {
+    // Broadcast UI event — workspace.js surfaces a toast via the SSE listener.
+    getBroadcaster().broadcastEvent(
+      "workspace_async_complete",
+      { sessionId, conversationId, ok, summary },
+      null, // global — surfaces wherever the user is
+    );
+
+    if (!this.pulseEngine) {
+      console.warn(
+        `[workspace] async completion for ${sessionId} but PulseEngine not initialized — summary stored, no inference trigger`,
+      );
+      return;
+    }
+
+    // Create a transient Pulse that fires entity inference about the completed work.
+    try {
+      const session = this.db.getWorkspaceSession(sessionId);
+      const goal = session?.briefing.goal ?? "(unknown goal)";
+      const statusLine = ok ? "completed successfully" : "failed";
+      // Smart truncation: respects paragraph boundaries, adds marker if cut.
+      // Full text lives in workspace_sessions.summary_text for reference.
+      const summaryText = summary
+        ? truncateForEntityContext(summary)
+        : "(no summary available)";
+      const promptText =
+        `Workspace session for "${goal}" ${statusLine}.\n\nSummary:\n${summaryText}`;
+
+      const pulse = this.db.createPulse({
+        name: `Workspace: ${goal.slice(0, 50)}`,
+        description: `Transient Pulse for workspace session ${sessionId}`,
+        promptText,
+        chatMode: "visible",
+        conversationId, // runs in the origin conversation context
+        enabled: true,
+        triggerType: "cron", // no cron_expression — only triggered manually
+        source: "entity",
+        autoDelete: true, // removes itself after running
+      });
+
+      this.pulseEngine.triggerPulse(pulse.id, "workspace_completion");
+    } catch (err) {
+      console.error(
+        `[workspace] failed to trigger completion Pulse for ${sessionId}:`,
+        err,
+      );
+    }
+  }
+
+  /**
+   * Run an entity turn inside a workspace conversation. Used by engaged mode
+   * (plan §8) — OpenCode emits a response, then this method runs the entity
+   * with full context (identity, RAG, memories) so the entity can respond to
+   * OpenCode as a user would. Returns the entity's response text.
+   *
+   * Mirrors the EntityTurn construction in handleChat (routes.ts:1444) but
+   * for the workspace conversation context. Uses a systemPromptSuffix to
+   * discourage recursive `workspace` tool calls — the entity is already in
+   * a workspace, it shouldn't open another.
+   */
+  private async runWorkspaceEntityTurn(
+    conversationId: string,
+    userMessage: string,
+    options?: {
+      pendingQuestion?: string;
+      sessionId?: string;
+      iteration?: number;
+      currentCap?: number;
+    },
+  ): Promise<string> {
+    const activeProfile = this.getActiveLLMProfile();
+    const { EntityTurn } = await import("../entity/loop.ts");
+
+    const turn = new EntityTurn(
+      this.llm,
+      this.db,
+      () => this.tools,
+      {
+        projectRoot: this.config.projectRoot,
+        dataRoot: this.config.dataRoot,
+        chatRAG: this.chatRAG ?? undefined,
+        mcpClient: this.mcpClient ?? undefined,
+        lorebookManager: this.lorebookManager,
+        vaultManager: this.vaultManager,
+        webSearchSettings: this.webSearchSettings,
+        discordSettings: this.discordSettings,
+        homeSettings: this.homeSettings,
+        imageGenSettings: this.imageGenSettings,
+        lovenseSettings: this.lovenseSettings,
+        buttplugSettings: this.buttplugSettings,
+        bleSettings: this.bleSettings,
+        deviceStatusCache: this.deviceCache,
+        contextLength: activeProfile?.contextLength,
+        maxTokens: activeProfile?.maxTokens,
+        persistentReasoningIntraTurn: this.llm.persistentReasoningIntraTurn,
+        persistentReasoningInterTurns: activeProfile
+          ?.persistentReasoningInterTurns,
+        pluginManager: this.pluginManager,
+      },
+    );
+
+    // Note: EntityTurn.process persists userMessage as a "user" role row
+    // before generating the entity's "assistant" response. In the workspace
+    // conversation that means OpenCode's response gets labeled as "user"
+    // (functionally correct — entity IS the user of OpenCode, and the entity
+    // is responding TO that message). Resist the temptation to also persist
+    // it as "assistant" — that creates a duplicate row that confuses the LLM
+    // in subsequent iterations.
+
+    // Capture content chunks into a string for return. EntityTurn.process()
+    // is a generator that yields chunks; we accumulate content-type chunks.
+    let responseText = "";
+    // House rules (plan §13c) read once per entity turn — appended to the
+    // systemPromptSuffix below so the workspace-context entity sees the same
+    // constraints the opencode agent file already carries.
+    const houseRulesForTurn = await readHouseRulesForEntityTurn(
+      this.config.dataRoot,
+    );
+    // Read the user's display name for the workspace context block.
+    let userName = "the user";
+    try {
+      const gsText = await Deno.readTextFile(
+        `${this.config.dataRoot}/.psycheros/general-settings.json`,
+      );
+      const gs = JSON.parse(gsText) as { userName?: string };
+      if (gs.userName?.trim()) userName = gs.userName.trim();
+    } catch {
+      // fall back to generic
+    }
+    // Look up the session to get the original goal + context. These get
+    // injected into the systemPromptSuffix so they survive token-budget
+    // truncation — in long engaged sessions, the first message (the
+    // briefing) can get trimmed out of the conversation history, and the
+    // entity loses sight of the overall task.
+    const wsSession = this.db.getWorkspaceSessionByConversation(conversationId);
+    const sessionGoal = wsSession?.briefing?.goal;
+    const sessionContext = wsSession?.briefing?.context;
+    try {
+      for await (
+        const chunk of turn.process(
+          conversationId,
+          userMessage,
+          {
+            // Tell the entity it's in workspace context — don't call workspace
+            // recursively. The `workspace` tool itself stays visible (entity
+            // needs end_session / extend_iterations / ask_origin_conversation);
+            // other workspace-only tools are gated by their `visibleIn`
+            // predicates. House rules (plan §13c) appended so the
+            // workspace-context entity sees the same user-defined constraints
+            // opencode does.
+            systemPromptSuffix: "\n\n=== ENGAGED WORKSPACE ===\n" +
+              (sessionGoal ? `Session goal: ${sessionGoal}\n` : "") +
+              (sessionContext ? `Context: ${sessionContext}\n` : "") +
+              (options?.sessionId ? `Session ID: ${options.sessionId}\n` : "") +
+              (options?.iteration && options?.currentCap
+                ? (() => {
+                  const remaining = options.currentCap! - options.iteration!;
+                  const line =
+                    `Iteration budget: ${options.iteration}/${options.currentCap} (${remaining} remaining).\n`;
+                  // Warn when within 2 of the cap. The entity CAN extend on
+                  // its current turn (the loop check happens after the entity
+                  // turn), so this is the moment to call extend_iterations
+                  // before the work gets cut off.
+                  if (remaining <= 2) {
+                    return line +
+                      `⚠️ Approaching the iteration cap. If the work isn't ` +
+                      "done, I call `extend_iterations` *now* — on the next " +
+                      "turn the loop will have exited.\n";
+                  }
+                  return line;
+                })()
+                : "") +
+              "This is an engaged workspace session. The conversation is direct: " +
+              'the "user" messages are OpenCode\'s responses, and my text reply ' +
+              "is automatically piped back to OpenCode as its next instruction. " +
+              "I do NOT need to call any tool to communicate with OpenCode — my " +
+              "text response IS the message. Calling `workspace` here is always " +
+              "wrong (I'm already inside it; nesting just wastes tokens).\n\n" +
+              "My tool calls during this turn (memory, identity, etc.) are NOT " +
+              "visible to OpenCode — only my text reaches it. So if I want " +
+              "OpenCode to know something, I say it in my reply.\n\n" +
+              "When I see a question in OpenCode's response that only " +
+              userName +
+              " can answer (real-time state, preferences, decisions), I call " +
+              "`ask_user` with the question. The answer comes back immediately. " +
+              "Don't use `ask_user` for things I can answer from my own knowledge.\n\n" +
+              (options?.pendingQuestion
+                ? `OpenCode asked a question this turn: "${
+                  options.pendingQuestion.slice(0, 400)
+                }". ` +
+                  "If I know the answer, I say it in my response. If I don't, I call ask_user.\n\n"
+                : "") +
+              "When the goal is met, I call `end_session` to end the loop. " +
+              (options?.sessionId
+                ? "My session_id for `end_session` is `" + options.sessionId +
+                  "` (the 8-char prefix works too). "
+                : "") +
+              "If I don't end the session, the loop continues up to a max " +
+              "iteration cap (currently 10). If I need more turns than the cap " +
+              "allows — the work is genuinely unfinished, not just stalling — " +
+              "I call `extend_iterations` with `session_id` and `additional` " +
+              "(e.g. +5) to raise the cap. Hard ceiling at 50 total." +
+              (houseRulesForTurn
+                ? `\n\nHOUSE RULES (set by ${userName} — apply in letter and spirit):\n${houseRulesForTurn}`
+                : ""),
+            // Voice attribution isn't relevant here — this is workspace, not voice.
+            voiceMode: false,
+          },
+        )
+      ) {
+        if (chunk.type === "content" && typeof chunk.content === "string") {
+          responseText += chunk.content;
+        }
+      }
+    } catch (err) {
+      console.error(
+        `[workspace.engaged] entity turn failed in ${conversationId}:`,
+        err,
+      );
+      throw err;
+    }
+
+    return responseText.trim();
+  }
+
+  private async handleWorkspaceMcp(
+    conversationId: string,
+    request: Request,
+  ): Promise<Response> {
+    const supervisor = getWorkspaceSupervisor();
+    if (!supervisor) {
+      return workspaceJsonResponse(
+        {
+          jsonrpc: "2.0",
+          id: null,
+          error: { code: -32600, message: "supervisor_not_initialized" },
+        },
+        503,
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return workspaceJsonResponse(
+        {
+          jsonrpc: "2.0",
+          id: null,
+          error: { code: -32700, message: "Parse error" },
+        },
+        400,
+      );
+    }
+
+    // Single request — batch not supported in Phase 1.
+    const req = body as {
+      jsonrpc?: string;
+      id?: string | number | null;
+      method: string;
+      params?: Record<string, unknown> | unknown[];
+    };
+    const response = await handleWorkspaceMcpRequest(
+      {
+        db: supervisor.config_.db,
+        projectRoot: supervisor.config_.projectRoot,
+        dataRoot: supervisor.config_.dataRoot,
+      },
+      conversationId,
+      req,
+    );
+    return workspaceJsonResponse(response);
   }
 
   /**
@@ -901,6 +2285,8 @@ export class Server {
           this.handleDiscordTurn(conversationId, userMessage, context),
         onMessage: (channelId, message) =>
           this.handleDiscordMessage(channelId, message),
+        enrichAttachmentMarkers: (plan, channel) =>
+          this.pluginManager.enrichAttachmentMarkers(plan, channel),
       });
 
       this.discordRouter.start();
@@ -1031,12 +2417,33 @@ export class Server {
     }
     const discordTools = createDefaultRegistry(allowedTools);
 
+    // Resolve the LLM profile for this turn. Server-channel turns use the
+    // Discord-selected profile (e.g. a cheaper model for chatter); DMs and
+    // anything unset fall back to the globally active profile. Resolved
+    // per-turn so profile edits/deletions apply without a restart.
+    const discordProfileId = this.discordGatewayConfig.llmProfileId;
+    const discordProfile = discordProfileId && !context.isDM
+      ? this.llmProfileSettings?.profiles.find((p) => p.id === discordProfileId)
+      : undefined;
+    const activeProfile = discordProfile ?? this.getActiveLLMProfile();
+
+    let llm = this.llm;
+    if (discordProfile) {
+      try {
+        llm = createClientFromProfile(discordProfile);
+      } catch (error) {
+        console.warn(
+          "[Discord] Discord LLM profile unusable, falling back to active profile:",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+
     // Build the entity config for this turn
-    const activeProfile = this.getActiveLLMProfile();
     const { EntityTurn } = await import("../entity/loop.ts");
 
     const turn = new EntityTurn(
-      this.llm,
+      llm,
       this.db,
       () => discordTools,
       {
@@ -1081,10 +2488,42 @@ export class Server {
         `[System Message: The following messages are piped in from a connected Discord channel (${location}). Each message shows the author, mention ID, timestamp, and message ID.${identity}]\n\n`;
       const contextualizedMessage = header + userMessage;
 
+      // Resolve image attachments. Vision-capable models get live pixels as
+      // transient vision parts; text-only models get captions via the
+      // Settings > Vision captioning hookup when enabled. Either way the
+      // persisted transcript keeps the [image N attached: ...] markers —
+      // captions persist with the message, pixels never do.
+      let visionImages: ChatImageUrlPart[] | undefined;
+      let captionBlock = "";
+      if (context.images?.length) {
+        const model = activeProfile?.model;
+        const captioning = this.imageGenSettings.captioning?.enabled
+          ? this.imageGenSettings.captioning
+          : undefined;
+        if (!model || supportsVision(model)) {
+          const downloaded = await downloadTurnImages(context.images);
+          if (downloaded.length > 0) {
+            visionImages = downloaded;
+          } else if (captioning) {
+            captionBlock = await captionTurnImages(context.images, captioning);
+          }
+        } else if (captioning) {
+          captionBlock = await captionTurnImages(context.images, captioning);
+        } else {
+          console.log(
+            `[Discord] Model ${model} has no vision and captioning is off — image markers only`,
+          );
+        }
+      }
+      const turnMessage = captionBlock
+        ? contextualizedMessage + captionBlock
+        : contextualizedMessage;
+
       for await (
-        const _ of turn.process(conversationId, contextualizedMessage, {
+        const _ of turn.process(conversationId, turnMessage, {
           sourceType: "discord",
           discordContext: context,
+          visionImages,
           skipStickyDecrement: true,
           skipUserPersist: context.skipUserMessagePersist,
         })
@@ -1721,6 +3160,44 @@ export class Server {
         },
       });
 
+      // Workspace sandbox retention — deletes sandbox dirs for terminal
+      // sessions older than the retention window. Briefing/summary rows
+      // survive; only resume becomes impossible for cleaned sessions.
+      this.scheduler.register("workspace.sandbox-retention", async () => {
+        const retentionDays = await readSandboxRetentionDays(
+          this.config.dataRoot,
+        );
+        if (retentionDays === 0) {
+          return { status: "skipped", result: "Retention disabled" };
+        }
+        const workspaceRoot = `${this.config.dataRoot}/.psycheros/workspace`;
+        const result = await runSandboxRetention(
+          workspaceRoot,
+          this.db,
+          retentionDays,
+        );
+        return {
+          status: result.errors === 0 ? "success" : "skipped",
+          result: `Cleaned ${result.cleaned} sandbox dirs (` +
+            `${(result.reclaimedBytes / 1024 / 1024).toFixed(1)} MB)` +
+            (result.errors > 0 ? `, ${result.errors} errors` : ""),
+        };
+      });
+      this.scheduler.defineSchedule({
+        id: "workspace-sandbox-retention",
+        kind: "recurring",
+        handler: "workspace.sandbox-retention",
+        cronExpr: "15 4 * * *",
+        catchupPolicy: "fire_once_then_align",
+        maxAttempts: 1,
+        metadata: {
+          name: "Workspace Sandbox Retention",
+          description:
+            "Delete sandbox dirs for terminal sessions past the retention window",
+          manualTrigger: true,
+        },
+      });
+
       // Startup integrity check + first summarization pass. Fire-and-forget
       // so it doesn't gate the HTTP server coming up; the scheduler will
       // still fire on schedule regardless.
@@ -1988,6 +3465,7 @@ export class Server {
           browserStyles: localStatus.capabilities.browserStyles +
             coreStatus.capabilities.browserStyles,
           settings: localStatus.capabilities.settings,
+          discordMedia: localStatus.capabilities.discordMedia,
         },
       });
     }
@@ -2264,6 +3742,118 @@ export class Server {
       return handleVoiceWebSocket(ctx, request);
     }
 
+    // ===================================================================
+    // Workspace routes (sub-agent OpenCode sessions)
+    // ===================================================================
+
+    // GET /api/workspace/status — capabilities + active session count
+    if (method === "GET" && path === "/api/workspace/status") {
+      return await this.handleWorkspaceStatus();
+    }
+
+    // GET /api/workspace/sessions — list sessions (default: active only)
+    if (method === "GET" && path === "/api/workspace/sessions") {
+      return await this.handleWorkspaceListSessions();
+    }
+
+    // POST /api/workspace/settings - Save workspace settings
+    if (method === "POST" && path === "/api/workspace/settings") {
+      return await this.handleSaveWorkspaceSettings(request);
+    }
+
+    // GET /api/workspace/sessions/:id — get one session
+    const wsSessionMatch = path.match(/^\/api\/workspace\/sessions\/([^/]+)$/);
+    if (method === "GET" && wsSessionMatch) {
+      return await this.handleWorkspaceGetSession(wsSessionMatch[1]);
+    }
+
+    // POST /api/workspace/sessions/:id/respond — respond to query-back
+    const wsRespondMatch = path.match(
+      /^\/api\/workspace\/sessions\/([^/]+)\/respond$/,
+    );
+    if (method === "POST" && wsRespondMatch) {
+      return await this.handleWorkspaceRespond(wsRespondMatch[1], request);
+    }
+
+    // POST /api/workspace/queries/:id/suspend — toast idle timer fired.
+    // Resolves the blocked ask_origin_conversation / ask_user tool call so
+    // OpenCode / entity can end its turn, then marks the session suspended.
+    // Query stays pending so the user can still answer via the FAB `!`.
+    const wsSuspendQueryMatch = path.match(
+      /^\/api\/workspace\/queries\/([^/]+)\/suspend$/,
+    );
+    if (method === "POST" && wsSuspendQueryMatch) {
+      return await this.handleWorkspaceSuspendQuery(wsSuspendQueryMatch[1]);
+    }
+
+    // POST /api/workspace/sessions/:id/cancel — user killswitch
+    const wsCancelMatch = path.match(
+      /^\/api\/workspace\/sessions\/([^/]+)\/cancel$/,
+    );
+    if (method === "POST" && wsCancelMatch) {
+      return this.handleWorkspaceCancel(wsCancelMatch[1]);
+    }
+
+    // POST /api/workspace/sessions/:id/pin — toggle retention exemption.
+    // Body: {"pinned": boolean} (default true).
+    const wsPinMatch = path.match(
+      /^\/api\/workspace\/sessions\/([^/]+)\/pin$/,
+    );
+    if (method === "POST" && wsPinMatch) {
+      let pinned = true;
+      try {
+        const body = await request.json() as { pinned?: boolean };
+        if (typeof body.pinned === "boolean") pinned = body.pinned;
+      } catch {
+        // No/invalid body — default pin=true.
+      }
+      const session = this.db.getWorkspaceSession(wsPinMatch[1]);
+      if (!session) {
+        return workspaceJsonResponse(
+          { ok: false, error: "Session not found" },
+          404,
+        );
+      }
+      this.db.setWorkspaceSessionPinned(session.id, pinned);
+      return workspaceJsonResponse({ ok: true, pinned });
+    }
+
+    // POST /api/workspace/approvals/:id/approve — approve a pending write
+    const wsApprovalMatch = path.match(
+      /^\/api\/workspace\/approvals\/([^/]+)\/(approve|deny)$/,
+    );
+    if (method === "POST" && wsApprovalMatch) {
+      return await this.handleWorkspaceApprovalDecision(
+        wsApprovalMatch[1],
+        wsApprovalMatch[2] === "approve",
+        request,
+      );
+    }
+
+    // GET /api/workspace/approvals — list pending approvals (for UI polling fallback)
+    if (method === "GET" && path === "/api/workspace/approvals") {
+      return this.handleWorkspaceListApprovals();
+    }
+
+    // GET /api/workspace/queries — list pending query-back questions.
+    if (method === "GET" && path === "/api/workspace/queries") {
+      return this.handleWorkspaceListQueries();
+    }
+
+    // POST /api/workspace/debug/test-open — debug endpoint to spawn a workspace
+    // session directly without going through the entity/LLM. Body: {goal, context?, mode?}.
+    // Useful for testing the workspace plumbing in isolation. Not part of the
+    // public API surface — guarded by checking that the request came from localhost.
+    if (method === "POST" && path === "/api/workspace/debug/test-open") {
+      return await this.handleWorkspaceDebugTestOpen(request);
+    }
+
+    // POST /api/workspace/mcp/:sessionId — MCP JSON-RPC endpoint
+    const wsMcpMatch = path.match(/^\/api\/workspace\/mcp\/([^/]+)$/);
+    if (wsMcpMatch) {
+      return await this.handleWorkspaceMcp(wsMcpMatch[1], request);
+    }
+
     // POST /api/device/command - Send command to BLE device via bridge
     if (method === "POST" && path === "/api/device/command") {
       return handleDeviceCommand(ctx, request);
@@ -2414,20 +4004,12 @@ export class Server {
       return await handleCreateConversation(ctx, request);
     }
 
-    // GET /api/conversations/:id/context/latest - Get latest context snapshot
-    const contextLatestMatch = path.match(
-      /^\/api\/conversations\/([^/]+)\/context\/latest$/,
-    );
-    if (method === "GET" && contextLatestMatch) {
-      return handleGetContextSnapshots(ctx, contextLatestMatch[1], true);
-    }
-
-    // GET /api/conversations/:id/context - Get all context snapshots
-    const contextAllMatch = path.match(
+    // GET /api/conversations/:id/context - Get current context snapshot
+    const contextMatch = path.match(
       /^\/api\/conversations\/([^/]+)\/context$/,
     );
-    if (method === "GET" && contextAllMatch) {
-      return handleGetContextSnapshots(ctx, contextAllMatch[1], false);
+    if (method === "GET" && contextMatch) {
+      return handleGetContextSnapshots(ctx, contextMatch[1]);
     }
 
     // GET /api/conversations/:id/messages - Get messages
@@ -2465,6 +4047,42 @@ export class Server {
     if (method === "PUT" && updateMessageMatch) {
       const messageId = updateMessageMatch[1];
       return await handleUpdateMessage(ctx, messageId, request);
+    }
+
+    // POST /api/messages/:id/delete — soft-delete (tombstone). Plan §9f.
+    const deleteMessageMatch = path.match(
+      /^\/api\/messages\/([^/]+)\/delete$/,
+    );
+    if (method === "POST" && deleteMessageMatch) {
+      const messageId = deleteMessageMatch[1];
+      return await handleDeleteMessage(ctx, messageId, request);
+    }
+
+    // POST /api/messages/:id/restore — undo soft-delete.
+    const restoreMessageMatch = path.match(
+      /^\/api\/messages\/([^/]+)\/restore$/,
+    );
+    if (method === "POST" && restoreMessageMatch) {
+      const messageId = restoreMessageMatch[1];
+      return await handleRestoreMessage(ctx, messageId, request);
+    }
+
+    // POST /api/messages/:id/flag-glitched — mark corrupted.
+    const flagGlitchedMatch = path.match(
+      /^\/api\/messages\/([^/]+)\/flag-glitched$/,
+    );
+    if (method === "POST" && flagGlitchedMatch) {
+      const messageId = flagGlitchedMatch[1];
+      return await handleFlagGlitchedMessage(ctx, messageId, request);
+    }
+
+    // POST /api/messages/:id/clear-glitched — clear glitched flag.
+    const clearGlitchedMatch = path.match(
+      /^\/api\/messages\/([^/]+)\/clear-glitched$/,
+    );
+    if (method === "POST" && clearGlitchedMatch) {
+      const messageId = clearGlitchedMatch[1];
+      return await handleClearGlitchedMessage(ctx, messageId, request);
     }
 
     // PATCH /api/conversations/:id/title - Update title
@@ -3194,6 +4812,36 @@ export class Server {
     }
 
     // ========================================
+    // Skills API Routes (Settings > Tools > Skills)
+    // ========================================
+
+    // GET /api/skills/list - Skills list HTML for in-place refresh
+    if (method === "GET" && path === "/api/skills/list") {
+      return await handleSkillsListFragment(ctx);
+    }
+
+    // POST /api/skills - Create or update a skill
+    if (method === "POST" && path === "/api/skills") {
+      return await handleSaveSkillAPI(ctx, request);
+    }
+
+    // GET /api/skills/:name - Full skill JSON
+    if (method === "GET" && path.startsWith("/api/skills/")) {
+      const skillName = path.slice("/api/skills/".length);
+      if (skillName && skillName !== "list") {
+        return await handleGetSkillAPI(ctx, skillName);
+      }
+    }
+
+    // DELETE /api/skills/:name - Delete a skill
+    if (method === "DELETE" && path.startsWith("/api/skills/")) {
+      const skillName = path.slice("/api/skills/".length);
+      if (skillName && skillName !== "list") {
+        return await handleDeleteSkillAPI(ctx, skillName);
+      }
+    }
+
+    // ========================================
     // Admin API Routes
     // ========================================
 
@@ -3476,6 +5124,11 @@ export class Server {
     // GET /fragments/settings/general - General settings fragment
     if (path === "/fragments/settings/general") {
       return await handleGeneralSettingsFragment(ctx);
+    }
+
+    // GET /fragments/settings/workspace - Workspace settings fragment
+    if (path === "/fragments/settings/workspace") {
+      return await this.renderWorkspaceSettingsFragment();
     }
 
     // GET /fragments/settings/sa - Situational Awareness settings fragment
@@ -3874,6 +5527,19 @@ export class Server {
     // GET /fragments/settings/tools - Tools settings UI fragment
     if (path === "/fragments/settings/tools") {
       return handleToolsSettingsFragment(ctx);
+    }
+
+    // GET /fragments/settings/skills/new - New skill editor fragment
+    if (path === "/fragments/settings/skills/new") {
+      return await handleSkillEditorFragment(ctx, null);
+    }
+
+    // GET /fragments/settings/skills/edit/:name - Skill editor fragment
+    const skillEditorMatch = path.match(
+      /^\/fragments\/settings\/skills\/edit\/([^/]+)$/,
+    );
+    if (skillEditorMatch) {
+      return await handleSkillEditorFragment(ctx, skillEditorMatch[1]);
     }
 
     if (path === "/fragments/settings/plugins") {

@@ -65,6 +65,20 @@ deno lint
 deno fmt --check
 ```
 
+Bare `deno check` walks the whole tree and, after a local launcher-v2 cargo
+build, fails on binary codegen artifacts under
+`packages/launcher-v2/src-tauri/target/` (fmt/lint honor the nested
+`.gitignore`; check doesn't). Use the CI-shaped entry-file form instead:
+
+```bash
+deno check \
+  packages/entity-core/src/mod.ts \
+  packages/entity-loom/src/main.ts \
+  packages/psycheros/src/main.ts \
+  packages/launcher/dashboard.ts \
+  packages/plugin-api/src/mod.ts
+```
+
 Per-package commands (dev server, start, stop) live in each package's
 `deno.json`:
 

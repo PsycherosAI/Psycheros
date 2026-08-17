@@ -67,7 +67,12 @@ import {
 import type { ServerConfig } from "./types.ts";
 import { DEFAULT_SERVER_CONFIG } from "./types.ts";
 import { cleanupOldSnapshots } from "./snapshot/mod.ts";
-import { EmbeddingCache } from "./embeddings/mod.ts";
+import {
+  EMBEDDING_REBUILD_METHOD,
+  EmbeddingCache,
+  notifyRebuild,
+  setRebuildNotifier,
+} from "./embeddings/mod.ts";
 import {
   createEntityCorePluginManager,
   type EntityCorePluginManager,
@@ -1476,20 +1481,36 @@ export async function startServer(
   // 60-second handshake timeout fires and the embodiment disconnects.
   await server.connect(transport);
 
+  // Rebuild progress flows to my parent as MCP notifications — it pauses its
+  // health-ping watchdog while I work and shows the user live progress.
+  setRebuildNotifier((n) => {
+    void server.server.notification(
+      {
+        method: EMBEDDING_REBUILD_METHOD,
+        params: n,
+      } as unknown as Parameters<typeof server.server.notification>[0],
+    )
+      .catch((err) => console.error("[Embeddings] notification failed:", err));
+  });
+
   console.error("Entity Core MCP server started");
   console.error(
     "I am ready to sync my identity and memories with my embodiments.",
   );
 
-  // Auto-rebuild embeddings if schema version changed (e.g., date enrichment
-  // added). Uses the server's EmbeddingCache so there's a single connection
-  // touching the vec table during rebuild — no concurrent-writes race.
-  await autoRebuildEmbeddings(fullConfig, embeddingCache);
+  // Auto-rebuild embeddings if the schema fingerprint changed (e.g., date
+  // enrichment bump). Runs in the BACKGROUND — the transport keeps serving
+  // and the handler yields between items so requests and pings get
+  // answered. Model changes are refused here: those are migrations my
+  // Psycheros parent owns (graph nodes included), reported via
+  // model_change_detected so it can offer the re-index flow.
+  void autoRebuildEmbeddings(fullConfig, embeddingCache);
 }
 
 /**
- * Check if cached embeddings need rebuilding (schema version mismatch)
- * and run a full rebuild if so. No-op when embeddings are up-to-date.
+ * Check if cached embeddings need rebuilding (schema fingerprint mismatch)
+ * and run a full memory rebuild if so. No-op when embeddings are up-to-date;
+ * refuses (without rebuilding or re-marking) when only the model changed.
  *
  * Uses the server's shared EmbeddingCache to avoid a second connection
  * racing against tool calls during startup.
@@ -1500,7 +1521,21 @@ async function autoRebuildEmbeddings(
 ): Promise<void> {
   await cache.initialize();
 
-  if (!cache.needsRebuild()) return;
+  const reason = cache.getRebuildReason();
+  if (reason === "none") return;
+
+  if (reason === "model") {
+    console.error(
+      "[Embeddings] Embedding model changed — refusing boot-time rebuild. " +
+        "Leaving the migration to my Psycheros parent (re-embed via Settings so graph nodes are rebuilt too).",
+    );
+    notifyRebuild({
+      phase: "model_change_detected",
+      message:
+        "Embedding model changed — memory indexes need rebuilding via re-index.",
+    });
+    return;
+  }
 
   const stats = cache.getStats();
   if (stats.totalCached === 0) {
@@ -1510,19 +1545,28 @@ async function autoRebuildEmbeddings(
   }
 
   console.error(
-    `[Embeddings] Schema version changed — rebuilding ${stats.totalCached} memory embeddings...`,
+    `[Embeddings] Schema version changed (${reason}) — rebuilding memory embeddings in background...`,
   );
 
   const store = config.store ?? new FileStore(config.dataDir);
   await store.initialize();
 
-  const handler = createMemoryEmbeddingRebuildHandler(store, cache);
-  const result = await handler();
+  try {
+    const handler = createMemoryEmbeddingRebuildHandler(store, cache);
+    const result = await handler();
 
-  console.error(
-    `[Embeddings] Rebuild complete: ${result.rebuilt} rebuilt, ${result.failed} failed`,
-  );
+    console.error(
+      `[Embeddings] Rebuild complete: ${result.rebuilt} rebuilt, ${result.failed} failed`,
+    );
 
-  // Mark schema version as current so we don't rebuild on next startup
-  cache.markSchemaUpToDate();
+    // Mark schema version as current so we don't rebuild on next startup —
+    // success only; a failed rebuild leaves the fingerprint stale.
+    cache.markSchemaUpToDate();
+  } catch (error) {
+    console.error(
+      `[Embeddings] Rebuild failed: ${
+        error instanceof Error ? error.message : String(error)
+      } (fingerprint left stale — next boot retries)`,
+    );
+  }
 }

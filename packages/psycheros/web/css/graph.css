@@ -521,7 +521,7 @@
 .gv-delete-btn-confirm {
   background: var(--c-error) !important;
   border-color: var(--c-error) !important;
-  color: #fff !important;
+  color: var(--c-on-accent) !important;
 }
 .gv-delete-btn-confirm:hover {
   opacity: 0.9;

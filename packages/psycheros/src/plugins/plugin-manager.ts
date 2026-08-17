@@ -6,6 +6,9 @@ import { basename, extname, join, normalize, toFileUrl } from "@std/path";
 import {
   type AppliedPluginEnv,
   applyPluginEnv,
+  contentTypeMatchesGlob,
+  DEFAULT_ATTACHMENT_HOOK_MAX_CHARS,
+  DEFAULT_ATTACHMENT_HOOK_TIMEOUT_MS,
   DEFAULT_PROMPT_HOOK_MAX_CHARS,
   DEFAULT_PROMPT_HOOK_TIMEOUT_MS,
   emptyPluginCapabilityCounts,
@@ -22,9 +25,15 @@ import type { Tool } from "../tools/mod.ts";
 import type { MCPClient } from "../mcp-client/mod.ts";
 import type { PluginHookDetail } from "../types.ts";
 import type { LLMClient } from "../llm/mod.ts";
+import type {
+  AttachmentEnrichmentChannel,
+  TurnAttachmentPlan,
+} from "../discord/mod.ts";
 import { PluginEventLogRegistry } from "./event-log.ts";
 import type { PluginEvent } from "./event-log.ts";
 import { resolveDependencies } from "./dependency-resolver.ts";
+import { sendDiscordAttachments } from "./discord-send.ts";
+import type { PsycherosDiscordSendParams } from "./discord-send.ts";
 
 /**
  * Default ceiling on the total prompt-hook context I internalize per turn.
@@ -43,6 +52,14 @@ const DEFAULT_PROMPT_HOOK_AGGREGATE_MAX_CHARS = 24_000;
  * wrapper itself doesn't push the total over the cap.
  */
 const PLUGIN_CONTEXT_WRAPPER_OVERHEAD = 80;
+
+/**
+ * Ceiling on the total attachment-marker text plugins may contribute to one
+ * Discord flush. The user message is never token-trimmed, so unbounded
+ * enrichment (N voice notes × full transcripts) would bloat every future
+ * turn's context — the same hazard class as the prompt-hook aggregate.
+ */
+const DEFAULT_ATTACHMENT_ENRICHMENT_AGGREGATE_MAX_CHARS = 16_000;
 
 export interface PluginPromptContext {
   conversationId: string;
@@ -66,6 +83,12 @@ export interface PluginPromptContext {
 export interface PsycherosPluginServices {
   statePath: string;
   env: PluginEnv;
+  /**
+   * Discord media service. Present only when the manifest declares
+   * `capabilities.discordMedia.send: true`. Sends use the host's bot token,
+   * read at send time — the token itself never reaches plugin code.
+   */
+  discord?: PsycherosDiscordMediaService;
   /**
    * Write or update a single secret in this plugin's secrets file. Name must
    * match `PSYCHEROS_PLUGIN_<ID>_*` prefix; value must be non-empty. Atomically
@@ -93,6 +116,68 @@ export interface PluginPromptHook {
   maxChars?: number;
   /** Return first-person context I can internalize during this turn. */
   run: (context: PluginPromptContext) => Promise<string | undefined>;
+}
+
+/**
+ * Outbound Discord media service, injected into `start()`'s services when
+ * the manifest declares `capabilities.discordMedia.send: true`.
+ */
+export interface PsycherosDiscordMediaService {
+  /**
+   * Send one message with file attachments to a Discord channel on the
+   * entity's behalf, using the host's bot token (never exposed to plugin
+   * code). Plugin tools read the current channel from
+   * `ctx.config.discordContext.channelId` — the `act_in_discord` pattern.
+   */
+  sendAttachments: (
+    params: PsycherosDiscordSendParams,
+  ) => Promise<{ messageIds: string[] }>;
+}
+
+/**
+ * Context passed to a plugin's `attachmentHook` — one attachment the native
+ * Discord walk declined (a GIF, a voice note). The signed CDN URL expires in
+ * ~24h, so the hook downloads at run time if it needs the bytes.
+ */
+export interface PluginAttachmentContext {
+  attachment: {
+    id: string;
+    messageId: string;
+    filename: string;
+    url: string;
+    contentType: string;
+    size: number;
+  };
+  channel: {
+    channelId: string;
+    channelName: string;
+    serverName: string | null;
+    isDM: boolean;
+  };
+  statePath: string;
+  env: PluginEnv;
+}
+
+/**
+ * Declared via `capabilities.discordMedia.attachmentTypes` in the manifest
+ * and exported as `attachmentHook` from the psycheros entrypoint.
+ *
+ * Return the replacement transcript marker for the attachment (persisted —
+ * the transcript's permanent record of what was shared), or `undefined` to
+ * decline so the next claiming plugin is consulted, then the native
+ * fallback marker. Timeouts, throws, and empty output all leave the native
+ * marker in place.
+ */
+export interface PluginAttachmentHook {
+  /** Lower runs first across plugins; default 0. */
+  priority?: number;
+  /** Default DEFAULT_ATTACHMENT_HOOK_TIMEOUT_MS (15s). */
+  timeoutMs?: number;
+  /** Marker text cap; default DEFAULT_ATTACHMENT_HOOK_MAX_CHARS (4,000). */
+  maxChars?: number;
+  run: (
+    ctx: PluginAttachmentContext,
+  ) => Promise<string | undefined> | string;
 }
 
 export interface PluginRoute {
@@ -135,6 +220,11 @@ interface PsycherosPluginModule {
    * HTML in standard settings chrome.
    */
   settingsFragment?: (ctx: PluginSettingsContext) => Promise<string> | string;
+  /**
+   * Handles Discord attachments the native walk declined. Declared in the
+   * manifest via `capabilities.discordMedia.attachmentTypes`.
+   */
+  attachmentHook?: PluginAttachmentHook;
   start?: (services: PsycherosPluginServices) => void | Promise<void>;
   stop?: (services: PsycherosPluginServices) => void | Promise<void>;
 }
@@ -225,6 +315,12 @@ export class PluginManager {
     private getLlm: () => LLMClient,
     private bundledRoot?: string,
     private dataRoot?: string,
+    /**
+     * Lazy Discord bot token getter — read at send time, not injection time,
+     * because plugins capture the services object once in start() and the
+     * host's discord settings can be (re)configured after that.
+     */
+    private getDiscordBotToken?: () => string | undefined,
   ) {
     // Event log path: when dataRoot is provided (production wiring), use
     // `<dataRoot>/.psycheros/plugin-logs` for origin-independence — installed
@@ -265,6 +361,26 @@ export class PluginManager {
     const pluginDir = plugin.directory;
     return {
       statePath,
+      discord: plugin.manifest.capabilities?.discordMedia?.send === true
+        ? {
+          sendAttachments: async (params: PsycherosDiscordSendParams) => {
+            const token = this.getDiscordBotToken?.();
+            if (!token) {
+              throw new Error(
+                "discord.sendAttachments: no Discord bot token configured on the host",
+              );
+            }
+            return await sendDiscordAttachments(params, {
+              token,
+              record: (event) =>
+                this.eventLog.record(pluginId, {
+                  ...event,
+                  category: "media",
+                }),
+            });
+          },
+        }
+        : undefined,
       env: plugin.appliedEnv?.env ?? {
         get: (name) => Deno.env.get(name),
         has: (name) => Deno.env.has(name),
@@ -335,6 +451,7 @@ export class PluginManager {
         const capabilities = emptyPluginCapabilityCounts();
         capabilities.browserScripts = manifest.browser?.scripts?.length ?? 0;
         capabilities.browserStyles = manifest.browser?.styles?.length ?? 0;
+        capabilities.discordMedia = manifest.capabilities?.discordMedia ? 1 : 0;
         const status: PluginStatus = {
           id: manifest.id,
           name: manifest.name,
@@ -355,6 +472,8 @@ export class PluginManager {
           },
           capabilities,
           declaresSettings: manifest.capabilities?.settings === true,
+          declaresDiscordMedia: manifest.capabilities?.discordMedia !==
+            undefined,
           origin,
         };
         discovered.push({ directory, manifest, status, origin });
@@ -513,6 +632,24 @@ export class PluginManager {
         plugin.status.capabilities.routes = module.routes?.length ?? 0;
         plugin.status.capabilities.settings =
           typeof module.settingsFragment === "function" ? 1 : 0;
+        // Manifest contract check: attachmentTypes claimed but no hook
+        // exported → degraded (native markers stand), not a failed load.
+        if (
+          (plugin.manifest.capabilities?.discordMedia?.attachmentTypes
+              ?.length ?? 0) > 0 &&
+          typeof module.attachmentHook?.run !== "function"
+        ) {
+          this.markDegraded(
+            plugin,
+            "declares discordMedia.attachmentTypes but its entrypoint does not export attachmentHook",
+          );
+          await this.eventLog.record(plugin.manifest.id, {
+            level: "error",
+            category: "load",
+            message:
+              "declares discordMedia.attachmentTypes but entrypoint does not export attachmentHook — declined attachments keep their native markers",
+          });
+        }
         await this.eventLog.record(plugin.manifest.id, {
           level: "info",
           category: "lifecycle",
@@ -598,6 +735,16 @@ export class PluginManager {
   hasSettings(id: string): boolean {
     const plugin = this.plugins.find((p) => p.manifest.id === id);
     return plugin?.status.declaresSettings === true;
+  }
+
+  /**
+   * Whether a plugin (by id) declares the discordMedia capability in its
+   * manifest. Manifest-only check, same as hasSettings — works for disabled
+   * or not-yet-loaded plugins (install review).
+   */
+  hasDiscordMedia(id: string): boolean {
+    const plugin = this.plugins.find((p) => p.manifest.id === id);
+    return plugin?.status.declaresDiscordMedia === true;
   }
 
   /**
@@ -903,6 +1050,170 @@ export class PluginManager {
   }
 
   /**
+   * Offer native-declined Discord attachment markers to plugin attachment
+   * hooks. Mutates `plan.markersByMessageId` in place: for each candidate
+   * whose effective content type matches a claiming plugin's attachmentTypes
+   * globs, hooks run in priority order (lower first, plugin id tiebreak) and
+   * the first non-undefined result replaces that marker. Failures, timeouts,
+   * and declines leave the native fallback marker in place. Stitching is
+   * deterministic (candidate order) against a per-flush aggregate char
+   * budget, mirroring buildPromptContent's semantics. Never throws — the
+   * caller's turn proceeds regardless.
+   */
+  async enrichAttachmentMarkers(
+    plan: TurnAttachmentPlan,
+    channel: AttachmentEnrichmentChannel,
+  ): Promise<void> {
+    try {
+      const claimants = this.plugins
+        .filter((plugin) => plugin.status.active)
+        .filter((plugin) =>
+          (plugin.manifest.capabilities?.discordMedia?.attachmentTypes
+            ?.length ?? 0) > 0
+        )
+        .filter((plugin) =>
+          typeof plugin.module?.attachmentHook?.run === "function"
+        )
+        .sort((a, b) =>
+          (a.module!.attachmentHook!.priority ?? 0) -
+            (b.module!.attachmentHook!.priority ?? 0) ||
+          a.manifest.id.localeCompare(b.manifest.id)
+        );
+      if (claimants.length === 0 || plan.pluginCandidates.length === 0) {
+        return;
+      }
+
+      const results = await Promise.all(
+        plan.pluginCandidates.map(async (candidate) => {
+          for (const plugin of claimants) {
+            const hook = plugin.module!.attachmentHook!;
+            const globs = plugin.manifest.capabilities!.discordMedia!
+              .attachmentTypes!;
+            if (
+              !globs.some((glob) =>
+                contentTypeMatchesGlob(glob, candidate.contentType)
+              )
+            ) {
+              continue;
+            }
+            const timeoutMs = hook.timeoutMs ??
+              DEFAULT_ATTACHMENT_HOOK_TIMEOUT_MS;
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            try {
+              const output = await Promise.race([
+                Promise.resolve(hook.run({
+                  attachment: {
+                    id: candidate.attachmentId,
+                    messageId: candidate.messageId,
+                    filename: candidate.filename,
+                    url: candidate.url,
+                    contentType: candidate.contentType,
+                    size: candidate.size,
+                  },
+                  channel: {
+                    channelId: channel.channelId,
+                    channelName: channel.channelName,
+                    serverName: channel.serverName,
+                    isDM: channel.isDM,
+                  },
+                  statePath: join(plugin.directory, "state"),
+                  env: this.services(plugin).env,
+                })),
+                new Promise<never>((_, reject) =>
+                  timeoutId = setTimeout(
+                    () =>
+                      reject(
+                        new Error(
+                          `attachment hook timed out after ${timeoutMs}ms`,
+                        ),
+                      ),
+                    timeoutMs,
+                  )
+                ),
+              ]);
+              if (typeof output === "string" && output.trim()) {
+                return { candidate, plugin, hook, text: output.trim() };
+              }
+              // undefined/empty — decline, next claimant.
+            } catch (error) {
+              plugin.status.degraded = true;
+              plugin.status.lastError = safeError(error);
+              console.error(
+                `[Plugins] Attachment hook ${plugin.manifest.id} failed for "${candidate.filename}":`,
+                error,
+              );
+              await this.eventLog.record(plugin.manifest.id, {
+                level: "error",
+                category: "media",
+                message: `attachment hook failed for "${candidate.filename}": ${
+                  safeError(error)
+                }`,
+              });
+              // Next claimant for this attachment.
+            } finally {
+              if (timeoutId !== undefined) clearTimeout(timeoutId);
+            }
+          }
+          return undefined;
+        }),
+      );
+
+      // Stitch deterministically in candidate order against the aggregate.
+      let remainingChars = DEFAULT_ATTACHMENT_ENRICHMENT_AGGREGATE_MAX_CHARS;
+      for (const result of results) {
+        if (!result) continue;
+        const { candidate, plugin, hook } = result;
+        const perMarkerMaxChars = hook.maxChars ??
+          DEFAULT_ATTACHMENT_HOOK_MAX_CHARS;
+        // Markers are single-line by construction — collapse whitespace so a
+        // multi-line transcript can't corrupt the accumulated message format.
+        const normalized = result.text.replace(/\s+/g, " ").trim();
+        const perMarkerSliced = normalized.slice(0, perMarkerMaxChars);
+        let body = perMarkerSliced.slice(0, remainingChars);
+        const truncatedByAggregate = body.length < perMarkerSliced.length;
+        const truncatedByPerMarker = perMarkerSliced.length <
+          normalized.length;
+        if (truncatedByPerMarker) body += " [truncated]";
+        if (truncatedByAggregate) body += " [truncated, plugin budget]";
+        if (!body) {
+          this.markDegraded(
+            plugin,
+            "attachment marker skipped due to aggregate enrichment budget",
+          );
+          await this.eventLog.record(plugin.manifest.id, {
+            level: "warn",
+            category: "budget",
+            message:
+              `attachment marker for "${candidate.filename}" skipped — aggregate enrichment budget exhausted`,
+          });
+          continue;
+        }
+        if (truncatedByPerMarker || truncatedByAggregate) {
+          this.markDegraded(
+            plugin,
+            `attachment marker for "${candidate.filename}" truncated (${
+              truncatedByPerMarker ? "per-hook cap" : "aggregate budget"
+            })`,
+          );
+          await this.eventLog.record(plugin.manifest.id, {
+            level: "warn",
+            category: "budget",
+            message:
+              `attachment marker for "${candidate.filename}" truncated from ${normalized.length} to ${body.length} chars`,
+          });
+        }
+        const markers = plan.markersByMessageId.get(candidate.messageId);
+        if (markers && candidate.markerIndex < markers.length) {
+          markers[candidate.markerIndex] = body;
+          remainingChars = Math.max(0, remainingChars - body.length);
+        }
+      }
+    } catch (error) {
+      console.error("[Plugins] Attachment marker enrichment failed:", error);
+    }
+  }
+
+  /**
    * Last turn's plugin context budget accounting, or undefined if no turn
    * has run yet (e.g., no plugin manager, or buildPromptContent hasn't been
    * called). The entity loop reads this to populate
@@ -1009,6 +1320,13 @@ export function createPluginManager(
   getLlm: () => LLMClient,
   bundledRoot?: string,
   dataRoot?: string,
+  getDiscordBotToken?: () => string | undefined,
 ): PluginManager {
-  return new PluginManager(pluginRoot, getLlm, bundledRoot, dataRoot);
+  return new PluginManager(
+    pluginRoot,
+    getLlm,
+    bundledRoot,
+    dataRoot,
+    getDiscordBotToken,
+  );
 }

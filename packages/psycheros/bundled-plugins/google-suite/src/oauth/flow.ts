@@ -1,19 +1,26 @@
 /**
- * OAuth flow orchestrator — wires together PKCE generation, the transient
- * callback listener, browser-open, and the token endpoint exchange.
+ * OAuth flow — two-phase design for headless/containerized Psycheros.
  *
- * Single entry point: `runOAuthFlow(opts)` returns success/failure with the
- * connected email + granted scopes. The caller persists the refresh token
- * via the `writeRefreshToken` callback (so it goes to the right secrets file
- * via PluginManager.services.writeSecret, not direct file I/O).
+ * Phase 1 (`prepareAuthUrl`): generates PKCE verifier + challenge, builds the
+ * Google consent URL, and persists flow state to `oauth-flow.json` for crash
+ * recovery. Returns the URL for the caller to surface as a clickable link.
+ *
+ * Phase 2 (`completeFlow`): called when Google redirects back to our server
+ * callback (`/api/plugins/google-suite/oauth-callback`). Exchanges the code for
+ * tokens and returns the result. The caller (routes.ts) persists the refresh
+ * token.
+ *
+ * This replaces the original loopback-listener design, which broke in
+ * containerized setups: `xdg-open` can't open a browser inside a headless
+ * container, and `127.0.0.1:8765` inside the container is unreachable from the
+ * operator's browser. The callback now routes through Psycheros's own web
+ * server (port 3000), which the operator can actually reach.
  */
 
 import { join } from "@std/path";
 import { computeCodeChallenge, generateCodeVerifier } from "./pkce.ts";
-import { OAuthTimeoutError, startCallbackListener } from "./listener.ts";
-import { openBrowser } from "./browser.ts";
-import { buildScopeString, type ServiceId } from "./scopes.ts";
 import { exchangeCode, fetchUserinfo } from "./refresh.ts";
+import { buildScopeString, type ServiceId } from "./scopes.ts";
 
 export interface OAuthFlowResult {
   success: boolean;
@@ -22,80 +29,57 @@ export interface OAuthFlowResult {
    *  subset if the user edited permissions during consent. */
   grantedScopes?: string[];
   error?: string;
-  /** Set when the failure was a timeout vs. some other error — lets the UI
-   *  show a more specific message. */
-  timedOut?: boolean;
 }
 
-export interface RunOAuthFlowOptions {
+export interface PrepareAuthUrlOptions {
   clientId: string;
-  clientSecret: string;
   enabledServices: readonly ServiceId[];
   /**
-   * Plugin statePath — used to persist `oauth-flow.json` for crash recovery.
-   * If the daemon dies mid-flow, the next startup can detect the orphaned
-   * file and surface a warning (operator can clean up by deleting it).
+   * Plugin statePath — used to persist `oauth-flow.json` for crash recovery
+   * and to carry PKCE state between prepareAuthUrl() and completeFlow().
    */
   statePath: string;
   /**
-   * Persists the captured refresh token to the plugin's secrets file. Caller
-   * is PluginManager.services.writeSecret, which validates the name prefix.
+   * The redirect URI Google should send the callback to. This is the
+   * Psycheros server's own callback endpoint, e.g.
+   * `https://echo.example.com/api/plugins/google-suite/oauth-callback`.
+   * Passed in by routes.ts from the incoming request's origin.
    */
-  writeRefreshToken: (token: string) => Promise<void>;
-  /** Override for testing — production callers should omit. */
-  portOverride?: readonly number[];
-  /** Override for testing — production callers should omit. */
-  timeoutMs?: number;
+  redirectUri: string;
 }
 
-const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
+export interface PreparedFlow {
+  authUrl: string;
+  state: string;
+}
 
-export async function runOAuthFlow(
-  opts: RunOAuthFlowOptions,
-): Promise<OAuthFlowResult> {
+/** Phase 1: build the Google consent URL with PKCE + state. */
+export async function prepareAuthUrl(
+  opts: PrepareAuthUrlOptions,
+): Promise<PreparedFlow> {
   const verifier = generateCodeVerifier();
   const challenge = await computeCodeChallenge(verifier);
   const state = crypto.randomUUID();
   const scopes = buildScopeString(opts.enabledServices);
 
-  // Persist flow state for crash recovery. Just enough to detect an orphaned
-  // flow on next startup — we don't actually use it to resume the flow.
+  // Persist flow state: PKCE verifier + state for the callback exchange,
+  // plus a timestamp for crash-recovery detection on next startup.
   const flowFile = join(opts.statePath, "oauth-flow.json");
-  try {
-    await Deno.mkdir(opts.statePath, { recursive: true });
-    await Deno.writeTextFile(
-      flowFile,
-      JSON.stringify({
-        state,
-        startedAt: new Date().toISOString(),
-      }),
-    );
-  } catch (error) {
-    console.warn(
-      `[google-suite] could not write oauth-flow.json for crash recovery: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
+  await Deno.mkdir(opts.statePath, { recursive: true });
+  await Deno.writeTextFile(
+    flowFile,
+    JSON.stringify({
+      state,
+      verifier,
+      redirectUri: opts.redirectUri,
+      clientId: opts.clientId,
+      startedAt: new Date().toISOString(),
+    }),
+  );
 
-  let listenerHandle;
-  try {
-    listenerHandle = await startCallbackListener({
-      expectedState: state,
-      ports: opts.portOverride,
-      timeoutMs: opts.timeoutMs,
-    });
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-
-  const redirectUri = `http://127.0.0.1:${listenerHandle.port}/callback`;
   const authUrl = new URL(GOOGLE_AUTH_ENDPOINT);
   authUrl.searchParams.set("client_id", opts.clientId);
-  authUrl.searchParams.set("redirect_uri", redirectUri);
+  authUrl.searchParams.set("redirect_uri", opts.redirectUri);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("scope", scopes);
   authUrl.searchParams.set("state", state);
@@ -107,63 +91,98 @@ export async function runOAuthFlow(
   authUrl.searchParams.set("access_type", "offline");
   authUrl.searchParams.set("prompt", "consent");
 
-  const browserResult = await openBrowser(authUrl.toString());
-  if (!browserResult.ok) {
-    console.warn(
-      `[google-suite] could not auto-open browser: ${
-        browserResult.error ?? "unknown error"
-      }. Operator must open the URL manually.`,
-    );
-    // Don't abort — the operator may have a headless setup and will open
-    // the URL from the settings UI's clickable link.
-  }
+  return { authUrl: authUrl.toString(), state };
+}
+
+export interface CompleteFlowOptions {
+  /** Authorization code from Google's callback redirect. */
+  code: string;
+  /** State parameter from Google's callback — must match what we stored. */
+  state: string;
+  /** Client secret for the token exchange. */
+  clientSecret: string;
+  /** Plugin statePath — reads oauth-flow.json for verifier + redirectUri. */
+  statePath: string;
+  /** Persists the captured refresh token to the plugin's secrets file. */
+  writeRefreshToken: (token: string) => Promise<void>;
+}
+
+/**
+ * Phase 2: exchange the callback code for tokens. Reads PKCE verifier +
+ * redirect URI from the persisted flow state, validates the state parameter,
+ * exchanges the code, fetches userinfo, and persists the refresh token.
+ *
+ * Throws on: state mismatch, missing/expired flow state, token exchange
+ * failure, or missing refresh token in the response.
+ */
+export async function completeFlow(
+  opts: CompleteFlowOptions,
+): Promise<OAuthFlowResult> {
+  const flowFile = join(opts.statePath, "oauth-flow.json");
+  let flowData: {
+    state: string;
+    verifier: string;
+    redirectUri: string;
+    clientId: string;
+    startedAt: string;
+  };
 
   try {
-    const { code, state: receivedState } = await listenerHandle.waitForCode();
-    if (receivedState !== state) {
-      return {
-        success: false,
-        error:
-          "OAuth state mismatch — possible CSRF attack or stale browser tab. Flow aborted.",
-      };
-    }
-
-    const tokens = await exchangeCode({
-      code,
-      clientId: opts.clientId,
-      clientSecret: opts.clientSecret,
-      redirectUri,
-      verifier,
-    });
-
-    const userinfo = await fetchUserinfo(tokens.access_token);
-
-    await opts.writeRefreshToken(tokens.refresh_token!);
-
-    return {
-      success: true,
-      email: userinfo.email,
-      grantedScopes: tokens.scope?.split(" ") ?? [scopes],
-    };
-  } catch (error) {
-    if (error instanceof OAuthTimeoutError) {
-      return {
-        success: false,
-        timedOut: true,
-        error:
-          "OAuth flow timed out after 5 minutes. Restart the flow from Settings → Plugins → Google Suite → Configure.",
-      };
-    }
+    const raw = await Deno.readTextFile(flowFile);
+    flowData = JSON.parse(raw);
+  } catch {
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error),
+      error:
+        "No OAuth flow in progress. Start the flow from Settings → Plugins → Google Suite → Connect Account.",
     };
-  } finally {
-    await listenerHandle.shutdown();
-    try {
-      await Deno.remove(flowFile);
-    } catch {
-      // Already gone or never written — non-fatal.
-    }
+  }
+
+  if (opts.state !== flowData.state) {
+    return {
+      success: false,
+      error:
+        "OAuth state mismatch — possible CSRF attack or stale browser tab. Flow aborted.",
+    };
+  }
+
+  const tokens = await exchangeCode({
+    code: opts.code,
+    clientId: flowData.clientId,
+    clientSecret: opts.clientSecret,
+    redirectUri: flowData.redirectUri,
+    verifier: flowData.verifier,
+  });
+
+  const userinfo = await fetchUserinfo(tokens.access_token);
+
+  await opts.writeRefreshToken(tokens.refresh_token!);
+
+  // Clean up the flow state file.
+  try {
+    await Deno.remove(flowFile);
+  } catch {
+    // Already gone — non-fatal.
+  }
+
+  return {
+    success: true,
+    email: userinfo.email,
+    grantedScopes: tokens.scope?.split(" ") ?? [],
+  };
+}
+
+/**
+ * Clear persisted flow state (if any) — called on disconnect or when a stale
+ * flow is detected on startup.
+ */
+export async function clearFlowState(statePath: string): Promise<void> {
+  const flowFile = join(statePath, "oauth-flow.json");
+  try {
+    await Deno.remove(flowFile);
+  } catch {
+    // Already gone — non-fatal.
   }
 }
+
+const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";

@@ -895,14 +895,15 @@ export function createWorkerClient(
   const apiKey = options?.apiKey || Deno.env.get("ZAI_API_KEY");
 
   if (!apiKey) {
-    return new LLMClient({
-      baseUrl: "",
-      apiKey: "",
-      model: "",
-      thinkingEnabled: false,
-      persistentReasoningIntraTurn: false,
-      provider: "custom",
-    });
+    // Throw instead of returning a broken empty-URL client. Callers wrap
+    // construction in try/catch and fall back gracefully (e.g. distillSummary
+    // falls through to finalText). The previous behavior — returning an
+    // LLMClient with baseUrl:"" — failed at chat-time with cryptic
+    // "Invalid URL: ''" errors that bypassed the fallback path entirely.
+    throw new Error(
+      "createWorkerClient: no API key configured. Set ZAI_API_KEY env var " +
+        "or pass options.apiKey (e.g. from the user's selected LLM profile).",
+    );
   }
 
   const config: LLMConfig = {

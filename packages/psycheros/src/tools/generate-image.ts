@@ -997,7 +997,7 @@ async function execute(
     let resultText = "Image generated successfully.";
     if (description) resultText += ` ${description}`;
     resultText +=
-      `\n\nFile path (use verbatim for send_discord_dm image_path argument): ${relativeFilePath}`;
+      `\n\nFile path (use verbatim for the send_discord_dm / act_in_discord image_path argument): ${relativeFilePath}`;
 
     if (veniceDroppedImages) {
       resultText +=

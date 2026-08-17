@@ -6,6 +6,36 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-16
+
+### Added
+
+- **Workspace:** the entity's faculty for careful computer work — sandboxed
+  OpenCode sessions (sync, async, or engaged), workdir binding for real host
+  folders, approval toasts, export to the projects folder, and a terminal view
+  with live progress.
+- **Skills:** on-demand procedural knowledge the entity loads with the `skill`
+  tool; loaded skills hold per-conversation until released, and the entity can
+  author their own. Managed in Settings > Tools > Skills.
+- **Theme Studio:** full-palette theming — presets, a generator from a seed
+  color with harmony rules, custom slot editing, contrast chips with one-tap
+  fixes, and JSON export/import.
+- **Decor:** optional Lace and Stamp edges for message bubbles that recolor with
+  the theme.
+- **Discord image vision:** images posted in server channels and DMs reach the
+  entity — vision models see them directly, text-only models get captions; every
+  attachment leaves a textual marker.
+- **Entity image sending in Discord channels:** `act_in_discord` gains
+  image_path with idempotent, timeout-hardened sends.
+- **Per-gateway LLM profile for Discord server channels:** chatter can run on an
+  economical profile while DMs keep the active one.
+
+### Fixed
+
+- Embedding settings / index dimension drift is now surfaced durably instead of
+  failing silently.
+- Voice call overlay follows the theme.
+
 ## [0.10.0] - 2026-07-24
 
 ### Added

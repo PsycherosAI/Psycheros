@@ -29,6 +29,23 @@ via `GET /api/conversations/:id/messages/paginated`.
 - Message editing works across lazily-loaded messages via `data-message-id`
   attributes
 
+## Held-Skill Chips
+
+When the entity loads a skill (`skill({name})` — loads always hold), a strip of
+tiny one-line chips — `Skill: <name>` — floats at the top-left of the chat area
+(`#held-skills-strip`, a sibling of `#chat` so it survives HTMX conversation
+swaps). Chips stack vertically and ellipsis-truncate before the top-right FAB
+column (voice-call and workspace FABs occupy that corner).
+
+Chips are **display-only** — no click-to-release, `pointer-events: none`,
+transparent background — just floating bubbles over the conversation, anchored
+top-left of `.main` like the FABs are anchored top-right (so they never push the
+conversation down). They are per-conversation (holds are stored in the
+`held_skills` table keyed by conversation), update live mid-turn via the
+`held-skills` UI region (`affectedRegions` on the skill tool → `dom_update`
+SSE), and re-render on conversation open via the chat fragment's OOB swaps.
+Design doc: [`design/held-skills-chips.md`](design/held-skills-chips.md).
+
 ## Context Inspector
 
 Built-in debugging tool for inspecting the full context sent to the LLM. Toggle
@@ -87,14 +104,11 @@ Settings, Vision Settings, Situational Awareness Settings.
 
 ## Context Inspector (continued)
 
-**Architecture:** Context snapshots are persisted to the `context_snapshots`
-database table on each turn. The inspector fetches data via
+**Architecture:** The current turn's context snapshot is persisted to the
+`context_snapshots` database table (latest-only — each insert replaces the
+previous snapshot for the conversation). The inspector fetches it via
 `GET /api/conversations/:id/context` — data survives page refresh and
-conversation switching. Capped at 50 snapshots per conversation (auto-pruned on
-insert).
-
-**Turn Navigation:** Use the prev/next arrows to inspect any turn in the
-conversation, not just the latest.
+conversation switching.
 
 **Search:** Full-text search across all snapshot content with match
 highlighting.
@@ -102,13 +116,14 @@ highlighting.
 **Tabs:**
 
 - **System**: Identity sections (self, user, relationship), situational
-  awareness, and the full assembled system message as collapsible sections with
-  size badges
+  awareness, skills currently held, and the full assembled system message as
+  collapsible sections with size badges
 - **RAG**: All five retrieval sources — memories, chat history, context book
   entries, data vault, knowledge graph
 - **Messages**: Conversation history sent to the LLM with role badges and
   collapsible content
-- **Tools**: Available tool definitions with parameters
+- **Tools**: Available tool definitions with parameters (the skills list rides
+  inside the `skill` tool's description)
 - **Metrics**: Per-section size breakdown, token counts, context window
   utilization bar (reads `contextLength` from the active LLM profile — shows
   e.g. "128k", "200k" — and reports how many oldest messages were trimmed)
@@ -365,20 +380,33 @@ server. Defaults:
 
 Customizable UI theming. Access via Settings → General Settings → Theme tab.
 
-### Color Themes
+### Theme Studio
 
-8 preset themes — Violet Dream, Phosphor Green, Ocean Blue, Sunset Orange, Rose,
-Amber, Mint, Slate — plus a free-form color picker. The custom color picker is
-initialized to Violet Dream (`#a855f7`), which also matches the
-`PSYCHEROS_ACCENT_COLOR` env-var default. Selecting any preset takes precedence;
-the env var only applies when no preset is chosen.
+Three ways to build a palette (Settings → General Settings → Theme):
+
+- **Presets** — 13 full palettes. Dark: Violet Dream (default), Phosphor Green,
+  Ocean Blue, Sunset Orange, Rose, Amber, Mint, Slate. Light: Sweet (pastel
+  pink/sax), Parchment (cream/navy), Olive (earthy), Beige (tonal camel).
+  Stripes preview the effective palette, not just the picked colors.
+- **Generate** — seed color + harmony rule (complementary, analogous, triadic,
+  tetradic) in OKLCH, dark/light mode, neutrals-tint slider, live preview, and a
+  "Surprise me" random seed.
+- **Custom** — pick all 7 slots: background, text, accent, highlight, success,
+  warning, alert. Everything else derives from those (neutral ramps, tints,
+  glows, on-color text) in `web/js/color.js`.
+
+Live contrast chips warn when text/accent pairs fail WCAG ratios, with a one-tap
+lightness fix. Semantic colors that land too close to the accent hue rotate
+within their family (green/amber/red) so status states stay distinguishable —
+e.g. the Amber preset's warning shifts to yellow. Themes export/import as JSON.
+Full contract: `docs/design/design-system.md`.
 
 ### Background Images
 
 - Upload custom backgrounds (JPEG, PNG, GIF, WebP up to 5MB)
 - Apply backgrounds from URL
 - Gallery with thumbnails, delete support
-- Blur slider (0-20px) and overlay opacity slider (0-100%)
+- Blur slider (0-50px) and overlay opacity slider (0-100%)
 
 ### Glass Effect
 
@@ -390,11 +418,15 @@ logo and header controls.
 
 ### Persistence
 
-Theme preferences persist server-side in `.psycheros/appearance-settings.json`.
-On page load, the server is queried first and its values take precedence;
-localStorage acts as a synchronous cache for instant rendering and an offline
-fallback. On theme changes, settings are saved to both localStorage (immediate)
-and the server (async fire-and-forget). CSS variables in `web/css/tokens.css`.
+Theme preferences persist server-side in `.psycheros/appearance-settings.json`
+(v2 shape — see `docs/api-reference.md`; legacy accent-only files self-heal to
+v2 on first load). The saved derived-token snapshot is injected as an inline
+`<style>` at first paint, so light themes don't flash dark and the logo gradient
+paints in-theme immediately. localStorage acts as a synchronous cache for
+instant rendering and an offline fallback. On theme changes, settings are saved
+to both localStorage (immediate) and the server (async fire-and-forget). The
+`PSYCHEROS_ACCENT_COLOR` env var, when set, overrides the accent at first paint
+only. CSS variables in `web/css/tokens.css`.
 
 **API Endpoints:**
 

@@ -59,6 +59,12 @@ import {
   loadUserContent,
 } from "./context.ts";
 import { loadMemorySettings } from "../memory/memory-settings.ts";
+import {
+  buildHeldSkillsBlock,
+  buildSkillsIndexBlock,
+  listSkills,
+  loadSkill,
+} from "../skills/mod.ts";
 import { applyContextBudget, type BudgetResult } from "./token-budget.ts";
 import { buildGraphContext, formatChatHistoryForContext } from "../rag/mod.ts";
 import { generateUIUpdates } from "../server/ui-updates.ts";
@@ -940,22 +946,44 @@ Discord interaction:
     const pluginContent = pluginContentResult?.content;
     const pluginHooks = pluginContentResult?.hooks;
 
-    const systemMessage = buildSystemMessage(
-      baseInstructions,
-      selfContent,
-      userContent,
-      relationshipContent,
-      customContent,
-      memoriesContent,
-      chatHistoryContent,
-      lorebookContent,
-      graphContent,
-      vaultContent,
-      imageGenContent,
-      saContent,
-      discordChannelContent,
-      pluginContent,
-    ) + (options?.systemPromptSuffix ?? "");
+    // Skills index — only advertised when the skill tool is actually enabled,
+    // and re-scanned per request so Settings edits apply next turn. The index
+    // rides with the skill tool's description (appended to the request's tool
+    // definitions below), not in the system message.
+    let skillsIndexContent: string | undefined;
+    if (
+      this.tools().getDefinitions().some((d) => d.function.name === "skill")
+    ) {
+      const skills = await listSkills(this.config.dataRoot);
+      if (skills.length > 0) {
+        skillsIndexContent = buildSkillsIndexBlock(skills);
+      }
+    }
+    let heldSkillsContent = await this.buildHeldSkillsContent(conversationId);
+
+    // Held skills are live: when the skill tool holds or releases mid-turn,
+    // the block is rebuilt and spliced into messages[0] so the entity has
+    // the skill in the SAME turn it reached for it (not next turn).
+    const composeSystemMessage = (held: string | undefined) =>
+      buildSystemMessage(
+        baseInstructions,
+        selfContent,
+        userContent,
+        relationshipContent,
+        customContent,
+        memoriesContent,
+        chatHistoryContent,
+        lorebookContent,
+        graphContent,
+        vaultContent,
+        imageGenContent,
+        saContent,
+        discordChannelContent,
+        pluginContent,
+        held,
+      ) + (options?.systemPromptSuffix ?? "");
+
+    const systemMessage = composeSystemMessage(heldSkillsContent);
 
     // Get conversation history from DB
     const history = this.db.getMessages(conversationId);
@@ -998,9 +1026,14 @@ Discord interaction:
           yield { type: "message_id", role: "user", id: userMessageId };
 
           // Index the user message for chat RAG (non-blocking, non-fatal)
-          // Skip for Discord and other non-web source turns
+          // Skip for Discord and other non-web source turns, and for
+          // workspace conversations — the scratchpad stays out of ChatRAG
+          // (ephemeral principle: the Pulse summary is the only channel
+          // workspace content flows back through).
           if (
-            this.config.chatRAG && userMessageId && !this.config.discordContext
+            this.config.chatRAG && userMessageId &&
+            !this.config.discordContext &&
+            conversation?.sourceType !== "workspace"
           ) {
             this.config.chatRAG.indexMessage(
               userMessageId,
@@ -1035,9 +1068,35 @@ Discord interaction:
       // Voice mode now has full tool support — only the explicit
       // disableTools flag (set by callers that genuinely want a tool-less
       // turn) suppresses tool definitions.
-      const toolDefinitions = options?.disableTools
+      //
+      // Passing { conversationId, db } lets each tool's `visibleIn` predicate
+      // gate itself out of contexts where it doesn't apply (e.g. ask_user and
+      // manage_message are workspace-only and stay out of main chat).
+      const baseToolDefinitions = options?.disableTools
         ? undefined
-        : this.tools().getDefinitions();
+        : this.tools().getDefinitions({
+          conversationId,
+          db: this.db,
+        });
+      // Append the skills index to the skill tool's description so the
+      // catalog loads with the tools array, where the model considers calling
+      // it. Cloned, never mutated in place — the registry's canonical
+      // definition (Settings UI) stays clean and nothing accumulates across
+      // turns.
+      const toolDefinitions = baseToolDefinitions && skillsIndexContent
+        ? baseToolDefinitions.map((d) =>
+          d.function.name === "skill"
+            ? {
+              ...d,
+              function: {
+                ...d.function,
+                description:
+                  `${d.function.description}\n\n${skillsIndexContent}`,
+              },
+            }
+            : d
+        )
+        : baseToolDefinitions;
 
       // Build the messages array for the LLM
       const messages = this.buildMessages(
@@ -1066,6 +1125,7 @@ Discord interaction:
         graphContent,
         vaultContent,
         situationalAwarenessContent: saContent,
+        heldSkillsContent,
         pluginContent,
         pluginHooks,
         messages: messages.slice(1).map((msg) => ({
@@ -1095,53 +1155,73 @@ Discord interaction:
         },
       };
 
-      // Persist context snapshot to database for the Context Inspector
-      const turnIndexStmt = this.db.getRawDb()
-        .prepare(
-          "SELECT COUNT(*) as count FROM messages WHERE conversation_id = ? AND role = 'user'",
-        );
-      let turnIndex: number;
-      try {
-        const turnIndexResult = turnIndexStmt.get<{ count: number }>(
-          conversationId,
-        );
-        turnIndex = turnIndexResult?.count ?? 1;
-      } finally {
-        turnIndexStmt.finalize();
-      }
+      // Persist context snapshot to database for the Context Inspector.
+      // Skipped for workspace conversations — engaged sessions run many
+      // EntityTurns per task, each writing a ~140KB snapshot of the same
+      // 22k-token system message. The scratchpad has no Inspector value
+      // (turns aren't user-visible conversations), so this is pure DB bloat.
+      // The in-memory snapshot still yields to the live stream below.
+      // persistSnapshot stays undefined for workspace conversations (skipped
+      // by design) — held-skills changes mid-turn call it if present.
+      let persistSnapshot: (() => void) | undefined;
+      if (conversation?.sourceType !== "workspace") {
+        const turnIndexStmt = this.db.getRawDb()
+          .prepare(
+            "SELECT COUNT(*) as count FROM messages WHERE conversation_id = ? AND role = 'user'",
+          );
+        let turnIndex: number;
+        try {
+          const turnIndexResult = turnIndexStmt.get<{ count: number }>(
+            conversationId,
+          );
+          turnIndex = turnIndexResult?.count ?? 1;
+        } finally {
+          turnIndexStmt.finalize();
+        }
 
-      this.db.addContextSnapshot({
-        conversationId,
-        turnIndex,
-        iteration: 1,
-        timestamp: contextSnapshot.timestamp,
-        userMessage,
-        systemMessage,
-        baseInstructionsContent: baseInstructions,
-        selfContent,
-        userContent,
-        relationshipContent,
-        customContent,
-        memoriesContent,
-        chatHistoryContent,
-        lorebookContent,
-        graphContent,
-        vaultContent,
-        situationalAwarenessContent: saContent,
-        messagesJson: JSON.stringify(contextSnapshot.messages ?? []),
-        // toolDefinitions is undefined when disableTools/voiceMode is set.
-        // JSON.stringify(undefined) returns undefined (not a string), which
-        // SQLite rejects with "Value of unsupported type: undefined". Coerce
-        // to "[]" so the column always has a valid JSON string.
-        toolDefinitionsJson: JSON.stringify(toolDefinitions ?? []),
-        metricsJson: JSON.stringify(contextSnapshot.metrics ?? {}),
-        pluginHooksJson: JSON.stringify(pluginHooks ?? []),
-      });
+        // Reads contextSnapshot's CURRENT fields, so mid-turn held-skills
+        // mutations (see the tool loop) persist on re-call.
+        persistSnapshot = () => {
+          this.db.addContextSnapshot({
+            conversationId,
+            turnIndex,
+            iteration: 1,
+            timestamp: contextSnapshot.timestamp,
+            userMessage,
+            systemMessage: contextSnapshot.systemMessage,
+            baseInstructionsContent: baseInstructions,
+            selfContent,
+            userContent,
+            relationshipContent,
+            customContent,
+            memoriesContent,
+            chatHistoryContent,
+            lorebookContent,
+            graphContent,
+            vaultContent,
+            situationalAwarenessContent: saContent,
+            heldSkillsContent: contextSnapshot.heldSkillsContent,
+            messagesJson: JSON.stringify(contextSnapshot.messages ?? []),
+            // toolDefinitions is undefined when disableTools/voiceMode is set.
+            // JSON.stringify(undefined) returns undefined (not a string), which
+            // SQLite rejects with "Value of unsupported type: undefined". Coerce
+            // to "[]" so the column always has a valid JSON string.
+            toolDefinitionsJson: JSON.stringify(toolDefinitions ?? []),
+            metricsJson: JSON.stringify(contextSnapshot.metrics ?? {}),
+            pluginHooksJson: JSON.stringify(pluginHooks ?? []),
+          });
+        };
+        persistSnapshot();
+      }
 
       yield { type: "context", context: contextSnapshot };
 
       // Track current iteration for tool loop protection
       let iteration = 0;
+
+      // Set when a tool held/released a skill this turn — triggers the
+      // live system-message splice below.
+      let heldSkillsDirty = false;
 
       // Retry configuration for transient upstream errors (e.g. Z.ai "network_error").
       // Z.ai's failure already takes ~30s, so we use a short fixed delay between retries
@@ -1394,10 +1474,14 @@ Discord interaction:
             }, messageId);
 
             // Index the assistant message for chat RAG (non-blocking, non-fatal)
-            // Skip for Discord and other non-web source turns
+            // Skip for Discord and other non-web source turns, and for
+            // workspace conversations — the scratchpad stays out of ChatRAG
+            // (ephemeral principle: the Pulse summary is the only channel
+            // workspace content flows back through).
             if (
               this.config.chatRAG && messageId && assistantContent &&
-              !this.config.discordContext
+              !this.config.discordContext &&
+              conversation?.sourceType !== "workspace"
             ) {
               this.config.chatRAG.indexMessage(
                 messageId,
@@ -1493,6 +1577,9 @@ Discord interaction:
           if (result.affectedRegions) {
             for (const region of result.affectedRegions) {
               affectedUIRegions.add(region);
+              if (region === "held-skills") {
+                heldSkillsDirty = true;
+              }
             }
           }
 
@@ -1526,6 +1613,20 @@ Discord interaction:
           for (const update of uiUpdates) {
             yield { type: "dom_update", update };
           }
+        }
+
+        // Live held skills: a hold/release this turn splices the rebuilt
+        // block into the system message NOW, so the entity's next inference
+        // in this same turn already has the skill it reached for. Costs one
+        // intra-turn prefix invalidation per hold/release event — rare, and
+        // cross-turn caching is already defeated by the SA block.
+        if (heldSkillsDirty) {
+          heldSkillsContent = await this.buildHeldSkillsContent(conversationId);
+          const updatedSystem = composeSystemMessage(heldSkillsContent);
+          messages[0].content = updatedSystem;
+          contextSnapshot.systemMessage = updatedSystem;
+          contextSnapshot.heldSkillsContent = heldSkillsContent;
+          persistSnapshot?.();
         }
 
         // Add assistant message with tool calls to the messages array
@@ -1790,6 +1891,28 @@ Discord interaction:
    * @param appendUserMessage - Whether to append the user message at the end (false on retry)
    * @returns Array of ChatMessage for the LLM
    */
+  /**
+   * Resolves the "Skills I'm holding" block: names from the DB, bodies
+   * re-resolved from disk so edits apply immediately. A hold whose skill
+   * file is gone drops out here (lazy row cleanup).
+   */
+  private async buildHeldSkillsContent(
+    conversationId: string,
+  ): Promise<string | undefined> {
+    const heldNames = this.db.getHeldSkills(conversationId);
+    if (heldNames.length === 0) return undefined;
+    const held: Array<{ name: string; body: string }> = [];
+    for (const name of heldNames) {
+      const skill = await loadSkill(this.config.dataRoot, name);
+      if (skill) {
+        held.push({ name: skill.name, body: skill.body });
+      } else {
+        this.db.releaseSkill(conversationId, name);
+      }
+    }
+    return held.length > 0 ? buildHeldSkillsBlock(held) : undefined;
+  }
+
   private buildMessages(
     systemMessage: string,
     history: Message[],

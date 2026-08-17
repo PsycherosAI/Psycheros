@@ -6,7 +6,7 @@
  */
 
 import type { ToolCall, ToolDefinition, ToolResult } from "../types.ts";
-import type { Tool, ToolContext } from "./types.ts";
+import type { Tool, ToolContext, ToolVisibilityContext } from "./types.ts";
 import { shellTool } from "./shell.ts";
 import { updateTitleTool } from "./update_title.ts";
 import { getMetricsTool } from "./get_metrics.ts";
@@ -46,8 +46,14 @@ import { generateImageTool } from "./generate-image.ts";
 import { describeImageTool } from "./describe-image.ts";
 // Look closer tool
 import { lookCloserTool } from "./look-closer.ts";
+import { skillTool } from "./skill.ts";
 // Conversation peek tool
 import { conversationPeekTool } from "./conversation-peek.ts";
+import { manageMessageTool } from "./manage-message.ts";
+// Workspace tool (sub-agent coding/research sessions via OpenCode)
+import { workspaceTool } from "./workspace.ts";
+// Ask User tool (standalone escalation for engaged workspace)
+import { askUserTool } from "./ask-user.ts";
 
 // =============================================================================
 // Available Tools Catalog
@@ -99,6 +105,14 @@ export const AVAILABLE_TOOLS: Record<string, Tool> = {
   look_closer: lookCloserTool,
   // Conversation peek
   conversation_peek: conversationPeekTool,
+  // Entity skills (on-demand procedure loading)
+  skill: skillTool,
+  // Message management (soft-delete + glitch flag)
+  manage_message: manageMessageTool,
+  // Workspace faculty (sub-agent OpenCode sessions)
+  workspace: workspaceTool,
+  // Ask user (engaged workspace escalation — standalone tool for reliability)
+  ask_user: askUserTool,
 };
 
 /**
@@ -143,10 +157,22 @@ export class ToolRegistry {
   /**
    * Get all tool definitions for sending to the LLM.
    *
+   * When `visibilityCtx` is provided, tools whose `visibleIn` predicate returns
+   * false are excluded. Tools without a predicate are always included. When
+   * omitted, no filtering is applied (backwards-compatible with callers that
+   * don't have a conversation context yet).
+   *
+   * @param visibilityCtx - Optional per-turn context used by `visibleIn` predicates
    * @returns Array of tool definitions
    */
-  getDefinitions(): ToolDefinition[] {
-    return Array.from(this.tools.values()).map((tool) => tool.definition);
+  getDefinitions(visibilityCtx?: ToolVisibilityContext): ToolDefinition[] {
+    return Array.from(this.tools.values())
+      .filter((tool) =>
+        !tool.visibleIn ||
+        !visibilityCtx ||
+        tool.visibleIn(visibilityCtx)
+      )
+      .map((tool) => tool.definition);
   }
 
   /**

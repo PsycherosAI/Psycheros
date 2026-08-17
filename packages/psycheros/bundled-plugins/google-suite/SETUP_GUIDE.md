@@ -39,6 +39,14 @@ Once connected, the entity has six Google services available (each toggleable):
 7. Under **Test users**, click **Add Users** → add your own Google account
    email. This is required while the app is in "Testing" status.
 
+> **Publish the app once setup works — don't stay in "Testing".** Google
+> **expires the refresh token after 7 days** while the consent screen is in
+> "Testing" status, so the plugin silently disconnects and needs re-connecting
+> every week. After verifying the connection works, go to **APIs & Services →
+> OAuth consent screen → Publish app** to move it to "In production". The "app
+> isn't verified" warning still appears (see Troubleshooting) but is safe to
+> click through, and refresh tokens then last indefinitely.
+
 ## Step 2: Add OAuth Scopes
 
 On the consent screen, under **Data access** or **Scopes**:
@@ -80,13 +88,23 @@ results in 403 errors. Each link above goes directly to the enable page.
 
 1. Go to **APIs & Services → Credentials**.
 2. Click **Create Credentials → OAuth client ID**.
-3. Application type: **Desktop app** (not Web application).
+3. Application type: **Web application**.
 4. Name: Psycheros (or whatever).
-5. Click **Create**.
-6. A dialog appears with your **Client ID** and **Client Secret** — copy both.
+5. Under **Authorized redirect URIs**, click **Add URI** and paste:
 
-> **Note:** Desktop app type automatically allows loopback redirect URIs. You do
-> NOT need to manually add redirect URIs.
+   ```
+   https://YOUR-PSYCHEROS-URL/api/plugins/google-suite/oauth-callback
+   ```
+
+   Replace `YOUR-PSYCHEROS-URL` with the URL you use to access this Psycheros
+   instance (e.g. `http://192.168.1.100:3000` or `https://echo.example.com`).
+
+6. Click **Create**.
+7. A dialog appears with your **Client ID** and **Client Secret** — copy both.
+
+> **Why Web application?** Psycheros runs as a server — the OAuth callback comes
+> back through Psycheros's own web server, not a local desktop app. If you
+> previously created a Desktop app client, create a new Web app client instead.
 
 ## Step 5: Connect in Psycheros
 
@@ -141,8 +159,16 @@ Plugin Context section. If empty, the hook cache may not have refreshed yet
 (5-minute interval). Restart to trigger an immediate refresh.
 
 **OAuth consent screen says "This app isn't verified":** This is normal for apps
-in "Testing" status. Click **Advanced → Go to Psycheros (unsafe)**. This only
-appears because you're using your own OAuth client, not a Google-verified app.
+in "Testing" status (and for published apps with sensitive scopes that haven't
+gone through Google's verification process). Click **Advanced → Go to Psycheros
+(unsafe)**. This only appears because you're using your own OAuth client, not a
+Google-verified app.
+
+**Connection stops working after about a week:** The consent screen is still in
+"Testing" status — Google expires refresh tokens after 7 days for testing apps.
+Publish the app (see the note in Step 1), then click **Connect Account** once
+more to mint a fresh token. Published-app refresh tokens persist indefinitely
+(Google only invalidates them after ~6 months of non-use).
 
 **Timezone issues with task due dates:** If tasks appear overdue by one day,
 check that your system timezone matches your Google account timezone. The plugin

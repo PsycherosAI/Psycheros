@@ -1,60 +1,100 @@
 /**
  * Design Tokens
- * OLED-friendly dark terminal aesthetic with accent color theming.
+ * See docs/design/design-system.md for the full contract.
+ *
+ * Structure: 7 picked slots (bg, fg, accent, highlight, success, warning,
+ * error) + derived tokens. Static defaults below EQUAL the derived output of
+ * ColorMath.deriveTokens() for the default violet theme — first paint and
+ * runtime apply must match. Do not hand-pick divergent values here; if a
+ * default changes, change the derivation and regenerate.
+ *
+ * Launcher-v2 (packages/launcher-v2/frontend/styles/tokens.css) mirrors the
+ * --c-* names — additive changes only, never rename.
  */
 
 :root {
-  /* Backgrounds - true black for OLED */
+  /* ===== Picked slots (user-themeable; 7 total) ===== */
   --c-bg: #000000;
-  --c-bg-raised: #0a0a0a;
-  --c-bg-sunken: #050505;
-  --c-bg-hover: #111111;
-
-  /* Foregrounds - high contrast */
   --c-fg: #e8e8e8;
-  --c-fg-muted: #888888;
-  --c-fg-strong: #ffffff;
-  --c-fg-subtle: #555555;
-  --c-fg-label: #888888;
-
-  /* Primary accent - violet dream (default preset, overridden by theme.js at runtime)
-     To change accent color, update these 5 values together:
-     - --c-accent: main color (hex)
-     - --c-accent-hover: lighter variant (hex)
-     - --c-accent-muted: darker variant (hex)
-     - --c-accent-subtle: 8% opacity (rgba)
-     - --c-accent-glow: 25% opacity (rgba) */
   --c-accent: #a855f7;
-  --c-accent-hover: #c084fc;
-  --c-accent-muted: #7e22ce;
+  --c-highlight: #00d4ff;
+  --c-success: #22c55e;
+  --c-warning: #f59e0b;
+  --c-error: #ef4444;
+
+  /* ===== Derived: neutrals (mix(bg, fg, t) / mix(fg, bg, t)) ===== */
+  --c-bg-sunken: #050505; /* t=0.02 */
+  --c-bg-raised: #0a0a0a; /* t=0.043 */
+  --c-bg-hover: #111111; /* t=0.073 */
+  --c-border: #1a1a1a; /* t=0.112 */
+  --c-border-hover: #222222; /* t=0.145 */
+  --c-border-strong: #2a2a2a; /* t=0.181 */
+  --c-fg-muted: #888888; /* t=0.414 toward bg */
+  --c-fg-label: #888888;
+  --c-fg-subtle: #555555; /* t=0.633 */
+  --c-fg-strong: #ffffff; /* isDark ? white : black */
+  --c-muted: #666666; /* t=0.56 */
+  --c-muted-subtle: rgba(102, 102, 102, 0.1);
+
+  /* ===== Derived: accent family ===== */
+  --c-accent-hover: #b977f9; /* lighten 0.2 */
+  --c-accent-muted: #653394; /* darken 0.4 */
   --c-accent-subtle: rgba(168, 85, 247, 0.08);
   --c-accent-glow: rgba(168, 85, 247, 0.25);
+  --c-accent-line: rgba(168, 85, 247, 0.4);
 
-  /* Brand mark gradient — 5 stops driven by theme.js at runtime.
-     Defaults below are the canonical violet preset (cyan→magenta);
-     theme.js overrides these per preset (or derives them procedurally
-     from a custom accent via canonical hue/lightness offsets). */
+  /* ===== Derived: highlight family ===== */
+  --c-highlight-hover: #33ddff; /* lighten 0.2 */
+  --c-highlight-subtle: rgba(0, 212, 255, 0.08);
+
+  /* ===== Derived: semantic tints ===== */
+  --c-success-hover: #4ed17e; /* lighten 0.2 */
+  --c-success-subtle: rgba(34, 197, 94, 0.1);
+  --c-success-glow: rgba(34, 197, 94, 0.4);
+  --c-warning-hover: #f7b13c; /* lighten 0.2 */
+  --c-warning-subtle: rgba(245, 158, 11, 0.1);
+  --c-warning-glow: rgba(245, 158, 11, 0.4);
+  --c-error-hover: #f26969; /* lighten 0.2 */
+  --c-error-subtle: rgba(239, 68, 68, 0.1);
+  --c-error-glow: rgba(239, 68, 68, 0.4);
+
+  /* ===== Derived: text on chromatic surfaces ===== */
+  --c-on-accent: #000000;
+  --c-on-highlight: #000000;
+  --c-on-success: #000000;
+  --c-on-warning: #000000;
+  --c-on-error: #000000;
+
+  /* ===== Derived: terminal pane ===== */
+  --c-bg-terminal: #0d0d0d; /* mix(bg→fg, 0.055) */
+  --c-text-terminal: #d4d4d4; /* mix(fg→bg, 0.086) */
+  --c-text-terminal-dim: #888888;
+
+  /* ===== Derived: overlays & scrims ===== */
+  --c-wash: rgba(232, 232, 232, 0.05); /* rgba(fg, .05) */
+  --c-bubble: rgba(
+    0,
+    0,
+    0,
+    0.5
+  ); /* isDark ? black dim : rgba(fg, .06) — user message fill */
+  --c-wash-strong: rgba(232, 232, 232, 0.1);
+  --c-scrim: rgba(0, 0, 0, 0.5); /* black in both modes */
+  --c-scrim-strong: rgba(0, 0, 0, 0.7);
+  --c-scrim-heavy: rgba(0, 0, 0, 0.92); /* black in both modes */
+
+  /* Brand mark gradient — 5 stops. The violet preset ships the canonical
+     hand-tuned cyan→magenta brand gradient; everything else derives a
+     lightness ramp on the accent hue (theme.js generateLogoStops). */
   --c-logo-stop-0: #00d2ff;
   --c-logo-stop-1: #66befe;
   --c-logo-stop-2: #a989fd;
   --c-logo-stop-3: #c54efe;
   --c-logo-stop-4: #d200ff;
 
-  /* Secondary - muted for thinking/secondary elements */
-  --c-muted: #666666;
-  --c-muted-subtle: rgba(102, 102, 102, 0.1);
-
-  /* Semantic colors */
-  --c-error: #ff4444;
-  --c-warning: #ffaa00;
-  --c-success: var(--c-accent);
-
-  /* Borders */
-  --c-border: #1a1a1a;
-  --c-border-strong: #2a2a2a;
-
   /* Spacing (4px base scale) */
   --sp-1: 4px;
+  --sp-5: 20px;
   --sp-2: 8px;
   --sp-3: 12px;
   --sp-4: 16px;
@@ -80,6 +120,7 @@
 
   --font-size-xs: 11px;
   --font-size-sm: 13px;
+  --font-size-md: 14px;
   --font-size-base: 16px;
   --font-size-lg: 18px;
   --font-size-xl: 20px;
@@ -87,12 +128,14 @@
   --font-weight-normal: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
+  --font-weight-bold: 700;
 
   --line-height: 1.7;
   --line-height-tight: 1.4;
 
   /* Effects */
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
   --glow-accent: 0 0 12px var(--c-accent-glow);
   --transition: 150ms ease;
 
@@ -111,12 +154,13 @@
   --bg-blur: 0px;
   --bg-overlay-opacity: 0;
 
-  /* Glassmorphism */
+  /* Glassmorphism (derived: rgba(bg-raised, .85) / rgba(fg, .08)) */
   --glass-bg: rgba(10, 10, 10, 0.85);
   --glass-blur: 12px;
-  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(232, 232, 232, 0.08);
 
   /* Border radius */
+  --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 8px;
 }

@@ -33,6 +33,7 @@ export type PluginEventCategory =
   | "route" // plugin-owned HTTP route hits (verbose, off by default)
   | "tool" // plugin-owned tool registration / call (verbose, off by default)
   | "budget" // aggregate prompt-hook budget truncations or skip
+  | "media" // discord attachment enrichment + outbound media sends
   | "system"; // manager-level events (startup, shutdown, configuration)
 
 export interface PluginEvent {

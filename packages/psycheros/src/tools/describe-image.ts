@@ -7,14 +7,11 @@
  */
 
 import { join } from "@std/path";
-import {
-  getMediaType,
-  sanitizeHeaderValue,
-  uint8ToBase64,
-} from "./generate-image.ts";
+import { sanitizeHeaderValue, uint8ToBase64 } from "./generate-image.ts";
 import type { ToolResult } from "../types.ts";
 import type { Tool, ToolContext } from "./types.ts";
 import type { CaptioningSettings } from "../llm/image-gen-settings.ts";
+import { resolveDiscordImagePath } from "./discord-image-path.ts";
 
 // =============================================================================
 // Shared Captioning Functions
@@ -502,33 +499,37 @@ async function executeDescribeImage(
         instructions,
       );
     } else if (path) {
-      // path is relative to .psycheros/
-      // If the path has no extension, look up the actual file in the directory
-      let resolvedPath = join(ctx.config.dataRoot, ".psycheros", path);
+      // path is relative to .psycheros/. The file's CONTENT flows back into
+      // the conversation, so containment matters as much as for sends. Some
+      // callers pass the generate_image "File path:" line with a leading
+      // "/" — normalize it away.
+      const normalized = path.trim().replace(/^\/+/, "");
+      let candidate = normalized;
       try {
-        await Deno.stat(resolvedPath);
+        await Deno.stat(join(ctx.config.dataRoot, ".psycheros", normalized));
       } catch {
-        // No extension — try to find the actual file by prefix
-        const dir = join(ctx.config.dataRoot, ".psycheros", path).replace(
-          /[^/]+$/,
-          "",
-        );
-        const prefix = path.split("/").pop()!;
+        // No exact hit (often extensionless) — look for a prefixed sibling.
+        const dir = join(ctx.config.dataRoot, ".psycheros", normalized)
+          .replace(/[^/]+$/, "");
+        const prefix = normalized.split("/").pop()!;
         try {
           for await (const entry of Deno.readDir(dir)) {
-            if (entry.name.startsWith(prefix)) {
-              resolvedPath = join(dir, entry.name);
+            if (entry.isFile && entry.name.startsWith(prefix)) {
+              candidate = `${normalized.replace(/[^/]+$/, "")}${entry.name}`;
               break;
             }
           }
         } catch { /* dir doesn't exist */ }
       }
-      const fileData = await Deno.readFile(resolvedPath);
+      const resolved = resolveDiscordImagePath(
+        ctx.config.dataRoot,
+        candidate,
+      );
+      const fileData = await Deno.readFile(resolved.absolutePath);
       const base64 = uint8ToBase64(fileData);
-      const mediaType = getMediaType(resolvedPath);
       caption = await captionImageDual(
         base64,
-        mediaType,
+        resolved.mediaType,
         captioningSettings,
         instructions,
       );

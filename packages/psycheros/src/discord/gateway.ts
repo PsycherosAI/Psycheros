@@ -39,6 +39,18 @@ export interface DiscordMember {
   roles: string[];
 }
 
+export interface DiscordAttachment {
+  id: string;
+  filename: string;
+  /** Discord-reported MIME type, e.g. "image/png" — may be absent */
+  content_type: string | null;
+  /** Signed CDN URL (expires ~24h — download at turn time, never persist) */
+  url: string;
+  size: number;
+  width?: number;
+  height?: number;
+}
+
 export interface DiscordMessage {
   id: string;
   channel_id: string;
@@ -49,6 +61,8 @@ export interface DiscordMessage {
   mention_everyone: boolean;
   mentions: DiscordUser[];
   mention_roles: string[];
+  /** Message attachments (images, files). Present in MESSAGE_CREATE payloads. */
+  attachments?: DiscordAttachment[];
   reference:
     | { message_id: string; channel_id: string; guild_id?: string }
     | null;

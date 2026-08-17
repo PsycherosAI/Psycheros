@@ -102,7 +102,7 @@
 .btn--primary {
   background-color: var(--c-accent);
   border-color: var(--c-accent);
-  color: #000;
+  color: var(--c-on-accent);
   font-weight: var(--font-weight-semibold);
 }
 
@@ -291,12 +291,225 @@
 
 /* User messages - subtle, recede */
 .msg--user .msg-content {
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: var(--c-bubble);
   color: var(--c-fg);
   border: 1px solid var(--c-border);
   word-wrap: break-word;
   font-size: var(--font-size-base);
   line-height: 1.6;
+}
+
+/* Decor: optional bubble edges (off by default). Pure-CSS masks —
+   alpha-only, so the edge recolors with --c-bubble in every theme.
+   Lace frames the whole user message box (header + bubble); stamp
+   perforates the bubble only. Shared with the Studio decor previews. */
+body[data-decor="lace"] .msg--user:not(.msg--editing),
+.studio-decor-preview[data-decor-preview="lace"] {
+  /* Eyelet lace (CC0, OpenClipart #251855): one repeating period of the
+     real trim — two scallops with interior cutwork — as a ~45×20px tile
+     at native aspect, repeated around all four edges. Small tiles render
+     reliably where the full 601px strip needed stretching/letterbox
+     gymnastics; the period is exact, so tiling is seamless. Alpha-only,
+     recolors with --c-bubble. Strip depth 20px inside the bubble padding. */
+  --lace-strip-top: url("/svg/lace-strip-top.svg");
+  --lace-strip-bottom: url("/svg/lace-strip-bottom.svg");
+  --lace-strip-left: url("/svg/lace-strip-left.svg");
+  --lace-strip-right: url("/svg/lace-strip-right.svg");
+  /* Corner caps: discs centered on the corner-radius arc center (12,12
+     of each 40px tile) — border-radius can never shave them. */
+  --lace-drop-tl: url("data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2740%27%20height=%2740%27%20viewBox=%270%200%2040%2040%27%3E%3Ccircle%20cx=%2712%27%20cy=%2712%27%20r=%2710%27/%3E%3C/svg%3E");
+  --lace-drop-tr: url("data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2740%27%20height=%2740%27%20viewBox=%270%200%2040%2040%27%3E%3Ccircle%20cx=%2728%27%20cy=%2712%27%20r=%2710%27/%3E%3C/svg%3E");
+  --lace-drop-br: url("data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2740%27%20height=%2740%27%20viewBox=%270%200%2040%2040%27%3E%3Ccircle%20cx=%2728%27%20cy=%2728%27%20r=%2710%27/%3E%3C/svg%3E");
+  --lace-drop-bl: url("data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2740%27%20height=%2740%27%20viewBox=%270%200%2040%2040%27%3E%3Ccircle%20cx=%2712%27%20cy=%2728%27%20r=%2710%27/%3E%3C/svg%3E");
+  background-color: var(--c-bubble);
+  border-radius: 12px;
+  border-color: transparent;
+  padding: 26px 24px;
+  -webkit-mask-image:
+    var(--lace-strip-top),
+    var(--lace-strip-bottom),
+    var(--lace-strip-left),
+    var(--lace-strip-right),
+    var(--lace-drop-tl),
+    var(--lace-drop-tr),
+    var(--lace-drop-bl),
+    var(--lace-drop-br),
+    linear-gradient(#000 0 0);
+  -webkit-mask-position:
+    left 0 top 0,
+    left 0 bottom 0,
+    left 0 top 0,
+    right 0 top 0,
+    left 0 top 0,
+    right 0 top 0,
+    left 0 bottom 0,
+    right 0 bottom 0,
+    center;
+  -webkit-mask-size:
+    44.52px 20px,
+    44.52px 20px,
+    20px 44.52px,
+    20px 44.52px,
+    40px 40px,
+    40px 40px,
+    40px 40px,
+    40px 40px,
+    calc(100% - 36px) calc(100% - 36px);
+  -webkit-mask-repeat:
+    repeat-x,
+    repeat-x,
+    repeat-y,
+    repeat-y,
+    no-repeat,
+    no-repeat,
+    no-repeat,
+    no-repeat,
+    no-repeat;
+  mask-image:
+    var(--lace-strip-top),
+    var(--lace-strip-bottom),
+    var(--lace-strip-left),
+    var(--lace-strip-right),
+    var(--lace-drop-tl),
+    var(--lace-drop-tr),
+    var(--lace-drop-bl),
+    var(--lace-drop-br),
+    linear-gradient(#000 0 0);
+  mask-position:
+    left 0 top 0,
+    left 0 bottom 0,
+    left 0 top 0,
+    right 0 top 0,
+    left 0 top 0,
+    right 0 top 0,
+    left 0 bottom 0,
+    right 0 bottom 0,
+    center;
+  mask-size:
+    44.52px 20px,
+    44.52px 20px,
+    20px 44.52px,
+    20px 44.52px,
+    40px 40px,
+    40px 40px,
+    40px 40px,
+    40px 40px,
+    calc(100% - 36px) calc(100% - 36px);
+  mask-repeat:
+    repeat-x,
+    repeat-x,
+    repeat-y,
+    repeat-y,
+    no-repeat,
+    no-repeat,
+    no-repeat,
+    no-repeat,
+    no-repeat;
+}
+
+/* The frame carries the bubble surface; the content inside goes bare */
+body[data-decor="lace"] .msg--user:not(.msg--editing) .msg-content {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+/* Preview boxes are short — shrink the tiles so the frame reads */
+.studio-decor-preview[data-decor-preview="lace"] {
+  padding: 0;
+  -webkit-mask-image:
+    var(--lace-strip-top),
+    var(--lace-strip-bottom),
+    var(--lace-strip-left),
+    var(--lace-strip-right),
+    linear-gradient(#000 0 0);
+  -webkit-mask-position:
+    left 0 top 0,
+    left 0 bottom 0,
+    left 0 top 0,
+    right 0 top 0,
+    center;
+  -webkit-mask-size:
+    31.17px 14px,
+    31.17px 14px,
+    14px 31.17px,
+    14px 31.17px,
+    calc(100% - 28px) calc(100% - 28px);
+  -webkit-mask-repeat: repeat-x, repeat-x, repeat-y, repeat-y, no-repeat;
+  mask-image:
+    var(--lace-strip-top),
+    var(--lace-strip-bottom),
+    var(--lace-strip-left),
+    var(--lace-strip-right),
+    linear-gradient(#000 0 0);
+  mask-position:
+    left 0 top 0,
+    left 0 bottom 0,
+    left 0 top 0,
+    right 0 top 0,
+    center;
+  mask-size:
+    31.17px 14px,
+    31.17px 14px,
+    14px 31.17px,
+    14px 31.17px,
+    calc(100% - 28px) calc(100% - 28px);
+  mask-repeat: repeat-x, repeat-x, repeat-y, repeat-y, no-repeat;
+}
+
+body[data-decor="stamp"] .msg--user .msg-content,
+.studio-decor-preview[data-decor-preview="stamp"] {
+  --stamp-notch: 5px;
+  --stamp-tile: 14px;
+  --stamp-band: 6px;
+  border-radius: 0;
+  border-color: transparent;
+  -webkit-mask:
+    radial-gradient(
+      circle var(--stamp-notch) at 50% 0,
+      transparent calc(var(--stamp-notch) - 1px),
+      #000 var(--stamp-notch)
+    ) top / var(--stamp-tile) var(--stamp-band) repeat-x,
+    radial-gradient(
+    circle var(--stamp-notch) at 50% 100%,
+    transparent calc(var(--stamp-notch) - 1px),
+    #000 var(--stamp-notch)
+  ) bottom / var(--stamp-tile) var(--stamp-band) repeat-x,
+    radial-gradient(
+    circle var(--stamp-notch) at 0 50%,
+    transparent calc(var(--stamp-notch) - 1px),
+    #000 var(--stamp-notch)
+  ) left / var(--stamp-band) var(--stamp-tile) repeat-y,
+    radial-gradient(
+    circle var(--stamp-notch) at 100% 50%,
+    transparent calc(var(--stamp-notch) - 1px),
+    #000 var(--stamp-notch)
+  ) right / var(--stamp-band) var(--stamp-tile) repeat-y,
+    linear-gradient(#000 0 0) center / calc(100% - 2 * var(--stamp-band))
+    calc(100% - 2 * var(--stamp-band)) no-repeat;
+  mask:
+    radial-gradient(
+      circle var(--stamp-notch) at 50% 0,
+      transparent calc(var(--stamp-notch) - 1px),
+      #000 var(--stamp-notch)
+    ) top / var(--stamp-tile) var(--stamp-band) repeat-x,
+    radial-gradient(
+    circle var(--stamp-notch) at 50% 100%,
+    transparent calc(var(--stamp-notch) - 1px),
+    #000 var(--stamp-notch)
+  ) bottom / var(--stamp-tile) var(--stamp-band) repeat-x,
+    radial-gradient(
+    circle var(--stamp-notch) at 0 50%,
+    transparent calc(var(--stamp-notch) - 1px),
+    #000 var(--stamp-notch)
+  ) left / var(--stamp-band) var(--stamp-tile) repeat-y,
+    radial-gradient(
+    circle var(--stamp-notch) at 100% 50%,
+    transparent calc(var(--stamp-notch) - 1px),
+    #000 var(--stamp-notch)
+  ) right / var(--stamp-band) var(--stamp-tile) repeat-y,
+    linear-gradient(#000 0 0) center / calc(100% - 2 * var(--stamp-band))
+    calc(100% - 2 * var(--stamp-band)) no-repeat;
 }
 
 /* Assistant messages - primary focus, no chrome */
@@ -670,7 +883,7 @@
 
 .tool-result.error {
   color: var(--c-error);
-  background-color: rgba(255, 68, 68, 0.1);
+  background-color: var(--c-error-subtle);
 }
 
 /* Caption disclosure on generated-image containers. Lives as a sibling of
@@ -767,7 +980,7 @@
   background-color: var(--c-accent);
   border: none;
   border-radius: 8px;
-  color: #000;
+  color: var(--c-on-accent);
   padding: 0;
   width: 38px;
   align-self: stretch;
@@ -837,7 +1050,7 @@
   background-color: var(--c-error);
   border: none;
   border-radius: 8px;
-  color: #fff;
+  color: var(--c-on-error);
   padding: 0;
   width: 38px;
   align-self: stretch;
@@ -849,8 +1062,8 @@
 }
 
 .stop-btn:hover:not(:disabled) {
-  background-color: #ff6666;
-  box-shadow: 0 0 12px rgba(255, 68, 68, 0.4);
+  background-color: var(--c-error-hover);
+  box-shadow: 0 0 12px var(--c-error-glow);
 }
 
 .stop-btn:active:not(:disabled) {
@@ -859,15 +1072,15 @@
 
 /* First tap - orange warning state requiring confirmation */
 .stop-btn.stop-confirm {
-  background-color: #f59e0b;
-  border-color: #f59e0b;
-  color: #000;
+  background-color: var(--c-warning);
+  border-color: var(--c-warning);
+  color: var(--c-on-warning);
   animation: pulse-warning 0.5s ease-in-out infinite alternate;
 }
 
 .stop-btn.stop-confirm:hover:not(:disabled) {
-  background-color: #fbbf24;
-  box-shadow: 0 0 12px rgba(245, 158, 11, 0.5);
+  background-color: var(--c-warning-hover);
+  box-shadow: 0 0 12px var(--c-warning-glow);
 }
 
 @keyframes pulse-warning {
@@ -1114,7 +1327,7 @@
   border-radius: 6px;
   z-index: 1000;
   animation: slideUp 0.2s ease;
-  box-shadow: 0 0 12px rgba(255, 68, 68, 0.4);
+  box-shadow: 0 0 12px var(--c-error-glow);
 }
 
 @keyframes slideUp {
@@ -1130,8 +1343,8 @@
 
 .toast-warning {
   background-color: var(--c-warning);
-  color: #000000;
-  box-shadow: 0 0 12px rgba(255, 170, 0, 0.4);
+  color: var(--c-on-warning);
+  box-shadow: 0 0 12px var(--c-warning-glow);
 }
 
 /* ==========================================================================
@@ -1168,7 +1381,7 @@
 .retry-btn:hover {
   color: var(--c-fg);
   border-color: var(--c-accent);
-  background: var(--c-accent-dim);
+  background: var(--c-accent-muted);
 }
 
 .retry-btn:active {
@@ -1291,7 +1504,7 @@
 }
 
 .metrics-value.warning {
-  color: #f59e0b;
+  color: var(--c-warning);
 }
 
 /* ==========================================================================
@@ -1312,7 +1525,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--c-on-accent);
   opacity: 0;
   transition: opacity var(--transition);
 }
@@ -1456,7 +1669,7 @@
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.7);
+  background-color: var(--c-scrim-strong);
   display: none;
   align-items: center;
   justify-content: center;
@@ -1524,13 +1737,13 @@
 .btn--danger {
   background-color: var(--c-error);
   border-color: var(--c-error);
-  color: #fff;
+  color: var(--c-on-error);
 }
 
 .btn--danger:hover:not(:disabled) {
-  background-color: #ff6666;
-  border-color: #ff6666;
-  box-shadow: 0 0 12px rgba(255, 68, 68, 0.4);
+  background-color: var(--c-error-hover);
+  border-color: var(--c-error-hover);
+  box-shadow: 0 0 12px var(--c-error-glow);
 }
 
 /* ==========================================================================
@@ -1664,7 +1877,7 @@
 .context-viewer-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.7);
+  background-color: var(--c-scrim-strong);
   z-index: 999;
   display: none;
   animation: fadeIn 0.15s ease;
@@ -1728,47 +1941,6 @@
 .context-viewer-close:hover {
   color: var(--c-fg);
   background-color: var(--c-bg-hover);
-}
-
-/* Turn selector */
-.context-turn-selector {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-4);
-  background-color: var(--c-bg-sunken);
-  border-bottom: 1px solid var(--c-border);
-  flex-shrink: 0;
-}
-
-.context-turn-btn {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--font-size-lg);
-  color: var(--c-fg-muted);
-  background: transparent;
-  border: 1px solid var(--c-border);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all var(--transition);
-}
-
-.context-turn-btn:hover {
-  color: var(--c-accent);
-  border-color: var(--c-accent);
-  background-color: var(--c-bg-hover);
-}
-
-.context-turn-label {
-  font-family: var(--font-mono);
-  font-size: var(--font-size-sm);
-  color: var(--c-fg-muted);
-  min-width: 120px;
-  text-align: center;
 }
 
 /* Search bar */
@@ -1930,13 +2102,13 @@
 }
 
 .context-tag-warn {
-  color: var(--c-warning, #f0ad4e);
-  border-color: var(--c-warning, #f0ad4e);
+  color: var(--c-warning);
+  border-color: var(--c-warning);
 }
 
 .context-tag-danger {
-  color: var(--c-danger, #ff6b6b);
-  border-color: var(--c-danger, #ff6b6b);
+  color: var(--c-error);
+  border-color: var(--c-error);
 }
 
 .context-tag-dim {
@@ -1957,7 +2129,7 @@
 /* Search highlights */
 .context-section-content mark,
 .context-message-content mark {
-  background-color: rgba(var(--c-accent-rgb, 99, 102, 241), 0.25);
+  background-color: var(--c-accent-glow);
   color: var(--c-fg);
   border-radius: 2px;
   padding: 0 1px;
@@ -2141,6 +2313,61 @@
   color: var(--c-accent);
 }
 
+/* Message action buttons (delete + flag-glitched, plan §9f).
+ * Same dimensions + hover pattern as .msg-edit-btn for visual consistency. */
+.msg-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--c-fg-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+  margin-left: 2px;
+}
+
+.msg-action-btn:hover {
+  background-color: var(--c-bg-hover);
+  color: var(--c-accent);
+}
+
+/* Delete button hover — red to signal destructive intent */
+.msg-action-btn[onclick*="confirmDeleteMessage"]:hover {
+  color: var(--c-error);
+}
+
+/* Flag-glitched hover — amber to match the glitched message placeholder */
+.msg-action-btn[onclick*="confirmFlagGlitched"]:hover {
+  color: var(--c-warning);
+}
+
+/* Restore / clear-flag buttons inside the tombstone / glitched notices */
+.tombstone-restore-btn,
+.glitched-clear-btn {
+  margin-top: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background: transparent;
+  border: 1px solid var(--c-border);
+  border-radius: 3px;
+  color: var(--c-fg-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.tombstone-restore-btn:hover,
+.glitched-clear-btn:hover {
+  background-color: var(--c-bg-hover);
+  color: var(--c-accent);
+  border-color: var(--c-accent);
+}
+
 /* Edited indicator */
 .msg-edited-indicator {
   font-family: var(--font-mono);
@@ -2278,7 +2505,7 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: var(--c-danger, #e53e3e);
+  background: var(--c-error);
   color: white;
   border: none;
   font-size: 12px;
@@ -2322,4 +2549,107 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Re-index banner — persistent embedding re-index status, above the chat bar */
+.reindex-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2, 0.5rem);
+  padding: 0.5rem calc(var(--sp-3, 0.75rem) + env(safe-area-inset-right, 0px))
+    0.5rem calc(var(--sp-3, 0.75rem) + env(safe-area-inset-left, 0px));
+  margin: 0 0 0.5rem 0;
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-accent-muted);
+  border-radius: var(--radius-sm, 6px);
+  font-size: 0.8rem;
+  color: var(--c-fg, inherit);
+}
+
+.reindex-banner[hidden] {
+  display: none;
+}
+
+.reindex-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.reindex-banner-action {
+  flex-shrink: 0;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+  cursor: pointer;
+}
+
+.reindex-banner-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.reindex-banner-dismiss {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+  border: none;
+  background: none;
+  color: var(--c-fg-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm, 6px);
+}
+
+.reindex-banner-dismiss:hover {
+  background: var(--c-bg-hover);
+  color: var(--c-fg, inherit);
+}
+
+/* Held-skill chips — persistent per-conversation status indicators for
+   skills the entity is holding active. Transparent floating bubble strip,
+   absolutely positioned like the top-right FABs so it never displaces the
+   conversation; stacks vertically, truncates before the FAB column. */
+.held-skills-strip {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  left: calc(12px + env(safe-area-inset-left));
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+  /* Reserve the top-right FAB column (voice + workspace) */
+  max-width: calc(100% - 76px);
+  pointer-events: none;
+}
+
+.held-skills-strip:empty {
+  display: none;
+}
+
+/* The flex rule above overrides the hidden attribute's UA display:none —
+   without this, [hidden] gating (settings views) does nothing. */
+.held-skills-strip[hidden] {
+  display: none;
+}
+
+.held-skill-chip {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-accent-muted);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--sp-2);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

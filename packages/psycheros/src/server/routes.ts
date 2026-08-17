@@ -10,6 +10,7 @@
 
 import type { SSEEvent, TurnMetrics } from "../types.ts";
 import type { DBClient } from "../db/mod.ts";
+import { archiveIfAvailable } from "../backup/mod.ts";
 import type {
   ChatImageUrlPart,
   LLMClient,
@@ -57,6 +58,7 @@ import {
 } from "../llm/mod.ts";
 import { getActiveProfile } from "../llm/settings.ts";
 import { detectModelCapabilities } from "../llm/model-capabilities.ts";
+import { readWorkspaceEntityName } from "../workspace/mod.ts";
 import { createClientFromProfile } from "../llm/client.ts";
 import {
   clampRagMaxChunks,
@@ -94,6 +96,8 @@ import {
   type EntityCoreOverviewData,
   escapeHtml,
   type GeneralSettings,
+  getFirstPaintThemeOverride,
+  getThemeMetaColor,
   type MetricsMap,
   renderAppShell,
   renderButtplugSettings,
@@ -153,6 +157,7 @@ import {
   renderVoiceCallView,
   renderVoiceProfileEdit,
   renderVoiceProfileHub,
+  renderWorkspaceTerminal,
 } from "./templates.ts";
 import {
   deleteConversation,
@@ -459,8 +464,13 @@ function normalizePath(path: string): string {
  * @param _ctx - Route context (unused, kept for consistency)
  * @returns HTTP Response with the app shell HTML
  */
-export function handleIndex(ctx: RouteContext): Response {
-  const html = renderAppShell(ctx.pluginManager.getBrowserHeadHtml());
+export async function handleIndex(ctx: RouteContext): Promise<Response> {
+  const appearance = await loadAppearanceSettings(ctx.dataRoot);
+  const html = renderAppShell(
+    ctx.pluginManager.getBrowserHeadHtml(),
+    getFirstPaintThemeOverride(appearance),
+    getThemeMetaColor(appearance),
+  );
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -548,10 +558,10 @@ export async function handleCreateConversation(
  * @param conversationId - The conversation ID
  * @returns HTTP Response with full app shell HTML
  */
-export function handleConversationView(
+export async function handleConversationView(
   ctx: RouteContext,
   conversationId: string,
-): Response {
+): Promise<Response> {
   // Check if conversation exists
   const conversation = ctx.db.getConversation(conversationId);
   if (!conversation) {
@@ -563,7 +573,28 @@ export function handleConversationView(
 
   // Always return the full app shell
   // Frontend JS will load the conversation content via /fragments/chat/:id
-  const html = renderAppShell(ctx.pluginManager.getBrowserHeadHtml());
+  const appearance = await loadAppearanceSettings(ctx.dataRoot);
+  const html = renderAppShell(
+    ctx.pluginManager.getBrowserHeadHtml(),
+    getFirstPaintThemeOverride(appearance),
+    getThemeMetaColor(appearance),
+  );
+
+  // For workspace conversations, tag the body so workspace.js applies the
+  // terminal aesthetic via body.workspace-mode. The client-side polling
+  // also picks this up as a fallback signal.
+  if (conversation.sourceType === "workspace") {
+    const tagged = html.replace(
+      "<body>",
+      '<body data-workspace-conversation="true">',
+    );
+    return new Response(tagged, {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+      },
+    });
+  }
+
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -599,6 +630,33 @@ export async function handleChatFragment(
     });
   }
 
+  // Workspace conversations render the terminal pane, not the chat view.
+  // Live sessions stream SSE events into .wt-output; ended sessions show
+  // briefing + persisted turns + summary.
+  if (conversation.sourceType === "workspace") {
+    const session = ctx.db.getWorkspaceSessionByConversation(conversationId);
+    const entityName = await readWorkspaceEntityName(ctx.dataRoot);
+    const { messages: turnRows } = ctx.db.getMessagesPaginated(
+      conversationId,
+      { limit: 200 },
+    );
+    const termHtml = renderWorkspaceTerminal(
+      conversationId,
+      session,
+      entityName,
+      turnRows,
+    );
+    const uiUpdates = generateUIUpdates(
+      ["header-title", "held-skills"],
+      ctx.db,
+      conversationId,
+    );
+    const oobHtml = renderAsOobSwaps(uiUpdates);
+    return new Response(termHtml + oobHtml, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
   const { messages, hasMore } = ctx.db.getMessagesPaginated(conversationId, {
     limit: 50,
   });
@@ -617,8 +675,12 @@ export async function handleChatFragment(
   const displayNames = await loadGeneralSettings(ctx.dataRoot);
   const chatHtml = renderChatView(messages, metricsMap, displayNames, hasMore);
 
-  // Generate OOB swaps for header title using unified helper
-  const uiUpdates = generateUIUpdates(["header-title"], ctx.db, conversationId);
+  // Generate OOB swaps for header title + held-skill chips using unified helper
+  const uiUpdates = generateUIUpdates(
+    ["header-title", "held-skills"],
+    ctx.db,
+    conversationId,
+  );
   const oobHtml = renderAsOobSwaps(uiUpdates);
 
   return new Response(chatHtml + oobHtml, {
@@ -757,39 +819,26 @@ export function handleGetMessages(
 }
 
 /**
- * Handle GET /api/conversations/:id/context - Get context snapshots
+ * Handle GET /api/conversations/:id/context - Get the current context snapshot
  *
- * Returns all persisted context snapshots for a conversation,
- * or just the latest if latest=true.
+ * Only the latest snapshot per conversation is persisted; returns 204 if none.
  *
  * @param ctx - Route context
  * @param conversationId - The conversation ID
- * @param latest - If true, return only the most recent snapshot
  * @returns HTTP Response with snapshot data
  */
 export function handleGetContextSnapshots(
   ctx: RouteContext,
   conversationId: string,
-  latest: boolean,
 ): Response {
-  if (latest) {
-    const snapshot = ctx.db.getLatestContextSnapshot(conversationId);
-    if (!snapshot) {
-      return new Response(null, {
-        status: 204,
-        headers: { "Access-Control-Allow-Origin": "*" },
-      });
-    }
-    return new Response(JSON.stringify(snapshot), {
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
+  const snapshot = ctx.db.getLatestContextSnapshot(conversationId);
+  if (!snapshot) {
+    return new Response(null, {
+      status: 204,
+      headers: { "Access-Control-Allow-Origin": "*" },
     });
   }
-
-  const snapshots = ctx.db.getContextSnapshots(conversationId);
-  return new Response(JSON.stringify(snapshots), {
+  return new Response(JSON.stringify(snapshot), {
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
@@ -840,7 +889,7 @@ export async function handleUpdateMessage(
   }
 
   // Perform the state change
-  const result = updateMessageContent(
+  const result = await updateMessageContent(
     ctx.db,
     conversationId,
     messageId,
@@ -907,6 +956,263 @@ export async function handleUpdateMessage(
   const displayNames = await loadGeneralSettings(ctx.dataRoot);
   const html = renderMessage(updatedMsg, metrics, displayNames);
 
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
+/**
+ * Handle POST /api/messages/:id/delete — soft-delete (tombstone).
+ *
+ * Per plan §9f: user-facing trigger path for tombstone. Entity-facing path
+ * is the `manage_message` tool; this endpoint backs the UI button. Sets
+ * deleted_at, archives content in metadata.tombstone, returns re-rendered
+ * tombstone HTML for HTMX swap.
+ *
+ * @param ctx - Route context
+ * @param messageId - The message ID
+ * @param request - HTTP Request with body { conversationId: string, reason?: string }
+ * @returns HTTP Response with tombstone HTML for HTMX swap
+ */
+export async function handleDeleteMessage(
+  ctx: RouteContext,
+  messageId: string,
+  request: Request,
+): Promise<Response> {
+  let conversationId: string;
+  let reason: string | undefined;
+  try {
+    const body = await request.json() as {
+      conversationId?: string;
+      reason?: string;
+    };
+    if (!body.conversationId || typeof body.conversationId !== "string") {
+      throw new Error("Missing conversationId");
+    }
+    conversationId = body.conversationId;
+    reason = typeof body.reason === "string" && body.reason.trim()
+      ? body.reason.trim()
+      : undefined;
+  } catch (error) {
+    console.error("[Routes] handleDeleteMessage parse error:", error);
+    return jsonErrorResponse("Invalid request body", 400);
+  }
+
+  const updated = ctx.db.softDeleteMessage(messageId, {
+    deletedBy: "user",
+    reason,
+  });
+  if (!updated) {
+    return jsonErrorResponse(`Message not found: ${messageId}`, 404);
+  }
+
+  // Re-embed the tombstone notice so ChatRAG matches the new content rather
+  // than the archived original. The original survives in metadata.tombstone
+  // for restore.
+  if (
+    ctx.chatRAG &&
+    (updated.role === "user" || updated.role === "assistant")
+  ) {
+    ctx.chatRAG.updateMessageEmbedding(
+      messageId,
+      conversationId,
+      updated.role,
+      updated.content,
+    ).catch((error) => {
+      console.error(
+        `[Routes] Failed to update embedding for tombstoned message ${messageId}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+  }
+
+  const { renderMessage } = await import("./templates.ts");
+  const displayNames = await loadGeneralSettings(ctx.dataRoot);
+  const html = renderMessage(updated, undefined, displayNames);
+  return htmlResponse(html);
+}
+
+/**
+ * Handle POST /api/messages/:id/restore — undo soft-delete.
+ *
+ * Pulls original content from metadata.tombstone, clears deleted_at.
+ */
+export async function handleRestoreMessage(
+  ctx: RouteContext,
+  messageId: string,
+  request: Request,
+): Promise<Response> {
+  let conversationId: string;
+  try {
+    const body = await request.json() as { conversationId?: string };
+    if (!body.conversationId || typeof body.conversationId !== "string") {
+      throw new Error("Missing conversationId");
+    }
+    conversationId = body.conversationId;
+  } catch (error) {
+    console.error("[Routes] handleRestoreMessage parse error:", error);
+    return jsonErrorResponse("Invalid request body", 400);
+  }
+
+  const updated = ctx.db.restoreMessage(messageId);
+  if (!updated) {
+    return jsonErrorResponse(
+      `Message not found or not deleted: ${messageId}`,
+      404,
+    );
+  }
+
+  // Re-add the embedding with the restored content.
+  if (
+    ctx.chatRAG &&
+    (updated.role === "user" || updated.role === "assistant")
+  ) {
+    ctx.chatRAG.updateMessageEmbedding(
+      messageId,
+      conversationId,
+      updated.role,
+      updated.content,
+    ).catch((error) => {
+      console.error(
+        `[Routes] Failed to re-add embedding for restored message ${messageId}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+  }
+
+  let metrics: TurnMetrics | undefined;
+  if (updated.role === "assistant") {
+    const dbMetrics = ctx.db.getMetricsByMessageId(messageId);
+    metrics = dbMetrics ?? undefined;
+  }
+
+  const { renderMessage } = await import("./templates.ts");
+  const displayNames = await loadGeneralSettings(ctx.dataRoot);
+  const html = renderMessage(updated, metrics, displayNames);
+  return htmlResponse(html);
+}
+
+/**
+ * Handle POST /api/messages/:id/flag-glitched — mark message as corrupted.
+ *
+ * UI shows a placeholder; entity can repair via workspace skill
+ * (psycheros-repair-glitched-message) or manage_message tool. Content
+ * unchanged — only the flag flips.
+ */
+export async function handleFlagGlitchedMessage(
+  ctx: RouteContext,
+  messageId: string,
+  request: Request,
+): Promise<Response> {
+  let conversationId: string;
+  let reason: string | undefined;
+  try {
+    const body = await request.json() as {
+      conversationId?: string;
+      reason?: string;
+    };
+    if (!body.conversationId || typeof body.conversationId !== "string") {
+      throw new Error("Missing conversationId");
+    }
+    conversationId = body.conversationId;
+    reason = typeof body.reason === "string" && body.reason.trim()
+      ? body.reason.trim()
+      : undefined;
+  } catch (error) {
+    console.error("[Routes] handleFlagGlitchedMessage parse error:", error);
+    return jsonErrorResponse("Invalid request body", 400);
+  }
+
+  const ok = ctx.db.markGlitched(messageId, reason);
+  if (!ok) {
+    return jsonErrorResponse(`Message not found: ${messageId}`, 404);
+  }
+
+  const messages = ctx.db.getMessages(conversationId);
+  const updated = messages.find((m) => m.id === messageId);
+  if (!updated) {
+    return jsonErrorResponse(
+      `Message flagged but not re-readable: ${messageId}`,
+      500,
+    );
+  }
+
+  const { renderMessage } = await import("./templates.ts");
+  const displayNames = await loadGeneralSettings(ctx.dataRoot);
+  const html = renderMessage(updated, undefined, displayNames);
+  return htmlResponse(html);
+}
+
+/**
+ * Handle POST /api/messages/:id/clear-glitched — remove glitched flag.
+ *
+ * Manual override. The repair skill auto-clears via content writes; this
+ * endpoint covers the case where the flag was set in error.
+ */
+export async function handleClearGlitchedMessage(
+  ctx: RouteContext,
+  messageId: string,
+  request: Request,
+): Promise<Response> {
+  let conversationId: string;
+  try {
+    const body = await request.json() as { conversationId?: string };
+    if (!body.conversationId || typeof body.conversationId !== "string") {
+      throw new Error("Missing conversationId");
+    }
+    conversationId = body.conversationId;
+  } catch (error) {
+    console.error("[Routes] handleClearGlitchedMessage parse error:", error);
+    return jsonErrorResponse("Invalid request body", 400);
+  }
+
+  const ok = ctx.db.clearGlitched(messageId);
+  if (!ok) {
+    return jsonErrorResponse(`Message not found: ${messageId}`, 404);
+  }
+
+  const messages = ctx.db.getMessages(conversationId);
+  const updated = messages.find((m) => m.id === messageId);
+  if (!updated) {
+    return jsonErrorResponse(
+      `Flag cleared but message not re-readable: ${messageId}`,
+      500,
+    );
+  }
+
+  let metrics: TurnMetrics | undefined;
+  if (updated.role === "assistant") {
+    const dbMetrics = ctx.db.getMetricsByMessageId(messageId);
+    metrics = dbMetrics ?? undefined;
+  }
+
+  const { renderMessage } = await import("./templates.ts");
+  const displayNames = await loadGeneralSettings(ctx.dataRoot);
+  const html = renderMessage(updated, metrics, displayNames);
+  return htmlResponse(html);
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+function jsonErrorResponse(message: string, status: number): Response {
+  return new Response(
+    JSON.stringify({ error: message }),
+    {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    },
+  );
+}
+
+function htmlResponse(html: string): Response {
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -1365,8 +1671,26 @@ export async function handleChat(
   const { signal } = abortController;
 
   // Create a ReadableStream that will produce SSE events
+  // Heartbeat: emit a ping every 15s to keep the connection alive through
+  // reverse proxies (nginx, Authelia, Cloudflare) and browser idle timeouts.
+  // Without this, any long-running tool call (image generation, workspace
+  // blocking on ask_origin_conversation, etc.) would let the connection go
+  // idle long enough for an upstream proxy to drop it — surfacing as a
+  // network error in the UI. The browser ignores events it has no listener
+  // for; this is pure keepalive. Declared outside `start()` so `cancel()`
+  // can also clear it.
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
   const stream = new ReadableStream<SSEEvent>({
     async start(controller) {
+      heartbeat = setInterval(() => {
+        try {
+          controller.enqueue({ type: "ping", data: "" });
+        } catch {
+          // Controller closed — stream ended. The interval will be cleared
+          // in the finally block below.
+        }
+      }, 15_000);
+
       try {
         // Prefix user message with attachment reference if provided
         let userMessage = body.message;
@@ -1541,6 +1865,7 @@ export async function handleChat(
           data: "error",
         });
       } finally {
+        if (heartbeat) clearInterval(heartbeat);
         controller.close();
       }
     },
@@ -1549,6 +1874,7 @@ export async function handleChat(
       // If POST /api/chat/stop marked this conversation, the disconnect is a
       // user-initiated Stop — set the reason so the for-await can break
       // instead of draining.
+      if (heartbeat) clearInterval(heartbeat);
       const wasStopRequested = consumeStopRequest(body.conversationId);
       if (wasStopRequested) {
         abortController.abort(
@@ -1636,8 +1962,18 @@ export async function handleChatRetry(
   const abortController = new AbortController();
   const { signal } = abortController;
 
+  // Heartbeat — see the chat handler for full rationale.
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
   const stream = new ReadableStream<SSEEvent>({
     async start(controller) {
+      heartbeat = setInterval(() => {
+        try {
+          controller.enqueue({ type: "ping", data: "" });
+        } catch {
+          // Controller closed — interval cleared in finally.
+        }
+      }, 15_000);
+
       try {
         const retryProfile = ctx.getActiveLLMProfile();
         const generalSettings = await loadGeneralSettings(ctx.dataRoot);
@@ -1735,10 +2071,12 @@ export async function handleChatRetry(
         });
         controller.enqueue({ type: "done", data: "error" });
       } finally {
+        if (heartbeat) clearInterval(heartbeat);
         controller.close();
       }
     },
     cancel() {
+      if (heartbeat) clearInterval(heartbeat);
       const wasStopRequested = consumeStopRequest(body.conversationId);
       if (wasStopRequested) {
         abortController.abort(
@@ -4710,7 +5048,7 @@ export async function handleUpdateLorebookEntry(
       updateData = body;
     }
 
-    const entry = ctx.lorebookManager.updateEntry(entryId, updateData);
+    const entry = await ctx.lorebookManager.updateEntry(entryId, updateData);
 
     if (!entry) {
       return new Response(
@@ -6354,9 +6692,16 @@ export function handleConnectionsDiscordFragment(ctx: RouteContext): Response {
   const gcWithWhitelist = gatewayConfig
     ? { ...gatewayConfig, dmWhitelist: whitelist }
     : gatewayConfig;
+  // Only id/name/model reach the template — never API keys.
+  const llmProfiles = ctx.getLLMProfileSettings().profiles.map((p) => ({
+    id: p.id,
+    name: p.name,
+    model: p.model,
+  }));
   const html = renderConnectionsDiscordSettings(
     maskDiscordSettings(ctx.getDiscordSettings()),
     gcWithWhitelist,
+    llmProfiles,
   );
   return new Response(html, {
     headers: {
@@ -7911,9 +8256,18 @@ export async function handleSaveToolsSettings(
 /**
  * Handle GET /fragments/settings/tools - Tools settings UI fragment.
  */
-export function handleToolsSettingsFragment(ctx: RouteContext): Response {
+export async function handleToolsSettingsFragment(
+  ctx: RouteContext,
+): Promise<Response> {
   const settings = ctx.getToolSettings();
-  const html = renderToolsSettings(settings, AVAILABLE_TOOLS, ctx.customTools);
+  const { listSkills } = await import("../skills/mod.ts");
+  const skills = await listSkills(ctx.dataRoot);
+  const html = renderToolsSettings(
+    settings,
+    AVAILABLE_TOOLS,
+    ctx.customTools,
+    skills,
+  );
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -8031,6 +8385,24 @@ export async function handleUploadCustomTool(
 
     const destPath = `${customDir}/${file.name}`;
     const bytes = new Uint8Array(await file.arrayBuffer());
+
+    // Archive existing file via the unified backup service before overwrite
+    // (re-importing the same filename clobbers the old file). Custom tools
+    // are disk-only with no DB record — without this, the previous version
+    // is gone for good.
+    try {
+      const existing = await Deno.readFile(destPath);
+      const existingText = new TextDecoder().decode(existing);
+      await archiveIfAvailable(
+        "custom_tool",
+        file.name,
+        existingText,
+        { reason: "custom tool re-upload" },
+      );
+    } catch {
+      // File doesn't exist yet — first upload, nothing to archive.
+    }
+
     await Deno.writeFile(destPath, bytes);
 
     // Reload custom tools to pick up the new file
@@ -8105,12 +8477,156 @@ export async function handleDeleteCustomTool(
   }
 
   try {
+    // Archive the file via the unified backup service before deletion.
+    // Custom tools have NO recovery path without this — disk-only, no DB
+    // record, no manifest. Once `Deno.remove` runs, the file is gone.
+    try {
+      const existing = await Deno.readFile(targetFile);
+      const existingText = new TextDecoder().decode(existing);
+      const filename = targetFile.split("/").pop() ?? targetFile;
+      await archiveIfAvailable(
+        "custom_tool",
+        filename,
+        existingText,
+        { reason: "custom tool delete" },
+      );
+    } catch {
+      // File read failed — unusual, but the delete should still proceed.
+      // Worst case: no backup, but the user gets the deletion they asked for.
+    }
+
     await Deno.remove(targetFile);
     const newTools = await loadCustomTools(ctx.dataRoot);
     ctx.updateCustomTools(newTools);
     return jsonResp({ success: true });
   } catch (error) {
     console.error("[Routes] handleDeleteCustomTool error:", error);
+    const msg = error instanceof Error ? error.message : "Delete failed";
+    return jsonResp({ success: false, error: msg }, 500);
+  }
+}
+
+// =============================================================================
+// Skills API Routes (Settings > Tools > Skills)
+// =============================================================================
+
+/**
+ * Handle GET /api/skills/list - Skills list HTML for in-place refresh
+ * after save/delete.
+ */
+export async function handleSkillsListFragment(
+  ctx: RouteContext,
+): Promise<Response> {
+  const { listSkills } = await import("../skills/mod.ts");
+  const { renderSkillsListSection } = await import("./templates.ts");
+  const skills = await listSkills(ctx.dataRoot);
+  return new Response(renderSkillsListSection(skills), {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+/**
+ * Handle GET /fragments/settings/skills/new and
+ * GET /fragments/settings/skills/edit/:name - Skill editor fragments.
+ */
+export async function handleSkillEditorFragment(
+  ctx: RouteContext,
+  name: string | null,
+): Promise<Response> {
+  const { loadSkill } = await import("../skills/mod.ts");
+  const { renderSkillEditor } = await import("./skill-templates.ts");
+  if (name === null) {
+    return new Response(
+      renderSkillEditor({ name: null, description: "", body: "" }),
+      {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      },
+    );
+  }
+  const skill = await loadSkill(ctx.dataRoot, name);
+  if (!skill) {
+    return new Response("Skill not found", { status: 404 });
+  }
+  return new Response(
+    renderSkillEditor({
+      name: skill.name,
+      description: skill.description,
+      body: skill.body,
+      generated: skill.generated,
+    }),
+    { headers: { "Content-Type": "text/html; charset=utf-8" } },
+  );
+}
+
+/**
+ * Handle GET /api/skills/:name - Full skill JSON (frontmatter-split).
+ */
+export async function handleGetSkillAPI(
+  ctx: RouteContext,
+  name: string,
+): Promise<Response> {
+  const { loadSkill } = await import("../skills/mod.ts");
+  const skill = await loadSkill(ctx.dataRoot, name);
+  if (!skill) return jsonResp({ error: "Skill not found" }, 404);
+  return jsonResp({
+    name: skill.name,
+    description: skill.description,
+    generated: skill.generated ?? false,
+    body: skill.body,
+    references: skill.references.map((r) => r.name),
+  });
+}
+
+/**
+ * Handle POST /api/skills - Create or update a skill from the editor.
+ */
+export async function handleSaveSkillAPI(
+  ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
+  try {
+    const body = await request.json() as {
+      name?: string;
+      description?: string;
+      body?: string;
+    };
+    const name = body.name?.trim();
+    if (!name) {
+      return jsonResp({ success: false, error: "Name is required" }, 400);
+    }
+    const { saveSkill, SKILL_NAME_RE } = await import("../skills/mod.ts");
+    if (!SKILL_NAME_RE.test(name)) {
+      return jsonResp({
+        success: false,
+        error: "Invalid name — lowercase letters, digits, and hyphens only.",
+      }, 400);
+    }
+    await saveSkill(ctx.dataRoot, {
+      name,
+      description: body.description?.trim() || "(no description)",
+      body: body.body ?? "",
+    });
+    return jsonResp({ success: true, name });
+  } catch (error) {
+    console.error("[Routes] handleSaveSkillAPI error:", error);
+    const msg = error instanceof Error ? error.message : "Save failed";
+    return jsonResp({ success: false, error: msg }, 500);
+  }
+}
+
+/**
+ * Handle DELETE /api/skills/:name - Delete a skill directory.
+ */
+export async function handleDeleteSkillAPI(
+  ctx: RouteContext,
+  name: string,
+): Promise<Response> {
+  try {
+    const { deleteSkill } = await import("../skills/mod.ts");
+    await deleteSkill(ctx.dataRoot, name);
+    return jsonResp({ success: true });
+  } catch (error) {
+    console.error("[Routes] handleDeleteSkillAPI error:", error);
     const msg = error instanceof Error ? error.message : "Delete failed";
     return jsonResp({ success: false, error: msg }, 500);
   }
@@ -8355,9 +8871,33 @@ export async function handleGeneralSettingsFragment(
 
 const APPEARANCE_SETTINGS_PATH = ".psycheros/appearance-settings.json";
 
+interface ThemeSlots {
+  bg: string;
+  fg: string;
+  accent: string;
+  highlight: string;
+  success: string;
+  warning: string;
+  error: string;
+}
+
+interface ThemeGenerator {
+  seed: string;
+  rule: string;
+  mode: "dark" | "light";
+  tintNeutrals: number;
+}
+
 interface AppearanceSettings {
-  preset: string | null;
-  customAccent: string | null;
+  version: 2;
+  source: "preset" | "generated" | "manual";
+  presetId: string | null;
+  slots: ThemeSlots;
+  generator: ThemeGenerator | null;
+  /** Derived-token snapshot from ColorMath. Echoed into a <style> tag for
+   * first paint — every value written here must pass SAFE_TOKEN_VALUE_RE. */
+  computed: { tokens: Record<string, string>; isDark: boolean } | null;
+  decor: "none" | "lace" | "stamp";
   bgImage: string | null;
   bgBlur: number;
   bgOverlayOpacity: number;
@@ -8365,13 +8905,160 @@ interface AppearanceSettings {
 }
 
 const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
-  preset: "violet",
-  customAccent: null,
+  version: 2,
+  source: "preset",
+  presetId: "violet",
+  slots: {
+    bg: "#000000",
+    fg: "#e8e8e8",
+    accent: "#a855f7",
+    highlight: "#00d4ff",
+    success: "#22c55e",
+    warning: "#f59e0b",
+    error: "#ef4444",
+  },
+  generator: null,
+  computed: null,
+  decor: "none",
   bgImage: null,
   bgBlur: 0,
   bgOverlayOpacity: 0,
   glassEnabled: false,
 };
+
+const SLOT_KEYS = [
+  "bg",
+  "fg",
+  "accent",
+  "highlight",
+  "success",
+  "warning",
+  "error",
+] as const;
+
+const DECOR_IDS = ["none", "lace", "stamp"];
+
+// CSS-injection guard: computed token values are echoed into a <style> tag
+// on first paint. These regexes are load-bearing — see docs/design/theming.md.
+const SLOT_HEX_RE = /^#[0-9a-fA-F]{6}$/;
+const SAFE_TOKEN_KEY_RE = /^(--c-[a-z0-9-]+|--glass-(bg|border))$/;
+const SAFE_TOKEN_VALUE_RE =
+  /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$|^rgba?\(\d{1,3}, ?\d{1,3}, ?\d{1,3}(, ?(0|1|0?\.\d+))?\)$/;
+
+interface LegacyAppearance {
+  preset?: string | null;
+  customAccent?: string | null;
+  bgImage?: string | null;
+  bgBlur?: number;
+  bgOverlayOpacity?: number;
+  glassEnabled?: boolean;
+}
+
+/** Map any persisted shape (v1 accent-only or v2 palette) to v2. The server
+ * has no preset table — legacy presetIds pass through for the client to
+ * resolve, and slots fall back to defaults. */
+function normalizeAppearanceSettings(
+  saved: Record<string, unknown> | null,
+): AppearanceSettings {
+  const base = JSON.parse(
+    JSON.stringify(DEFAULT_APPEARANCE_SETTINGS),
+  ) as AppearanceSettings;
+  if (!saved || typeof saved !== "object") return base;
+
+  const decorRaw = saved.decor === "scallops" ? "lace" : saved.decor;
+  const decor: AppearanceSettings["decor"] =
+    typeof decorRaw === "string" && DECOR_IDS.includes(decorRaw)
+      ? decorRaw as AppearanceSettings["decor"]
+      : "none";
+
+  const bgFields = {
+    decor,
+    bgImage: typeof saved.bgImage === "string" ? saved.bgImage : null,
+    bgBlur: Number.isFinite(saved.bgBlur as number)
+      ? saved.bgBlur as number
+      : 0,
+    bgOverlayOpacity: Number.isFinite(saved.bgOverlayOpacity as number)
+      ? saved.bgOverlayOpacity as number
+      : 0,
+    glassEnabled: !!saved.glassEnabled,
+  };
+
+  if (saved.version === 2) {
+    const slots = saved.slots as Record<string, unknown> | undefined;
+    if (
+      slots &&
+      SLOT_KEYS.every((k) =>
+        typeof slots[k] === "string" && SLOT_HEX_RE.test(slots[k])
+      )
+    ) {
+      const clean: Record<string, string> = {};
+      for (const k of SLOT_KEYS) clean[k] = (slots[k] as string).toLowerCase();
+      base.slots = clean as unknown as ThemeSlots;
+    }
+    const source = saved.source;
+    if (source === "preset" || source === "generated" || source === "manual") {
+      base.source = source;
+    }
+    if (typeof saved.presetId === "string") base.presetId = saved.presetId;
+    else if (base.source !== "preset") base.presetId = null;
+    const gen = saved.generator as Record<string, unknown> | null | undefined;
+    if (base.source === "generated" && gen && typeof gen === "object") {
+      base.generator = {
+        seed: typeof gen.seed === "string" ? gen.seed : "",
+        rule: typeof gen.rule === "string" ? gen.rule : "analogous",
+        mode: gen.mode === "light" ? "light" : "dark",
+        tintNeutrals: Number.isFinite(gen.tintNeutrals as number)
+          ? gen.tintNeutrals as number
+          : 0,
+      };
+    }
+    const computed = saved.computed as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    if (
+      computed && typeof computed === "object" && computed.tokens &&
+      typeof computed.tokens === "object" &&
+      typeof computed.isDark === "boolean"
+    ) {
+      const tokens: Record<string, string> = {};
+      let safe = true;
+      const entries = Object.entries(
+        computed.tokens as Record<string, unknown>,
+      );
+      if (entries.length <= 128) {
+        for (const [k, v] of entries) {
+          if (
+            typeof v === "string" && SAFE_TOKEN_KEY_RE.test(k) &&
+            SAFE_TOKEN_VALUE_RE.test(v)
+          ) {
+            tokens[k] = v;
+          } else {
+            safe = false;
+            break;
+          }
+        }
+        if (safe) base.computed = { tokens, isDark: computed.isDark };
+      }
+    }
+    return { ...base, ...bgFields };
+  }
+
+  // v1 legacy: preset + customAccent
+  const legacy = saved as unknown as LegacyAppearance;
+  const presetId = typeof legacy.preset === "string" ? legacy.preset : "violet";
+  const custom = typeof legacy.customAccent === "string" &&
+      SLOT_HEX_RE.test(legacy.customAccent)
+    ? legacy.customAccent.toLowerCase()
+    : null;
+  return {
+    ...base,
+    ...bgFields,
+    source: custom ? "manual" : "preset",
+    presetId: custom ? null : presetId,
+    slots: custom ? { ...base.slots, accent: custom } : { ...base.slots },
+  };
+}
 
 async function loadAppearanceSettings(
   dataRoot: string,
@@ -8380,10 +9067,12 @@ async function loadAppearanceSettings(
     const text = await Deno.readTextFile(
       `${dataRoot}/${APPEARANCE_SETTINGS_PATH}`,
     );
-    const saved = JSON.parse(text) as Partial<AppearanceSettings>;
-    return { ...DEFAULT_APPEARANCE_SETTINGS, ...saved };
+    const saved = JSON.parse(text) as Record<string, unknown>;
+    return normalizeAppearanceSettings(saved);
   } catch {
-    return { ...DEFAULT_APPEARANCE_SETTINGS };
+    return JSON.parse(
+      JSON.stringify(DEFAULT_APPEARANCE_SETTINGS),
+    ) as AppearanceSettings;
   }
 }
 
@@ -8403,30 +9092,37 @@ export async function handleGetAppearanceSettings(
 }
 
 /**
- * Handle POST /api/appearance-settings - Save appearance settings.
+ * Handle POST /api/appearance-settings - Save appearance settings (v2 full
+ * state). Values destined for the first-paint <style> are validated here —
+ * this is the CSS-injection guard.
  */
 export async function handleSaveAppearanceSettings(
   ctx: RouteContext,
   request: Request,
 ): Promise<Response> {
   try {
-    const body = await request.json() as Partial<AppearanceSettings>;
-    const current = await loadAppearanceSettings(ctx.dataRoot);
+    const body = await request.json() as Record<string, unknown>;
+    const updated = normalizeAppearanceSettings(body);
 
-    const updated: AppearanceSettings = {
-      preset: body.preset !== undefined ? body.preset : current.preset,
-      customAccent: body.customAccent !== undefined
-        ? body.customAccent
-        : current.customAccent,
-      bgImage: body.bgImage !== undefined ? body.bgImage : current.bgImage,
-      bgBlur: body.bgBlur !== undefined ? body.bgBlur : current.bgBlur,
-      bgOverlayOpacity: body.bgOverlayOpacity !== undefined
-        ? body.bgOverlayOpacity
-        : current.bgOverlayOpacity,
-      glassEnabled: body.glassEnabled !== undefined
-        ? body.glassEnabled
-        : current.glassEnabled,
-    };
+    if (body.version === 2) {
+      const slots = body.slots as Record<string, unknown> | undefined;
+      const slotsValid = slots &&
+        SLOT_KEYS.every((k) =>
+          typeof slots[k] === "string" && SLOT_HEX_RE.test(slots[k])
+        );
+      if (!slotsValid) {
+        return new Response(
+          JSON.stringify({ error: "Invalid theme slots (expected 7 #rrggbb)" }),
+          {
+            status: 400,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            },
+          },
+        );
+      }
+    }
 
     const settingsDir = `${ctx.dataRoot}/.psycheros`;
     await Deno.mkdir(settingsDir, { recursive: true });

@@ -24,9 +24,6 @@ import {
   serviceScopeLabel,
 } from "../oauth/scopes.ts";
 
-const FIRST_PORT = 8765;
-const LAST_PORT = 8785;
-
 const API_ENABLE_URLS: Record<string, string> = {
   calendar:
     "https://console.cloud.google.com/apis/library/calendar-json.googleapis.com",
@@ -122,7 +119,7 @@ export async function renderSettingsFragment(
               <li>Under <strong>Data access / Scopes</strong>, add scopes for services you want (search "calendar", "gmail", etc.)</li>
               <li>Under <strong>Test users</strong>, add your own Google account email</li>
               <li>Go to <strong>APIs & Services → Library</strong> and <strong>Enable</strong> each API you want to use (direct links below each service toggle)</li>
-              <li>Go to <strong>Credentials → Create Credentials → OAuth client ID</strong> → type: <strong>Desktop app</strong></li>
+              <li>Go to <strong>Credentials → Create Credentials → OAuth client ID</strong> → type: <strong>Web application</strong></li>
               <li>Copy the <strong>Client ID</strong> and <strong>Client Secret</strong>, paste them below, click Save</li>
               <li>Toggle on the services you want, then click <strong>Connect Account</strong></li>
               <li>Restart Psycheros</li>
@@ -152,14 +149,13 @@ export async function renderSettingsFragment(
   }
     <section class="theme-section">
       <h3 class="theme-section-title">Google Cloud OAuth Client</h3>
-      <p class="theme-section-desc">Create an OAuth 2.0 Client ID of type <strong>Desktop app</strong> in the
+      <p class="theme-section-desc">Create an OAuth 2.0 Client ID of type <strong>Web application</strong> in the
         <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>.
-        Add the following ${
-    LAST_PORT - FIRST_PORT + 1
-  } redirect URIs to the client's Authorized redirect URIs:</p>
+        Under <strong>Authorized redirect URIs</strong>, add the URL below — it's where Google sends the response after you sign in:</p>
       <details style="margin: var(--sp-2) 0;">
-        <summary style="cursor: pointer; color: var(--c-accent);">Show redirect URIs</summary>
-        <pre style="margin-top: var(--sp-2); padding: var(--sp-2); background: var(--c-surface-2); border-radius: 4px; overflow-x: auto; font-size: 0.85em;">${redirectUriList()}</pre>
+        <summary style="cursor: pointer; color: var(--c-accent);">Show redirect URI</summary>
+        <pre style="margin-top: var(--sp-2); padding: var(--sp-2); background: var(--c-surface-2); border-radius: 4px; overflow-x: auto; font-size: 0.85em;">${callbackRedirectUri()}/api/plugins/google-suite/oauth-callback</pre>
+        <p class="settings-note" style="margin-top: var(--sp-1);">Replace the domain above with the URL you use to access this Psycheros instance. The path part (<code>/api/plugins/google-suite/oauth-callback</code>) stays the same.</p>
       </details>
       <form class="llm-fields" hx-post="/api/plugins/google-suite/save-credentials" hx-target="#gs-credentials-status" hx-swap="innerHTML">
         <div class="llm-field">
@@ -367,10 +363,16 @@ function renderServiceToggle(
   `;
 }
 
-function redirectUriList(): string {
-  const ports: number[] = [];
-  for (let p = FIRST_PORT; p <= LAST_PORT; p++) ports.push(p);
-  return ports.map((p) => `http://127.0.0.1:${p}/callback`).join("\n");
+/**
+ * Best-effort guess at this server's external origin, for showing the operator
+ * what redirect URI to register in Google Cloud. Uses the Referer header from
+ * the settings page request if available; otherwise shows a placeholder.
+ */
+function callbackRedirectUri(): string {
+  // We can't know the exact origin at render time (fragment rendering doesn't
+  // have access to the HTTP request). Show a placeholder the operator replaces
+  // with their actual domain. The /api/plugins/... path is always the same.
+  return "https://your-psycheros-url.example.com";
 }
 
 function escapeHtml(s: string): string {

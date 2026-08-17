@@ -2,38 +2,70 @@
  * Design tokens — mirrors packages/psycheros/web/css/tokens.css so the
  * launcher and the embedded chat client share one visual identity.
  *
- * Keep these in sync when the canonical tokens change.
+ * Keep these in sync when the canonical tokens change. Static defaults equal
+ * ColorMath.deriveTokens() output for the default violet theme. The
+ * launcher's manager surface is dark-only, so only the defaults are mirrored
+ * (no derivation engine here). Add tokens additively; never rename.
  */
 
 :root {
-  /* Backgrounds — true black for OLED */
+  /* Picked slots */
   --c-bg: #000000;
+  --c-fg: #e8e8e8;
+  --c-accent: #a855f7;
+  --c-highlight: #00d4ff;
+  --c-success: #22c55e;
+  --c-warning: #f59e0b;
+  --c-error: #ef4444;
+
+  /* Derived: neutrals */
   --c-bg-raised: #0a0a0a;
   --c-bg-sunken: #050505;
   --c-bg-hover: #111111;
-
-  /* Foregrounds — high contrast */
-  --c-fg: #e8e8e8;
   --c-fg-muted: #888888;
   --c-fg-strong: #ffffff;
   --c-fg-subtle: #555555;
   --c-fg-label: #888888;
+  --c-muted: #666666;
+  --c-muted-subtle: rgba(102, 102, 102, 0.1);
+  --c-border: #1a1a1a;
+  --c-border-hover: #222222;
+  --c-border-strong: #2a2a2a;
 
-  /* Primary accent — violet dream (mirrors the psycheros default preset) */
-  --c-accent: #a855f7;
-  --c-accent-hover: #c084fc;
-  --c-accent-muted: #7e22ce;
+  /* Derived: accent family */
+  --c-accent-hover: #b977f9;
+  --c-accent-muted: #653394;
   --c-accent-subtle: rgba(168, 85, 247, 0.08);
   --c-accent-glow: rgba(168, 85, 247, 0.25);
+  --c-accent-line: rgba(168, 85, 247, 0.4);
 
-  /* Semantic */
-  --c-error: #ff4444;
-  --c-warning: #ffaa00;
-  --c-success: var(--c-accent);
+  /* Derived: highlight + semantic tints */
+  --c-highlight-hover: #33ddff;
+  --c-highlight-subtle: rgba(0, 212, 255, 0.08);
+  --c-success-hover: #4ed17e;
+  --c-success-subtle: rgba(34, 197, 94, 0.1);
+  --c-success-glow: rgba(34, 197, 94, 0.4);
+  --c-warning-hover: #f7b13c;
+  --c-warning-subtle: rgba(245, 158, 11, 0.1);
+  --c-warning-glow: rgba(245, 158, 11, 0.4);
+  --c-error-hover: #f26969;
+  --c-error-subtle: rgba(239, 68, 68, 0.1);
+  --c-error-glow: rgba(239, 68, 68, 0.4);
 
-  /* Borders */
-  --c-border: #1a1a1a;
-  --c-border-strong: #2a2a2a;
+  /* Derived: text on chromatic surfaces */
+  --c-on-accent: #000000;
+  --c-on-highlight: #000000;
+  --c-on-success: #000000;
+  --c-on-warning: #000000;
+  --c-on-error: #000000;
+
+  /* Derived: overlays */
+  --c-wash: rgba(232, 232, 232, 0.05);
+  --c-wash-strong: rgba(232, 232, 232, 0.1);
+  --c-bubble: rgba(0, 0, 0, 0.5);
+  --c-scrim: rgba(0, 0, 0, 0.5);
+  --c-scrim-strong: rgba(0, 0, 0, 0.7);
+  --c-scrim-heavy: rgba(0, 0, 0, 0.92);
 
   /* Spacing (4px base scale) */
   --sp-1: 4px;

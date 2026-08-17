@@ -115,10 +115,6 @@ higher tier. They're surfaced separately by RAG.
 
 ## Embedding maintenance
 
-Memory content is enriched with a human-readable date prefix before embedding
-(e.g., `"Significant memory from February 14, 2026. [original content]"`), so
-temporal queries can match memories by date.
-
 **The embedding model is configurable.** My Psycheros parent pushes the active
 model + chunk params at spawn time via `ENTITY_CORE_EMBEDDING_*` env vars
 (`ENTITY_CORE_EMBEDDING_MODEL`, `ENTITY_CORE_EMBEDDING_DIMENSION`,
@@ -126,46 +122,25 @@ model + chunk params at spawn time via `ENTITY_CORE_EMBEDDING_*` env vars
 `deno task dev` standalone) I fall back to MiniLM defaults. See
 `src/embeddings/settings.ts:loadEmbeddingRuntimeConfig()`.
 
-The vec0 dimension is **dynamic** — `EMBEDDING_DIMENSION` in `graph/types.ts` is
-now `DEFAULT_EMBEDDING_DIMENSION` plus a `getActiveEmbeddingDimension()` getter
-that reads the env var at runtime. Vec0 DDL sites
-(`graph/schema.ts:vectorTableSql(dim)` and
-`embeddings/cache.ts:vectorTableSql(dim)`) take dim as a parameter.
+Deep reference — date-prefix enrichment, dynamic vec0 dimension, schema
+fingerprint classification, rebuild notification protocol, maintenance tools:
+[`docs/embeddings.md`](docs/embeddings.md).
 
-**Schema fingerprint (load-bearing):** `EmbeddingCache` stores a composite JSON
-fingerprint in `embedding_metadata.schema_version`:
+Traps:
 
-```json
-{
-  "algorithm": 3,
-  "chunkParamsHash": "3000:2048:400:2800:200",
-  "modelRepoId": "Cohee/jina-embeddings-v2-base-en"
-}
-```
-
-When any of those change (enrichment algorithm bump, chunk params, or model
-swap), `needsRebuild()` returns true and the boot path runs
-`autoRebuildEmbeddings()` — which calls `createMemoryEmbeddingRebuildHandler`
-(memory cache only). Graph nodes are NOT rebuilt automatically; Psycheros calls
-the `embedding_rebuild_all` MCP tool to rebuild both.
-
-Three MCP tools manage the embedding cache in `graph.db`:
-
-- `memory_embedding_purge` — scans cached memory embeddings and removes entries
-  whose memory file no longer exists. Use after manual file deletion to prevent
-  ghost search results.
-- `memory_embedding_rebuild` — clears the memory embedding cache and re-embeds
-  every memory file from scratch. Memory cache only — graph nodes untouched.
-- `embedding_rebuild_all` — drops + recreates both `vec_memory_embeddings` AND
-  `vec_graph_nodes`, re-embeds every memory file + every non-deleted graph node,
-  marks the schema fingerprint up to date. Called by my Psycheros parent when
-  the user switches embedding model or chunk size. Assumes I've been restarted
-  with the new `ENTITY_CORE_EMBEDDING_*` env vars first.
-
-**Xenova cache gotcha:** `env.useBrowserCache = false` is forced in
-`src/embeddings/mod.ts`. Deno has the Web Cache API, so Xenova defaults to it
-and skips the filesystem — breaking on-disk download detection. Don't remove the
-override.
+- **Never remove the `yieldToEventLoop()` calls in the rebuild handlers.**
+  Without them the `notifications/embedding-rebuild` notifications can't be sent
+  and the parent's watchdog kills entity-core mid-rebuild.
+- **Model-swap fingerprints are refused at boot** — model changes are
+  parent-owned migrations (`embedding_rebuild_all`), never an automatic rebuild.
+- **One shared EmbeddingCache per process** (`src/mod.ts` constructs it and
+  passes it to `startServer`). The startup backfill uses the same instance,
+  skips when a rebuild is pending/running, and never closes it — a second cache
+  connection races the background rebuild on the vec tables.
+- **Xenova cache gotcha:** `env.useBrowserCache = false` is forced in
+  `src/embeddings/mod.ts`. Deno has the Web Cache API, so Xenova defaults to it
+  and skips the filesystem — breaking on-disk download detection. Don't remove
+  the override.
 
 ## Knowledge graph
 
@@ -186,6 +161,7 @@ Batch backfill from an existing memory tree is
 | Sync protocol, memory retrieval       | [docs/sync-and-memory.md](docs/sync-and-memory.md)           |
 | Knowledge graph internals             | [docs/knowledge-graph.md](docs/knowledge-graph.md)           |
 | Snapshots: retention, restore         | [docs/snapshots.md](docs/snapshots.md)                       |
+| Embedding pipeline                    | [docs/embeddings.md](docs/embeddings.md)                     |
 | Code review findings                  | [docs/code-review-findings.md](docs/code-review-findings.md) |
 | Security audit                        | [docs/security-audit.md](docs/security-audit.md)             |
 

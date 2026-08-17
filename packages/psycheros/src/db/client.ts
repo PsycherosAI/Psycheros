@@ -6,8 +6,10 @@
  */
 
 import { type BindValue, Database } from "@db/sqlite";
+import { dirname } from "@std/path";
 import { initializeSchema } from "./schema.ts";
 import { getVecVersion } from "./vector.ts";
+import { archiveIfAvailable } from "../backup/mod.ts";
 import type {
   ContextSnapshotRecord,
   Conversation,
@@ -19,6 +21,11 @@ import type {
   ToolCall,
   TurnMetrics,
   UpdatePulseInput,
+  WorkspaceBriefing,
+  WorkspaceIsolation,
+  WorkspaceMode,
+  WorkspaceSession,
+  WorkspaceStatus,
 } from "../types.ts";
 
 /**
@@ -58,6 +65,8 @@ interface MessageRow {
   pulse_name: string | null;
   is_voice: number | null;
   metadata: string | null;
+  deleted_at: string | null;
+  is_glitched: number | null;
 }
 
 /**
@@ -100,6 +109,7 @@ interface ContextSnapshotRow {
   graph_content: string | null;
   vault_content: string | null;
   situational_awareness_content: string | null;
+  held_skills_content: string | null;
   messages_json: string;
   tool_definitions_json: string;
   metrics_json: string;
@@ -136,7 +146,9 @@ export class DBClient {
       this.db.exec("PRAGMA foreign_keys = ON");
 
       // Initialize schema (idempotent)
-      initializeSchema(this.db);
+      // Derive dataRoot from dbPath (standard layout: <dataRoot>/.psycheros/psycheros.db)
+      const dataRoot = dirname(dirname(dbPath));
+      initializeSchema(this.db, dataRoot);
     } catch (error) {
       // Clean up on initialization failure
       this.db.close();
@@ -586,6 +598,44 @@ export class DBClient {
   }
 
   /**
+   * Look up a single message by ID across all conversations. Used by the
+   * workspace coordination layer's `read_entity_data({type:"message"})` so
+   * OpenCode can find a specific message without scanning conversations.
+   */
+  getMessageById(id: string): Message | null {
+    const stmt = this.db.prepare(
+      `SELECT id, conversation_id, role, content, reasoning_content,
+              tool_call_id, tool_calls, created_at, edited_at,
+              pulse_id, pulse_name, is_voice, metadata, deleted_at, is_glitched
+       FROM messages WHERE id = ?`,
+    );
+    const row = stmt.get<MessageRow>(id);
+    stmt.finalize();
+    return row ? this.rowToMessage(row) : null;
+  }
+
+  /**
+   * Search messages by case-insensitive substring match on content. Returns
+   * matches across all conversations, most recent first. Used by the workspace
+   * when only a phrase is known (no message ID).
+   */
+  searchMessages(query: string, limit = 20): Message[] {
+    const pattern = `%${query.replace(/[%_]/g, "\\$&")}%`;
+    const stmt = this.db.prepare(
+      `SELECT id, conversation_id, role, content, reasoning_content,
+              tool_call_id, tool_calls, created_at, edited_at,
+              pulse_id, pulse_name, is_voice, metadata, deleted_at, is_glitched
+       FROM messages
+       WHERE content LIKE ? ESCAPE '\\'
+       ORDER BY created_at DESC
+       LIMIT ?`,
+    );
+    const rows = stmt.all<MessageRow>(pattern, limit);
+    stmt.finalize();
+    return rows.map((row) => this.rowToMessage(row));
+  }
+
+  /**
    * Retrieves all messages for a conversation.
    *
    * @param conversationId - The conversation ID
@@ -595,7 +645,7 @@ export class DBClient {
     const stmt = this.db.prepare(
       `SELECT id, conversation_id, role, content, reasoning_content,
               tool_call_id, tool_calls, created_at, edited_at,
-              pulse_id, pulse_name, is_voice, metadata
+              pulse_id, pulse_name, is_voice, metadata, deleted_at, is_glitched
        FROM messages
        WHERE conversation_id = ?
        ORDER BY created_at ASC`,
@@ -632,7 +682,7 @@ export class DBClient {
       const hasTiebreaker = !!options.beforeId;
       query = `SELECT id, conversation_id, role, content, reasoning_content,
                       tool_call_id, tool_calls, created_at, edited_at,
-                      pulse_id, pulse_name, is_voice, metadata
+                      pulse_id, pulse_name, is_voice, metadata, deleted_at, is_glitched
                FROM messages
                WHERE conversation_id = ?
                  AND (created_at < ?${
@@ -653,7 +703,7 @@ export class DBClient {
       // Initial load: fetch the most recent messages (DESC). Reversed below.
       query = `SELECT id, conversation_id, role, content, reasoning_content,
                       tool_call_id, tool_calls, created_at, edited_at,
-                      pulse_id, pulse_name, is_voice, metadata
+                      pulse_id, pulse_name, is_voice, metadata, deleted_at, is_glitched
                FROM messages
                WHERE conversation_id = ?
                ORDER BY created_at DESC
@@ -733,28 +783,41 @@ export class DBClient {
       pulseName: row.pulse_name ?? undefined,
       isVoice: !!row.is_voice,
       metadata,
+      deletedAt: row.deleted_at ? new Date(row.deleted_at) : undefined,
+      isGlitched: !!row.is_glitched,
     };
   }
 
   /**
-   * Updates a message's content.
+   * Updates a message's content. Prior content is archived to
+   * `metadata.priorVersions[]` for short-term recovery. Pruned to keep the
+   * recent window useful: within 24h of the most recent edit, up to 5
+   * versions are kept. After 24h quiet, collapses to just the most recent
+   * version (one backup long-term, no unbounded growth).
    *
    * @param id - The message ID
    * @param content - The new content
+   * @param options.reason - Optional one-line reason for the edit (audit trail)
    * @returns The updated message or null if not found
    */
-  updateMessage(id: string, content: string): Message | null {
+  async updateMessage(
+    id: string,
+    content: string,
+    options?: { reason?: string },
+  ): Promise<Message | null> {
     const now = new Date();
     const nowISO = now.toISOString();
 
     this.db.exec("BEGIN TRANSACTION");
 
     try {
-      // Check if message exists
+      // Check if message exists; capture current content + metadata for archive
       const checkStmt = this.db.prepare(
-        "SELECT conversation_id FROM messages WHERE id = ?",
+        "SELECT conversation_id, content, metadata FROM messages WHERE id = ?",
       );
-      const existing = checkStmt.get<{ conversation_id: string }>(id);
+      const existing = checkStmt.get<
+        { conversation_id: string; content: string; metadata: string | null }
+      >(id);
       checkStmt.finalize();
 
       if (!existing) {
@@ -762,7 +825,22 @@ export class DBClient {
         return null;
       }
 
-      // Update the message
+      // Archive the pre-edit content via the unified backup service before
+      // the overwrite. Covers both user inline edits and entity-data tool
+      // writes (the `reason` field distinguishes them in the audit trail).
+      // Old `metadata.priorVersions` field on existing rows is left as
+      // read-only legacy; new writes route through the unified service
+      // (JSONL files on disk, outside psycheros.db).
+      await archiveIfAvailable(
+        "message",
+        id,
+        existing.content,
+        options?.reason ? { reason: options.reason } : undefined,
+      );
+
+      // Update content (+ metadata stays untouched — priorVersions is no
+      // longer written here, but we preserve existing metadata fields like
+      // image/fade/etc. on the row by only updating content + edited_at).
       this.db.exec(
         `UPDATE messages SET content = ?, edited_at = ? WHERE id = ?`,
         [content, nowISO, id],
@@ -780,7 +858,7 @@ export class DBClient {
       const getUpdatedStmt = this.db.prepare(
         `SELECT id, conversation_id, role, content, reasoning_content,
                 tool_call_id, tool_calls, created_at, edited_at,
-                pulse_id, pulse_name, is_voice, metadata
+                pulse_id, pulse_name, is_voice, metadata, deleted_at, is_glitched
          FROM messages WHERE id = ?`,
       );
       const updatedRow = getUpdatedStmt.get<MessageRow>(id);
@@ -796,6 +874,193 @@ export class DBClient {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  // ===========================================================================
+  // Soft-delete (tombstone) + Glitched Operations
+  // ===========================================================================
+  //
+  // Soft-delete keeps the row in place but replaces content with a tombstone
+  // notice and stores the original in `metadata.tombstone` for recovery. The
+  // `deleted_at` column is the authoritative flag — non-NULL means deleted.
+  //
+  // Glitched messages are flagged via `is_glitched=1`. The content stays as-is
+  // (typically unreadable), and the UI renders a placeholder overlay. Entity
+  // can repair via write_entity_data Phase 2.
+
+  /**
+   * Soft-delete a message. Replaces content with a tombstone notice, archives
+   * original content + reason in metadata.tombstone for recovery, sets
+   * deleted_at timestamp. Conversation flow is preserved — no gaps in the UI.
+   *
+   * ChatRAG and consolidation treat tombstoned messages as not-existing.
+   */
+  softDeleteMessage(
+    id: string,
+    options?: { deletedBy?: string; reason?: string },
+  ): Message | null {
+    const now = new Date().toISOString();
+    const deletedBy = options?.deletedBy ?? "entity";
+
+    this.db.exec("BEGIN TRANSACTION");
+    try {
+      const selectStmt = this.db.prepare(
+        "SELECT content, metadata FROM messages WHERE id = ?",
+      );
+      const row = selectStmt.get<
+        { content: string; metadata: string | null }
+      >(id);
+      selectStmt.finalize();
+
+      if (!row) {
+        this.db.exec("ROLLBACK");
+        return null;
+      }
+
+      // Parse existing metadata so we don't clobber image/fade fields.
+      let metadata: Record<string, unknown> = {};
+      if (row.metadata) {
+        try {
+          metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+        } catch {
+          // corrupt metadata — start fresh
+          metadata = {};
+        }
+      }
+
+      // Archive original content for recovery.
+      metadata.tombstone = {
+        originalContent: row.content,
+        deletedBy,
+        ...(options?.reason ? { reason: options.reason } : {}),
+      };
+
+      const tombstoneContent = `[message deleted by ${deletedBy} — ${now}${
+        options?.reason ? ` — reason: ${options.reason}` : ""
+      }]`;
+
+      this.db.exec(
+        `UPDATE messages
+         SET content = ?, metadata = ?, deleted_at = ?
+         WHERE id = ?`,
+        [
+          tombstoneContent,
+          JSON.stringify(metadata),
+          now,
+          id,
+        ],
+      );
+
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    // Re-fetch via the standard path so the caller gets a full Message.
+    const getStmt = this.db.prepare(
+      `SELECT id, conversation_id, role, content, reasoning_content,
+              tool_call_id, tool_calls, created_at, edited_at,
+              pulse_id, pulse_name, is_voice, metadata, deleted_at, is_glitched
+       FROM messages WHERE id = ?`,
+    );
+    const updated = getStmt.get<MessageRow>(id);
+    getStmt.finalize();
+    return updated ? this.rowToMessage(updated) : null;
+  }
+
+  /**
+   * Restore a soft-deleted message. Moves the original content back from
+   * metadata.tombstone into the content field, clears deleted_at, removes
+   * the tombstone metadata entry.
+   */
+  restoreMessage(id: string): Message | null {
+    this.db.exec("BEGIN TRANSACTION");
+    try {
+      const selectStmt = this.db.prepare(
+        "SELECT metadata FROM messages WHERE id = ?",
+      );
+      const row = selectStmt.get<{ metadata: string | null }>(id);
+      selectStmt.finalize();
+
+      if (!row) {
+        this.db.exec("ROLLBACK");
+        return null;
+      }
+
+      let metadata: Record<string, unknown> = {};
+      if (row.metadata) {
+        try {
+          metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+        } catch {
+          metadata = {};
+        }
+      }
+
+      const tombstone = metadata.tombstone as
+        | { originalContent?: string }
+        | undefined;
+
+      if (!tombstone?.originalContent) {
+        // Not deleted — nothing to restore.
+        this.db.exec("ROLLBACK");
+        return null;
+      }
+
+      const originalContent = tombstone.originalContent;
+      delete metadata.tombstone;
+
+      this.db.exec(
+        `UPDATE messages
+         SET content = ?, metadata = ?, deleted_at = NULL
+         WHERE id = ?`,
+        [
+          originalContent,
+          Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null,
+          id,
+        ],
+      );
+
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    const getStmt = this.db.prepare(
+      `SELECT id, conversation_id, role, content, reasoning_content,
+              tool_call_id, tool_calls, created_at, edited_at,
+              pulse_id, pulse_name, is_voice, metadata, deleted_at, is_glitched
+       FROM messages WHERE id = ?`,
+    );
+    const updated = getStmt.get<MessageRow>(id);
+    getStmt.finalize();
+    return updated ? this.rowToMessage(updated) : null;
+  }
+
+  /**
+   * Mark a message as glitched (corrupted/unreadable content). The content
+   * stays in place; the UI overlays a `▒▒▒ MESSAGE CORRUPTED ▒▒▒` placeholder.
+   * Useful when a bug is discovered after the fact.
+   */
+  markGlitched(id: string, _reason?: string): boolean {
+    const result = this.db.exec(
+      "UPDATE messages SET is_glitched = 1 WHERE id = ?",
+      [id],
+    );
+    return result > 0;
+  }
+
+  /**
+   * Clear the glitched flag. Used after a successful repair via
+   * write_entity_data when the new content replaces the corrupted state.
+   */
+  clearGlitched(id: string): boolean {
+    const result = this.db.exec(
+      "UPDATE messages SET is_glitched = 0 WHERE id = ?",
+      [id],
+    );
+    return result > 0;
   }
 
   // ===========================================================================
@@ -957,7 +1222,7 @@ export class DBClient {
     const stmt = this.db.prepare(
       `SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content,
               m.tool_call_id, m.tool_calls, m.created_at, m.edited_at,
-              m.pulse_id, m.pulse_name, m.is_voice
+              m.pulse_id, m.pulse_name, m.is_voice, m.deleted_at, m.is_glitched
        ${join}
        WHERE ${dateExpr} = ?${sourceFilter}
        ORDER BY m.created_at ASC`,
@@ -1373,13 +1638,10 @@ export class DBClient {
   // ===========================================================================
 
   /**
-   * Maximum number of context snapshots to retain per conversation.
-   */
-  private static readonly MAX_SNAPSHOTS_PER_CONVERSATION = 50;
-
-  /**
-   * Persists a context snapshot to the database.
-   * Non-fatal — logs warnings on failure. Prunes old snapshots beyond the cap.
+   * Persists a context snapshot to the database, replacing any previous
+   * snapshot for the conversation. Only the latest turn's snapshot is kept —
+   * it exists for the Context Inspector's current-turn view, not history.
+   * Non-fatal — logs warnings on failure.
    *
    * @param snapshot - The snapshot record to persist
    * @returns True if the snapshot was persisted successfully
@@ -1392,13 +1654,19 @@ export class DBClient {
       const now = new Date().toISOString();
 
       this.db.exec(
+        `DELETE FROM context_snapshots WHERE conversation_id = ?`,
+        [snapshot.conversationId],
+      );
+
+      this.db.exec(
         `INSERT INTO context_snapshots
          (id, conversation_id, turn_index, iteration, timestamp, user_message,
           system_message, base_instructions_content, self_content, user_content,
-          relationship_content, custom_content, memories_content, chat_history_content,
-          lorebook_content, graph_content, vault_content, situational_awareness_content,
+          relationship_content, custom_content, memories_content,
+          chat_history_content, lorebook_content, graph_content, vault_content,
+          situational_awareness_content, held_skills_content,
           messages_json, tool_definitions_json, metrics_json, plugin_hooks_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           snapshot.conversationId,
@@ -1418,28 +1686,12 @@ export class DBClient {
           snapshot.graphContent ?? null,
           snapshot.vaultContent ?? null,
           snapshot.situationalAwarenessContent ?? null,
+          snapshot.heldSkillsContent ?? null,
           snapshot.messagesJson,
           snapshot.toolDefinitionsJson,
           snapshot.metricsJson,
           snapshot.pluginHooksJson ?? null,
           now,
-        ],
-      );
-
-      // Prune old snapshots beyond the cap
-      this.db.exec(
-        `DELETE FROM context_snapshots
-         WHERE conversation_id = ?
-           AND id NOT IN (
-             SELECT id FROM context_snapshots
-             WHERE conversation_id = ?
-             ORDER BY turn_index DESC, iteration DESC
-             LIMIT ?
-           )`,
-        [
-          snapshot.conversationId,
-          snapshot.conversationId,
-          DBClient.MAX_SNAPSHOTS_PER_CONVERSATION,
         ],
       );
 
@@ -1454,30 +1706,6 @@ export class DBClient {
   }
 
   /**
-   * Retrieves all context snapshots for a conversation.
-   *
-   * @param conversationId - The conversation ID
-   * @returns Array of snapshots, ordered by turn index ascending
-   */
-  getContextSnapshots(conversationId: string): ContextSnapshotRecord[] {
-    const stmt = this.db.prepare(
-      `SELECT id, conversation_id, turn_index, iteration, timestamp, user_message,
-              system_message, base_instructions_content, self_content, user_content,
-              relationship_content, custom_content, memories_content, chat_history_content,
-              lorebook_content, graph_content, vault_content, situational_awareness_content,
-              messages_json, tool_definitions_json, metrics_json, plugin_hooks_json, created_at
-       FROM context_snapshots
-       WHERE conversation_id = ?
-       ORDER BY turn_index ASC, iteration ASC`,
-    );
-
-    const rows = stmt.all<ContextSnapshotRow>(conversationId);
-    stmt.finalize();
-
-    return rows.map((row) => this.rowToContextSnapshot(row));
-  }
-
-  /**
    * Retrieves the most recent context snapshot for a conversation.
    *
    * @param conversationId - The conversation ID
@@ -1489,8 +1717,9 @@ export class DBClient {
     const stmt = this.db.prepare(
       `SELECT id, conversation_id, turn_index, iteration, timestamp, user_message,
               system_message, base_instructions_content, self_content, user_content,
-              relationship_content, custom_content, memories_content, chat_history_content,
-              lorebook_content, graph_content, vault_content, situational_awareness_content,
+              relationship_content, custom_content, memories_content,
+              chat_history_content, lorebook_content, graph_content, vault_content,
+              situational_awareness_content, held_skills_content,
               messages_json, tool_definitions_json, metrics_json, plugin_hooks_json, created_at
        FROM context_snapshots
        WHERE conversation_id = ?
@@ -1528,6 +1757,7 @@ export class DBClient {
       vaultContent: row.vault_content ?? undefined,
       situationalAwarenessContent: row.situational_awareness_content ??
         undefined,
+      heldSkillsContent: row.held_skills_content ?? undefined,
       messagesJson: row.messages_json,
       toolDefinitionsJson: row.tool_definitions_json,
       metricsJson: row.metrics_json,
@@ -1687,7 +1917,23 @@ export class DBClient {
   /**
    * Update a pulse. Returns true if a row was updated.
    */
-  updatePulse(id: string, data: Partial<UpdatePulseInput>): boolean {
+  async updatePulse(
+    id: string,
+    data: Partial<UpdatePulseInput>,
+  ): Promise<boolean> {
+    // Archive the pre-edit pulse state via the unified backup service.
+    // Pulses are complex configs (~20 columns) and irreplaceable — losing
+    // a hand-tuned trigger or chain setup is a real hit.
+    const beforeUpdate = this.getPulse(id);
+    if (beforeUpdate) {
+      await archiveIfAvailable(
+        "pulse",
+        id,
+        JSON.stringify(beforeUpdate),
+        { reason: "pulse update" },
+      );
+    }
+
     const sets: string[] = [];
     const values: unknown[] = [];
 
@@ -1983,6 +2229,323 @@ export class DBClient {
   }
 
   // ===========================================================================
+  // Workspace Session Operations
+  // ===========================================================================
+  //
+  // Workspace sessions are OpenCode-as-faculty: supervised subprocesses the
+  // entity spawns via the `workspace` omni-tool. Each row links a
+  // sourceType="workspace" conversation to its sandbox path, OpenCode session
+  // ID, briefing, and final summary.
+
+  /**
+   * Create a new workspace session row. The conversation row and sandbox dir
+   * must already exist; this just records the linkage and initial state.
+   */
+  createWorkspaceSession(input: {
+    conversationId: string;
+    originConversationId?: string;
+    sandboxPath: string;
+    mode: WorkspaceMode;
+    briefing: WorkspaceBriefing;
+    partyhard?: boolean;
+    isolation?: WorkspaceIsolation;
+  }): WorkspaceSession {
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const isolation = input.isolation ?? "sandboxed";
+
+    this.db.exec(
+      `INSERT INTO workspace_sessions
+       (id, conversation_id, origin_conversation_id, sandbox_path, status, mode,
+        isolation, partyhard, briefing_json, token_usage, created_at, last_activity_at)
+       VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, 0, ?, ?)`,
+      [
+        id,
+        input.conversationId,
+        input.originConversationId ?? null,
+        input.sandboxPath,
+        input.mode,
+        isolation,
+        input.partyhard ? 1 : 0,
+        JSON.stringify(input.briefing),
+        now,
+        now,
+      ],
+    );
+
+    return this.getWorkspaceSession(id)!;
+  }
+
+  /**
+   * Get a workspace session by its primary ID.
+   */
+  getWorkspaceSession(id: string): WorkspaceSession | null {
+    const stmt = this.db.prepare(
+      "SELECT * FROM workspace_sessions WHERE id = ?",
+    );
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    stmt.finalize();
+    return row ? DBClient.workspaceSessionRowToSession(row) : null;
+  }
+
+  /**
+   * Get the workspace session associated with a workspace-type conversation.
+   */
+  getWorkspaceSessionByConversation(
+    conversationId: string,
+  ): WorkspaceSession | null {
+    const stmt = this.db.prepare(
+      "SELECT * FROM workspace_sessions WHERE conversation_id = ?",
+    );
+    const row = stmt.get(conversationId) as Record<string, unknown> | undefined;
+    stmt.finalize();
+    return row ? DBClient.workspaceSessionRowToSession(row) : null;
+  }
+
+  /**
+   * Look up a workspace session by OpenCode's session ID (ses_...).
+   * Used when routing OpenCode callbacks back to the originating workspace.
+   */
+  getWorkspaceSessionByOpenCodeSession(
+    opencodeSessionId: string,
+  ): WorkspaceSession | null {
+    const stmt = this.db.prepare(
+      "SELECT * FROM workspace_sessions WHERE opencode_session_id = ?",
+    );
+    const row = stmt.get(opencodeSessionId) as
+      | Record<string, unknown>
+      | undefined;
+    stmt.finalize();
+    return row ? DBClient.workspaceSessionRowToSession(row) : null;
+  }
+
+  /**
+   * List workspace sessions with optional filters. Ordered newest first.
+   */
+  listWorkspaceSessions(filter?: {
+    status?: WorkspaceStatus | WorkspaceStatus[];
+    originConversationId?: string;
+  }): WorkspaceSession[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+
+    if (filter?.status) {
+      const statuses = Array.isArray(filter.status)
+        ? filter.status
+        : [filter.status];
+      if (statuses.length > 0) {
+        const placeholders = statuses.map(() => "?").join(", ");
+        where.push(`status IN (${placeholders})`);
+        params.push(...statuses);
+      }
+    }
+
+    if (filter?.originConversationId) {
+      where.push("origin_conversation_id = ?");
+      params.push(filter.originConversationId);
+    }
+
+    const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+    const stmt = this.db.prepare(
+      `SELECT * FROM workspace_sessions ${whereClause} ORDER BY created_at DESC`,
+    );
+    const rows = stmt.all<Record<string, unknown>>(...(params as BindValue[]));
+    stmt.finalize();
+    return rows.map((row) => DBClient.workspaceSessionRowToSession(row));
+  }
+
+  /**
+   * List sessions in non-terminal states — the "active sessions" set shown
+   * in the workspace icon badge and used by the supervisor for reconnect.
+   */
+  listActiveWorkspaceSessions(): WorkspaceSession[] {
+    return this.listWorkspaceSessions({
+      status: ["pending", "running", "paused", "suspended"],
+    });
+  }
+
+  /**
+   * Set the retention-exemption (pin) flag on a workspace session.
+   */
+  setWorkspaceSessionPinned(id: string, pinned: boolean): boolean {
+    this.db.exec(
+      "UPDATE workspace_sessions SET pinned = ? WHERE id = ?",
+      [pinned ? 1 : 0, id],
+    );
+    return this.db.changes > 0;
+  }
+
+  /**
+   * Set the workdir (existing host folder bound rw for this session) after
+   * the bind approval toast resolves.
+   */
+  setWorkspaceSessionWorkdir(id: string, workdir: string): boolean {
+    this.db.exec(
+      "UPDATE workspace_sessions SET workdir = ? WHERE id = ?",
+      [workdir, id],
+    );
+    return this.db.changes > 0;
+  }
+
+  /**
+   * List pinned workspace sessions (any status) — for the FAB dropdown's
+   * pinned-projects section.
+   */
+  listPinnedWorkspaceSessions(): WorkspaceSession[] {
+    const stmt = this.db.prepare(
+      "SELECT * FROM workspace_sessions WHERE pinned = 1 ORDER BY last_activity_at DESC",
+    );
+    const rows = stmt.all<Record<string, unknown>>();
+    stmt.finalize();
+    return rows.map((r) => DBClient.workspaceSessionRowToSession(r));
+  }
+
+  /**
+   * Update workspace session status. `extras` lets callers set associated
+   * fields in the same write (e.g. error on failure, summary on completion).
+   */
+  updateWorkspaceSessionStatus(
+    id: string,
+    status: WorkspaceStatus,
+    extras?: {
+      error?: string;
+      opencodeSessionId?: string;
+      summary?: string;
+    },
+  ): boolean {
+    const now = new Date().toISOString();
+    const sets: string[] = ["status = ?", "last_activity_at = ?"];
+    const values: unknown[] = [status, now];
+
+    if (extras?.error !== undefined) {
+      sets.push("error_text = ?");
+      values.push(extras.error);
+    }
+    if (extras?.opencodeSessionId !== undefined) {
+      sets.push("opencode_session_id = ?");
+      values.push(extras.opencodeSessionId);
+    }
+    if (extras?.summary !== undefined) {
+      sets.push("summary_text = ?");
+      values.push(extras.summary);
+    }
+    if (
+      status === "complete" ||
+      status === "failed" ||
+      status === "cancelled"
+    ) {
+      sets.push("ended_at = ?");
+      values.push(now);
+    }
+
+    values.push(id);
+    const result = this.db.exec(
+      `UPDATE workspace_sessions SET ${sets.join(", ")} WHERE id = ?`,
+      values as BindValue[],
+    );
+    return result > 0;
+  }
+
+  /**
+   * Set the final summary text. Called once when the workspace completes.
+   */
+  setWorkspaceSessionSummary(id: string, summary: string): boolean {
+    const now = new Date().toISOString();
+    const result = this.db.exec(
+      "UPDATE workspace_sessions SET summary_text = ?, last_activity_at = ? WHERE id = ?",
+      [summary, now, id],
+    );
+    return result > 0;
+  }
+
+  /**
+   * Mark that the entity has signaled end-of-session via the workspace
+   * end_session action. Engaged-runner polls `session.endRequested` after
+   * each entity turn to decide whether to exit the loop (per plan §13a —
+   * entity-driven termination, not tool-use heuristic).
+   */
+  markWorkspaceSessionEndRequested(id: string): boolean {
+    const now = new Date().toISOString();
+    const result = this.db.exec(
+      "UPDATE workspace_sessions SET end_requested = 1, last_activity_at = ? WHERE id = ?",
+      [now, id],
+    );
+    return result > 0;
+  }
+
+  /**
+   * Increment the token-usage counter by a delta. Used by the supervisor as
+   * OpenCode reports token usage.
+   */
+  incrementWorkspaceSessionTokens(
+    id: string,
+    deltaTokens: number,
+  ): boolean {
+    if (deltaTokens <= 0) return true;
+    const now = new Date().toISOString();
+    const result = this.db.exec(
+      "UPDATE workspace_sessions SET token_usage = token_usage + ?, last_activity_at = ? WHERE id = ?",
+      [deltaTokens, now, id],
+    );
+    return result > 0;
+  }
+
+  /**
+   * Update last_activity_at without changing status. Used as a heartbeat
+   * from the supervisor while a session is running.
+   */
+  touchWorkspaceSession(id: string): boolean {
+    const now = new Date().toISOString();
+    const result = this.db.exec(
+      "UPDATE workspace_sessions SET last_activity_at = ? WHERE id = ?",
+      [now, id],
+    );
+    return result > 0;
+  }
+
+  /**
+   * Convert a workspace_sessions row into a WorkspaceSession object.
+   * Parses the JSON briefing and translates SQLite integers to booleans
+   * where applicable.
+   */
+  static workspaceSessionRowToSession(
+    row: Record<string, unknown>,
+  ): WorkspaceSession {
+    let briefing: WorkspaceBriefing;
+    try {
+      briefing = JSON.parse(row.briefing_json as string) as WorkspaceBriefing;
+    } catch {
+      // Should never happen — briefing_json is always written via JSON.stringify
+      briefing = { goal: "(briefing unreadable)" };
+    }
+
+    return {
+      id: row.id as string,
+      conversationId: row.conversation_id as string,
+      originConversationId: (row.origin_conversation_id as string | null) ??
+        undefined,
+      sandboxPath: row.sandbox_path as string,
+      status: row.status as WorkspaceStatus,
+      mode: row.mode as WorkspaceMode,
+      isolation: (row.isolation as WorkspaceIsolation | undefined) ??
+        "sandboxed",
+      partyhard: Boolean(row.partyhard),
+      opencodeSessionId: (row.opencode_session_id as string | null) ??
+        undefined,
+      briefing,
+      summary: (row.summary_text as string | null) ?? undefined,
+      tokenUsage: row.token_usage as number,
+      createdAt: row.created_at as string,
+      endedAt: (row.ended_at as string | null) ?? undefined,
+      lastActivityAt: row.last_activity_at as string,
+      error: (row.error_text as string | null) ?? undefined,
+      endRequested: Boolean(row.end_requested),
+      pinned: Boolean(row.pinned),
+      workdir: (row.workdir as string | null) ?? undefined,
+    };
+  }
+
+  // ===========================================================================
   // Discord DM Whitelist Operations
   // ===========================================================================
 
@@ -2034,6 +2597,46 @@ export class DBClient {
     const row = stmt.get(userId);
     stmt.finalize();
     return !!row;
+  }
+
+  // ===========================================================================
+  // Held Skills
+  // ===========================================================================
+
+  /**
+   * Hold a skill for a conversation. Idempotent — re-holding an already-held
+   * skill is a no-op that keeps the original held_at ordering.
+   */
+  holdSkill(conversationId: string, skillName: string): void {
+    this.db.exec(
+      `INSERT OR IGNORE INTO held_skills (conversation_id, skill_name, held_at)
+       VALUES (?, ?, ?)`,
+      [conversationId, skillName, new Date().toISOString()],
+    );
+  }
+
+  /**
+   * Release a held skill. Returns true if a hold was actually removed.
+   */
+  releaseSkill(conversationId: string, skillName: string): boolean {
+    this.db.exec(
+      `DELETE FROM held_skills WHERE conversation_id = ? AND skill_name = ?`,
+      [conversationId, skillName],
+    );
+    return this.db.changes > 0;
+  }
+
+  /**
+   * List held skill names for a conversation, oldest hold first.
+   */
+  getHeldSkills(conversationId: string): string[] {
+    const stmt = this.db.prepare(
+      `SELECT skill_name FROM held_skills WHERE conversation_id = ?
+       ORDER BY held_at ASC`,
+    );
+    const rows = stmt.all(conversationId) as Array<{ skill_name: string }>;
+    stmt.finalize();
+    return rows.map((r) => r.skill_name);
   }
 
   // ===========================================================================

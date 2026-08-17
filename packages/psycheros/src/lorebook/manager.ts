@@ -6,6 +6,7 @@
  */
 
 import type { DBClient } from "../db/mod.ts";
+import { archiveIfAvailable } from "../backup/mod.ts";
 import type {
   CreateLorebookData,
   CreateLorebookEntryData,
@@ -284,9 +285,19 @@ export class LorebookManager {
   /**
    * Update an entry.
    */
-  updateEntry(id: string, data: UpdateLorebookEntryData): LorebookEntry | null {
+  async updateEntry(
+    id: string,
+    data: UpdateLorebookEntryData,
+  ): Promise<LorebookEntry | null> {
     const entry = this.getEntry(id);
     if (!entry) return null;
+
+    await archiveIfAvailable(
+      "lorebook_entry",
+      id,
+      JSON.stringify(entry),
+      { reason: "lorebook entry update" },
+    );
 
     const rawDb = this.db.getRawDb();
     const now = new Date().toISOString();

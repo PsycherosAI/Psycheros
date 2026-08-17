@@ -13,6 +13,7 @@ import type {
   ToolCall,
   ToolResult,
   TurnMetrics,
+  WorkspaceSession,
 } from "../types.ts";
 
 /** Get the user's configured display timezone for Intl formatting. */
@@ -53,6 +54,7 @@ import { pulseIconSvg } from "../pulse/templates.ts";
 import type { ExtractionHealth } from "../mcp-client/mod.ts";
 import { getWearableConnectionManager } from "../wearable/mod.ts";
 import type { PluginStatus } from "../../../plugin-api/src/mod.ts";
+import type { SkillMeta } from "../skills/mod.ts";
 import type { UnmanagedCustomTool } from "../plugins/mod.ts";
 import type { MemorySettings } from "../memory/memory-settings.ts";
 import {
@@ -235,14 +237,21 @@ function darken(hex: string, percent: number): string {
   );
 }
 
-/**
- * Generate CSS override for accent color from env var.
- * Returns empty string if no override is set.
- */
-function getAccentColorOverride(): string {
-  const accentColor = Deno.env.get("PSYCHEROS_ACCENT_COLOR");
-  if (!accentColor) return "";
+/** Structural view of AppearanceSettings for first-paint injection
+ * (routes.ts owns the authoritative type). */
+interface FirstPaintAppearance {
+  computed?: { tokens: Record<string, string>; isDark: boolean } | null;
+  slots?: { bg?: string; accent?: string } | null;
+}
 
+// Defense-in-depth on top of the POST validation (routes.ts): these regexes
+// gate everything echoed into the first-paint <style> tag.
+const FP_TOKEN_KEY_RE = /^(--c-[a-z0-9-]+|--glass-(bg|border))$/;
+const FP_TOKEN_VALUE_RE =
+  /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$|^rgba?\(\d{1,3}, ?\d{1,3}, ?\d{1,3}(, ?(0|1|0?\.\d+))?\)$/;
+const FP_HEX6_RE = /^#[0-9a-fA-F]{6}$/;
+
+function accentOnlyOverride(accentColor: string): string {
   const rgb = hexToRgb(accentColor);
   if (!rgb) return "";
 
@@ -262,6 +271,48 @@ function getAccentColorOverride(): string {
 </style>`;
 }
 
+/**
+ * First-paint theme override. Priority:
+ * 1. PSYCHEROS_ACCENT_COLOR env var (hard override, accent-only — unchanged)
+ * 2. persisted computed-token snapshot (full palette, no FOUC on light themes)
+ * 3. accent slot only (legacy state before the client self-heals to v2)
+ * Empty string when there is nothing to inject.
+ */
+export function getFirstPaintThemeOverride(
+  appearance: FirstPaintAppearance | null,
+): string {
+  const envAccent = Deno.env.get("PSYCHEROS_ACCENT_COLOR");
+  if (envAccent) return accentOnlyOverride(envAccent);
+
+  const computed = appearance?.computed;
+  if (computed?.tokens && typeof computed.tokens === "object") {
+    const lines = Object.entries(computed.tokens)
+      .filter(([k, v]) => FP_TOKEN_KEY_RE.test(k) && FP_TOKEN_VALUE_RE.test(v))
+      .map(([k, v]) => `    ${k}: ${v};`);
+    if (lines.length > 0) {
+      const scheme = computed.isDark ? "dark" : "light";
+      return `<style>
+  :root {
+    color-scheme: ${scheme};
+${lines.join("\n")}
+  }
+</style>`;
+    }
+  }
+
+  const accent = appearance?.slots?.accent;
+  if (accent && FP_HEX6_RE.test(accent)) return accentOnlyOverride(accent);
+  return "";
+}
+
+/** Browser-chrome color (<meta name="theme-color">) from the theme's bg slot. */
+export function getThemeMetaColor(
+  appearance: FirstPaintAppearance | null,
+): string {
+  const bg = appearance?.slots?.bg;
+  return bg && FP_HEX6_RE.test(bg) ? bg : "#000000";
+}
+
 // =============================================================================
 // Page Templates
 // =============================================================================
@@ -270,18 +321,22 @@ function getAccentColorOverride(): string {
  * Render the full app shell HTML.
  * This is served on initial page load.
  */
-export function renderAppShell(pluginHeadHtml = ""): string {
+export function renderAppShell(
+  pluginHeadHtml = "",
+  firstPaintCss = "",
+  themeColor = "#000000",
+): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#000000">
+  <meta name="theme-color" content="${themeColor}">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Psycheros</title>
   <link rel="stylesheet" href="/css/main.css">
-  ${getAccentColorOverride()}
+  ${firstPaintCss}
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="/manifest.json" crossorigin="use-credentials">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.svg">
@@ -300,6 +355,8 @@ export function renderAppShell(pluginHeadHtml = ""): string {
     <div class="main">
       <div class="sidebar-overlay" onclick="Psycheros.toggleSidebar()"></div>
       ${renderSidebar([])}
+      <div id="reindex-banner" class="reindex-banner" hidden></div>
+      <div id="held-skills-strip" class="held-skills-strip"></div>
       <div class="chat" id="chat">
         ${renderEmptyState()}
         ${renderInputArea()}
@@ -307,7 +364,7 @@ export function renderAppShell(pluginHeadHtml = ""): string {
       <button
         class="voice-call-fab"
         id="voice-call-btn"
-        style="display: none; position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 50%; align-items: center; justify-content: center; background-color: var(--c-bg-raised, #0a0a0a); border: 1px solid var(--c-accent-muted, #7e22ce); color: var(--c-accent, #a855f7); cursor: pointer; z-index: 50; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); padding: 0; margin: 0; box-sizing: border-box;"
+        style="display: none; position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 50%; align-items: center; justify-content: center; background-color: var(--c-bg-raised); border: 1px solid var(--c-accent-muted); color: var(--c-accent); cursor: pointer; z-index: 50; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); padding: 0; margin: 0; box-sizing: border-box;"
         onclick="Psycheros.startVoiceCall()"
         title="Start voice call"
         aria-label="Start voice call"
@@ -316,8 +373,25 @@ export function renderAppShell(pluginHeadHtml = ""): string {
           <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/>
         </svg>
       </button>
+      <button
+        class="workspace-fab"
+        id="workspace-btn"
+        style="display: none; position: absolute; top: calc(64px + env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 50%; align-items: center; justify-content: center; background-color: var(--c-bg-raised); border: 1px solid var(--c-accent-muted); color: var(--c-accent); cursor: pointer; z-index: 50; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); padding: 0; margin: 0; box-sizing: border-box; font-family: 'JetBrains Mono', ui-monospace, monospace;"
+        onclick="Psycheros.openWorkspaceList()"
+        title="Workspace sessions"
+        aria-label="Workspace sessions"
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="5" width="20" height="14" rx="2"/>
+          <path d="M6 12l3 2-3 2"/>
+          <line x1="13" y1="16" x2="16" y2="16"/>
+        </svg>
+        <span id="workspace-fab-badge" style="position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; border-radius: 9px; background-color: var(--c-accent); color: white; font-size: 11px; font-weight: 600; display: none; align-items: center; justify-content: center; padding: 0 5px; font-family: ui-sans-serif, system-ui, sans-serif;"></span>
+        <span id="workspace-fab-alert" style="position: absolute; top: -6px; left: -6px; min-width: 20px; height: 20px; border-radius: 10px; background-color: var(--c-warning); color: var(--c-on-warning); font-size: 13px; font-weight: 700; display: none; align-items: center; justify-content: center; padding: 0 5px; font-family: ui-sans-serif, system-ui, sans-serif; box-shadow: 0 0 0 2px var(--c-bg-raised); line-height: 1;" title="One or more workspace sessions need user input">!</span>
+      </button>
     </div>
   </div>
+  <script src="/js/color.js"></script>
   <script src="/js/theme.js"></script>
   <script>
   (function() {
@@ -394,7 +468,9 @@ export function renderAppShell(pluginHeadHtml = ""): string {
   })();
   </script>
   <script type="module" src="/js/psycheros.js"></script>
+  <script type="module" src="/js/reindex-banner.js"></script>
   <script type="module" src="/js/voice.js"></script>
+  <script type="module" src="/js/workspace.js"></script>
 </body>
 </html>`;
 }
@@ -491,7 +567,7 @@ export function renderHeaderTitle(title?: string): string {
 /**
  * Render a back button that returns to the settings hub.
  */
-function renderSettingsBackButton(
+export function renderSettingsBackButton(
   href: string = "/fragments/settings",
 ): string {
   const label = href === "/fragments/settings/plugins"
@@ -763,6 +839,25 @@ export function renderSettingsHub(): string {
         <div class="settings-hub-card-body">
           <span class="settings-hub-card-title">Plugins</span>
           <span class="settings-hub-card-desc">Inspect trusted local extensions and runtime status</span>
+        </div>
+        <svg class="settings-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </a>
+      <a class="settings-hub-card"
+        hx-get="/fragments/settings/workspace"
+        hx-target="#chat"
+        hx-swap="innerHTML">
+        <div class="settings-hub-card-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="5" width="20" height="14" rx="2"/>
+            <path d="M6 12l3 2-3 2"/>
+            <line x1="13" y1="16" x2="16" y2="16"/>
+          </svg>
+        </div>
+        <div class="settings-hub-card-body">
+          <span class="settings-hub-card-title">Workspace</span>
+          <span class="settings-hub-card-desc">Sub-agent coding sessions via OpenCode — entity's faculty for detailed work</span>
         </div>
         <svg class="settings-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="9 18 15 12 9 6"/>
@@ -1324,58 +1419,58 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
 
     <div id="general-tab-theme" class="general-tab-panel" style="display:none;">
 
-    <!-- Accent Color Section -->
+    <!-- Theme Studio Section -->
     <section class="theme-section">
-      <h3 class="theme-section-title">Accent Color</h3>
-      <p class="theme-section-desc">Choose a preset or pick a custom color</p>
-      <div class="theme-grid" id="theme-grid">
-        <button class="theme-swatch" data-theme="phosphor" title="Phosphor Green" style="--swatch-color: #39ff14">
-          <span class="swatch-preview"></span>
-          <span class="swatch-name">Phosphor</span>
-        </button>
-        <button class="theme-swatch" data-theme="ocean" title="Ocean Blue" style="--swatch-color: #00d4ff">
-          <span class="swatch-preview"></span>
-          <span class="swatch-name">Ocean</span>
-        </button>
-        <button class="theme-swatch" data-theme="sunset" title="Sunset Orange" style="--swatch-color: #ff6b35">
-          <span class="swatch-preview"></span>
-          <span class="swatch-name">Sunset</span>
-        </button>
-        <button class="theme-swatch" data-theme="violet" title="Violet Dream" style="--swatch-color: #a855f7">
-          <span class="swatch-preview"></span>
-          <span class="swatch-name">Violet</span>
-        </button>
-        <button class="theme-swatch" data-theme="rose" title="Rose" style="--swatch-color: #f43f5e">
-          <span class="swatch-preview"></span>
-          <span class="swatch-name">Rose</span>
-        </button>
-        <button class="theme-swatch" data-theme="amber" title="Amber" style="--swatch-color: #f59e0b">
-          <span class="swatch-preview"></span>
-          <span class="swatch-name">Amber</span>
-        </button>
-        <button class="theme-swatch" data-theme="mint" title="Mint" style="--swatch-color: #10b981">
-          <span class="swatch-preview"></span>
-          <span class="swatch-name">Mint</span>
-        </button>
-        <button class="theme-swatch" data-theme="slate" title="Slate" style="--swatch-color: #64748b">
-          <span class="swatch-preview"></span>
-          <span class="swatch-name">Slate</span>
-        </button>
-        <button class="theme-swatch" data-theme="custom" title="Custom Color" style="--swatch-color: #888888">
-          <span class="swatch-preview swatch-preview--custom">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M20.71 4.63l-1.34-1.34c-.37-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.04 0-1.41z"/>
-              <path d="M7 14l-4.69 4.69a1 1 0 0 0-.21.33l-1 3a1 1 0 0 0 1.21 1.21l3-1a1 1 0 0 0 .33-.21L10 18"/>
-            </svg>
-          </span>
-          <span class="swatch-name">Custom</span>
-        </button>
+      <h3 class="theme-section-title">Theme</h3>
+      <p class="theme-section-desc">Pick a palette, generate one from a seed color, or craft your own</p>
+
+      <div class="studio-tabs" id="studio-tabs">
+        <button type="button" class="studio-tab active" data-studio-mode="presets">Presets</button>
+        <button type="button" class="studio-tab" data-studio-mode="generate">Generate</button>
+        <button type="button" class="studio-tab" data-studio-mode="custom">Custom</button>
       </div>
-      <div class="custom-color-row" id="custom-color-row" style="display: none;">
-        <input type="color" id="custom-color-picker" class="color-picker" value="#a855f7">
-        <input type="text" id="custom-color-hex" class="color-hex-input" placeholder="#a855f7" maxlength="7">
+
+      <div class="studio-panel" id="studio-panel-presets">
+        <div class="studio-preset-grid" id="studio-preset-grid"></div>
       </div>
-      <button class="btn btn--ghost btn--sm" onclick="Theme.reset(); initAppearance();" style="margin-top: var(--sp-3);">Reset to Default</button>
+
+      <div class="studio-panel" id="studio-panel-generate" style="display:none;">
+        <div class="studio-seed-row">
+          <input type="color" id="gen-seed-color" class="color-picker" value="#a855f7" aria-label="Seed color">
+          <input type="text" id="gen-seed-hex" class="color-hex-input" placeholder="#a855f7" maxlength="7" aria-label="Seed color hex">
+          <button type="button" class="btn btn--ghost btn--sm" onclick="studioSurprise()">Surprise me</button>
+        </div>
+        <div class="studio-rule-row" id="gen-rules">
+          <button type="button" class="studio-chip active" data-rule="complementary">Complementary</button>
+          <button type="button" class="studio-chip" data-rule="analogous">Analogous</button>
+          <button type="button" class="studio-chip" data-rule="triadic">Triadic</button>
+          <button type="button" class="studio-chip" data-rule="tetradic">Tetradic</button>
+        </div>
+        <div class="studio-mode-row" id="gen-mode">
+          <button type="button" class="studio-chip active" data-mode="dark">Dark</button>
+          <button type="button" class="studio-chip" data-mode="light">Light</button>
+        </div>
+        <label class="studio-slider-row">
+          <span>Tint neutrals</span>
+          <input type="range" id="gen-tint" min="0" max="100" value="0" oninput="studioTintInput(this)">
+          <span id="gen-tint-value">0%</span>
+        </label>
+        <div class="studio-preview" id="gen-preview" aria-label="Generated palette preview"></div>
+        <button type="button" class="btn btn--primary btn--sm" onclick="studioApplyGenerated()">Apply generated palette</button>
+      </div>
+
+      <div class="studio-panel" id="studio-panel-custom" style="display:none;">
+        <div id="studio-custom-slots"></div>
+      </div>
+
+      <div class="studio-contrast-row" id="studio-contrast"></div>
+
+      <div class="studio-actions">
+        <button type="button" class="btn btn--ghost btn--sm" onclick="studioExport()">Export</button>
+        <button type="button" class="btn btn--ghost btn--sm" onclick="document.getElementById('studio-import-file').click()">Import</button>
+        <input type="file" id="studio-import-file" accept="application/json,.json" onchange="studioImport(this)" hidden>
+        <button type="button" class="btn btn--ghost btn--sm" onclick="Theme.reset(); initAppearance();">Reset to Default</button>
+      </div>
     </section>
 
     <!-- Background Image Section -->
@@ -1415,6 +1510,26 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
         </div>
 
         <button class="btn btn--ghost btn--sm" onclick="clearBackground()">Clear Background</button>
+      </div>
+    </section>
+
+    <!-- Decor Section -->
+    <section class="theme-section">
+      <h3 class="theme-section-title">Decor</h3>
+      <p class="theme-section-desc">Optional edges for message bubbles</p>
+      <div class="studio-decor-row" id="studio-decor-row">
+        <button type="button" class="studio-decor-card" data-decor="none" title="No edge">
+          <span class="studio-decor-preview" data-decor-preview="none"></span>
+          <span class="studio-decor-name">None</span>
+        </button>
+        <button type="button" class="studio-decor-card" data-decor="lace" title="Scalloped lace edge">
+          <span class="studio-decor-preview" data-decor-preview="lace"></span>
+          <span class="studio-decor-name">Lace</span>
+        </button>
+        <button type="button" class="studio-decor-card" data-decor="stamp" title="Perforated stamp edge">
+          <span class="studio-decor-preview" data-decor-preview="stamp"></span>
+          <span class="studio-decor-name">Stamp</span>
+        </button>
       </div>
     </section>
 
@@ -1497,56 +1612,268 @@ function showAppearanceStatus(type, message) {
   }
 }
 
-function initAppearance() {
-  const theme = Theme.get();
-  const customRow = document.getElementById('custom-color-row');
-  const colorPicker = document.getElementById('custom-color-picker');
-  const colorHex = document.getElementById('custom-color-hex');
-  const customSwatch = document.querySelector('.theme-swatch[data-theme="custom"]');
+// --- Theme Studio ---
+// NOTE: fragment scripts re-execute on every HTMX swap — top-level
+// declarations must be var/function (redeclare-safe), never const/let
+// (a re-run SyntaxError kills the whole script and the Studio never mounts).
+var STUDIO_SLOT_META = [
+  { key: 'bg', label: 'Background' },
+  { key: 'fg', label: 'Text' },
+  { key: 'accent', label: 'Accent' },
+  { key: 'highlight', label: 'Highlight' },
+  { key: 'success', label: 'Success' },
+  { key: 'warning', label: 'Warning' },
+  { key: 'error', label: 'Alert' },
+];
 
-  const isCustom = !!theme.customAccent;
+var STUDIO_STRIP_WEIGHTS = { bg: 3, accent: 2, highlight: 1, success: 1, warning: 1 };
 
-  document.querySelectorAll('.theme-swatch').forEach(el => {
-    const isPresetMatch = !isCustom && el.dataset.theme === theme.preset;
-    const isCustomMatch = isCustom && el.dataset.theme === 'custom';
-    el.classList.toggle('active', isPresetMatch || isCustomMatch);
+// Stripes preview the EFFECTIVE palette (post-derivation, including the
+// accent-collision clearance), not the raw picked slots — a preview must
+// show what actually applies.
+function studioEffectiveSlots(slots) {
+  return globalThis.ColorMath ? ColorMath.deriveTokens(slots).slots : slots;
+}
 
-    el.onclick = () => {
-      document.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
-      el.classList.add('active');
-      if (el.dataset.theme === 'custom') {
-        customRow.style.display = 'flex';
-        const hex = colorPicker.value;
-        Theme.setCustomAccent(hex);
-        customSwatch.style.setProperty('--swatch-color', hex);
-      } else {
-        customRow.style.display = 'none';
-        Theme.setPreset(el.dataset.theme);
+function studioStrip(slots) {
+  const eff = studioEffectiveSlots(slots);
+  return Object.entries(STUDIO_STRIP_WEIGHTS).map(([k, w]) =>
+    '<span style="background:' + eff[k] + ';flex:' + w + '"></span>').join('');
+}
+
+function studioGenState() {
+  return {
+    seed: document.getElementById('gen-seed-hex').value,
+    rule: document.querySelector('#gen-rules .studio-chip.active')?.dataset.rule || 'complementary',
+    mode: document.querySelector('#gen-mode .studio-chip.active')?.dataset.mode || 'dark',
+    tintNeutrals: parseInt(document.getElementById('gen-tint').value) / 100,
+  };
+}
+
+// Preview of what applyGenerator would produce, without touching Theme state.
+function studioPreviewSlots(gen) {
+  const pair = ColorMath.harmony(gen.seed, gen.rule);
+  if (!pair) return null;
+  const isDark = gen.mode !== 'light';
+  const baseNeutrals = isDark ? { bg: '#000000', fg: '#e8e8e8' } : { bg: '#f7f4f2', fg: '#292524' };
+  return {
+    bg: ColorMath.mix(baseNeutrals.bg, gen.seed, (isDark ? 0.05 : 0.04) * gen.tintNeutrals),
+    fg: baseNeutrals.fg,
+    accent: gen.seed,
+    highlight: pair.highlight,
+    ...ColorMath.semanticDefaults(isDark),
+  };
+}
+
+function studioPreview() {
+  const slots = studioPreviewSlots(studioGenState());
+  const el = document.getElementById('gen-preview');
+  if (el) el.innerHTML = slots ? studioStrip(slots) : '';
+}
+
+function studioApplyGenerated() {
+  const gen = studioGenState();
+  if (!ColorMath.harmony(gen.seed, gen.rule)) {
+    showAppearanceStatus('error', 'Enter a valid seed color (#rrggbb)');
+    return;
+  }
+  Theme.applyGenerator(gen);
+  initAppearance();
+}
+
+function studioSurprise() {
+  const seed = ColorMath.randomSeed();
+  document.getElementById('gen-seed-color').value = seed;
+  document.getElementById('gen-seed-hex').value = seed;
+  studioPreview();
+}
+
+function studioTintInput(input) {
+  document.getElementById('gen-tint-value').textContent = input.value + '%';
+  studioPreview();
+}
+
+function studioSwitchMode(mode) {
+  document.querySelectorAll('#studio-tabs .studio-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.studioMode === mode);
+  });
+  document.getElementById('studio-panel-presets').style.display = mode === 'presets' ? '' : 'none';
+  document.getElementById('studio-panel-generate').style.display = mode === 'generate' ? '' : 'none';
+  document.getElementById('studio-panel-custom').style.display = mode === 'custom' ? '' : 'none';
+}
+
+function studioBuildPresets(theme) {
+  const grid = document.getElementById('studio-preset-grid');
+  if (!grid) return;
+  const presets = Theme.getPresets();
+  grid.innerHTML = Object.entries(presets).map(([id, p]) => {
+    const active = theme.source === 'preset' && theme.presetId === id;
+    return '<button type="button" class="studio-preset-card' + (active ? ' active' : '') + '" data-preset="' + id + '"' +
+      ' title="' + p.name + '">' +
+      '<span class="studio-preset-strip">' + studioStrip(p.slots) + '</span>' +
+      '<span class="studio-preset-name">' + id.charAt(0).toUpperCase() + id.slice(1) + '</span>' +
+      '<span class="studio-preset-mode">' + (p.dark ? 'dark' : 'light') + '</span>' +
+      '</button>';
+  }).join('');
+  grid.querySelectorAll('.studio-preset-card').forEach(card => {
+    card.onclick = () => {
+      Theme.setPreset(card.dataset.preset);
+      initAppearance();
+    };
+  });
+}
+
+function studioBuildDecor(theme) {
+  document.querySelectorAll('#studio-decor-row .studio-decor-card').forEach(card => {
+    card.classList.toggle('active', card.dataset.decor === theme.decor);
+    card.onclick = () => {
+      Theme.setDecor(card.dataset.decor);
+      initAppearance();
+    };
+  });
+}
+
+function studioBuildCustomSlots(theme) {
+  const wrap = document.getElementById('studio-custom-slots');
+  if (!wrap) return;
+  wrap.innerHTML = STUDIO_SLOT_META.map(m =>
+    '<div class="studio-slot-row">' +
+    '<span class="studio-slot-label">' + m.label + '</span>' +
+    '<input type="text" class="color-hex-input" data-slot-hex="' + m.key + '" value="' + theme.slots[m.key] + '" maxlength="7" aria-label="' + m.label + ' hex">' +
+    '<input type="color" class="color-picker" data-slot-color="' + m.key + '" value="' + theme.slots[m.key] + '" aria-label="' + m.label + ' color">' +
+    '</div>'
+  ).join('');
+  wrap.querySelectorAll('[data-slot-color]').forEach(picker => {
+    const hexInput = wrap.querySelector('[data-slot-hex="' + picker.dataset.slotColor + '"]');
+    picker.oninput = () => { hexInput.value = picker.value; };
+    picker.onchange = () => studioSetSlot(picker.dataset.slotColor, picker.value);
+  });
+  wrap.querySelectorAll('[data-slot-hex]').forEach(hexInput => {
+    hexInput.onchange = () => {
+      if (/^#[0-9a-fA-F]{6}$/.test(hexInput.value)) {
+        studioSetSlot(hexInput.dataset.slotHex, hexInput.value);
       }
     };
   });
+}
 
-  if (isCustom) {
-    customRow.style.display = 'flex';
-    colorPicker.value = theme.customAccent;
-    colorHex.value = theme.customAccent;
-    customSwatch.style.setProperty('--swatch-color', theme.customAccent);
+function studioSetSlot(key, hex) {
+  const slots = { ...Theme.get().slots, [key]: hex };
+  Theme.setSlots(slots);
+  initAppearance();
+}
+
+function studioFixWarning(pair) {
+  const theme = Theme.get();
+  const slots = { ...theme.slots };
+  if (pair === 'fg/bg') {
+    slots.fg = ColorMath.fixContrast(slots.fg, slots.bg, 4.5);
+  } else if (pair === 'accent/bg') {
+    slots.accent = ColorMath.fixContrast(slots.accent, slots.bg, 3);
+  } else if (pair === 'highlight/bg') {
+    slots.highlight = ColorMath.fixContrast(slots.highlight, slots.bg, 3);
   } else {
-    customRow.style.display = 'none';
+    return;
   }
+  Theme.setSlots(slots);
+  initAppearance();
+}
 
-  colorPicker.oninput = () => {
-    colorHex.value = colorPicker.value;
-    Theme.setCustomAccent(colorPicker.value);
-    customSwatch.style.setProperty('--swatch-color', colorPicker.value);
-  };
-  colorHex.onchange = () => {
-    if (/^#[0-9a-fA-F]{6}$/.test(colorHex.value)) {
-      colorPicker.value = colorHex.value;
-      Theme.setCustomAccent(colorHex.value);
-      customSwatch.style.setProperty('--swatch-color', colorHex.value);
+function studioRenderContrast() {
+  const el = document.getElementById('studio-contrast');
+  if (!el) return;
+  const computed = Theme.getComputed();
+  const warnings = computed.warnings || [];
+  if (warnings.length === 0) {
+    el.innerHTML = '<span class="studio-contrast-chip ok">Contrast OK</span>';
+    return;
+  }
+  el.innerHTML = warnings.map(w =>
+    '<span class="studio-contrast-chip low">' + w.pair + ' ' + w.ratio + ':1' +
+    (w.pair.includes('/') ? ' <button type="button" data-fix="' + w.pair + '">Fix</button>' : '') +
+    '</span>'
+  ).join('');
+  el.querySelectorAll('[data-fix]').forEach(btn => {
+    btn.onclick = () => studioFixWarning(btn.dataset.fix);
+  });
+}
+
+function studioExport() {
+  const blob = new Blob([Theme.exportTheme()], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'psycheros-theme.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function studioImport(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  file.text().then(text => {
+    if (Theme.importTheme(text)) {
+      showAppearanceStatus('success', 'Theme imported');
+      initAppearance();
+    } else {
+      showAppearanceStatus('error', 'Could not read that theme file');
     }
-  };
+  });
+}
+
+function initAppearance() {
+  const theme = Theme.get();
+
+  document.querySelectorAll('#studio-tabs .studio-tab').forEach(tab => {
+    tab.onclick = () => studioSwitchMode(tab.dataset.studioMode);
+  });
+  const startMode = theme.source === 'preset' ? 'presets' : theme.source === 'generated' ? 'generate' : 'custom';
+  studioSwitchMode(startMode);
+
+  studioBuildPresets(theme);
+  studioBuildCustomSlots(theme);
+  studioBuildDecor(theme);
+  studioRenderContrast();
+
+  const seedColor = document.getElementById('gen-seed-color');
+  const seedHex = document.getElementById('gen-seed-hex');
+  if (seedColor && !seedColor.dataset.wired) {
+    seedColor.dataset.wired = '1';
+    seedColor.oninput = () => { seedHex.value = seedColor.value; studioPreview(); };
+    seedColor.onchange = studioPreview;
+    seedHex.oninput = () => {
+      if (/^#[0-9a-fA-F]{6}$/.test(seedHex.value)) { seedColor.value = seedHex.value; studioPreview(); }
+    };
+    document.querySelectorAll('#gen-rules .studio-chip').forEach(chip => {
+      chip.onclick = () => {
+        document.querySelectorAll('#gen-rules .studio-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        studioPreview();
+      };
+    });
+    document.querySelectorAll('#gen-mode .studio-chip').forEach(chip => {
+      chip.onclick = () => {
+        document.querySelectorAll('#gen-mode .studio-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        studioPreview();
+      };
+    });
+  }
+  if (theme.source === 'generated' && theme.generator) {
+    seedColor.value = theme.generator.seed;
+    seedHex.value = theme.generator.seed;
+    document.querySelectorAll('#gen-rules .studio-chip').forEach(c =>
+      c.classList.toggle('active', c.dataset.rule === theme.generator.rule));
+    document.querySelectorAll('#gen-mode .studio-chip').forEach(c =>
+      c.classList.toggle('active', c.dataset.mode === theme.generator.mode));
+    document.getElementById('gen-tint').value = Math.round(theme.generator.tintNeutrals * 100);
+    document.getElementById('gen-tint-value').textContent = Math.round(theme.generator.tintNeutrals * 100) + '%';
+  } else if (seedHex && !seedHex.value) {
+    seedHex.value = theme.slots.accent;
+    seedColor.value = theme.slots.accent;
+  }
+  studioPreview();
 
   const bgBlur = document.getElementById('bg-blur');
   const bgOverlay = document.getElementById('bg-overlay');
@@ -1695,8 +2022,8 @@ export function renderSASettings(
         }</span>
               <span class="ble-status-badge" style="font-size:var(--font-size-xs);padding:2px 8px;border-radius:8px;${
           isConnected
-            ? "background:rgba(76,175,80,0.15);color:#4CAF50;"
-            : "background:rgba(158,158,158,0.15);color:#9E9E9E;"
+            ? "background:var(--c-success-subtle);color:var(--c-success);"
+            : "background:var(--c-wash-strong);color:var(--c-fg-muted);"
         }">${isConnected ? "Connected" : "Disconnected"}</span>
             </label>
             ${
@@ -1810,7 +2137,7 @@ export function renderSASettings(
               <span class="toggle-slider"></span>
             </label>
             <input type="text" data-rule-name placeholder="Rule name"
-              style="flex:1;background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:6px 8px;font-size:14px;">
+              style="flex:1;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:6px 8px;font-size:14px;">
             <button class="btn" onclick="deleteEventRule(this)" title="Delete rule"
               style="padding:4px 8px;color:var(--c-fg-muted);">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -1818,30 +2145,30 @@ export function renderSASettings(
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;">
             <label style="font-size:12px;color:var(--c-fg-muted);">IF</label>
-            <select data-cond-stream style="background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
+            <select data-cond-stream style="background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
               ${streamOptions}
             </select>
-            <select data-cond-operator style="background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
+            <select data-cond-operator style="background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
               <option value="changes_to">changes to</option>
               <option value="goes_above">goes above</option>
               <option value="goes_below">goes below</option>
             </select>
             <input type="text" data-cond-value placeholder="value"
-              style="width:60px;background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
+              style="width:60px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
             <input type="number" data-cond-sustained placeholder="sustain min" min="0"
-              style="width:80px;background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;" title="Sustained: condition must hold for this many minutes before firing">
+              style="width:80px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;" title="Sustained: condition must hold for this many minutes before firing">
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;">
             <label style="font-size:12px;color:var(--c-fg-muted);">THEN</label>
             <span style="font-size:13px;">Run Pulse:</span>
-            <select data-action-pulse style="background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
+            <select data-action-pulse style="background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
               ${pulseOptions}
             </select>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
             <label style="font-size:13px;color:var(--c-fg-muted);">Cooldown:</label>
             <input type="number" data-rule-cooldown value="5" min="0"
-              style="width:50px;background:var(--input-bg);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
+              style="width:50px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
             <span style="font-size:12px;color:var(--c-fg-muted);">min</span>
           </div>
         </div>
@@ -1898,7 +2225,7 @@ function renderEventRuleCard(
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:4px;">
       <span style="font-size:12px;color:var(--c-fg-muted);">IF</span>
-      <span style="background:var(--input-bg);padding:2px 6px;border-radius:4px;font-size:13px;font-family:monospace;">${
+      <span style="background:var(--c-bg-raised);padding:2px 6px;border-radius:4px;font-size:13px;font-family:monospace;">${
     escapeHtml(rule.condition.streamId)
   } ${opLabel[rule.condition.operator] ?? rule.condition.operator} ${
     escapeHtml(String(rule.condition.value))
@@ -2075,6 +2402,124 @@ ${renderInputArea()}`;
 }
 
 /**
+ * Render the workspace terminal pane — replaces the chat view for workspace
+ * conversations. The live stream (SSE workspace_event) appends terminal lines
+ * into .wt-output while the session runs; ended sessions render briefing +
+ * any persisted entity/OpenCode turns + the summary. Per the ephemeral
+ * principle, the full transcript exists only live — never persisted.
+ *
+ * In engaged mode the persisted rows are: user rows = OpenCode's output,
+ * assistant rows = the entity's turns. Rendered as terminal output lines and
+ * accent-colored entity input lines respectively.
+ */
+export function renderWorkspaceTerminal(
+  conversationId: string,
+  session: WorkspaceSession | null,
+  entityName: string,
+  messages: Message[],
+): string {
+  const status = session?.status ?? "unknown";
+  const statusLabel: Record<string, string> = {
+    running: "RUNNING",
+    suspended: "SUSPENDED",
+    complete: "COMPLETE",
+    failed: "FAILED",
+    cancelled: "CANCELLED",
+    pending: "STARTING",
+    paused: "SUSPENDED",
+    unknown: "NO SESSION",
+  };
+  const isLive = status === "running" || status === "pending";
+
+  const goal = session?.briefing?.goal ?? "(no briefing recorded)";
+  const context = session?.briefing?.context;
+
+  const metaBits: string[] = [];
+  if (session) {
+    metaBits.push(session.mode);
+    metaBits.push(session.isolation ?? "sandboxed");
+    if (session.workdir) metaBits.push(session.workdir);
+    if (session.tokenUsage > 0) {
+      metaBits.push(`${session.tokenUsage.toLocaleString()} tokens`);
+    }
+    if (session.createdAt) metaBits.push(session.createdAt.slice(0, 10));
+  }
+
+  const lines: string[] = [];
+  for (const msg of messages) {
+    const text = (typeof msg.content === "string"
+      ? msg.content
+      : JSON.stringify(msg.content)).trim();
+    if (!text) {
+      continue;
+    }
+    if (msg.role === "assistant") {
+      lines.push(
+        `<div class="wt-line wt-line--entity"><span class="wt-entity-name">${
+          escapeHtml(entityName)
+        }</span><span class="wt-text">${escapeHtml(text)}</span></div>`,
+      );
+    } else {
+      lines.push(
+        `<div class="wt-line wt-line--output"><span class="wt-src">opencode</span><span class="wt-text">${
+          escapeHtml(text)
+        }</span></div>`,
+      );
+    }
+  }
+
+  return `<div class="workspace-terminal" id="workspace-terminal" data-conversation-id="${
+    escapeHtml(conversationId)
+  }" data-entity-name="${
+    escapeHtml(entityName)
+  }" data-session-status="${status}">
+  <div class="wt-header">
+    <span class="wt-prompt">❯</span>
+    <span class="wt-goal">${escapeHtml(goal)}</span>
+    <span class="wt-status wt-status--${status}">${
+    statusLabel[status] ?? status
+  }</span>
+  </div>
+  ${
+    metaBits.length > 0
+      ? `<div class="wt-meta">${
+        metaBits.map((b) => escapeHtml(b)).join(" · ")
+      }</div>`
+      : ""
+  }
+  <div class="wt-output" id="wt-output">
+    <div class="wt-block wt-briefing">
+      <div class="wt-block-label">briefing</div>
+      <div class="wt-text">${escapeHtml(goal)}</div>
+      ${
+    context ? `<div class="wt-text wt-dim">${escapeHtml(context)}</div>` : ""
+  }
+    </div>
+    ${
+    isLive
+      ? `<div class="wt-live-note" id="wt-live-note">live — waiting for events…</div>`
+      : ""
+  }
+    ${lines.join("\n    ")}
+    ${
+    !isLive && session?.summary
+      ? `<div class="wt-block wt-summary">
+      <div class="wt-block-label">summary</div>
+      <div class="wt-text">${escapeHtml(session.summary)}</div>
+    </div>`
+      : ""
+  }
+  </div>
+  <div class="wt-footer" id="wt-footer">
+    <span class="wt-cursor">▊</span>
+    <span class="wt-footer-text">${
+    isLive ? "streaming" : "session ended — transcript is ephemeral"
+  }</span>
+  </div>
+</div>`;
+}
+
+/**
  * Render all messages.
  */
 export function renderMessages(
@@ -2109,6 +2554,20 @@ export function renderMessage(
   displayNames?: { entityName: string; userName: string },
   toolResultsByCallId?: Map<string, Message>,
 ): string {
+  // Tombstone check — soft-deleted messages render as a placeholder notice
+  // so conversation flow is preserved without showing the deleted content.
+  // Original content is archived in metadata.tombstone for recovery.
+  if (msg.deletedAt) {
+    return renderTombstoneMessage(msg);
+  }
+
+  // Glitched check — corrupted/unreadable messages render as a placeholder
+  // so the user sees something is wrong without breaking flow. Entity can
+  // repair via write_entity_data Phase 2.
+  if (msg.isGlitched) {
+    return renderGlitchedMessage(msg);
+  }
+
   // Derive [Voice Chat] prefix from the isVoice column (authoritative).
   // Also strip any stray prefix from content as defense-in-depth — the
   // column is the source of truth, content should never carry the prefix.
@@ -2139,6 +2598,104 @@ export function renderMessage(
 }
 
 /**
+ * Render the action buttons for a message: edit, delete (soft-delete /
+ * tombstone), and flag-glitched. Per plan §9f — surfaces the trigger
+ * paths so users can mark their own or the entity's messages for
+ * repair/removal without needing to ask the entity to do it.
+ *
+ * @param messageId - The message ID. When undefined, no buttons render.
+ * @param prefix - CSS class prefix: "msg" for regular chat messages,
+ *   "discord-msg" for Discord channel view messages. The edit button
+ *   already used different classes (msg-edit-btn vs discord-msg-edit-btn);
+ *   we mirror that for the new buttons.
+ */
+function renderMessageActionButtons(
+  messageId: string | undefined,
+  prefix: "msg" | "discord-msg" = "msg",
+): string {
+  if (!messageId) return "";
+  const id = escapeHtml(messageId);
+  const editCls = prefix === "discord-msg"
+    ? "discord-msg-edit-btn"
+    : "msg-edit-btn";
+  const actionCls = prefix === "discord-msg"
+    ? "discord-msg-action-btn"
+    : "msg-action-btn";
+  return `<button class="${editCls}" onclick="Psycheros.startMessageEdit('${id}')" title="Edit message">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+      </button>
+      <button class="${actionCls}" onclick="Psycheros.confirmDeleteMessage('${id}')" title="Delete message">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/>
+          <path d="M10 11v6M14 11v6"/>
+          <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/>
+        </svg>
+      </button>
+      <button class="${actionCls}" onclick="Psycheros.confirmFlagGlitched('${id}')" title="Mark as corrupted">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+      </button>`;
+}
+
+/**
+ * Render a soft-deleted message as a tombstone placeholder. The visible
+ * content is a notice (e.g. "[deleted by entity — 2026-07-28 — reason: ...]"),
+ * preserving conversation flow without showing the deleted content.
+ *
+ * Original content is archived in metadata.tombstone for recovery.
+ */
+function renderTombstoneMessage(msg: Message): string {
+  const deletedAt = msg.deletedAt instanceof Date
+    ? msg.deletedAt.toISOString()
+    : String(msg.deletedAt);
+  // The content was already replaced with the tombstone notice at write time
+  // (db.softDeleteMessage), so we just render it with a styled container.
+  const tombstoneNotice = msg.content || "[message deleted]";
+  const tombstoneMeta = msg.metadata?.tombstone;
+  const reason = tombstoneMeta?.reason
+    ? ` — reason: ${escapeHtml(tombstoneMeta.reason)}`
+    : "";
+  const id = escapeHtml(msg.id);
+  return `<div class="message tombstone" data-message-id="${id}" role="status">
+    <div class="tombstone-marker">✕</div>
+    <div class="tombstone-content">
+      <div class="tombstone-notice">${escapeHtml(tombstoneNotice)}</div>
+      <div class="tombstone-meta">Deleted ${
+    escapeHtml(deletedAt)
+  }${reason}</div>
+      <button class="tombstone-restore-btn" onclick="Psycheros.restoreDeletedMessage('${id}')" title="Restore message">Restore</button>
+    </div>
+  </div>`;
+}
+
+/**
+ * Render a glitched (corrupted/unreadable) message as a terminal-style
+ * placeholder. The content stays in the DB (typically unreadable); the UI
+ * overlays a `▒▒▒ MESSAGE CORRUPTED ▒▒▒` block so the user knows something
+ * is wrong. Entity can repair via write_entity_data.
+ */
+function renderGlitchedMessage(msg: Message): string {
+  const id = escapeHtml(msg.id);
+  return `<div class="message glitched" data-message-id="${id}" role="alert">
+    <div class="glitched-marker">⚠</div>
+    <div class="glitched-content">
+      <div class="glitched-placeholder">▒▒▒ MESSAGE CORRUPTED ▒▒▒</div>
+      <div class="glitched-meta">Message ${
+    escapeHtml(msg.id)
+  } — content unreadable. Entity can repair via write_entity_data or the workspace skill.</div>
+      <button class="glitched-clear-btn" onclick="Psycheros.clearGlitchedFlag('${id}')" title="Clear glitched flag">Clear flag</button>
+    </div>
+  </div>`;
+}
+
+/**
  * Render a user message.
  *
  * @param content - Message content
@@ -2155,16 +2712,7 @@ export function renderUserMessage(
   const editedIndicator = editedAt
     ? `<span class="msg-edited-indicator">(edited)</span>`
     : "";
-  const editBtn = messageId
-    ? `<button class="msg-edit-btn" onclick="Psycheros.startMessageEdit('${
-      escapeHtml(messageId)
-    }')" title="Edit message">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-        </svg>
-      </button>`
-    : "";
+  const actionButtons = renderMessageActionButtons(messageId);
   const dataAttr = messageId
     ? `data-message-id="${escapeHtml(messageId)}"`
     : "";
@@ -2197,7 +2745,7 @@ export function renderUserMessage(
     ${timeEl}
     <span>${displayName}</span>
     ${editedIndicator}
-    ${editBtn}
+    ${actionButtons}
   </div>
   <div class="msg-content user-text" data-raw-content="${
     escapeHtml(content)
@@ -2216,23 +2764,14 @@ function renderPulseMessage(msg: Message): string {
     : "";
   const pulseName = escapeHtml(msg.pulseName || "Pulse");
   const icon = pulseIconSvg(14);
-  const editBtn = msg.id
-    ? `<button class="msg-edit-btn" onclick="Psycheros.startMessageEdit('${
-      escapeHtml(msg.id)
-    }')" title="Edit message">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-        </svg>
-      </button>`
-    : "";
+  const actionButtons = renderMessageActionButtons(msg.id);
 
   return `<div class="msg msg--pulse" ${dataAttr}>
   <div class="msg-header">
     <span class="pulse-header-icon">${icon}</span>
     <span>${pulseName}</span>
     ${timeEl}
-    ${editBtn}
+    ${actionButtons}
   </div>
   <div class="msg-content" data-raw-content="${escapeHtml(msg.content)}">${
     renderMarkdown(msg.content)
@@ -2252,16 +2791,7 @@ export function renderAssistantMessage(
   const editedIndicator = msg.editedAt
     ? `<span class="msg-edited-indicator">(edited)</span>`
     : "";
-  const editBtn = msg.id
-    ? `<button class="msg-edit-btn" onclick="Psycheros.startMessageEdit('${
-      escapeHtml(msg.id)
-    }')" title="Edit message">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-        </svg>
-      </button>`
-    : "";
+  const actionButtons = renderMessageActionButtons(msg.id);
 
   const timeStr = msg.createdAt ? formatMessageTime(msg.createdAt) : "";
   const timeEl = timeStr
@@ -2277,7 +2807,7 @@ export function renderAssistantMessage(
     ${timeEl}
     ${editedIndicator}
     ${metrics ? renderMetricsIndicator(metrics) : ""}
-    ${editBtn}
+    ${actionButtons}
   </div>
   <div class="msg-content">`;
 
@@ -2716,13 +3246,13 @@ export function renderFileList(
           class="settings-create-file-input"
           id="upload-filename-input"
           placeholder="File name (e.g., base_instructions.md)"
-          style="padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--fg); font-family: inherit; font-size: 13px;"
+          style="padding: 8px; border: 1px solid var(--c-border); border-radius: 6px; background: var(--c-bg-raised); color: var(--c-fg); font-family: inherit; font-size: 13px;"
         />
         <textarea
           id="upload-content-input"
           placeholder="Paste file content here..."
           rows="5"
-          style="padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--fg); resize: vertical; font-family: inherit; font-size: 13px;"
+          style="padding: 8px; border: 1px solid var(--c-border); border-radius: 6px; background: var(--c-bg-raised); color: var(--c-fg); resize: vertical; font-family: inherit; font-size: 13px;"
         ></textarea>
         <button
           class="btn btn--primary btn--sm"
@@ -3265,7 +3795,7 @@ export function renderMemoryList(
           class="settings-create-file-input"
           id="significant-title-input"
           placeholder="Memory title..."
-          style="flex: 1 1 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--fg); font-family: inherit; font-size: 13px;"
+          style="flex: 1 1 100%; padding: 8px; border: 1px solid var(--c-border); border-radius: 6px; background: var(--c-bg-raised); color: var(--c-fg); font-family: inherit; font-size: 13px;"
         />
         <input
           type="date"
@@ -3277,7 +3807,7 @@ export function renderMemoryList(
           id="significant-content-input"
           placeholder="Memory content..."
           rows="2"
-          style="flex: 1 1 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--fg); resize: vertical; font-family: inherit; font-size: 13px;"
+          style="flex: 1 1 100%; padding: 8px; border: 1px solid var(--c-border); border-radius: 6px; background: var(--c-bg-raised); color: var(--c-fg); resize: vertical; font-family: inherit; font-size: 13px;"
         ></textarea>
         <button
           class="btn btn--primary btn--sm"
@@ -5656,7 +6186,7 @@ export function renderLLMProfileEdit(
       <!-- Persistent Reasoning (Intra-Turn) -->
       <div style="margin-top:1rem;">
         <label for="llm-persistent-intra" style="display:block;font-weight:600;margin-bottom:0.25rem;">Persistent Reasoning (Intra-Turn)</label>
-        <select id="llm-persistent-intra" onchange="updatePersistentReasoningWarnings()" style="width:100%;padding:0.4rem;background:var(--bg-secondary,#1a1a1a);color:var(--text-primary,#fff);border:1px solid var(--border-color,#333);border-radius:4px;">
+        <select id="llm-persistent-intra" onchange="updatePersistentReasoningWarnings()" style="width:100%;padding:0.4rem;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;">
           <option value="auto" ${
     isNew || profile?.persistentReasoningIntraTurn !== "on" &&
         profile?.persistentReasoningIntraTurn !== "off"
@@ -5671,7 +6201,7 @@ export function renderLLMProfileEdit(
   }>Off (force disable)</option>
         </select>
         <p class="label-hint" style="margin-top:0.25rem;font-size:0.8rem;opacity:0.7;">When working through a multi-step task, reasoning is retained between steps so each step builds on the last. Set to <strong>on</strong> if the provider accepts <code>reasoning_content</code> on inbound messages (DeepSeek, GLM, Venice.ai pointing at DeepSeek-R1, many OpenRouter backing models). <strong>Auto</strong> only enables this for verified providers.</p>
-        <p class="label-hint" id="persistent-intra-warning" style="margin-top:0.25rem;font-size:0.8rem;color:#f0ad4e;display:none;">This provider isn't in the verified list for persistent reasoning. If the API returns 400 errors on multi-step turns, set this back to auto or off.</p>
+        <p class="label-hint" id="persistent-intra-warning" style="margin-top:0.25rem;font-size:0.8rem;color:var(--c-warning);display:none;">This provider isn't in the verified list for persistent reasoning. If the API returns 400 errors on multi-step turns, set this back to auto or off.</p>
       </div>
 
       <!-- Persistent Reasoning (Inter-Turn) -->
@@ -5679,9 +6209,9 @@ export function renderLLMProfileEdit(
         <label for="llm-persistent-inter" style="display:block;font-weight:600;margin-bottom:0.25rem;">Persistent Reasoning (Inter-Turn)</label>
         <input type="number" id="llm-persistent-inter" min="0" max="20" value="${
     isNew ? 0 : profile?.persistentReasoningInterTurns ?? 0
-  }" oninput="updatePersistentReasoningWarnings()" style="width:6rem;padding:0.4rem;background:var(--bg-secondary,#1a1a1a);color:var(--text-primary,#fff);border:1px solid var(--border-color,#333);border-radius:4px;">
+  }" oninput="updatePersistentReasoningWarnings()" style="width:6rem;padding:0.4rem;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;">
         <p class="label-hint" style="margin-top:0.25rem;font-size:0.8rem;opacity:0.7;">How many past turns of thinking are carried forward. Higher values improve cohesion but consume context budget — each turn's reasoning can run 1-5k tokens. 0 disables.</p>
-        <p class="label-hint" id="persistent-inter-warning" style="margin-top:0.25rem;font-size:0.8rem;color:#f0ad4e;display:none;">This provider isn't in the verified list for persistent reasoning. If the API returns 400 errors, set this back to 0.</p>
+        <p class="label-hint" id="persistent-inter-warning" style="margin-top:0.25rem;font-size:0.8rem;color:var(--c-warning);display:none;">This provider isn't in the verified list for persistent reasoning. If the API returns 400 errors, set this back to 0.</p>
       </div>
     </section>
 
@@ -5891,8 +6421,8 @@ function renderBLEDeviceRow(
   const statusBadge =
     `<span class="ble-status-badge" style="font-size:var(--font-size-xs);padding:2px 8px;border-radius:8px;margin-top:14px;${
       connected
-        ? "background:rgba(76,175,80,0.15);color:#4CAF50;"
-        : "background:rgba(158,158,158,0.15);color:#9E9E9E;"
+        ? "background:var(--c-success-subtle);color:var(--c-success);"
+        : "background:var(--c-wash-strong);color:var(--c-fg-muted);"
     }">${connected ? "Connected" : "Disconnected"}</span>`;
   return `<div class="ble-device-row" data-device-id="${
     escapeHtml(d.id)
@@ -5922,7 +6452,7 @@ function renderBLEDeviceRow(
     Enabled
   </label>
   ${statusBadge}
-  <button class="btn btn--xs" onclick="this.closest('.ble-device-row').remove()" title="Remove device" style="margin-top:14px;background:var(--c-bg-hover,#333);border:1px solid var(--c-border,#555);color:var(--c-fg);">
+  <button class="btn btn--xs" onclick="this.closest('.ble-device-row').remove()" title="Remove device" style="margin-top:14px;background:var(--c-bg-hover);border:1px solid var(--c-border);color:var(--c-fg);">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
     </svg>
@@ -6047,7 +6577,7 @@ export function renderConnectionsSettings(
     wsSettings.provider === "tavily" ? "" : "display:none;"
   }">
       <h3 class="theme-section-title">Tavily API Key</h3>
-      <p class="theme-section-desc">Get an API key from <a href="https://tavily.com" target="_blank" rel="noopener" style="color:var(--accent)">tavily.com</a></p>
+      <p class="theme-section-desc">Get an API key from <a href="https://tavily.com" target="_blank" rel="noopener" style="color:var(--c-accent)">tavily.com</a></p>
       <div class="llm-fields">
         <div class="llm-field">
           <label for="ws-tavily-key">API Key</label>
@@ -6063,7 +6593,7 @@ export function renderConnectionsSettings(
     wsSettings.provider === "brave" ? "" : "display:none;"
   }">
       <h3 class="theme-section-title">Brave Search API Key</h3>
-      <p class="theme-section-desc">Get an API key from <a href="https://brave.com/search/api/" target="_blank" rel="noopener" style="color:var(--accent)">brave.com/search/api</a></p>
+      <p class="theme-section-desc">Get an API key from <a href="https://brave.com/search/api/" target="_blank" rel="noopener" style="color:var(--c-accent)">brave.com/search/api</a></p>
       <div class="llm-fields">
         <div class="llm-field">
           <label for="ws-brave-key">API Key</label>
@@ -6164,9 +6694,9 @@ export function renderConnectionsSettings(
     .connections-nav-tab:active { transform: scale(0.98); }
     .connections-nav-tab.active { color: var(--c-accent); background: var(--c-accent-subtle); border-color: var(--c-accent); }
     .radio-label { display: flex; align-items: center; gap: 10px; padding: 8px 0; cursor: pointer; }
-    .radio-label input[type="radio"] { accent-color: var(--accent); width: 16px; height: 16px; flex-shrink: 0; }
+    .radio-label input[type="radio"] { accent-color: var(--c-accent); width: 16px; height: 16px; flex-shrink: 0; }
     .radio-text { font-weight: 500; min-width: 100px; }
-    .label-hint { color: var(--text-dim); font-size: 0.85rem; }
+    .label-hint { color: var(--c-fg-muted); font-size: 0.85rem; }
   </style>
 </div>`;
 }
@@ -6217,9 +6747,25 @@ function renderHomeTab(
 export function renderConnectionsDiscordSettings(
   settings: DiscordSettings,
   gatewayConfig?: DiscordGatewayConfig,
+  llmProfiles?: { id: string; name: string; model: string }[],
 ): string {
   const gc = gatewayConfig;
   const dmWhitelist = gc?.dmWhitelist ?? [];
+  const selectedLlmProfileId = typeof gc?.llmProfileId === "string"
+    ? gc.llmProfileId
+    : "";
+  const llmProfileDropdown = !llmProfiles || llmProfiles.length === 0
+    ? `<p class="settings-note" style="color:var(--c-muted);">No LLM profiles configured. Create one in <a href="/fragments/settings/model" style="color:var(--c-accent);">Model Settings</a> first.</p>`
+    : `<select class="settings-input" id="discord-llm-profile">
+        <option value="">Use active profile (default)</option>
+        ${
+      llmProfiles.map((p) =>
+        `<option value="${escapeHtml(p.id)}"${
+          p.id === selectedLlmProfileId ? " selected" : ""
+        }>${escapeHtml(p.name)} (${escapeHtml(p.model)})</option>`
+      ).join("")
+    }
+      </select>`;
 
   return `<div class="settings-view">
   <div class="settings-header">
@@ -6369,6 +6915,11 @@ export function renderConnectionsDiscordSettings(
     escapeHtml(settings.globalInstructions)
   }</textarea>
             <span class="field-hint">Write from the entity's perspective, in first-person</span>
+          </div>
+          <div class="llm-field">
+            <label class="settings-label">LLM Profile for Server Channels</label>
+            ${llmProfileDropdown}
+            <span class="field-hint">Used for server-channel responses — e.g. an economical model for chatter. Direct messages and private chat always use the active profile.</span>
           </div>
           <div class="llm-field">
             <label class="toggle-label" for="discord-daily-memories">
@@ -6601,6 +7152,7 @@ async function saveDiscordSettings(event) {
         maxBufferSize: parseInt(document.getElementById('discord-max-buffer')?.value) || 50,
         includeInDailyMemories: document.getElementById('discord-daily-memories')?.checked ?? true,
         memoryInstructions: document.getElementById('discord-memory-instructions')?.value.trim() || '',
+        llmProfileId: document.getElementById('discord-llm-profile')?.value ?? '',
       };
 
       await fetch('/api/discord/gateway-config', {
@@ -6793,11 +7345,11 @@ function renderLovenseTab(
       .lovense-toys-grid { display: flex; flex-direction: column; gap: var(--sp-2); }
       .lovense-toy-card { background: var(--c-bg); border: 1px solid var(--c-border); border-radius: var(--radius-md); padding: var(--sp-3); display: flex; justify-content: space-between; align-items: center; }
       .lovense-toy-name { font-weight: 500; }
-      .lovense-toy-id { color: var(--text-dim); font-size: 0.8rem; font-family: monospace; }
+      .lovense-toy-id { color: var(--c-fg-muted); font-size: 0.8rem; font-family: monospace; }
       .lovense-toy-battery { color: var(--c-fg-muted); font-size: 0.85rem; }
       .lovense-toy-status { font-size: 0.8rem; padding: 2px 8px; border-radius: var(--radius-sm); }
-      .lovense-toy-status.connected { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
-      .lovense-toy-status.disconnected { background: rgba(248, 113, 113, 0.15); color: #f87171; }
+      .lovense-toy-status.connected { background: var(--c-success-subtle); color: var(--c-success); }
+      .lovense-toy-status.disconnected { background: var(--c-error-subtle); color: var(--c-error); }
     </style>
 
     <script>
@@ -7021,7 +7573,7 @@ function renderButtplugTab(
     <div id="buttplug-status" class="llm-status" style="display:none;"></div>
 
     <style>
-      .intimacy-section-header { margin: var(--sp-9) 0 var(--sp-4) 0; padding-bottom: var(--sp-3); border-bottom: 1px solid var(--c-border); }
+      .intimacy-section-header { margin: var(--sp-8) 0 var(--sp-4) 0; padding-bottom: var(--sp-3); border-bottom: 1px solid var(--c-border); }
       .intimacy-section-header:first-child { margin-top: 0; }
       .intimacy-section-title { margin: 0; font-size: 18px; font-weight: 700; color: var(--c-fg); }
       .intimacy-section-desc { margin: var(--sp-1) 0 0 0; font-size: var(--font-size-sm); color: var(--c-fg-muted); }
@@ -7030,7 +7582,7 @@ function renderButtplugTab(
       .buttplug-devices-grid { display: flex; flex-direction: column; gap: var(--sp-2); }
       .buttplug-device-card { background: var(--c-bg); border: 1px solid var(--c-border); border-radius: var(--radius-md); padding: var(--sp-3); display: flex; justify-content: space-between; align-items: center; }
       .buttplug-device-name { font-weight: 500; }
-      .buttplug-device-caps { color: var(--c-fg-dim); font-size: 0.8rem; }
+      .buttplug-device-caps { color: var(--c-fg-muted); font-size: 0.8rem; }
     </style>
 
     <script>
@@ -7298,18 +7850,18 @@ function renderHomeSettingsContent(
     .home-device-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .home-device-name-row { display: flex; align-items: center; gap: 6px; }
     .home-device-name { font-weight: 600; font-size: 14px; color: var(--c-fg); }
-    .home-device-meta { font-size: 12px; color: var(--c-fg-dim); }
+    .home-device-meta { font-size: 12px; color: var(--c-fg-muted); }
     .home-device-actions { display: flex; align-items: center; gap: var(--sp-2); flex-shrink: 0; }
     .btn--sm { padding: 4px 10px; font-size: 12px; }
     .home-device-power { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-    .home-power-on { background: #22c55e; box-shadow: 0 0 4px #22c55e80; }
-    .home-power-off { background: #6b7280; }
-    .home-power-unknown { background: #eab308; opacity: 0.6; }
-    .home-power-error { background: #ef4444; }
+    .home-power-on { background: var(--c-success); box-shadow: 0 0 4px var(--c-success-glow); }
+    .home-power-off { background: var(--c-fg-subtle); }
+    .home-power-unknown { background: var(--c-warning); opacity: 0.6; }
+    .home-power-error { background: var(--c-error); }
     .home-on-btn { background: var(--c-border); color: var(--c-fg); border: 1px solid var(--c-border); }
-    .home-on-btn:hover { background: #22c55e20; border-color: #22c55e; color: #22c55e; }
+    .home-on-btn:hover { background: var(--c-success-subtle); border-color: var(--c-success); color: var(--c-success); }
     .home-off-btn { background: var(--c-border); color: var(--c-fg); border: 1px solid var(--c-border); }
-    .home-off-btn:hover { background: #ef444420; border-color: #ef4444; color: #ef4444; }
+    .home-off-btn:hover { background: var(--c-error-subtle); border-color: var(--c-error); color: var(--c-error); }
   </style>
 
 <script>
@@ -7545,10 +8097,68 @@ refreshAllDeviceStatus();
 </script>`;
 }
 
+/**
+ * Skills list section — shared by the Tools settings fragment and the
+ * /api/skills/list in-place refresh.
+ */
+export function renderSkillsListSection(skills: SkillMeta[]): string {
+  if (skills.length === 0) {
+    return `<section class="tools-category" id="cat-skills">
+  <div class="tools-category-header">
+    <div>
+      <h3 class="tools-category-title">Skills</h3>
+      <p class="tools-category-desc">No skills installed yet.</p>
+    </div>
+  </div>
+</section>`;
+  }
+  const items = skills.map((skill) => {
+    const badge = skill.generated
+      ? ` <span style="font-size:var(--font-size-xs);color:var(--c-fg-muted);border:1px solid var(--c-border);border-radius:var(--radius-sm);padding:0 6px;">auto-generated — regenerated from source at startup</span>`
+      : "";
+    return `<div class="custom-tool-row" style="display:flex;align-items:flex-start;gap:var(--sp-2);">
+  <div style="flex:1;min-width:0;">
+    <label class="tool-item">
+      <span class="tool-item-name">${escapeHtml(skill.name)}${badge}</span>
+      <span class="tool-item-desc">${escapeHtml(skill.description)}</span>
+    </label>
+  </div>
+  <button class="btn btn--xs" onclick="psycherosSkillsEdit('${
+      escapeHtml(skill.name)
+    }')" title="Edit skill" style="margin-top:4px;flex-shrink:0;background:var(--c-bg-hover);border:1px solid var(--c-border);">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+      <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/>
+    </svg>
+  </button>
+  <button class="btn btn--xs" onclick="psycherosSkillsDelete('${
+      escapeHtml(skill.name)
+    }')" title="Delete skill" style="margin-top:4px;flex-shrink:0;background:var(--c-bg-hover);border:1px solid var(--c-border);color:var(--c-error);">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+    </svg>
+  </button>
+</div>`;
+  }).join("\n");
+  return `<section class="tools-category" id="cat-skills">
+  <div class="tools-category-header">
+    <div>
+      <h3 class="tools-category-title">Skills</h3>
+      <p class="tools-category-desc">Markdown procedure files loaded by the entity on demand</p>
+    </div>
+  </div>
+  <div class="tools-list">
+    ${items}
+  </div>
+</section>`;
+}
+
 export function renderToolsSettings(
   settings: ToolsSettings,
   availableTools: Record<string, Tool>,
   customTools: Record<string, Tool>,
+  skills: SkillMeta[] = [],
 ): string {
   const overrides = settings.toolOverrides;
 
@@ -7588,7 +8198,7 @@ export function renderToolsSettings(
   <div style="flex:1;min-width:0;">${itemHtml}</div>
   <button class="btn btn--xs" onclick="deleteCustomTool('${
         escapeHtml(name)
-      }')" title="Delete tool" style="margin-top:4px;flex-shrink:0;background:var(--c-bg-hover,#333);border:1px solid var(--c-border,#555);color:var(--c-danger,#e74c3c);">
+      }')" title="Delete tool" style="margin-top:4px;flex-shrink:0;background:var(--c-bg-hover);border:1px solid var(--c-border);color:var(--c-error);">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <polyline points="3 6 5 6 21 6"/>
       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -7671,6 +8281,13 @@ export function renderToolsSettings(
         </svg>
         Custom
       </button>
+      <button class="tools-nav-tab" data-tab="skills" onclick="switchToolsTab('skills')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        </svg>
+        Skills
+      </button>
     </nav>
 
     <div id="tools-tab-builtin" class="tools-tab-panel">
@@ -7693,6 +8310,23 @@ export function renderToolsSettings(
       </div>
 
       ${customToolsListHtml}
+    </div>
+
+    <div id="tools-tab-skills" class="tools-tab-panel" style="display:none;">
+      <div class="tools-import">
+        <button class="btn btn--primary btn--xs" onclick="psycherosSkillsNew()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px">
+            <path d="M12 3v18M3 12h18"/>
+          </svg>
+          New Skill
+        </button>
+        <span class="tools-import-hint">
+          Skills are markdown procedure files the entity loads on demand via the
+          <code>skill</code> tool (toggle under Built-in &gt; Skills). Stored in
+          <code>.psycheros/skills/</code> — changes apply on the next turn, no restart.
+        </span>
+      </div>
+      ${renderSkillsListSection(skills)}
     </div>
 
     <!-- Status -->
@@ -8521,8 +9155,8 @@ export function renderVisionGalleryTab(data: {
     .gallery-thumb-wrap { position: relative; }
     .gallery-thumb { width: 100%; aspect-ratio: 1; object-fit: cover; cursor: pointer; display: block; }
     .gallery-badge { position: absolute; top: 6px; left: 6px; font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: var(--radius-sm); pointer-events: none; text-transform: uppercase; letter-spacing: 0.3px; }
-    .gallery-badge--generated { background: rgba(0,0,0,0.65); color: #fff; }
-    .gallery-badge--user { background: rgba(255,255,255,0.85); color: #333; }
+    .gallery-badge--generated { background: var(--c-scrim-strong); color: #fff; }
+    .gallery-badge--user { background: var(--c-fg); color: var(--c-bg); }
     .gallery-meta { padding: var(--sp-2); display: flex; align-items: center; gap: var(--sp-1); }
     .gallery-filename { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--c-fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; cursor: default; }
     .gallery-copy-btn { flex-shrink: 0; background: none; border: none; color: var(--c-fg-muted); cursor: pointer; padding: 2px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; transition: color var(--transition); }
@@ -8531,7 +9165,7 @@ export function renderVisionGalleryTab(data: {
     .gallery-info { padding: 0 var(--sp-2) var(--sp-2); font-size: var(--font-size-xs); color: var(--c-fg-muted); }
     .gallery-empty { color: var(--c-fg-muted); font-size: var(--font-size-sm); text-align: center; padding: var(--sp-8) 0; }
     .gallery-load-more { margin-top: var(--sp-4); text-align: center; }
-    .gallery-lightbox { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: var(--sp-3); cursor: pointer; }
+    .gallery-lightbox { position: fixed; inset: 0; z-index: 9999; background: var(--c-scrim-heavy); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: var(--sp-3); cursor: pointer; }
     .gallery-lightbox img { max-width: 90vw; max-height: 85vh; object-fit: contain; border-radius: var(--radius-sm); cursor: default; }
     @media (max-width: 768px) {
       .gallery-lightbox img { max-width: 100vw; max-height: 80vh; border-radius: 0; }
@@ -9223,15 +9857,8 @@ export function renderDiscordChannelView(
     const editedIndicator = msg.editedAt
       ? `<span class="msg-edited-indicator">(edited)</span>`
       : "";
-    const editBtn = !isSystem && msg.id
-      ? `<button class="discord-msg-edit-btn" onclick="Psycheros.startMessageEdit('${
-        escapeHtml(msg.id)
-      }')" title="Edit message">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-          </svg>
-        </button>`
+    const actionButtons = !isSystem
+      ? renderMessageActionButtons(msg.id, "discord-msg")
       : "";
 
     // For entity messages, render thinking + tool calls + content
@@ -9265,7 +9892,7 @@ export function renderDiscordChannelView(
     }</span>
         <span class="discord-msg-time">${timeStr}</span>
         ${editedIndicator}
-        ${editBtn}
+        ${actionButtons}
       </div>
       <div class="discord-msg-content">${contentHtml}</div>
     </div>`;
@@ -9479,7 +10106,7 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
         <span class="toggle-slider"></span>
         <span class="toggle-text">Enable voice chat</span>
       </label>
-      <span id="voice-status-msg" style="margin-left: var(--sp-2); font-size: var(--text-xs);"></span>
+      <span id="voice-status-msg" style="margin-left: var(--sp-2); font-size: var(--font-size-xs);"></span>
     </div>
     <div class="settings-hub-grid">
       ${profileCards}
@@ -9488,12 +10115,12 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
     <div class="settings-section" style="margin-top: var(--sp-5); padding: var(--sp-4); border: 1px solid var(--c-border); border-radius: 8px;">
       <div style="margin-bottom: var(--sp-2);">
         <strong style="font-size: var(--font-size-sm);">Hold to Talk</strong>
-        <p style="font-size: var(--text-xs); color: var(--c-fg-muted); margin: var(--sp-1) 0 0;">
+        <p style="font-size: var(--font-size-xs); color: var(--c-fg-muted); margin: var(--sp-1) 0 0;">
           Configure keys for hold-to-talk. Toggle on/off from the voice overlay.
         </p>
       </div>
       <div id="ptt-keybindings">
-        <span style="font-size: var(--text-xs); color: var(--c-fg-muted); display: block; margin-bottom: var(--sp-1);">Key bindings</span>
+        <span style="font-size: var(--font-size-xs); color: var(--c-fg-muted); display: block; margin-bottom: var(--sp-1);">Key bindings</span>
         <div id="ptt-keys-list" style="display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center;">
           ${
     (settings.pttKeys ?? ["Space"]).map((key, i) =>
@@ -9505,7 +10132,7 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
   }
           <button type="button" class="btn btn--ghost btn--sm" id="ptt-add-key-btn" onclick="capturePTTKey()" style="font-size: var(--font-size-xs);">+ Add binding</button>
         </div>
-        <div id="ptt-capture-hint" style="display: none; margin-top: var(--sp-2); font-size: var(--text-xs); color: var(--c-accent);">
+        <div id="ptt-capture-hint" style="display: none; margin-top: var(--sp-2); font-size: var(--font-size-xs); color: var(--c-accent);">
           Press any key or mouse button...
           <button type="button" class="btn btn--ghost btn--sm" onclick="cancelPTTKeyCapture()" style="margin-left: var(--sp-2);">Cancel</button>
         </div>
@@ -9515,7 +10142,7 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
     <div class="settings-section" style="margin-top: var(--sp-5); padding: var(--sp-4); border: 1px solid var(--c-border); border-radius: 8px;">
       <div style="margin-bottom: var(--sp-2);">
         <strong style="font-size: var(--font-size-sm);">Debug</strong>
-        <p style="font-size: var(--text-xs); color: var(--c-fg-muted); margin: var(--sp-1) 0 0;">
+        <p style="font-size: var(--font-size-xs); color: var(--c-fg-muted); margin: var(--sp-1) 0 0;">
           Diagnostic tools for voice chat. Enable the panel to capture the full pipeline (mic permission, WebSocket events, state transitions, TTS frame arrival, audio setup) &mdash; useful when asking for support or debugging audio glitches.
         </p>
       </div>
@@ -9579,7 +10206,7 @@ export function renderVoiceProfileEdit(
         <input type="text" class="input-field llm-input" value="${
       escapeHtml(entry.written)
     }" placeholder="Written (e.g. Psycheros)">
-        <span style="color: var(--text-dim);">&rarr;</span>
+        <span style="color: var(--c-fg-muted);">&rarr;</span>
         <input type="text" class="input-field llm-input" value="${
       escapeHtml(entry.spoken)
     }" placeholder="Spoken (e.g. sy-KEH-ros)">
@@ -9595,7 +10222,7 @@ export function renderVoiceProfileEdit(
         <input type="text" class="input-field llm-input" value="${
       escapeHtml(entry.misheard)
     }" placeholder="Misheard (e.g. sih keh ros)">
-        <span style="color: var(--text-dim);">&rarr;</span>
+        <span style="color: var(--c-fg-muted);">&rarr;</span>
         <input type="text" class="input-field llm-input" value="${
       escapeHtml(entry.correct)
     }" placeholder="Correct (e.g. Psycheros)">
@@ -10054,7 +10681,7 @@ export function renderVoiceProfileEdit(
           </div>
           ${
     p?.lastKeepAlive
-      ? `<div class="llm-field"><span style="font-size: var(--text-xs); color: var(--text-dim);">Last keep-alive: ${
+      ? `<div class="llm-field"><span style="font-size: var(--font-size-xs); color: var(--c-fg-muted);">Last keep-alive: ${
         escapeHtml(p.lastKeepAlive)
       }</span></div>`
       : ""
@@ -10123,7 +10750,7 @@ export function renderVoiceCallView(
     <div class="voice-status" id="voice-status">
       <span class="voice-status-dot voice-status-dot--connecting" id="voice-status-dot"></span>
       <span id="voice-status-text">Connecting...</span>
-      <button class="btn btn--ghost" id="test-tts-btn" onclick="testTTSConnection()" style="margin-left: auto; font-size: var(--text-xs);">Test TTS</button>
+      <button class="btn btn--ghost" id="test-tts-btn" onclick="testTTSConnection()" style="margin-left: auto; font-size: var(--font-size-xs);">Test TTS</button>
     </div>
 
     <div class="voice-transcript" id="voice-transcript" aria-live="polite"></div>

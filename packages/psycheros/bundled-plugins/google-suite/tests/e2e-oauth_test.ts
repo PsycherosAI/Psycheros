@@ -1,27 +1,16 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
-import { runOAuthFlow } from "../src/oauth/flow.ts";
+import { completeFlow, prepareAuthUrl } from "../src/oauth/flow.ts";
 
 /**
- * End-to-end OAuth flow test.
+ * End-to-end OAuth flow test — two-phase API.
  *
  * Exercises the full plumbing:
- *   1. runOAuthFlow() generates verifier/challenge/state
- *   2. Starts a real transient HTTP listener on a test port range
- *   3. Writes oauth-flow.json with the state token (we read it back to craft
- *      a valid callback URL — simulating Google's redirect)
- *   4. Flow's exchangeCode() hits stubbed fetch and returns canned tokens
- *   5. writeRefreshToken callback fires with the captured refresh token
- *   6. Flow returns success with email + grantedScopes
- *
- * What this catches that unit tests don't:
- *   - State token threading between flow.ts → listener.ts → exchangeCode
- *   - Listener lifecycle (port binding, callback routing, shutdown)
- *   - PKCE verifier passed correctly from flow to exchangeCode
- *   - Refresh token reaches the writeRefreshToken callback
+ *   1. prepareAuthUrl() generates verifier/challenge/state, writes oauth-flow.json
+ *   2. Test reads the state token from oauth-flow.json
+ *   3. completeFlow() is called with the code + state — exchanges for tokens
+ *   4. writeRefreshToken callback fires with the captured refresh token
+ *   5. Returns success with email + grantedScopes
  */
-
-const TEST_PORT_RANGE = [38501, 38502, 38503, 38504, 38505];
 
 interface StubConfig {
   fakeAuthCode: string;
@@ -48,8 +37,6 @@ function installOAuthStubFetch(
     const method = init?.method ?? "GET";
 
     if (url === "https://oauth2.googleapis.com/token" && method === "POST") {
-      // Body can be a string, URLSearchParams, or other. Coerce to string
-      // for assertion convenience.
       let bodyStr = "";
       if (typeof init?.body === "string") bodyStr = init.body;
       else if (init?.body instanceof URLSearchParams) {
@@ -79,8 +66,6 @@ function installOAuthStubFetch(
       );
     }
 
-    // Fall through to the real fetch for everything else — this is critical
-    // because the test makes a real fetch to the local callback listener.
     return await original(input as Parameters<typeof original>[0], init);
   }) as typeof globalThis.fetch;
 
@@ -89,41 +74,7 @@ function installOAuthStubFetch(
   };
 }
 
-/**
- * Read the state token from <statePath>/oauth-flow.json. The flow writes
- * this file at startup for crash recovery — we use it as the source of truth
- * for what state value the listener expects.
- */
-async function readFlowState(statePath: string): Promise<string> {
-  const flowFile = join(statePath, "oauth-flow.json");
-  for (let i = 0; i < 100; i++) {
-    try {
-      const raw = await Deno.readTextFile(flowFile);
-      const parsed = JSON.parse(raw) as { state?: string };
-      if (parsed.state) return parsed.state;
-    } catch {
-      // File not written yet — flow hasn't started. Retry.
-    }
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  throw new Error(`oauth-flow.json never appeared at ${flowFile}`);
-}
-
-async function waitForPort(port: number, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/__probe__`);
-      await response.body?.cancel();
-      return;
-    } catch {
-      await new Promise((r) => setTimeout(r, 20));
-    }
-  }
-  throw new Error(`port ${port} didn't open within ${timeoutMs}ms`);
-}
-
-Deno.test("E2E: runOAuthFlow captures code, exchanges for tokens, persists refresh token", async () => {
+Deno.test("E2E: prepareAuthUrl + completeFlow captures code, exchanges for tokens", async () => {
   const cfg: StubConfig = {
     fakeAuthCode: "test-auth-code-abc",
     fakeRefreshToken: "test-refresh-token-xyz",
@@ -142,36 +93,32 @@ Deno.test("E2E: runOAuthFlow captures code, exchanges for tokens, persists refre
   const restoreFetch = installOAuthStubFetch(cfg, captured);
   const statePath = await Deno.makeTempDir({ prefix: "psycheros-e2e-" });
 
-  const flowPromise = runOAuthFlow({
+  // Phase 1: prepare the auth URL
+  const redirectUri =
+    "https://example.com/api/plugins/google-suite/oauth-callback";
+  const prepared = await prepareAuthUrl({
     clientId: "test-client-id",
-    clientSecret: "test-client-secret",
     enabledServices: ["calendar"],
+    statePath,
+    redirectUri,
+  });
+
+  assertStringIncludes(prepared.authUrl, "accounts.google.com");
+  assertStringIncludes(prepared.authUrl, "client_id=test-client-id");
+  assertStringIncludes(prepared.authUrl, "code_challenge_method=S256");
+
+  // Phase 2: complete the flow with the code + state
+  const result = await completeFlow({
+    code: cfg.fakeAuthCode,
+    state: prepared.state,
+    clientSecret: "test-client-secret",
     statePath,
     writeRefreshToken: async (token) => {
       writtenRefreshToken = token;
       writeCallCount++;
     },
-    portOverride: TEST_PORT_RANGE,
-    timeoutMs: 5000,
   });
 
-  // Wait for the flow to write oauth-flow.json AND bind the listener.
-  const expectedState = await readFlowState(statePath);
-  await waitForPort(TEST_PORT_RANGE[0], 1000);
-
-  // Hit the listener with a matching state + auth code.
-  const callbackUrl = `http://127.0.0.1:${
-    TEST_PORT_RANGE[0]
-  }/callback?code=${cfg.fakeAuthCode}&state=${expectedState}`;
-  console.log("[test] callback URL:", callbackUrl);
-  const callbackResponse = await fetch(callbackUrl);
-  const callbackBody = await callbackResponse.text();
-  console.log("[test] callback status:", callbackResponse.status);
-  console.log("[test] callback body snippet:", callbackBody.slice(0, 200));
-  assertEquals(callbackResponse.status, 200);
-  assertStringIncludes(callbackBody, "Connected");
-
-  const result = await flowPromise;
   restoreFetch();
 
   assertEquals(
@@ -196,7 +143,7 @@ Deno.test("E2E: runOAuthFlow captures code, exchanges for tokens, persists refre
   assertEquals(captured.userinfoRequests, 1);
 });
 
-Deno.test("E2E: runOAuthFlow times out when no callback arrives", async () => {
+Deno.test("E2E: completeFlow rejects mismatched state", async () => {
   const restoreFetch = installOAuthStubFetch(
     {
       fakeAuthCode: "ignored",
@@ -209,22 +156,57 @@ Deno.test("E2E: runOAuthFlow times out when no callback arrives", async () => {
   );
 
   const statePath = await Deno.makeTempDir({ prefix: "psycheros-e2e-" });
-  const result = await runOAuthFlow({
+  await prepareAuthUrl({
     clientId: "test-client-id",
-    clientSecret: "test-client-secret",
     enabledServices: ["calendar"],
+    statePath,
+    redirectUri: "https://example.com/api/plugins/google-suite/oauth-callback",
+  });
+
+  const result = await completeFlow({
+    code: "some-code",
+    state: "wrong-state",
+    clientSecret: "test-client-secret",
     statePath,
     writeRefreshToken: async () => {
       throw new Error("should not be called");
     },
-    portOverride: TEST_PORT_RANGE,
-    timeoutMs: 200, // very short
   });
+
   restoreFetch();
 
   assertEquals(result.success, false);
-  assertEquals(result.timedOut, true);
-  assertStringIncludes(result.error ?? "", "timed out");
+  assertStringIncludes(result.error ?? "", "state mismatch");
+});
+
+Deno.test("E2E: completeFlow rejects when no flow state exists", async () => {
+  const restoreFetch = installOAuthStubFetch(
+    {
+      fakeAuthCode: "ignored",
+      fakeRefreshToken: "ignored",
+      fakeAccessToken: "ignored",
+      fakeEmail: "ignored@x.com",
+      fakeScopes: [],
+    },
+    { tokenRequestBodies: [], userinfoRequests: 0 },
+  );
+
+  const statePath = await Deno.makeTempDir({ prefix: "psycheros-e2e-" });
+
+  const result = await completeFlow({
+    code: "some-code",
+    state: "some-state",
+    clientSecret: "test-client-secret",
+    statePath,
+    writeRefreshToken: async () => {
+      throw new Error("should not be called");
+    },
+  });
+
+  restoreFetch();
+
+  assertEquals(result.success, false);
+  assertStringIncludes(result.error ?? "", "No OAuth flow in progress");
 });
 
 Deno.test("E2E: writeRefreshToken callback failure surfaces in flow result", async () => {
@@ -239,29 +221,30 @@ Deno.test("E2E: writeRefreshToken callback failure surfaces in flow result", asy
   const restoreFetch = installOAuthStubFetch(cfg, captured);
 
   const statePath = await Deno.makeTempDir({ prefix: "psycheros-e2e-" });
-  const flowPromise = runOAuthFlow({
+  const prepared = await prepareAuthUrl({
     clientId: "test-client-id",
-    clientSecret: "test-client-secret",
     enabledServices: ["calendar"],
     statePath,
-    writeRefreshToken: async () => {
-      throw new Error("disk full");
-    },
-    portOverride: TEST_PORT_RANGE,
-    timeoutMs: 5000,
+    redirectUri: "https://example.com/api/plugins/google-suite/oauth-callback",
   });
 
-  const expectedState = await readFlowState(statePath);
-  await waitForPort(TEST_PORT_RANGE[0], 1000);
-  const cbResponse = await fetch(
-    `http://127.0.0.1:${
-      TEST_PORT_RANGE[0]
-    }/callback?code=${cfg.fakeAuthCode}&state=${expectedState}`,
-  );
-  await cbResponse.text();
-  const result = await flowPromise;
+  // completeFlow should throw on writeRefreshToken failure
+  let caughtError: Error | undefined;
+  try {
+    await completeFlow({
+      code: cfg.fakeAuthCode,
+      state: prepared.state,
+      clientSecret: "test-client-secret",
+      statePath,
+      writeRefreshToken: async () => {
+        throw new Error("disk full");
+      },
+    });
+  } catch (error) {
+    caughtError = error as Error;
+  }
+
   restoreFetch();
 
-  assertEquals(result.success, false);
-  assertStringIncludes(result.error ?? "", "disk full");
+  assertStringIncludes(caughtError?.message ?? "", "disk full");
 });

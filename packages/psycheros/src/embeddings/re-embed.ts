@@ -2,8 +2,8 @@
  * Re-Embed Orchestrator
  *
  * Coordinates a full re-embedding pass when the active embedding model or
- * chunk size changes. The chat endpoint blocks while this is running — the
- * server wrapper sets `reEmbedBlocking` and refuses new turns with 503.
+ * chunk size changes. Chat is NOT blocked while this runs — turns proceed
+ * with degraded retrieval until the re-embed completes.
  *
  * Responsibilities:
  *   1. Drop + recreate psycheros vec0 tables at the new dimension (vec0
@@ -15,9 +15,12 @@
  *   5. Persist the new settings file atomically.
  *   6. Report progress via snapshot callbacks for the SSE stream.
  *
- * Failure handling is conservative — any error halts the run, restores the
- * previous settings from disk, and leaves the dimension-tracking metadata
- * alone (so the next startup detects the mismatch and the user can retry).
+ * Failure handling is conservative — any error halts the run and leaves the
+ * dimension-tracking metadata alone. Note the settings file already holds
+ * the new model by this point (the save endpoint persists before the user
+ * confirms), so a failed run leaves settings and vec tables out of sync.
+ * Server.init() logs that mismatch at boot and the app shell surfaces the
+ * re-index banner on load; the fix is simply re-running the re-embed.
  */
 
 import type { Database } from "@db/sqlite";

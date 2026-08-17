@@ -228,7 +228,13 @@ export class ConversationRAG {
       ) v
       JOIN message_embeddings e ON e.rowid = v.rowid
       LEFT JOIN messages m ON m.id = e.message_id
-      ${options.conversationId ? "WHERE e.conversation_id = ?" : ""}
+      ${
+      options.conversationId
+        ? "WHERE e.conversation_id = ?"
+        // Cross-conversation search excludes workspace scratchpads — their
+        // content reaches memory via the completion Pulse, not ChatRAG.
+        : "WHERE e.conversation_id NOT IN (SELECT id FROM conversations WHERE source_type = 'workspace')"
+    }
       ORDER BY v.distance
     `;
 
@@ -300,6 +306,7 @@ export class ConversationRAG {
         SELECT e.id, e.message_id, e.conversation_id, e.role, e.content, e.embedding, e.created_at, m.is_voice
         FROM message_embeddings e
         LEFT JOIN messages m ON m.id = e.message_id
+        WHERE e.conversation_id NOT IN (SELECT id FROM conversations WHERE source_type = 'workspace')
       `;
       params = [];
     }

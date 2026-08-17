@@ -49,6 +49,10 @@ export const DEFAULT_DISABLED_TOOLS: ReadonlySet<string> = new Set([
   "control_toy",
   "ble_device",
   "act_in_discord",
+  // Workspace requires OpenCode installed locally; opt-in per install.
+  "workspace",
+  // ask_user only meaningful in engaged workspace; enable alongside workspace.
+  "ask_user",
 ]);
 
 /** Tools that are deprecated and hidden from both the UI and the LLM. Kept in AVAILABLE_TOOLS for potential resurrection. */
@@ -136,6 +140,20 @@ export const TOOL_CATEGORIES: ToolCategory[] = [
     name: "Conversation",
     description: "Cross-conversation awareness",
     toolNames: ["conversation_peek"],
+  },
+  {
+    id: "skills",
+    name: "Skills",
+    description:
+      'Load on-demand skill procedures (markdown skill files listed under "My skills")',
+    toolNames: ["skill"],
+  },
+  {
+    id: "workspace",
+    name: "Workspace",
+    description:
+      "OpenCode-powered faculty for careful, detailed work. The `workspace` tool spawns sessions from any conversation; `ask_user` and `manage_message` are only available to the entity inside an active workspace session.",
+    toolNames: ["workspace", "ask_user", "manage_message"],
   },
 ];
 

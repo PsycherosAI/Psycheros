@@ -1,4 +1,9 @@
 export { createPluginManager, PluginManager } from "./plugin-manager.ts";
+export { sendDiscordAttachments } from "./discord-send.ts";
+export type {
+  PsycherosDiscordSendParams,
+  SendDiscordAttachmentsOptions,
+} from "./discord-send.ts";
 export { PluginInstaller, PluginInstallerError } from "./installer.ts";
 export {
   formatEventForFile,
@@ -28,10 +33,13 @@ export type {
   PluginUpdateCheckResult,
 } from "./updater.ts";
 export type {
+  PluginAttachmentContext,
+  PluginAttachmentHook,
   PluginPromptContext,
   PluginPromptHook,
   PluginRoute,
   PluginSettingsContext,
+  PsycherosDiscordMediaService,
 } from "./plugin-manager.ts";
 export type {
   PluginDraftInstallResult,

@@ -9,6 +9,7 @@
 import { isAbsolute, join } from "@std/path";
 import type { Database } from "@db/sqlite";
 import type { DBClient } from "../db/mod.ts";
+import { archiveIfAvailable } from "../backup/mod.ts";
 import type {
   VaultCreateOptions,
   VaultDocument,
@@ -316,6 +317,21 @@ export class VaultManager {
     const now = new Date().toISOString();
 
     if (updates.content !== undefined) {
+      // Archive the pre-edit content via the unified backup service before
+      // overwriting the file. Vault documents are user-authored content
+      // (life stories, prose) — irreplaceable.
+      try {
+        const existingContent = await Deno.readTextFile(doc.filePath);
+        await archiveIfAvailable(
+          "vault_doc",
+          id,
+          existingContent,
+          { reason: "vault document update" },
+        );
+      } catch {
+        // File missing — nothing to archive. Continue with the write.
+      }
+
       // Re-write the file
       await Deno.writeTextFile(doc.filePath, updates.content);
 

@@ -132,6 +132,24 @@ const DEFAULT_CONFIG: Partial<MCPClientConfig> = {
   denoPath: "deno",
 };
 
+/** entity-core's embedding-rebuild notification method (custom, no capability needed). */
+const EMBEDDING_REBUILD_METHOD = "notifications/embedding-rebuild";
+
+/**
+ * After a fresh spawn, failed pings get this grace window before the
+ * watchdog declares entity-core dead — model loading and boot rebuilds can
+ * legitimately take minutes. A crashed child closes the transport, which
+ * routes through the reconnect path regardless of grace.
+ */
+const SPAWN_GRACE_MS = 3 * 60_000;
+
+/**
+ * Ceiling on how long rebuild notifications can keep pings paused. The
+ * window refreshes on every progress event, so this only trips when a
+ * rebuild has genuinely stalled (lost `done`).
+ */
+const MAX_PING_PAUSE_MS = 60 * 60_000;
+
 /**
  * Local cache of identity content.
  */
@@ -160,9 +178,33 @@ export class MCPClient {
   /**
    * When true, the health-ping loop skips entirely. Set by callers that
    * hold the daemon busy for long enough that a ping would falsely trip
-   * the reconnect watchdog (e.g. re-embed orchestrator loading a model).
+   * the reconnect watchdog (e.g. re-embed orchestrator loading a model),
+   * and automatically by entity-core's embedding-rebuild notifications.
    */
   private pingsPaused = false;
+  /**
+   * When the current ping pause started (or was last refreshed by rebuild
+   * progress). The watchdog enforces a cap so a lost `done` notification
+   * can never leave pings paused forever — but the cap only fires when
+   * progress has genuinely stalled, never mid-healthy-rebuild.
+   */
+  private pingsPausedSince: Date | null = null;
+  /**
+   * When this connection was established. A young connection whose pings
+   * fail gets a startup grace window instead of an immediate watchdog kill —
+   * entity-core may legitimately be minutes into model loading.
+   */
+  private connectedAt: Date | null = null;
+  /**
+   * Listener for entity-core embedding-rebuild notifications. Wired by the
+   * server to broadcast `embedding_reindex` SSE events for the re-index
+   * banner.
+   */
+  private rebuildListener:
+    | ((
+      e: import("../embeddings/reindex-event.ts").EmbeddingReindexEvent,
+    ) => void)
+    | null = null;
 
   /**
    * Pause automatic health pings. Use around long-running maintenance
@@ -171,6 +213,9 @@ export class MCPClient {
    */
   pausePings(): void {
     this.pingsPaused = true;
+    if (this.pingsPausedSince === null) {
+      this.pingsPausedSince = new Date();
+    }
   }
 
   /**
@@ -179,9 +224,68 @@ export class MCPClient {
    */
   resumePings(): void {
     this.pingsPaused = false;
+    this.pingsPausedSince = null;
     this.wasAlive = true;
     this.reconnectAttempts = 0;
     this.lastPingSuccess = new Date();
+  }
+
+  /**
+   * Wire the rebuild-notification listener (server → SSE banner). Replaces
+   * any previous listener.
+   */
+  setRebuildListener(
+    fn:
+      | ((
+        e: import("../embeddings/reindex-event.ts").EmbeddingReindexEvent,
+      ) => void)
+      | null,
+  ): void {
+    this.rebuildListener = fn;
+  }
+
+  /**
+   * Handle a server-initiated notification. Embedding-rebuild notifications
+   * drive the ping pause/resume: `started`/`progress` pause the watchdog
+   * (refreshing the pause window on progress), `done`/`failed` resume it.
+   */
+  private handleServerNotification(
+    notification: { method?: string; params?: unknown },
+  ): void {
+    if (notification.method !== EMBEDDING_REBUILD_METHOD) return;
+    let params: unknown = notification.params;
+    if (typeof params === "string") {
+      try {
+        params = JSON.parse(params);
+      } catch {
+        return;
+      }
+    }
+    if (typeof params !== "object" || params === null) return;
+    const event =
+      params as import("../embeddings/reindex-event.ts").EmbeddingReindexEvent;
+    if (typeof event.phase !== "string") return;
+
+    switch (event.phase) {
+      case "started":
+      case "progress":
+        // Refresh the pause window on every progress event so the safety
+        // cap only trips on a genuine stall, never on a long healthy run.
+        this.pingsPausedSince = new Date();
+        this.pausePings();
+        break;
+      case "done":
+      case "failed":
+        this.resumePings();
+        break;
+      default:
+        break;
+    }
+    try {
+      this.rebuildListener?.(event);
+    } catch (error) {
+      console.error("[MCP] rebuild listener failed:", error);
+    }
   }
   private toolCallTimeoutMs = 60_000; // 60 seconds default for tool calls
   private pingTimeoutMs = 5_000; // 5 seconds for health probes
@@ -431,6 +535,18 @@ export class MCPClient {
         version: "0.1.0",
       });
 
+      // Server→client notifications (embedding-rebuild progress). Set
+      // BEFORE connect so an early `started` can't slip past us.
+      this.client.fallbackNotificationHandler = (notification) => {
+        this.handleServerNotification(
+          notification as {
+            method?: string;
+            params?: unknown;
+          },
+        );
+        return Promise.resolve();
+      };
+
       // Listen for unexpected transport closes to keep state consistent
       this.transport.onclose = () => {
         if (!this.intentionalClose) {
@@ -440,10 +556,12 @@ export class MCPClient {
         }
         this.client = null;
         this.transport = null;
+        this.connectedAt = null;
         this.intentionalClose = false;
       };
 
       await this.client.connect(this.transport);
+      this.connectedAt = new Date();
 
       // Record the child PID so we can reap it next run if we crash mid-shutdown.
       await this.writeChildPid();
@@ -498,6 +616,7 @@ export class MCPClient {
     this.lastPingSuccess = null;
     this.lastPingAttempt = null;
     this.wasAlive = true;
+    this.connectedAt = null;
 
     // Close connection
     if (this.client) {
@@ -619,7 +738,28 @@ export class MCPClient {
       // Skip pings while a long-running maintenance task (e.g. re-embed)
       // holds the pause flag — psycheros is likely CPU-bound loading a
       // model and the ping would falsely trigger reconnect storms.
-      if (this.pingsPaused) return;
+      if (this.pingsPaused) {
+        // Safety cap: a lost `done` notification must never leave pings
+        // paused forever. The window refreshes on every rebuild progress
+        // event, so this only trips when progress has genuinely stalled.
+        if (
+          this.pingsPausedSince !== null &&
+          Date.now() - this.pingsPausedSince.getTime() > MAX_PING_PAUSE_MS
+        ) {
+          console.error(
+            "[MCP] Embedding rebuild pause exceeded safety cap — resuming health pings",
+          );
+          this.resumePings();
+          this.broadcastMcpStatus({
+            connected: true,
+            alive: true,
+            reconnecting: false,
+            message:
+              "Embedding rebuild pause exceeded safety cap — health pings resumed",
+          });
+        }
+        return;
+      }
       const ok = await this.ping();
       if (ok && !this.wasAlive) {
         this.wasAlive = true;
@@ -640,6 +780,25 @@ export class MCPClient {
           console.log(
             "[MCP] Health ping failed but tool call in progress — skipping reconnect",
           );
+          return;
+        }
+        // Startup grace: a young connection may legitimately be minutes
+        // into model loading or a boot rebuild. Log and show status
+        // instead of killing — a genuinely crashed child closes the
+        // transport, which routes through the normal reconnect path.
+        if (
+          this.connectedAt !== null &&
+          Date.now() - this.connectedAt.getTime() < SPAWN_GRACE_MS
+        ) {
+          console.log(
+            "[MCP] Entity-core not answering yet (recent spawn) — granting startup grace",
+          );
+          this.broadcastMcpStatus({
+            connected: true,
+            alive: true,
+            reconnecting: false,
+            message: "Entity-core is still starting…",
+          });
           return;
         }
         this.wasAlive = false;

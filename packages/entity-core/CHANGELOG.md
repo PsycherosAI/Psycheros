@@ -6,6 +6,17 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-16
+
+### Added
+
+- Embedding rebuild notifications, watchdog grace, and visible re-index
+  progress.
+
+### Changed
+
+- Package documentation refreshed (embeddings guide, MCP tools reference).
+
 ## [0.6.0] - 2026-07-24
 
 ### Added

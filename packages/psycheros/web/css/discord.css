@@ -24,13 +24,13 @@
 }
 
 .discord-dot-connected {
-  background-color: #22c55e;
-  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+  background-color: var(--c-success);
+  box-shadow: 0 0 6px var(--c-success-glow);
 }
 
 .discord-dot-disconnected {
-  background-color: #ef4444;
-  box-shadow: 0 0 4px rgba(239, 68, 68, 0.3);
+  background-color: var(--c-error);
+  box-shadow: 0 0 4px var(--c-error-glow);
 }
 
 /* ==========================================================================
@@ -48,13 +48,13 @@
 }
 
 .status-connected {
-  color: #22c55e;
-  background-color: rgba(34, 197, 94, 0.1);
+  color: var(--c-success);
+  background-color: var(--c-success-subtle);
 }
 
 .status-disconnected {
-  color: #ef4444;
-  background-color: rgba(239, 68, 68, 0.1);
+  color: var(--c-error);
+  background-color: var(--c-error-subtle);
 }
 
 .discord-status-indicator {
@@ -65,13 +65,13 @@
 }
 
 .status-connected .discord-status-indicator {
-  background-color: #22c55e;
-  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+  background-color: var(--c-success);
+  box-shadow: 0 0 6px var(--c-success-glow);
 }
 
 .status-disconnected .discord-status-indicator {
-  background-color: #ef4444;
-  box-shadow: 0 0 4px rgba(239, 68, 68, 0.3);
+  background-color: var(--c-error);
+  box-shadow: 0 0 4px var(--c-error-glow);
 }
 
 /* ==========================================================================
@@ -227,7 +227,7 @@
   flex-direction: column;
   gap: 2px;
   padding: var(--sp-2) 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--c-wash);
 }
 
 .discord-msg-role {
@@ -402,18 +402,18 @@
 }
 
 .discord-mode-badge--active {
-  background-color: rgba(34, 197, 94, 0.12);
-  color: #22c55e;
+  background-color: var(--c-success-subtle);
+  color: var(--c-success);
 }
 
 .discord-mode-badge--lurk {
-  background-color: rgba(234, 179, 8, 0.12);
-  color: #eab308;
+  background-color: var(--c-warning-subtle);
+  color: var(--c-warning);
 }
 
 .discord-mode-badge--strict {
-  background-color: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
+  background-color: var(--c-error-subtle);
+  color: var(--c-error);
 }
 
 /* ==========================================================================
@@ -639,9 +639,9 @@
 }
 
 .discord-header-btn-danger:hover {
-  color: #ef4444;
-  border-color: #ef4444;
-  background-color: rgba(239, 68, 68, 0.08);
+  color: var(--c-error);
+  border-color: var(--c-error);
+  background-color: var(--c-error-subtle);
 }
 
 /* ==========================================================================
@@ -677,6 +677,40 @@
 
 .discord-msg-edit-btn:hover {
   color: var(--c-accent);
+}
+
+/* Discord message action buttons (delete + flag-glitched, plan §9f).
+ * Same hover-reveal pattern as .discord-msg-edit-btn. */
+.discord-msg-action-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--c-fg-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition), color var(--transition);
+}
+
+.discord-message:hover .discord-msg-action-btn {
+  display: flex;
+  opacity: 1;
+}
+
+.discord-msg-action-btn:hover {
+  color: var(--c-accent);
+}
+
+.discord-msg-action-btn[onclick*="confirmDeleteMessage"]:hover {
+  color: var(--c-error);
+}
+
+.discord-msg-action-btn[onclick*="confirmFlagGlitched"]:hover {
+  color: var(--c-warning);
 }
 
 /* ==========================================================================
@@ -789,6 +823,6 @@
 }
 
 .discord-tool-result--error {
-  color: #f87171;
-  border-left-color: #f87171;
+  color: var(--c-error);
+  border-left-color: var(--c-error);
 }

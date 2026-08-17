@@ -201,12 +201,12 @@ export function deleteConversations(
  * @param content - The new content
  * @returns StateChangeResult with the updated message info
  */
-export function updateMessageContent(
+export async function updateMessageContent(
   db: DBClient,
   conversationId: string,
   messageId: string,
   content: string,
-): StateChangeResult<{ messageId: string; conversationId: string }> {
+): Promise<StateChangeResult<{ messageId: string; conversationId: string }>> {
   // Validate content
   const trimmedContent = content.trim();
 
@@ -218,8 +218,11 @@ export function updateMessageContent(
     };
   }
 
-  // Perform the update
-  const updated = db.updateMessage(messageId, trimmedContent);
+  // Perform the update. Reason goes into metadata.priorVersions[] for the
+  // audit trail so future recovery / inspection knows who/what/why.
+  const updated = await db.updateMessage(messageId, trimmedContent, {
+    reason: "user inline edit",
+  });
 
   if (!updated) {
     return {

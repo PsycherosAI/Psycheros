@@ -271,7 +271,7 @@ mod tests {
         let json = r#"{
             "port": 3000,
             "entity_name": "Atlas",
-            "user_name": "Echo",
+            "user_name": "Rowan",
             "timezone": "America/Los_Angeles",
             "daemon_mode": "manual",
             "bundled_source_version": "psycheros-v0.3.3"

@@ -184,7 +184,7 @@
 
 .admin-status-error {
   background: var(--c-error);
-  box-shadow: 0 0 6px rgba(255, 68, 68, 0.3);
+  box-shadow: 0 0 6px var(--c-error-glow);
 }
 
 /* ==========================================================================
@@ -386,20 +386,20 @@
   color: var(--c-error);
 }
 .admin-log-warn .admin-log-level-badge {
-  color: #f59e0b;
+  color: var(--c-warning);
 }
 .admin-log-info .admin-log-level-badge {
-  color: #3b82f6;
+  color: var(--c-highlight);
 }
 
 .admin-log-error {
-  background: rgba(255, 68, 68, 0.05);
+  background: var(--c-error-subtle);
   border-left-color: var(--c-error);
 }
 
 .admin-log-warn {
-  background: rgba(245, 158, 11, 0.05);
-  border-left-color: #f59e0b;
+  background: var(--c-warning-subtle);
+  border-left-color: var(--c-warning);
 }
 
 /* ==========================================================================
@@ -501,12 +501,12 @@
 
 .admin-job-name {
   font-weight: 600;
-  color: var(--c-text);
+  color: var(--c-fg);
 }
 
 .admin-job-desc {
   font-size: 0.8em;
-  color: var(--c-text-muted);
+  color: var(--c-fg-muted);
   margin-top: 2px;
 }
 
@@ -524,12 +524,12 @@
 }
 
 .admin-status-running {
-  background: #f59e0b;
+  background: var(--c-warning);
   animation: adminStatusPulse 1s ease-in-out infinite;
 }
 
 .admin-status-idle {
-  background: var(--c-text-muted);
+  background: var(--c-fg-muted);
   opacity: 0.4;
 }
 
@@ -540,8 +540,8 @@
   padding: var(--sp-1) var(--sp-2);
   background: var(--c-bg-raised);
   border: 1px solid var(--c-border);
-  border-radius: var(--radius);
-  color: var(--c-text);
+  border-radius: var(--radius-md);
+  color: var(--c-fg);
   font-size: 0.8em;
   cursor: pointer;
   transition: var(--transition);
@@ -674,8 +674,8 @@
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-4);
-  background: rgba(229, 53, 53, 0.1);
-  border: 1px solid rgba(229, 53, 53, 0.3);
+  background: var(--c-error-subtle);
+  border: 1px solid var(--c-error-glow);
   color: var(--c-error);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
@@ -686,7 +686,7 @@
 }
 
 .admin-action-btn-danger:hover {
-  background: rgba(229, 53, 53, 0.2);
+  background: var(--c-error-subtle);
 }
 
 .admin-action-spinner {
@@ -726,7 +726,7 @@
 }
 
 .admin-action-output-header.admin-action-warning {
-  color: #e5a00d;
+  color: var(--c-warning);
 }
 
 .admin-action-output-pre {
@@ -764,7 +764,6 @@
 .admin-input[type="file"] {
   width: auto;
   padding: var(--sp-1) var(--sp-2);
-  color-scheme: dark;
 }
 
 .admin-input[type="file"]::file-selector-button {
@@ -844,7 +843,7 @@
   padding: var(--sp-4);
   background: var(--c-bg-raised);
   border: 1px solid var(--c-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   text-align: center;
 }
 

@@ -7,6 +7,7 @@
 
 export { DiscordGatewayClient } from "./gateway.ts";
 export type {
+  DiscordAttachment,
   DiscordChannel,
   DiscordGuild,
   DiscordMessage,
@@ -21,6 +22,20 @@ export type {
   DiscordTurnContext,
   RouterDeps,
 } from "./router.ts";
+
+export {
+  captionTurnImages,
+  downloadTurnImage,
+  downloadTurnImages,
+  planTurnAttachments,
+} from "./images.ts";
+export type {
+  AttachmentEnrichmentChannel,
+  DiscordPluginAttachment,
+  DiscordTurnImage,
+  DownloadedImage,
+  TurnAttachmentPlan,
+} from "./images.ts";
 
 export { ConversationMapper } from "./conversation-map.ts";
 export {

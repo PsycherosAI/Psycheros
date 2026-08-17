@@ -57,10 +57,11 @@ Discord Gateway is configured via **Settings > External Connections > Channels >
 Discord** in the web UI, not via env vars. Settings persist to
 `.psycheros/discord-gateway.json`.
 
-| Field                    | Type    | Default | Description                                                                                                                                                             |
-| ------------------------ | ------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `includeInDailyMemories` | boolean | `true`  | Include Discord activity in daily memory summarization via pre-summarizer                                                                                               |
-| `memoryInstructions`     | string  | `""`    | Instructions for the pre-summarizer and daily memory writer (e.g., handle mappings like "superdog420 is James"). Written in first-person from the entity's perspective. |
+| Field                    | Type    | Default | Description                                                                                                                                                                                                                      |
+| ------------------------ | ------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `includeInDailyMemories` | boolean | `true`  | Include Discord activity in daily memory summarization via pre-summarizer                                                                                                                                                        |
+| `memoryInstructions`     | string  | `""`    | Instructions for the pre-summarizer and daily memory writer (e.g., handle mappings like "superdog420 is James"). Written in first-person from the entity's perspective.                                                          |
+| `llmProfileId`           | string  | `""`    | LLM connection profile used for **server-channel turns** (e.g. an economical model for chatter). Empty = the globally active profile. DMs always use the active profile. Selected via Settings > External Connections > Discord. |
 
 ### Connection reliability
 

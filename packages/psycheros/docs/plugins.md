@@ -36,7 +36,11 @@ letting a plugin into my embodiment.
    capabilities against what the plugin claims to do. A weather plugin does not
    need browser scripts. A quote-of-the-day plugin does not need `promptHooks`.
    A turn-counter does not need `tools`. Anything that doesn't fit the stated
-   purpose is a question to ask before installing.
+   purpose is a question to ask before installing. `discordMedia` claims get the
+   same scrutiny as prompt hooks: an `attachmentTypes` marker becomes the
+   transcript's permanent record of what was shared in that channel, and
+   `send: true` lets the plugin post media with the entity's voice — a bare
+   `"*"` attachment claim or an unexplained `send` deserves a question.
 
 3. **Prompt hooks deserve extra scrutiny.** A `promptHook` returns first-person
    context that I will internalize as my own this turn. That's the most direct
@@ -147,7 +151,7 @@ Each directory contains `plugin.json` and optional host entrypoints:
   "id": "artifact-search",
   "name": "Artifact Search",
   "version": "1.0.0",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "enabled": true,
   "entrypoints": {
     "psycheros": "./psycheros.ts",
@@ -162,6 +166,10 @@ Each directory contains `plugin.json` and optional host entrypoints:
 
 My directory name must match `id`. Manifest paths are relative, start with `./`,
 and cannot escape the plugin directory.
+
+`apiVersion` is `2` (current). Version `1` manifests still load unchanged; the
+`discordMedia` capability below requires version 2 and fails validation on a
+version 1 manifest.
 
 ### Declaring dependencies on other plugins
 
@@ -272,6 +280,60 @@ for microphone capture, speech recognition, synthesis, and playback. These are
 plugin responsibilities; the core harness does not ship a webcam or audio
 provider.
 
+### Discord media
+
+Discord attachments split into two plugin surfaces, both declared in the
+manifest under `capabilities.discordMedia` (apiVersion 2):
+
+```json
+{
+  "apiVersion": 2,
+  "capabilities": {
+    "discordMedia": {
+      "attachmentTypes": ["audio/*", "image/gif"],
+      "send": true
+    }
+  }
+}
+```
+
+**Inbound — `attachmentHook`.** When someone shares an attachment my host can't
+natively perceive — a GIF, a voice note — I get a chance to describe it. My
+`attachmentHook` receives the attachment (signed CDN URL that expires in ~24h,
+so I download at hook time if I need the bytes), the channel it arrived in, my
+`env`, and my `statePath`. I return the marker text that lands in the transcript
+— for a voice note, a transcript like `[voice note (12s): "see you tomorrow"]`.
+The host only consults me for attachments the native path declined;
+PNG/JPEG/WebP vision handling is never mine to intercept. If I return
+`undefined`, decline silently, time out (default 15s), or throw, the native
+marker stands and I'm marked degraded. My output is capped (default 4,000 chars
+per attachment, 16,000 across a flush) and collapsed to one line, because
+markers are single-line by construction. Hooks should return fast — enrichment
+runs before the entity's turn starts, so a slow provider costs response latency.
+
+```ts
+export default {
+  attachmentHook: {
+    async run(ctx) {
+      const audio = await fetch(ctx.attachment.url);
+      const transcript = await transcribe(audio, ctx.env);
+      return `[voice note: "${transcript}"]`;
+    },
+  },
+};
+```
+
+**Outbound — `services.discord.sendAttachments`.** When I declare `send:
+true`,
+my `start()` services gain `discord.sendAttachments`: I pass a channelId,
+optional content and reply reference, and files (bytes + filename +
+contentType), and the host posts them with its own bot token. The token never
+reaches my code — reaching into host internals for it is unsupported. My tools
+read the current channel from `ctx.config.discordContext.channelId` (the
+`act_in_discord` pattern) and report graceful unavailability outside Discord
+turns. Sends are logged to my plugin event log. Uploads are capped at 10 files /
+8 MB each per message.
+
 ## Testing
 
 My plugins are ordinary Deno modules. I can keep tests beside my plugin and run:
@@ -328,6 +390,9 @@ Deno.test("my speech route uses my configured provider", async () => {
   }
 });
 ```
+
+Plugins using the `discordMedia` capability set `apiVersion: 2` in the fixture
+manifest (version 1 fixtures keep working — both are accepted).
 
 My host tests should cover startup failure isolation, lifecycle cleanup, prompt
 timeouts and truncation, sanitized fallbacks, tool registration, route
@@ -410,6 +475,16 @@ first-person convention.
   secrets in the file are preserved.
 - `readSecrets(): Promise<Record<string, string>>` — bulk read of this plugin's
   secrets. Empty object if no file exists.
+- `discord?: { sendAttachments(params) }` — present only when the manifest
+  declares `capabilities.discordMedia.send: true`. Posts one message with file
+  attachments to Discord on the entity's behalf
+  (`{ channelId, content?, messageReferenceId?, idempotencyKey?, files: [{
+  filename, contentType?, data }] }`,
+  10 files / 8 MB each) using the host's bot token, read at send time and never
+  exposed to plugin code. `idempotencyKey` is optional — the host derives a
+  Discord nonce from it and sets `enforce_nonce`, so a retried send with the
+  same key dedupes server-side (best-effort, window-scoped). Sends land in the
+  plugin event log under the `media` category.
 
 ## Prompt Hook Context
 
@@ -435,3 +510,12 @@ status badge (fired / truncated / budget-skipped / failed / empty), priority,
 and elapsed milliseconds. Hook output bodies should stay terse — the wrapper
 already identifies the plugin via `source="..."`, so don't repeat the plugin
 name in the body unless natural language demands it.
+
+## Deferred work (v1.1+)
+
+- Entity-core plugin events are not yet surfaced in the UI — the event-log class
+  lives in `packages/psycheros/src/plugins/`; moving it to
+  `packages/plugin-api/src/` would let both hosts share one log file per plugin.
+- The auto-updater has no scheduler integration (checks are manual).
+- The install-review diff is manifest-field only — runtime capability diffs
+  (tools/hooks/routes between versions) require source comparison.

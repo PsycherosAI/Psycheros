@@ -625,7 +625,25 @@ function cleanup() {
   currentWalkieState = "idle";
   previousWalkieState = null;
   activeConversationId = null;
+
+  // Voice call ended — drain any workspace queries that were queued during
+  // the call. The browser is the right place for this gate (the toast is a
+  // client-side DOM element); the server has no notion of "voice call
+  // active." Without this drain, a workspace question fired mid-call would
+  // either cut off the user mid-utterance with a toast or be silently lost
+  // (if the SSE handler queued it but nothing drained the queue).
+  if (typeof globalThis.drainQueuedWorkspaceQueries === "function") {
+    try { globalThis.drainQueuedWorkspaceQueries(); } catch { /* ignore */ }
+  }
 }
+
+// Expose voice-call-active check so workspace.js can queue queries during a
+// call instead of surfacing toasts that would interrupt the user mid-call.
+// Same pattern as Pulse queueing on the server, just at the DOM layer where
+// the toast actually lives.
+globalThis.isVoiceCallActive = function () {
+  return voiceWs !== null;
+};
 
 // =============================================================================
 // Audio Capture

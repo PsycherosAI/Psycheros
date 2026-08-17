@@ -57,3 +57,4 @@ export type {
   ReEmbedSnapshot,
 } from "./re-embed.ts";
 export { readActiveDimension, ReEmbedOrchestrator } from "./re-embed.ts";
+export type { EmbeddingReindexEvent, ReindexPhase } from "./reindex-event.ts";

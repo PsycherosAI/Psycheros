@@ -15,7 +15,7 @@ All Psycheros configuration is via environment variables. Copy `.env.example` to
 | `PSYCHEROS_HOST`                    | No       | `0.0.0.0`     | Server hostname                                                                                                                                                                                                                                                                                                                                                                           |
 | `PSYCHEROS_LOG_LEVEL`               | No       | `info`        | Global log level floor (`debug`/`info`/`warn`/`error`). Entries below this level are dropped from stdout and the admin log ring buffer. See [Log Levels](#log-levels) for per-component overrides.                                                                                                                                                                                        |
 | `PSYCHEROS_DATA_DIR`                | No       | `cwd`         | Where runtime state lives — `.psycheros/` (including `custom-tools/`, `backgrounds/`, `vault/`), `identity/`, `.snapshots/`, `memories/`. Defaults to the cwd, matching the historic `deno task start` behaviour. Set this when running under a launcher that puts source and data in different places (e.g. the desktop app puts data under `~/Library/Application Support/Psycheros/`). |
-| `PSYCHEROS_ACCENT_COLOR`            | No       | `#a855f7`     | UI accent color (hex). Overridden by any preset theme selected in Settings > Appearance.                                                                                                                                                                                                                                                                                                  |
+| `PSYCHEROS_ACCENT_COLOR`            | No       | `#a855f7`     | Accent override (hex) applied to the first-paint stylesheet. A theme saved in Settings > General > Theme takes over once the page loads.                                                                                                                                                                                                                                                  |
 | `PSYCHEROS_TOOLS`                   | No       | (all)         | Comma-separated list of enabled tools. Default: all tools enabled. Use `none` to disable all non-auto tools, or list specific tools to limit access.                                                                                                                                                                                                                                      |
 | `PSYCHEROS_MEMORY_HOUR`             | No       | `4`           | Fallback UTC hour for daily summarization (0-23). Only used when `PSYCHEROS_DISPLAY_TZ` is not set.                                                                                                                                                                                                                                                                                       |
 | `PSYCHEROS_SNAPSHOT_HOUR`           | No       | `3`           | Hour to run daily identity snapshots (0-23)                                                                                                                                                                                                                                                                                                                                               |
@@ -93,11 +93,12 @@ The "Show Discord Hub in Sidebar" toggle in the Connection section controls
 whether the Discord Hub entry appears in the Conversations sidebar. Defaults to
 on. Toggling it off and saving hides the Hub immediately without a page refresh.
 
-| Field                    | Type    | Default | Description                                                                                                                                                             |
-| ------------------------ | ------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `includeInDailyMemories` | boolean | `true`  | Include Discord activity in daily memory summarization via pre-summarizer                                                                                               |
-| `memoryInstructions`     | string  | `""`    | Instructions for the pre-summarizer and daily memory writer (e.g., handle mappings like "superdog420 is James"). Written in first-person from the entity's perspective. |
-| `debounceWindowMs`       | number  | `5000`  | Wait time (ms) after the last message before flushing the accumulation buffer to the entity. Resets on each new message.                                                |
+| Field                    | Type    | Default | Description                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------ | ------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `includeInDailyMemories` | boolean | `true`  | Include Discord activity in daily memory summarization via pre-summarizer                                                                                                                                                                                                                                                                           |
+| `memoryInstructions`     | string  | `""`    | Instructions for the pre-summarizer and daily memory writer (e.g., handle mappings like "superdog420 is James"). Written in first-person from the entity's perspective.                                                                                                                                                                             |
+| `debounceWindowMs`       | number  | `5000`  | Wait time (ms) after the last message before flushing the accumulation buffer to the entity. Resets on each new message.                                                                                                                                                                                                                            |
+| `llmProfileId`           | string  | `""`    | LLM connection profile used for **server-channel turns** (e.g. an economical model for chatter). Empty = the globally active profile. DMs always use the active profile. Selected via Settings > External Connections > Discord. Resolved per turn — profile edits apply without a restart, and a deleted profile falls back to the active profile. |
 
 ### Active Mode Tiers
 
@@ -130,6 +131,40 @@ simply not calling `act_in_discord`, the same as it does in active-mode
 channels. This lets conversations wind down naturally — for example, two
 entities DMing each other will reach a natural stopping point rather than
 looping indefinitely.
+
+### Image attachments
+
+Images posted in configured channels or whitelisted DMs reach the entity. Each
+turn resolves them in this order:
+
+1. **Pixels** — if the turn's model is vision-capable (detected via the model
+   capability table in `src/llm/model-capabilities.ts`), up to 4 images are
+   downloaded from Discord's signed CDN at turn time and attached as transient
+   vision content — the same mechanism as web chat image uploads. Pixel data is
+   never persisted.
+2. **Captions** — if the model is text-only and captioning is configured
+   (**Settings > Vision**), the images are captioned by the configured provider
+   (Gemini or OpenRouter) and the caption block is appended to the turn's
+   message. Captions persist in the transcript.
+3. **Markers** — with neither, images are still recorded as textual markers.
+
+Every attachment always leaves a marker in the persisted transcript, numbered in
+the order the images were attached to the turn:
+
+| Marker                                              | Meaning                                     |
+| --------------------------------------------------- | ------------------------------------------- |
+| `[image 2 attached: photo.png]`                     | Image the entity saw that turn              |
+| `[image attached: anim.gif (format not supported)]` | gif, avif, heic, and other non-vision types |
+| `[image attached: huge.png (10.4 MB, too large)]`   | over the 8 MB per-image cap                 |
+| `[image attached: extra.png (image limit reached)]` | over the 4-image cap — most recent kept     |
+| `[file attached: clip.mp4 (2.3 MB)]`                | non-image attachment                        |
+
+Caps: 4 images per turn, 8 MB per image, 15 s download timeout. A failed
+download skips that image — never the turn — and its marker stays in the
+transcript.
+
+Implementation: `src/discord/images.ts` (attachment planning, download,
+captioning), `src/server/server.ts` (`handleDiscordTurn` resolution).
 
 ### Connection reliability
 

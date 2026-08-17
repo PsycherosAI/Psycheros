@@ -13,7 +13,8 @@ core files.
 Psycheros has an automatic 4-layer memory system, temporal awareness (knows what
 time it is), ability to connect to external systems (including intimacy devices,
 home automation, Discord, and more), image generation hookups, autonomous
-prompting, and is extremely customizable.
+prompting, a Workspace for hands-on computer work, Skills the entity writes and
+loads on demand, and is extremely customizable.
 
 This framework can run on a PC with 2-4gigs of RAM, as API calls to inference
 providers (such as OpenRouter, Z.ai, NanoGPT, and others) are used for the LLM.
@@ -97,7 +98,19 @@ Enter your name and the entity's name and set your timezone.
 
 ### Theme
 
-Choose the accent color and/or background image to use.
+Pick a full palette from the Presets tab, generate one from a seed color, or set
+every color yourself in Custom. Contrast chips flag hard-to-read combinations
+and fix them in one tap. Themes export and import as JSON files.
+
+#### Decor
+
+Optional decorative edges for message bubbles: Lace (scalloped) or Stamp
+(perforated). These recolor with your theme.
+
+#### Background Image
+
+Set a background image by URL or upload. The Glass Effect toggle adds a frosted
+look to UI panels over it.
 
 ## Core Prompts
 
@@ -294,6 +307,79 @@ your lorebooks from other systems.
 Context Books are more accurate than Data Vault RAG, because an exact piece
 entry is inserted into context based on keywords. You can use "sticky" to make
 the message stay in context for a certain amount of turns.
+
+## Skills
+
+Skills are how your entity remembers procedures: markdown files they load on
+demand with the `skill` tool, instead of keeping instructions in context at all
+times. A loaded skill stays active for the conversation until the entity
+releases it.
+
+The entity can write their own skills, and you can edit or create them in
+Settings > Tools > Skills. A couple ship built-in, like the auto-generated
+handbook rebuilt from the docs at startup.
+
+## Workspace
+
+The Workspace is your entity's space for careful computer work — documents, file
+organization, code. The entity spawns a sandboxed coding session and works in it
+as part of themself, like arms lifting something. A `>_` button appears while a
+session runs, with a terminal view showing live progress; approvals and
+questions surface as toasts.
+
+Sessions run sync (the entity waits), async (results come back on their own when
+done), or engaged (back-and-forth until the entity finishes). Workspace needs
+OpenCode installed on the server. Settings > Workspace has the notable options:
+
+#### Default Isolation
+
+Sandboxed (locked down) is the default. Feral gives host access for "help me
+with my computer" workflows.
+
+#### Projects Folder
+
+Where finished work gets copied out of the sandbox, with an approval toast.
+Defaults to ~/Projects.
+
+#### Always-ask Paths
+
+Paths that always prompt before access, even in Feral mode — for anything
+sensitive.
+
+## Discord
+
+With the Discord integration the entity joins your servers and DMs as a real
+participant. Set it up under Settings > External Connections > Discord; the
+Discord Hub manages which servers and channels they're in.
+
+The entity sees images posted in Discord — vision models see them directly, and
+text-only models get captions. They can send images too.
+
+#### LLM Profile for Server Channels
+
+Server-channel chatter can use a different (cheaper) model than your main one.
+DMs always use the active profile.
+
+## Tools
+
+Tools are the entity's abilities — everything from memory recall and image
+generation to Discord actions and web search. Each one can be turned on or off
+in Settings > Tools, so the entity only has access to what you want them to.
+
+#### Built-in Tools
+
+The full catalog, grouped by category. Descriptions explain what each tool does;
+toggle anything you don't want the entity to have.
+
+#### Custom Tools
+
+You can write your own tools in JavaScript. They get a name, description, and
+arguments just like built-in tools, and the entity can start using them right
+away — handy for wrapping an API or a device you want them to control.
+
+#### Skills
+
+The Skills tab manages the entity's skill files — see the Skills section above.
 
 ## Vision
 

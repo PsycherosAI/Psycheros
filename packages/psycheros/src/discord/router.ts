@@ -5,7 +5,17 @@
  * hard gates → accumulation buffer → entity turn trigger → response posting.
  */
 
-import type { DiscordGatewayClient, DiscordMessage } from "./gateway.ts";
+import type {
+  DiscordAttachment,
+  DiscordGatewayClient,
+  DiscordMessage,
+} from "./gateway.ts";
+import { planTurnAttachments } from "./images.ts";
+import type {
+  AttachmentEnrichmentChannel,
+  DiscordTurnImage,
+  TurnAttachmentPlan,
+} from "./images.ts";
 import type {
   ActiveTier,
   ChannelMode,
@@ -23,6 +33,8 @@ export interface AccumulatedMessage {
   authorUsername: string;
   authorBot: boolean;
   content: string;
+  /** Raw attachments from the Discord message (empty array when none) */
+  attachments: DiscordAttachment[];
   timestamp: string;
   messageId: string;
   mentionsBot: boolean;
@@ -43,6 +55,16 @@ export interface RouterDeps {
     channelId: string,
     message: AccumulatedMessage,
   ) => Promise<void> | void;
+  /**
+   * Offer native-declined attachment markers to plugin hooks (bound by the
+   * server to PluginManager.enrichAttachmentMarkers). Optional so the router
+   * is testable in isolation and plugin-free deployments are unchanged.
+   * Receives the plan (mutated in place) + channel context.
+   */
+  enrichAttachmentMarkers?: (
+    plan: TurnAttachmentPlan,
+    channel: AttachmentEnrichmentChannel,
+  ) => Promise<void>;
 }
 
 export interface DiscordTurnContext {
@@ -54,6 +76,8 @@ export interface DiscordTurnContext {
   isDM: boolean;
   senderUsername: string;
   senderUserId: string;
+  /** Images selected for vision this turn (marker-numbered order; transient, never persisted) */
+  images?: DiscordTurnImage[];
   /** In lurk mode, individual messages are already persisted — skip userMessage persistence in the turn */
   skipUserMessagePersist?: boolean;
   /** The active mode tier that triggered this turn (only set for active mode channels) */
@@ -223,6 +247,7 @@ export class MessageRouter {
       authorUsername: msg.author.global_name || msg.author.username,
       authorBot: msg.author.bot,
       content: msg.content,
+      attachments: msg.attachments ?? [],
       timestamp: msg.timestamp,
       messageId: msg.id,
       mentionsBot: mentionsBot || isEveryoneHere || replyToBot,
@@ -258,6 +283,7 @@ export class MessageRouter {
         authorUsername: msg.author.global_name || msg.author.username,
         authorBot: false,
         content: msg.content,
+        attachments: msg.attachments ?? [],
         timestamp: msg.timestamp,
         messageId: msg.id,
         mentionsBot: true, // DMs always trigger
@@ -477,8 +503,33 @@ export class MessageRouter {
           buffer[0].authorUsername,
         );
 
-      // Format accumulated messages
-      const userMessage = this.formatAccumulatedMessages(buffer);
+      // Plan attachment markers + vision images in one walk so the marker
+      // numbering matches the order of the vision parts passed to the turn.
+      const attachmentPlan = planTurnAttachments(buffer);
+      // Then offer the declined attachments to plugin hooks, if any claim
+      // them. Best-effort — the native markers stay truthful on any failure.
+      if (
+        attachmentPlan.pluginCandidates.length > 0 &&
+        this.deps.enrichAttachmentMarkers
+      ) {
+        try {
+          await this.deps.enrichAttachmentMarkers(attachmentPlan, {
+            channelId,
+            channelName: this.getChannelNameForChannel(channelId),
+            serverName: isDM ? null : this.getServerNameForChannel(channelId),
+            isDM,
+          });
+        } catch (error) {
+          console.error(
+            `[Discord] Attachment marker enrichment failed (non-fatal):`,
+            error,
+          );
+        }
+      }
+      const userMessage = this.formatAccumulatedMessages(
+        buffer,
+        attachmentPlan.markersByMessageId,
+      );
 
       // Find the most relevant sender (the one who mentioned/replied to bot, or the last sender)
       const triggerMsg = [...buffer].reverse().find((m) => m.mentionsBot) ??
@@ -493,6 +544,9 @@ export class MessageRouter {
         isDM,
         senderUsername: triggerMsg.authorUsername,
         senderUserId: triggerMsg.authorId,
+        images: attachmentPlan.turnImages.length > 0
+          ? attachmentPlan.turnImages
+          : undefined,
         skipUserMessagePersist: false,
         activeTier: tier,
       };
@@ -512,7 +566,10 @@ export class MessageRouter {
   // Message formatting
   // -------------------------------------------------------------------------
 
-  private formatAccumulatedMessages(messages: AccumulatedMessage[]): string {
+  private formatAccumulatedMessages(
+    messages: AccumulatedMessage[],
+    markersByMessageId: Map<string, string[]>,
+  ): string {
     return messages.map((msg) => {
       const time = new Date(msg.timestamp).toLocaleTimeString([], {
         hour: "numeric",
@@ -523,7 +580,11 @@ export class MessageRouter {
       const replyTag = msg.referenceMessageId
         ? ` (replying to ${msg.referenceMessageId})`
         : "";
-      return `**${msg.authorUsername}** (<@${msg.authorId}>)${botTag} (${time}) [msg:${msg.messageId}]${replyTag}:\n${msg.content}`;
+      const markers = markersByMessageId.get(msg.messageId);
+      // The marker line must stand alone — image-only messages have empty
+      // content, so the markers are all the entity sees for them.
+      const markerLine = markers?.length ? `\n${markers.join(" ")}` : "";
+      return `**${msg.authorUsername}** (<@${msg.authorId}>)${botTag} (${time}) [msg:${msg.messageId}]${replyTag}:\n${msg.content}${markerLine}`;
     }).join("\n\n");
   }
 

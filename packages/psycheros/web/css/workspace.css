@@ -1,0 +1,1189 @@
+/**
+ * Workspace UI — terminal aesthetic
+ *
+ * Workspace conversations render with monospace font, box-drawing chrome,
+ * and a distinct visual identity from main chat. Reinforces "mode switch"
+ * when entering a workspace.
+ *
+ * Mobile-first: layouts tested at phone viewport sizes before desktop.
+ */
+
+/* ============================================================================
+ * FAB — floating action button next to voice call
+ * ========================================================================== */
+
+.workspace-fab {
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.workspace-fab.is-shown {
+  display: flex !important;
+}
+
+.workspace-fab.is-active {
+  border-color: var(--c-accent);
+  background-color: var(--c-accent-muted);
+}
+
+.workspace-fab.is-active::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid var(--c-accent);
+  opacity: 0.5;
+  animation: workspace-pulse 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes workspace-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0;
+  }
+}
+
+/**
+ * Stalled state — amber border + slower pulse. Purely informational: the
+ * supervisor's heartbeat watchdog marks a session stalled when no OpenCode
+ * events have fired for ~90s and it isn't waiting on a user query/approval.
+ * The 5-min hard timeout still kills the subprocess; this is the early
+ * warning so the user knows "running" actually means "stuck."
+ */
+.workspace-fab.is-stalled {
+  border-color: var(--c-warning);
+  background-color: var(--c-warning-subtle);
+}
+
+.workspace-fab.is-stalled.is-active::after {
+  border-color: var(--c-warning);
+  animation: workspace-stalled-pulse 3s ease-in-out infinite;
+}
+
+@keyframes workspace-stalled-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.2;
+  }
+}
+
+/* ============================================================================
+ * Workspace conversation body — terminal aesthetic
+ * Applied when body has .workspace-mode class (set by JS when conversation
+ * sourceType === "workspace").
+ * ========================================================================== */
+
+body.workspace-mode .chat {
+  font-family: "JetBrains Mono", ui-monospace, "Ubuntu Mono", monospace;
+  background-color: var(--c-bg-terminal);
+  color: var(--c-text-terminal);
+}
+
+body.workspace-mode .messages {
+  font-family: inherit;
+}
+
+body.workspace-mode .message {
+  border-left: 2px solid transparent;
+  padding-left: 12px;
+  margin-bottom: 8px;
+}
+
+body.workspace-mode .message.role-assistant {
+  border-left-color: var(--c-accent-muted);
+}
+
+body.workspace-mode .message.role-user {
+  border-left-color: var(--c-accent);
+}
+
+body.workspace-mode .message .role-label {
+  font-size: 0.75em;
+  opacity: 0.7;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Workspace action blocks — like terminal output, indented and dimmer */
+body.workspace-mode .workspace-action-block {
+  margin: 8px 0 8px 16px;
+  padding: 8px 12px;
+  background-color: var(--c-wash);
+  border-left: 2px solid var(--c-wash-strong);
+  font-size: 0.9em;
+  color: var(--c-text-terminal-dim);
+  border-radius: 0;
+}
+
+body.workspace-mode .workspace-action-block::before {
+  content: "▼ workspace";
+  display: block;
+  font-size: 0.75em;
+  opacity: 0.6;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+body.workspace-mode .workspace-action-block.collapsed {
+  max-height: 1.5em;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+body.workspace-mode .workspace-action-block.collapsed::after {
+  content: " (click to expand)";
+  font-size: 0.75em;
+  opacity: 0.5;
+}
+
+/* Permission prompts — amber warning */
+body.workspace-mode .permission-prompt {
+  background-color: var(--c-warning-subtle);
+  border: 1px solid var(--c-warning-glow);
+  padding: 12px;
+  margin: 8px 0;
+  font-size: 0.9em;
+}
+
+body.workspace-mode .permission-prompt .permission-warning {
+  color: var(--c-warning);
+  font-weight: 600;
+}
+
+body.workspace-mode .permission-prompt button {
+  font-family: inherit;
+  font-size: 0.85em;
+  padding: 4px 12px;
+  margin-right: 8px;
+  background: transparent;
+  border: 1px solid var(--c-text-terminal-dim);
+  color: inherit;
+  cursor: pointer;
+}
+
+body.workspace-mode .permission-prompt button.btn-approve {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+body.workspace-mode .permission-prompt button.btn-deny {
+  border-color: var(--c-error);
+  color: var(--c-error);
+}
+
+/* Input area — prompt cursor aesthetic */
+body.workspace-mode .input-area {
+  font-family: inherit;
+  border-top: 1px solid var(--c-wash-strong);
+}
+
+body.workspace-mode .input-area::before {
+  content: "> ";
+  color: var(--c-accent);
+  font-family: inherit;
+  font-weight: 600;
+}
+
+/* Header info — session slug, partyhard badge, tokens */
+body.workspace-mode .workspace-header-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid var(--c-wash-strong);
+  font-size: 0.8em;
+  font-family: inherit;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+body.workspace-mode .workspace-header-info .workspace-slug {
+  color: var(--c-text-terminal-dim);
+}
+
+body.workspace-mode .workspace-header-info .partyhard-badge {
+  background-color: var(--c-warning-subtle);
+  color: var(--c-warning);
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--c-warning-glow);
+}
+
+body.workspace-mode .workspace-header-info .workspace-stats {
+  margin-left: auto;
+  color: var(--c-text-terminal-dim);
+}
+
+/* Accent stripe under header */
+body.workspace-mode .chat::before {
+  content: "";
+  display: block;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--c-accent),
+    transparent
+  );
+  margin-bottom: 0;
+}
+
+/* ============================================================================
+ * Workspace summary card — appears in main chat when session completes
+ * ========================================================================== */
+
+.workspace-summary-card {
+  margin: 12px 0;
+  padding: 12px 14px;
+  background-color: var(--c-bg-terminal);
+  border: 1px solid var(--c-accent-muted);
+  border-left: 3px solid var(--c-accent);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.9em;
+  color: var(--c-text-terminal);
+}
+
+.workspace-summary-card .summary-title {
+  font-weight: 600;
+  color: var(--c-accent);
+  margin-bottom: 4px;
+}
+
+.workspace-summary-card .summary-goal {
+  color: var(--c-text-terminal-dim);
+  font-size: 0.9em;
+  margin-bottom: 8px;
+}
+
+.workspace-summary-card .summary-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.workspace-summary-card .summary-actions a,
+.workspace-summary-card .summary-actions button {
+  font-family: inherit;
+  font-size: 0.85em;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--c-accent-muted);
+  color: var(--c-accent);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+/* ============================================================================
+ * Workspace session list — dropdown when FAB clicked
+ * ========================================================================== */
+
+.workspace-list-dropdown {
+  position: fixed;
+  top: calc(60px + env(safe-area-inset-top));
+  right: 12px;
+  width: min(360px, calc(100vw - 24px));
+  max-height: 60vh;
+  overflow-y: auto;
+  background-color: var(--c-bg-raised);
+  border: 1px solid var(--c-accent-muted);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  color: var(--c-text-terminal);
+}
+
+.workspace-list-dropdown .list-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-wash-strong);
+  font-size: 0.85em;
+  color: var(--c-text-terminal-dim);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.workspace-list-dropdown .session-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-wash);
+  cursor: pointer;
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.workspace-list-dropdown .session-row:hover,
+.workspace-list-dropdown .session-row:focus {
+  background-color: var(--c-accent-subtle);
+  outline: none;
+}
+
+.workspace-list-dropdown .session-row .session-status {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.workspace-list-dropdown .session-row .session-status.running {
+  background-color: var(--c-success);
+  box-shadow: 0 0 6px var(--c-success-glow);
+}
+
+.workspace-list-dropdown .session-row .session-status.paused {
+  background-color: var(--c-warning);
+}
+
+.workspace-list-dropdown .session-row .session-status.complete {
+  background-color: var(--c-accent);
+}
+
+.workspace-list-dropdown .session-row .session-status.failed,
+.workspace-list-dropdown .session-row .session-status.cancelled {
+  background-color: var(--c-error);
+}
+
+.workspace-list-dropdown .session-row .session-status.suspended {
+  background-color: var(--c-warning);
+  box-shadow: 0 0 6px var(--c-warning-glow);
+  animation: workspace-suspended-pulse 2s ease-in-out infinite;
+}
+
+@keyframes workspace-suspended-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Pending questions section — recovery path for suspended queries (plan §14).
+ * Reuses session-row patterns with amber accent to match the FAB `!` badge. */
+.workspace-list-dropdown .list-header-pending {
+  color: var(--c-warning);
+  border-bottom-color: var(--c-warning-subtle);
+}
+
+.workspace-list-dropdown .list-divider {
+  height: 1px;
+  background-color: var(--c-wash-strong);
+  margin: 0;
+}
+
+.workspace-list-dropdown .query-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-wash);
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+  outline: none;
+}
+
+.workspace-list-dropdown .query-row:hover,
+.workspace-list-dropdown .query-row:focus {
+  background-color: var(--c-warning-subtle);
+}
+
+.workspace-list-dropdown .query-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: var(--c-warning);
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8em;
+  font-weight: 700;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.workspace-list-dropdown .query-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace-list-dropdown .query-text {
+  font-size: 0.9em;
+  color: var(--c-text-terminal);
+  word-wrap: break-word;
+}
+
+.workspace-list-dropdown .query-goal {
+  font-size: 0.78em;
+  color: var(--c-text-terminal-dim);
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.workspace-list-dropdown .session-row .session-goal {
+  font-size: 0.9em;
+  margin-top: 4px;
+  color: var(--c-text-terminal);
+}
+
+.workspace-list-dropdown .session-row .session-meta {
+  font-size: 0.75em;
+  color: var(--c-text-terminal-dim);
+  margin-top: 4px;
+}
+
+.workspace-list-dropdown .session-cancel-btn {
+  display: block;
+  margin-top: 6px;
+  padding: 3px 10px;
+  font-family: inherit;
+  font-size: 0.8em;
+  background: transparent;
+  border: 1px solid var(--c-error);
+  color: var(--c-error);
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.workspace-list-dropdown .session-cancel-btn:hover {
+  background: var(--c-error-subtle);
+}
+
+.workspace-list-dropdown .session-cancel-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.workspace-list-dropdown .empty-state {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--c-text-terminal-dim);
+  font-size: 0.9em;
+}
+
+/* ============================================================================
+ * Toasts — above chat bar (mobile-first)
+ * NOT top-right (crowded on mobile).
+ * ========================================================================== */
+
+.workspace-toast {
+  position: fixed;
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, calc(100vw - 24px));
+  /* Cap height so long questions don't push input/buttons off-screen.
+     Scroll internally if content overflows. */
+  max-height: calc(100vh - 100px - env(safe-area-inset-bottom));
+  overflow-y: auto;
+  background-color: var(--c-bg-raised);
+  border: 1px solid var(--c-accent-muted);
+  border-left: 3px solid var(--c-accent);
+  padding: 10px 14px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.85em;
+  color: var(--c-text-terminal);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 200;
+  animation: workspace-toast-in 220ms ease-out;
+  cursor: pointer;
+}
+
+@keyframes workspace-toast-in {
+  from {
+    transform: translate(-50%, 20px);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+.workspace-toast:hover {
+  border-left-color: var(--c-accent);
+}
+
+/* ============================================================================
+ * Mobile-first breakpoints — scale up, not down
+ * ========================================================================== */
+
+/* ============================================================================
+ * Tombstone + Glitched messages — used in ALL conversations (not just
+ * workspace) since soft-delete and glitched state can apply anywhere.
+ * ========================================================================== */
+
+.message.tombstone {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  background-color: var(--c-error-subtle);
+  border-left: 3px solid var(--c-error-glow);
+  border-radius: 0;
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+
+.message.tombstone .tombstone-marker {
+  color: var(--c-error);
+  font-weight: 600;
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.message.tombstone .tombstone-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.message.tombstone .tombstone-notice {
+  color: var(--c-fg-subtle);
+  font-style: italic;
+  word-break: break-word;
+}
+
+.message.tombstone .tombstone-meta {
+  font-size: 0.85em;
+  color: var(--c-fg-subtle);
+  margin-top: 2px;
+  opacity: 0.8;
+}
+
+.message.glitched {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  background-color: var(--c-warning-subtle);
+  border-left: 3px solid var(--c-warning-glow);
+  border-radius: 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.85em;
+}
+
+.message.glitched .glitched-marker {
+  color: var(--c-warning);
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.message.glitched .glitched-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.message.glitched .glitched-placeholder {
+  color: var(--c-warning);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.message.glitched .glitched-meta {
+  font-size: 0.85em;
+  color: var(--c-fg-subtle);
+  margin-top: 4px;
+}
+
+/* ============================================================================
+ * Approval + Query toasts — content styling
+ * ========================================================================== */
+
+.workspace-toast.workspace-approval-toast,
+.workspace-toast.workspace-query-toast {
+  padding: 12px 14px;
+  font-size: 0.85em;
+}
+
+.workspace-toast .toast-title {
+  font-weight: 600;
+  color: var(--c-warning);
+  margin-bottom: 6px;
+  letter-spacing: 0.03em;
+}
+
+.workspace-toast .toast-target,
+.workspace-toast .toast-justification,
+.workspace-toast .toast-reflection,
+.workspace-toast .toast-diff-summary {
+  margin-top: 4px;
+  color: var(--c-text-terminal);
+  word-break: break-word;
+}
+
+.workspace-toast .toast-reflection {
+  font-style: italic;
+  color: var(--c-text-terminal-dim);
+  font-size: 0.95em;
+}
+
+.workspace-toast .toast-diff {
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-left: 2px solid var(--c-accent-muted);
+  font-size: 0.85em;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: none; /* hidden by default — toggle with Details button */
+}
+
+.workspace-toast .toast-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  justify-content: flex-end;
+}
+
+.workspace-toast .toast-actions button {
+  font-family: inherit;
+  font-size: 0.9em;
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid var(--c-text-terminal-dim);
+  color: inherit;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.workspace-toast .toast-actions button.btn-approve {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+  font-weight: 600;
+}
+
+.workspace-toast .toast-actions button.btn-deny {
+  border-color: var(--c-error);
+  color: var(--c-error);
+}
+
+.workspace-toast .toast-actions button:hover {
+  background: var(--c-wash);
+}
+
+.workspace-toast .toast-question {
+  margin: 6px 0;
+  color: var(--c-text-terminal);
+  font-style: italic;
+}
+
+.workspace-toast .toast-form {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.workspace-toast .toast-input {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 0.95em;
+  padding: 5px 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--c-text-terminal-dim);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.workspace-toast .toast-input:focus {
+  outline: none;
+  border-color: var(--c-accent);
+}
+
+.workspace-toast.is-resolved {
+  animation: workspace-toast-out 200ms ease-in forwards;
+}
+
+.workspace-toast .toast-error {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: var(--c-error-subtle);
+  border-left: 2px solid var(--c-error);
+  color: var(--c-error);
+  font-size: 0.9em;
+}
+
+@keyframes workspace-toast-out {
+  to {
+    transform: translate(-50%, 20px);
+    opacity: 0;
+  }
+}
+
+@media (min-width: 768px) {
+  body.workspace-mode .chat {
+    font-size: 0.95em;
+  }
+
+  .workspace-list-dropdown {
+    width: 420px;
+  }
+
+  .workspace-toast {
+    bottom: auto;
+    top: calc(60px + env(safe-area-inset-top));
+    right: 12px;
+    left: auto;
+    transform: none;
+    /* Desktop: cap height to viewport minus top offset + safe margins. */
+    max-height: calc(100vh - 100px - env(safe-area-inset-top));
+    width: 360px;
+  }
+
+  @keyframes workspace-toast-in {
+    from {
+      transform: translateX(20px);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+}
+
+/* ============================================================================
+ * Workspace settings fragment — form fields
+ * The generic .settings-field container has no base styles (only the Discord
+ * form scopes its own), so this fragment styles its fields directly. Mobile-
+ * first: full-width inputs, generous touch targets.
+ * ========================================================================== */
+
+.workspace-settings form .settings-field {
+  margin-bottom: var(--sp-4);
+}
+
+.workspace-settings .settings-field > label {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--c-fg);
+  margin-bottom: var(--sp-2);
+}
+
+.workspace-settings input[type="text"],
+.workspace-settings input[type="number"],
+.workspace-settings select,
+.workspace-settings textarea {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  padding: var(--sp-2) var(--sp-3);
+  background-color: var(--c-bg-sunken);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  color: var(--c-fg);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.workspace-settings textarea {
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.workspace-settings input[type="text"]:focus,
+.workspace-settings input[type="number"]:focus,
+.workspace-settings select:focus,
+.workspace-settings textarea:focus {
+  border-color: var(--c-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--c-accent-subtle);
+}
+
+.workspace-settings input::placeholder,
+.workspace-settings textarea::placeholder {
+  color: var(--c-fg-muted);
+}
+
+.workspace-settings .settings-field-hint {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  margin: var(--sp-2) 0 0;
+  line-height: 1.5;
+}
+
+.workspace-settings .settings-field-hint code {
+  background-color: var(--c-bg);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+}
+
+.workspace-settings .workspace-status-card {
+  margin-top: var(--sp-6);
+  padding: var(--sp-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--c-bg-sunken);
+}
+
+.workspace-settings .workspace-status-card h3 {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--c-fg);
+  margin: 0 0 var(--sp-2);
+}
+
+.workspace-settings .workspace-status-card p {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  margin: 0;
+}
+
+/* Desktop: cap field widths so they don't span the page. Mobile stays
+   full-width — the base rule above is the mobile-first default. */
+@media (min-width: 768px) {
+  .workspace-settings input[type="text"],
+  .workspace-settings input[type="number"],
+  .workspace-settings select {
+    max-width: 420px;
+  }
+
+  .workspace-settings textarea {
+    max-width: 560px;
+  }
+
+  .workspace-settings .workspace-status-card {
+    max-width: 560px;
+  }
+}
+
+/* ============================================================================
+ * Workspace terminal pane — replaces the chat view for workspace conversations
+ *
+ * Live sessions stream SSE events as terminal lines into .wt-output. Ended
+ * sessions show briefing + persisted turns + summary. Transcript is ephemeral
+ * (plan §3) — the live stream is the only full-fidelity view.
+ * ========================================================================== */
+
+.workspace-terminal {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  font-family: "JetBrains Mono", ui-monospace, "Ubuntu Mono", monospace;
+  background-color: var(--c-bg-terminal);
+  color: var(--c-text-terminal);
+  font-size: 0.85em;
+  line-height: 1.6;
+}
+
+.workspace-terminal .wt-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--c-wash-strong);
+  background-color: rgba(0, 0, 0, 0.3);
+  min-width: 0;
+}
+
+.workspace-terminal .wt-prompt {
+  color: var(--c-accent);
+  font-weight: 600;
+}
+
+.workspace-terminal .wt-goal {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--c-text-terminal);
+}
+
+.workspace-terminal .wt-status {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 2px;
+  border: 1px solid;
+}
+
+.wt-status--running, .wt-status--pending {
+  color: var(--c-accent);
+  border-color: var(--c-accent);
+  animation: wt-status-blink 2s ease-in-out infinite;
+}
+
+.wt-status--complete {
+  color: var(--c-success);
+  border-color: var(--c-success);
+}
+
+.wt-status--failed {
+  color: var(--c-error);
+  border-color: var(--c-error);
+}
+
+.wt-status--cancelled {
+  color: var(--c-text-terminal-dim);
+  border-color: var(--c-text-terminal-dim);
+}
+
+.wt-status--suspended, .wt-status--paused {
+  color: var(--c-warning);
+  border-color: var(--c-warning);
+}
+
+.wt-status--unknown {
+  color: var(--c-text-terminal-dim);
+  border-color: var(--c-text-terminal-dim);
+}
+
+@keyframes wt-status-blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.workspace-terminal .wt-meta {
+  padding: var(--sp-1) var(--sp-4);
+  font-size: 0.75em;
+  color: var(--c-text-terminal-dim);
+  border-bottom: 1px solid var(--c-wash);
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.workspace-terminal .wt-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workspace-terminal .wt-live-note {
+  color: var(--c-text-terminal-dim);
+  font-style: italic;
+}
+
+/* Terminal lines */
+.wt-line {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.wt-line .wt-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-width: 0;
+}
+
+.wt-line--output .wt-src {
+  flex-shrink: 0;
+  color: var(--c-text-terminal-dim);
+  font-size: 0.85em;
+}
+
+.wt-line--output .wt-src::after {
+  content: " ▸";
+  opacity: 0.5;
+}
+
+/* Entity input line — accent name, easy to spot */
+.wt-line--entity .wt-entity-name {
+  flex-shrink: 0;
+  color: var(--c-accent);
+  font-weight: 600;
+}
+
+.wt-line--entity .wt-entity-name::after {
+  content: " ❯";
+  opacity: 0.7;
+}
+
+.wt-line--entity .wt-text {
+  color: var(--c-text-terminal);
+}
+
+/* Tool invocation — dim command line */
+.wt-line--tool .wt-tool-prefix {
+  flex-shrink: 0;
+  color: var(--c-text-terminal-dim);
+}
+
+.wt-line--tool .wt-tool-prefix::before {
+  content: "$ ";
+  color: var(--c-success);
+}
+
+/* Tool result — indented, dimmer */
+.wt-line--result {
+  padding-left: var(--sp-4);
+  border-left: 1px solid var(--c-wash-strong);
+  margin-left: var(--sp-2);
+}
+
+/* Error — red */
+.wt-line--error .wt-text {
+  color: var(--c-error);
+}
+
+.wt-line--status .wt-text {
+  color: var(--c-warning);
+  font-weight: 600;
+}
+
+.wt-dim {
+  color: var(--c-text-terminal-dim);
+}
+
+/* Blocks — briefing + summary */
+.wt-block {
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--c-wash-strong);
+  background-color: var(--c-wash);
+}
+
+.wt-block .wt-block-label {
+  font-size: 0.75em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-text-terminal-dim);
+  margin-bottom: var(--sp-2);
+}
+
+.wt-block.wt-summary {
+  border-left: 3px solid var(--c-accent);
+}
+
+.wt-block.wt-summary .wt-block-label {
+  color: var(--c-accent);
+}
+
+/* Footer — cursor + state */
+.workspace-terminal .wt-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border-top: 1px solid var(--c-wash-strong);
+  background-color: rgba(0, 0, 0, 0.3);
+  color: var(--c-text-terminal-dim);
+  font-size: 0.8em;
+}
+
+.workspace-terminal .wt-cursor {
+  color: var(--c-accent);
+  animation: wt-cursor-blink 1.1s step-end infinite;
+}
+
+.wt-footer--ended .wt-cursor {
+  animation: none;
+  opacity: 0.3;
+}
+
+@keyframes wt-cursor-blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/**
+ * Completion flash — brief green state when a workspace finishes. Driven by
+ * flashFabComplete() on the workspace_async_complete SSE event; the next
+ * status poll re-evaluates (and hides the FAB if no sessions remain).
+ */
+.workspace-fab.is-complete {
+  border-color: var(--c-success);
+  background-color: var(--c-success-subtle);
+}
+
+.workspace-fab.is-complete::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid var(--c-success);
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ============================================================================
+ * Pinned projects list — Settings > Workspace management section
+ * ========================================================================== */
+
+.workspace-settings .workspace-pin-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: 560px;
+}
+
+.workspace-settings .pin-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--c-bg-sunken);
+}
+
+.workspace-settings .pin-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workspace-settings .pin-row-goal {
+  font-size: var(--font-size-sm);
+  color: var(--c-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-settings .pin-row-meta {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+}
+
+.workspace-settings .pin-list-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--c-fg-muted);
+  margin-top: var(--sp-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.workspace-settings .pin-row-empty {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  font-style: italic;
+}

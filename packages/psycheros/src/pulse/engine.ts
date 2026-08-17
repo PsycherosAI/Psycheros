@@ -73,7 +73,8 @@ export type PulseTriggerSource =
   | "chain"
   | "manual"
   | "inactivity"
-  | "data_event";
+  | "data_event"
+  | "workspace_completion";
 
 // =============================================================================
 // Semaphore
@@ -318,6 +319,18 @@ export class PulseEngine {
         catchupPolicy: "skip_missed",
         maxAttempts: 1,
       });
+      return;
+    }
+
+    // Cron pulses without a cronExpression are manually-triggered only —
+    // they should NOT have a recurring schedule. Previously this fell back
+    // to "0 * * * *" (hourly), which caused ghost Pulses: workspace
+    // completion Pulses with triggerType:"cron" + autoDelete + no
+    // cronExpression would recur hourly after a server restart that re-
+    // registered their triggers before the autoDelete fired. With autoDelete
+    // they'd eventually self-clean, but only after at least one spurious
+    // extra firing. Bail here — no schedule means no recurrence.
+    if (pulse.triggerType === "cron" && !pulse.cronExpression) {
       return;
     }
 
@@ -578,7 +591,7 @@ export class PulseEngine {
       } else if (isOneshot) {
         // Clear runAt and disable so the pulse can't fire again. The
         // scheduler's oneshot already disabled the schedule.
-        this.db.updatePulse(pulseId, { runAt: null, enabled: false });
+        await this.db.updatePulse(pulseId, { runAt: null, enabled: false });
       }
 
       return result;
@@ -663,7 +676,7 @@ export class PulseEngine {
     if (!conversationId && pulse.chatMode === "visible") {
       const conv = this.db.createConversation(`[Pulse] ${pulse.name}`);
       conversationId = conv.id;
-      this.db.updatePulse(pulse.id, { conversationId });
+      await this.db.updatePulse(pulse.id, { conversationId });
     }
 
     // For silent mode with no conversation, create a temporary one.

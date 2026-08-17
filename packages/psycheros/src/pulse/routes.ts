@@ -451,7 +451,7 @@ export async function handleUpdatePulse(
     const body = await request.json() as Record<string, unknown>;
     const schedule = translateFormData(body);
 
-    ctx.db.updatePulse(pulseId, {
+    await ctx.db.updatePulse(pulseId, {
       name: (body.name as string)?.trim(),
       description: (body.description as string) || null,
       promptText: (body.promptText as string)?.trim(),
