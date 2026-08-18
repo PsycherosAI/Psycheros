@@ -6,6 +6,17 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-08-17
+
+### Fixed
+
+- Database migrations for Workspace sessions and held Skills now run on every
+  install. They had been accidentally placed inside the optional sqlite-vec
+  vector-table init path, so environments without the sqlite-vec extension
+  (including CI and native installs) never got the `workspace_sessions` and
+  `held_skills` tables — breaking Workspace and held-skill features at runtime
+  there.
+
 ## [0.11.1] - 2026-08-17
 
 ### Fixed
