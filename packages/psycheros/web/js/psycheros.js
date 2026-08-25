@@ -925,7 +925,7 @@ async function newConversation() {
     }
 
     // Reload conversation list
-    htmx.trigger('#conv-list', 'load');
+    htmx.trigger('#conv-list', 'refresh-conv-list');
 
     // Clear context inspector state — new conversation has no snapshots yet
     contextSnapshot = null;
@@ -1342,7 +1342,7 @@ async function sendMessage() {
       });
       const conversation = await response.json();
       currentConversationId = conversation.id;
-      htmx.trigger('#conv-list', 'load');
+      htmx.trigger('#conv-list', 'refresh-conv-list');
       history.pushState({}, '', `/c/${conversation.id}`);
     } catch (_error) {
       showToast('Failed to create conversation');
