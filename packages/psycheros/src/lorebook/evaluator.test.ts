@@ -6,7 +6,7 @@ import type { LorebookEntry, LorebookState } from "./types.ts";
 /**
  * Regression tests for sticky-entry bookkeeping in the lorebook evaluator.
  *
- * Bug (2026-09-14, Echo live): entries added from sticky state were pushed to
+ * Bug (2026-09-14, production): entries added from sticky state were pushed to
  * `activeEntries` but never registered in `triggeredEntryIds`. The recursion
  * pass then scanned all active entry content — including that same sticky
  * entry's own full prompt — and matched its trigger word inside its own body,
@@ -41,20 +41,20 @@ function makeEntry(
 
 Deno.test("sticky entry is not re-added by the recursion pass (duplicate context bug)", () => {
   // Entry whose content contains its own trigger word ("fair" appears in its
-  // own body) — exactly the OCF shape that duplicated on Echo.
-  const ocf = makeEntry({
-    id: "ocf",
-    name: "Oregon Country Fair",
-    triggers: ["OCF", "fair"],
+  // own body) — exactly the shape that duplicated in production.
+  const fest = makeEntry({
+    id: "fest",
+    name: "Harborfest",
+    triggers: ["HF", "festival"],
     sticky: true,
     stickyDuration: 5,
     content:
-      "Robin volunteers for Oregon Country Fair (OCF) every summer; the Fair grounds.",
+      "Harborfest runs every summer; the festival grounds open at dawn.",
   });
 
   const state: LorebookState = {
-    activeEntries: new Map([["ocf", {
-      entryId: "ocf",
+    activeEntries: new Map([["fest", {
+      entryId: "fest",
       turnsRemaining: 4,
       triggeredAtMessage: 1,
       triggeredAt: new Date().toISOString(),
@@ -64,7 +64,7 @@ Deno.test("sticky entry is not re-added by the recursion pass (duplicate context
   };
 
   const result = evaluateLorebook(
-    [ocf],
+    [fest],
     {
       userMessage: "hello",
       history: [{ role: "user", content: "hello" }],
@@ -82,7 +82,7 @@ Deno.test("sticky entry is not re-added by the recursion pass (duplicate context
   const headers = [...ctx.matchAll(/^\[([^\]]+)\]$/gm)].map((m) => m[1]);
   assertEquals(
     headers,
-    ["Oregon Country Fair"],
+    ["Harborfest"],
     `duplicate headers in context: ${headers}`,
   );
 });
@@ -102,10 +102,10 @@ Deno.test("facet entries: sticky entries do not trigger each other via their own
     });
 
   const entries = [
-    mk("omega", "Omega", "Omega prompt mentioning Auralis and Rasika."),
-    mk("auralis", "Auralis", "Auralis prompt mentioning Prime."),
-    mk("rasika", "Rasika", "Rasika prompt mentioning Omega."),
-    mk("prime", "Prime", "Prime prompt mentioning Auralis and Omega."),
+    mk("onyx", "Onyx", "Onyx prompt mentioning Aster and Rune."),
+    mk("aster", "Aster", "Aster prompt mentioning Pike."),
+    mk("rune", "Rune", "Rune prompt mentioning Onyx."),
+    mk("pike", "Pike", "Pike prompt mentioning Aster and Onyx."),
   ];
 
   const state: LorebookState = {

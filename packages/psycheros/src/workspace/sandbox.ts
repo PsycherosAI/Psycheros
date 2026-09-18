@@ -232,7 +232,7 @@ export function buildBwrapArgv(input: {
   // bookkeeping and writes to them at startup (config dir: a .gitignore and
   // cached state; data dir: sessions DB + logs). A read-only mount here
   // kills every session with `Unknown: FileSystem.writeFile` — found live
-  // on echobox 2026-09-03 after the existence guard landed.
+  // 2026-09-03 after the existence guard landed.
   const opencodeHomeArgs = [
     ...(dirExistsSync(opencodeInstall)
       ? ["--ro-bind", opencodeInstall, opencodeInstall]

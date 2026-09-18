@@ -1,7 +1,7 @@
 /**
  * Tests for vault title normalization and near-duplicate detection.
  *
- * Regression context: the Rasika Dystopian AU document was forked five ways
+ * Regression context: a Dystopian AU document was forked five ways
  * in April 2026 because each vault write used a cosmetically different
  * title ("... (started 4/3/2026)" vs "... (updated 4/5)") and the exact-match
  * duplicate guard never fired. These cases pin the matching behavior.
@@ -17,12 +17,12 @@ import {
 Deno.test("normalizeTitle strips case, diacritics, punctuation, trailing churn", () => {
   // Trailing date + "updated" are version noise, not identity.
   assertEquals(
-    normalizeTitle("Dystopian AU - Rasika Pickpocket Scenario (updated 4/8)"),
-    "dystopian au rasika pickpocket scenario",
+    normalizeTitle("Dystopian AU - Marlowe Pickpocket Scenario (updated 4/8)"),
+    "dystopian au marlowe pickpocket scenario",
   );
   assertEquals(
-    normalizeTitle("  Dystopian AU — Rasika Pickpocket Scenario!  "),
-    "dystopian au rasika pickpocket scenario",
+    normalizeTitle("  Dystopian AU — Marlowe Pickpocket Scenario!  "),
+    "dystopian au marlowe pickpocket scenario",
   );
   assertEquals(normalizeTitle("Caf\u00e9 Notes"), "cafe notes");
   // Mid-title words survive; only the trailing run is stripped.
@@ -37,8 +37,8 @@ Deno.test("normalizeTitle strips case, diacritics, punctuation, trailing churn",
 Deno.test("exact normalized equality is a near-duplicate", () => {
   assert(
     isNearDuplicateTitle(
-      "Dystopian AU - Rasika Pickpocket Scenario (started 4/3/2026)",
-      "Dystopian AU - Rasika Pickpocket Scenario (updated 4/5)",
+      "Dystopian AU - Marlowe Pickpocket Scenario (started 4/3/2026)",
+      "Dystopian AU - Marlowe Pickpocket Scenario (updated 4/5)",
     ),
   );
 });
@@ -52,8 +52,8 @@ Deno.test("em-dash vs hyphen separators still match", () => {
 Deno.test("containment of a substantial title matches", () => {
   assert(
     isNearDuplicateTitle(
-      "Dystopian AU - Rasika Pickpocket Scenario",
-      "Dystopian AU - Rasika Pickpocket Scenario (updated 4/8)",
+      "Dystopian AU - Marlowe Pickpocket Scenario",
+      "Dystopian AU - Marlowe Pickpocket Scenario (updated 4/8)",
     ),
   );
 });
@@ -66,8 +66,8 @@ Deno.test("short generic titles do not match everything", () => {
 Deno.test("low-overlap containment does not match", () => {
   assertFalse(
     isNearDuplicateTitle(
-      "Rasika",
-      "Rasika Dystopian Pickpocket AU Scenario Continuity",
+      "Marlowe",
+      "Marlowe Dystopian Pickpocket AU Scenario Continuity",
     ),
   );
 });
@@ -79,15 +79,15 @@ Deno.test("unrelated titles do not match", () => {
 Deno.test("findNearDuplicateTitle prefers the longest candidate", () => {
   const candidates = [
     "Dystopian AU",
-    "Dystopian AU - Rasika Pickpocket Scenario (updated 4/6)",
+    "Dystopian AU - Marlowe Pickpocket Scenario (updated 4/6)",
     "Voice Pipeline Research",
   ];
   assertEquals(
     findNearDuplicateTitle(
-      "Dystopian AU - Rasika Pickpocket Scenario (updated 4/8)",
+      "Dystopian AU - Marlowe Pickpocket Scenario (updated 4/8)",
       candidates,
     ),
-    "Dystopian AU - Rasika Pickpocket Scenario (updated 4/6)",
+    "Dystopian AU - Marlowe Pickpocket Scenario (updated 4/6)",
   );
 });
 

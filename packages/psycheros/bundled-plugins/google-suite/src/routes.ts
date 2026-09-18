@@ -176,7 +176,7 @@ async function handleOauthStatus(
 
 /**
  * Derive the callback URL from the incoming request. The operator reaches
- * Psycheros's server at some origin (e.g. http://voyager.local:3000 or
+ * Psycheros's server at some origin (e.g. http://psycheros.local:3000 or
  * https://echo.example.com). The OAuth callback must route back to that same
  * origin so Google's redirect lands on this server.
  *

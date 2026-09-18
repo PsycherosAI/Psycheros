@@ -1,7 +1,7 @@
 /**
  * Integration tests for the vault tool duplicate-title guards.
  *
- * Regression context (2026-09 Rasika AU restore): an entity repeatedly
+ * Regression context (2026-09 AU-document restore): an entity repeatedly
  * re-wrote one document under shifting titles; `write` happily created
  * forks and `append`/`rewrite` missed the target because lookups were
  * exact-match. These tests pin the new behavior: `write` refuses
@@ -64,14 +64,14 @@ Deno.test("write refuses a near-duplicate title", async () => {
   try {
     const first = await run(ctx, {
       operation: "write",
-      title: "Dystopian AU - Rasika Pickpocket Scenario (started 4/3/2026)",
+      title: "Dystopian AU - Marlowe Pickpocket Scenario (started 4/3/2026)",
       content: "# Original\n\nSome content here.",
     });
     assert(!first.isError, "first write should succeed: " + first.content);
 
     const second = await run(ctx, {
       operation: "write",
-      title: "Dystopian AU - Rasika Pickpocket Scenario (updated 4/5)",
+      title: "Dystopian AU - Marlowe Pickpocket Scenario (updated 4/5)",
       content: "# Fork attempt",
     });
     assert(second.isError, "near-duplicate write must be refused");
