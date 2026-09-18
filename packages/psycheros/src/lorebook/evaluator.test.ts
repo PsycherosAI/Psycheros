@@ -48,8 +48,7 @@ Deno.test("sticky entry is not re-added by the recursion pass (duplicate context
     triggers: ["HF", "festival"],
     sticky: true,
     stickyDuration: 5,
-    content:
-      "Harborfest runs every summer; the festival grounds open at dawn.",
+    content: "Harborfest runs every summer; the festival grounds open at dawn.",
   });
 
   const state: LorebookState = {
