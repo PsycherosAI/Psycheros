@@ -215,13 +215,35 @@ export function buildBwrapArgv(input: {
   binary: string;
   args: string[];
 }): { binary: string; args: string[] } {
-  // OpenCode install paths under $HOME need to be visible inside the sandbox.
-  // Without these, bwrap can't find the opencode binary, much less let it
-  // read its config or write to its sessions DB.
+  // OpenCode per-user install paths under $HOME (official installer layout:
+  // ~/.opencode holds the binary + bundled node_modules, the other two hold
+  // user config and OpenCode's own session bookkeeping). Each is bound only
+  // when it actually exists — bwrap hard-fails on missing bind sources, and
+  // none of these is guaranteed: a system-wide OpenCode install (package
+  // manager, /usr/local/bin) leaves ~/.opencode absent, and a fresh user may
+  // have none of the three yet. With a system-wide binary, OpenCode itself
+  // comes in through the /usr ro-bind below.
   const home = Deno.env.get("HOME") ?? "/root";
   const opencodeInstall = `${home}/.opencode`;
   const opencodeConfig = `${home}/.config/opencode`;
   const opencodeData = `${home}/.local/share/opencode`;
+  // Install dir is read-only (binary + bundled node_modules — pure assets).
+  // Config and data dirs are read-WRITE: OpenCode treats both as its own
+  // bookkeeping and writes to them at startup (config dir: a .gitignore and
+  // cached state; data dir: sessions DB + logs). A read-only mount here
+  // kills every session with `Unknown: FileSystem.writeFile` — found live
+  // on echobox 2026-09-03 after the existence guard landed.
+  const opencodeHomeArgs = [
+    ...(dirExistsSync(opencodeInstall)
+      ? ["--ro-bind", opencodeInstall, opencodeInstall]
+      : []),
+    ...(dirExistsSync(opencodeConfig)
+      ? ["--bind", opencodeConfig, opencodeConfig]
+      : []),
+    ...(dirExistsSync(opencodeData)
+      ? ["--bind", opencodeData, opencodeData]
+      : []),
+  ];
 
   // Shared OpenCode runtime (node_modules symlink target). Bound rw so
   // OpenCode can install plugin updates into the one shared copy. Only
@@ -290,22 +312,9 @@ export function buildBwrapArgv(input: {
       "--ro-bind",
       "/run",
       "/run",
-      // OpenCode install paths under $HOME. Without these, bwrap can't find
-      // the opencode binary, much less let it read config or write sessions.
-      //
-      // - ~/.opencode/ — binary install + bundled node_modules (read-only)
-      // - ~/.config/opencode/ — user config (opencode.jsonc) (read-only)
-      // - ~/.local/share/opencode/ — sessions DB + logs (read-write; this is
-      //   OpenCode's own bookkeeping, NOT user data — safe to write here)
-      "--ro-bind",
-      opencodeInstall,
-      opencodeInstall,
-      "--ro-bind",
-      opencodeConfig,
-      opencodeConfig,
-      "--bind",
-      opencodeData,
-      opencodeData,
+      // OpenCode per-user install paths under $HOME — bound when present
+      // (see opencodeHomeArgs above).
+      ...opencodeHomeArgs,
       // Devices + proc + tmp.
       "--dev",
       "/dev",
@@ -355,6 +364,12 @@ export async function buildSandboxExecArgv(input: {
   const data = await realpathOrFallback(input.dataRoot);
   const opencodeBin = await realpathOrFallback(input.binary);
 
+  // OpenCode per-user dirs under $HOME (mirror of the Linux bind set).
+  const home = Deno.env.get("HOME") ?? "/root";
+  const opencodeInstall = `${home}/.opencode`;
+  const opencodeConfig = `${home}/.config/opencode`;
+  const opencodeData = `${home}/.local/share/opencode`;
+
   // Seatbelt profile — minimal viable sandbox for OpenCode to function
   // while blocking Tier 5 paths. Generated fresh per session.
   const profile = `
@@ -378,6 +393,16 @@ export async function buildSandboxExecArgv(input: {
 ;; Sandbox (read-write — entity's work area)
 (allow file-write* (subpath "${sandbox}"))
 (allow file-read* (subpath "${sandbox}"))
+
+;; OpenCode per-user dirs — same treatment as the bwrap binds on Linux:
+;; install assets read-only, config + session data read-write (OpenCode
+;; writes bookkeeping like a .gitignore and its sessions DB at startup).
+;; Rules on nonexistent paths are harmless no-ops under Seatbelt.
+(allow file-read* (subpath "${opencodeInstall}"))
+(allow file-read* (subpath "${opencodeConfig}"))
+(allow file-write* (subpath "${opencodeConfig}"))
+(allow file-read* (subpath "${opencodeData}"))
+(allow file-write* (subpath "${opencodeData}"))
 ${
     input.workdir
       ? `

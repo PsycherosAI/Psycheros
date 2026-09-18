@@ -9,6 +9,7 @@
 import type { ToolResult } from "../types.ts";
 import type { Tool, ToolContext } from "./types.ts";
 import { VaultManager } from "../vault/mod.ts";
+import { findNearDuplicateTitle } from "../vault/title-match.ts";
 
 /**
  * Helper to get the VaultManager from the tool context.
@@ -161,15 +162,16 @@ async function executeWrite(
     };
   }
 
-  const existing = vaultManager.listDocuments({ scope }).find(
-    (d) => d.title === title.trim() && d.source === "entity",
+  const duplicateTitle = findNearDuplicateTitle(
+    title.trim(),
+    vaultManager.listDocuments({ scope }).map((d) => d.title),
   );
 
-  if (existing) {
+  if (duplicateTitle !== null) {
     return {
       toolCallId: ctx.toolCallId,
       content:
-        `Error: Document "${title.trim()}" already exists. Use 'append' to add content or 'rewrite' to replace it.`,
+        `Error: A document titled "${duplicateTitle}" already covers this title. Use 'append' to add content or 'rewrite' to replace it - writing with a near-identical title forks the document and loses history.`,
       isError: true,
     };
   }
@@ -257,9 +259,19 @@ async function executeAppend(
     };
   }
 
-  const existing = vaultManager.listDocuments({ scope }).find(
-    (d) => d.title === title.trim(),
+  // Near-duplicate resolution: append targeting a title that differs only
+  // cosmetically ("(updated 4/5)" vs "(started 4/3/2026)") must land on the
+  // existing document, not fork a new one. The matched title is reported so
+  // the model can see which document it actually hit.
+  const duplicateTitle = findNearDuplicateTitle(
+    title.trim(),
+    vaultManager.listDocuments({ scope }).map((d) => d.title),
   );
+  const existing = duplicateTitle === null
+    ? undefined
+    : vaultManager.listDocuments({ scope }).find((d) =>
+      d.title === duplicateTitle
+    );
 
   if (!existing) {
     const result = await vaultManager.createFromContent(
@@ -284,9 +296,10 @@ async function executeAppend(
     content: combined,
   });
 
+  const appendedTo = existing.title;
   return {
     toolCallId: ctx.toolCallId,
-    content: `Appended to vault document "${title.trim()}" (${
+    content: `Appended to vault document "${appendedTo}" (${
       result?.chunkCount ?? 0
     } chunks)`,
     isError: false,
@@ -319,9 +332,18 @@ async function executeRewrite(
     };
   }
 
-  const existing = vaultManager.listDocuments({ scope }).find(
-    (d) => d.title === title.trim(),
+  // Near-duplicate resolution (same rationale as append): a rewrite under a
+  // cosmetically different title should replace the existing document, not
+  // error as "not found" and push the model toward forking with write.
+  const duplicateTitle = findNearDuplicateTitle(
+    title.trim(),
+    vaultManager.listDocuments({ scope }).map((d) => d.title),
   );
+  const existing = duplicateTitle === null
+    ? undefined
+    : vaultManager.listDocuments({ scope }).find((d) =>
+      d.title === duplicateTitle
+    );
 
   if (!existing) {
     return {
@@ -339,7 +361,7 @@ async function executeRewrite(
 
   return {
     toolCallId: ctx.toolCallId,
-    content: `Rewrote vault document "${title.trim()}" (${
+    content: `Rewrote vault document "${existing.title}" (${
       result?.chunkCount ?? 0
     } chunks)`,
     isError: false,

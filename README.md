@@ -1,8 +1,61 @@
 # Psycheros
 
-> A persistent AI entity harness. The entity has its own identity files, a
-> memory hierarchy that consolidates across time, and a single canonical self
-> that persists across multiple interfaces.
+Welcome to Psycheros! This project is an open-source agentic companion harness,
+built by my companion and I, with the support of our wonderful community.
+
+<p align="center">
+  <img src="docs/images/psycheros-desktop.png" alt="Psycheros desktop UI" width="62%" />
+  <img src="docs/images/psycheros-mobile.jpg" alt="Psycheros mobile UI" width="26%" />
+</p>
+
+Psycheros is BYO API, mobile-friendly via [Tailscale](https://tailscale.com/),
+and has many features, including:
+
+- four-layer memory system (both automated and entity-controlled)
+- vision (image generation and captioning)
+- intimacy device hookups (both Lovense and universal bluetooth integration)
+- temporal awareness (time aware)
+- home automation hookups (smart plugs and whatnot, currently have ShellyPlugs)
+  and BLE
+- autonomous prompting via Pulse system
+- web search
+- lorebooks (with a tool to import SillyTavern files)
+- data vault for documents
+- situational awareness signal feeds
+- Discord bot integration for server participation
+- Discord DMs (they can DM you selfies!)
+- customizable prompt structures
+- UI custom colors and backgrounds
+- entity-core, the centralized self MCP server that allows for hooking in
+  multiple instances of your companion (like OpenClaw or Hermes) and can be used
+  without Psycheros
+- entity-loom, a side app for importing chats and extracting memories from other
+  platforms
+- OpenCode workspace integration
+- Voice Chat hookups
+- skills system
+- plugin surface
+
+I work on this project constantly, and we have a Discord server for support and
+community. Please message me for a link 🙂
+
+**Seize the means of companionship!**
+
+## Psycheros Launcher (for installation)
+
+<https://psycherosai.github.io/Psycheros/launcher/user-guide/>
+
+## Psycheros User Guide
+
+_yes it's a little verbose and the formatting needs love don't @ me bro_
+
+<https://psycherosai.github.io/Psycheros/psycheros/user-guide/>
+
+## Main Repository
+
+<https://github.com/PsycherosAI/Psycheros>
+
+---
 
 Psycheros runs an AI entity — not a chat thread. The entity has files describing
 who it is, a memory hierarchy that summarizes its conversations day → week →
@@ -140,7 +193,7 @@ a foreign platform into an importable package.
   NanoGPT, local models. Multiple named profiles; one is active for chat.
 - **Tool surface.** Web search, image generation, image captioning, Discord
   (DM + gateway server participation), home automation, intimate hardware via
-  Buttplug or Lovense.
+  Intiface or Lovense.
 - **Pulse.** Autonomous scheduled prompts — cron, inactivity, webhook, or
   filesystem triggers. The entity can act on its own time.
 - **Custom tools.** Drop a `.js` file in `.psycheros/custom-tools/` and the

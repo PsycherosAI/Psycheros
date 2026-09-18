@@ -2178,6 +2178,60 @@ export class DBClient {
   }
 
   /**
+   * Most recent terminal (success/error/dead) pulse run. Unlike
+   * {@link getLastSuccessfulPulseRunAt}, includes failed runs — the
+   * inactivity circuit breaker in the PulseEngine uses this to detect
+   * back-to-back execution failures.
+   */
+  getLastPulseTerminalRun(
+    pulseId: string,
+  ): { status: string; completedAt: string } | null {
+    const stmt = this.db.prepare(
+      `SELECT status, completed_at
+       FROM job_runs
+       WHERE handler = 'pulse.execute'
+         AND json_extract(payload_json, '$.pulseId') = ?
+         AND status IN ('success', 'error', 'dead')
+         AND completed_at IS NOT NULL
+       ORDER BY completed_at DESC, created_at DESC
+       LIMIT 1`,
+    );
+    const row = stmt.get(pulseId) as
+      | { status: string; completed_at: string }
+      | undefined;
+    stmt.finalize();
+    if (!row) return null;
+    return { status: row.status, completedAt: row.completed_at };
+  }
+
+  /**
+   * Count consecutive failed (error/dead) pulse fires, walking backwards
+   * from the most recent run. A success, or a `skipped` row (guard
+   * rejection — not an execution attempt; also the pruned-first row
+   * class), stops the count. Bounded at 50 rows so a long outage can
+   * never make this scan expensive.
+   */
+  getPulseFailureStreak(pulseId: string): number {
+    const stmt = this.db.prepare(
+      `SELECT status
+       FROM job_runs
+       WHERE handler = 'pulse.execute'
+         AND json_extract(payload_json, '$.pulseId') = ?
+         AND status IN ('success', 'error', 'dead', 'skipped')
+       ORDER BY completed_at DESC, created_at DESC
+       LIMIT 50`,
+    );
+    const rows = stmt.all(pulseId) as Array<{ status: string }>;
+    stmt.finalize();
+    let streak = 0;
+    for (const row of rows) {
+      if (row.status !== "error" && row.status !== "dead") break;
+      streak++;
+    }
+    return streak;
+  }
+
+  /**
    * Get the timestamp of the most recent user message across all
    * conversations. Used by the inactivity trigger eligibility check.
    */

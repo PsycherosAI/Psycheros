@@ -132,6 +132,9 @@ export function evaluateLorebook(
           console.log(
             `[Lorebook] Adding "${entry.name}" to active entries from sticky (no decrement)`,
           );
+          // Register in triggeredEntryIds so the recursion pass can't
+          // re-derive this entry from its own full-prompt content.
+          triggeredEntryIds.add(entryId);
           activeEntries.push({
             entry,
             recursiveTrigger: false,
@@ -157,6 +160,9 @@ export function evaluateLorebook(
             console.log(
               `[Lorebook] Adding "${entry.name}" to active entries from sticky`,
             );
+            // Register in triggeredEntryIds so the recursion pass can't
+            // re-derive this entry from its own full-prompt content.
+            triggeredEntryIds.add(entryId);
             activeEntries.push({
               entry,
               recursiveTrigger: false,

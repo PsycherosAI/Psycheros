@@ -4,7 +4,37 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.11.3] - 2026-09-18
+
+### Fixed
+
+- Vault documents can no longer be forked by title churn. `vault write` with a
+  title that differs from an existing document only by trailing version noise
+  ("(started 4/3/2026)" vs "(updated 4/5)") is now refused with a pointer to
+  `append`/`rewrite`; `append` and `rewrite` resolve such near-duplicate titles
+  onto the existing document instead of missing it (exact-match lookup) and
+  forking. Matching normalizes case/diacritics/punctuation and strips a trailing
+  run of version-noise tokens (dates, "updated", "final", "part N"); mid-title
+  words still count as identity.
+- Editing a vault document no longer leaves `file_size` stale. `updateDocument`
+  rewrote the file and re-indexed chunks but never updated the recorded size, so
+  metadata drifted from disk by exactly the edit's length delta.
+- Workspace sessions on Linux no longer fail at startup when OpenCode's per-user
+  folders don't exist. The sandbox bind-mounted `~/.opencode`,
+  `~/.config/opencode`, and `~/.local/share/opencode` unconditionally, and
+  bubblewrap hard-fails on missing bind sources — so a system-wide OpenCode
+  install (package manager, `/usr/local/bin`) left every session dying instantly
+  with `bwrap: Can't find source path`. Each mount is now added only when its
+  folder exists; a system-wide binary reaches the sandbox through the existing
+  `/usr` mount.
+- Workspace sessions no longer die at startup when OpenCode treats its per-user
+  config directory as writable. OpenCode writes bookkeeping (a `.gitignore`,
+  cached state) into `~/.config/opencode` at startup; the Linux sandbox mounted
+  that directory read-only, killing every session with
+  `Unknown: FileSystem.writeFile` the moment the folder existed. Config and
+  session-data mounts are now read-write (install assets stay read-only). The
+  macOS sandbox-exec profile gains the same per-user directory rules, which it
+  had been missing entirely.
 
 ## [0.11.2] - 2026-08-17
 
@@ -1392,6 +1422,10 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 - Entity identity and memory served by the sibling `entity-core` MCP server,
   spawned as a subprocess when `PSYCHEROS_MCP_ENABLED=true`.
 
+[0.11.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.11.3
+[0.11.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.11.2
+[0.11.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.11.1
+[0.11.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.11.0
 [0.10.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.10.0
 [0.9.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.9.2
 [0.9.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.9.1

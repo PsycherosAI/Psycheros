@@ -342,11 +342,15 @@ export class VaultManager {
         this.removeChunks(id);
         const chunkCount = await this.indexContent(id, updates.content);
 
+        // file_size must track the rewritten file — leaving the old value
+        // makes metadata drift from disk by exactly the length delta (seen
+        // live: a 10611 -> 10594 byte rewrite kept size 10611).
+        const newSize = new TextEncoder().encode(updates.content).length;
         db.exec(
           `UPDATE vault_documents
-           SET content_hash = ?, chunk_count = ?, updated_at = ?
+           SET content_hash = ?, chunk_count = ?, file_size = ?, updated_at = ?
            WHERE id = ?`,
-          [newHash, chunkCount, now, id],
+          [newHash, chunkCount, newSize, now, id],
         );
 
         const updated = this.getDocument(id)!;

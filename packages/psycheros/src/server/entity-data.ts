@@ -435,7 +435,15 @@ export async function exportEntityData(
     for (const doc of vaultDocs) {
       // file_path may be absolute (seed/upload) or dataRoot-relative
       // (import). `join` concatenates two absolutes, so branch.
-      const fullPath = isAbsolute(doc.file_path)
+      // Legacy rows may hold absolute paths from a previous machine or
+      // container (e.g. /app/... from the Docker era). Those paths do not
+      // exist on this host, so remap them into the current data root by
+      // their canonical relative suffix (vault/documents/<scope>/<file>).
+      const anchor = join(".psycheros", "vault", "documents", "");
+      const idx = doc.file_path.indexOf(anchor);
+      const fullPath = idx >= 0
+        ? join(ctx.dataRoot, anchor, doc.file_path.slice(idx + anchor.length))
+        : isAbsolute(doc.file_path)
         ? doc.file_path
         : join(ctx.dataRoot, doc.file_path);
       try {

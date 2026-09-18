@@ -65,6 +65,18 @@ const WEBHOOK_RATE_LIMIT_MS = 10_000;
 /** Inactivity pulses tick this often — the handler decides whether to fire. */
 const INACTIVITY_TICK_CRON = "* * * * *";
 
+/**
+ * Max consecutive failed (error/dead) fires before the inactivity gate
+ * backs off to one attempt per threshold window instead of every tick.
+ * Caps runaway retry loops during provider outages (expired API keys,
+ * auth 401s, DNS failures): each tick assembles a full LLM context that
+ * dies with nothing to show for it. The success-only cooldown gate
+ * never arms during such an outage, so without this cap the per-minute
+ * tick re-fires the pulse until the provider recovers or the user
+ * messages (observed 2026-09-15: 125 fires / ~2.5h).
+ */
+const INACTIVITY_MAX_CONSECUTIVE_FAILURES = 3;
+
 /** Pulse trigger sources, recorded in the job_runs payload. */
 export type PulseTriggerSource =
   | "cron"
@@ -635,6 +647,35 @@ export class PulseEngine {
       const sinceLastRunMs = Date.now() - new Date(lastSuccessAt).getTime();
       if (sinceLastRunMs < thresholdMs) {
         return { ok: false, reason: "Cooldown active" };
+      }
+    }
+
+    // Circuit breaker: if fires keep failing (provider outage, expired
+    // API key, mid-turn LLM errors — none of which produce a successful
+    // run), stop re-firing every tick. After
+    // INACTIVITY_MAX_CONSECUTIVE_FAILURES consecutive failed fires,
+    // allow at most one fire attempt per threshold window until a fire
+    // succeeds. The backoff self-heals: the next success re-arms the
+    // regular cooldown, and editing the pulse (updated_at bump — e.g.
+    // fixing the API key) lifts the breaker immediately so config
+    // repairs are verifiable on the next tick.
+    const lastTerminal = this.db.getLastPulseTerminalRun(pulse.id);
+    const editedSinceLastRun = lastTerminal
+      ? new Date(pulse.updatedAt) >= new Date(lastTerminal.completedAt ?? 0)
+      : false;
+    if (
+      lastTerminal && lastTerminal.status !== "success" && !editedSinceLastRun
+    ) {
+      const streak = this.db.getPulseFailureStreak(pulse.id);
+      if (streak >= INACTIVITY_MAX_CONSECUTIVE_FAILURES) {
+        const lastAttemptMs = new Date(lastTerminal.completedAt ?? 0).getTime();
+        if (Date.now() - lastAttemptMs < thresholdMs) {
+          return {
+            ok: false,
+            reason:
+              `Circuit breaker: ${streak} consecutive failed fires; retrying at most once per threshold window until a fire succeeds`,
+          };
+        }
       }
     }
 
