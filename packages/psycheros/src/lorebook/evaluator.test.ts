@@ -6,7 +6,7 @@ import type { LorebookEntry, LorebookState } from "./types.ts";
 /**
  * Regression tests for sticky-entry bookkeeping in the lorebook evaluator.
  *
- * Bug (2026-09-14, production): entries added from sticky state were pushed to
+ * Production bug pinned here: entries added from sticky state push to
  * `activeEntries` but never registered in `triggeredEntryIds`. The recursion
  * pass then scanned all active entry content — including that same sticky
  * entry's own full prompt — and matched its trigger word inside its own body,

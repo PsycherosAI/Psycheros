@@ -2,6 +2,29 @@
 
 Detailed documentation for Psycheros web UI features.
 
+## What's New Splash
+
+After an update, a full-screen overlay shows the release notes (and the owner's
+letter, when one rides along) — once per version, per device. Design + rulings:
+[`docs/design/whats-new.md`](design/whats-new.md).
+
+- **Source:** GitHub Releases on the public repo (`PsycherosAI/Psycheros`) — the
+  single place release notes are authored. The daemon caches them at startup +
+  every 6h to `.psycheros/whats-new-cache.json` and serves `GET /api/whats-new`
+  locally, so page loads never touch GitHub (offline and rate-limit safe).
+- **Trigger:** client-side, `web/js/whats-new.js` — localStorage
+  `psycheros.whatsNew.seenVersion`. A release shows when it's newer than seen
+  AND not newer than the running app (users who haven't updated aren't told
+  about what they don't have). Prereleases and unparseable tags are skipped
+  server-side.
+- **Presentation:** full-screen takeover on mobile, centered card ≥768px; body
+  rendered with `marked` + sanitized with `DOMPurify` (both already in the app
+  shell). Dismiss = Continue (marks seen) or the GitHub link; a scrim tap closes
+  without marking seen.
+- **Reopen:** Settings > General > "What's New" → `WhatsNew.open()` — history
+  view of the cached releases; never touches the seen flag.
+- Stays dormant until the first Release exists on the public repo.
+
 ## Lazy Message Loading
 
 Long conversations are paginated client-side to prevent typing lag on desktop.
@@ -165,7 +188,8 @@ propagates to all server-side date/time formatting — message headers, snapshot
 dates, memory metadata, vault document dates, knowledge graph sync times, and
 daily memory summarization. Client-side streaming timestamps and the entity's
 temporal XML are also included. Empty selection falls back to the `TZ`
-environment variable, then the browser's local timezone for display.
+environment variable, then the daemon machine's system timezone (server-side);
+client-side rendering uses the browser's own timezone.
 
 Implemented in `src/entity/loop.ts` via `formatMessageTimestamp()`. XML
 stripping in `src/server/markdown.ts` and `web/js/psycheros.js`.
@@ -354,13 +378,14 @@ General Settings (first card in the settings hub). Two tabs: **General** and
 
 #### Timezone
 
-- **Display Timezone** — dropdown of ~40 common IANA timezones grouped by
-  region, with "(System Default)" option
+- **Timezone** — dropdown of ~40 common IANA timezones grouped by region, with
+  "(System Default)" option
 - Affects all server-rendered date/time display: message timestamps, snapshot
   dates (Today/Yesterday labels), memory metadata, vault document dates,
   knowledge graph sync times, and daily memory summarization schedule
 - Also affects client-streamed timestamps and entity temporal XML
-- Empty selection uses the system/browser default
+- Empty selection ("System Default") uses the timezone of the machine running
+  the daemon
 
 Settings are loaded on page init from the server and cached in
 `globalThis.PsycherosSettings` for instant access during streaming. Saving

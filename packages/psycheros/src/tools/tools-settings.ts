@@ -58,6 +58,10 @@ export const DEFAULT_DISABLED_TOOLS: ReadonlySet<string> = new Set([
 /** Tools that are deprecated and hidden from both the UI and the LLM. Kept in AVAILABLE_TOOLS for potential resurrection. */
 export const DEPRECATED_TOOLS: ReadonlySet<string> = new Set([
   "sync_mcp",
+  // Auto-title (first user message) covers conversation naming.
+  "update_title",
+  // Informational only — snapshot handling is entity-core's business.
+  "list_identity_snapshots",
 ]);
 
 // =============================================================================
@@ -69,17 +73,13 @@ export const TOOL_CATEGORIES: ToolCategory[] = [
     id: "system",
     name: "System",
     description: "Shell execution, metrics, and system operations",
-    toolNames: ["shell", "update_title", "get_metrics"],
+    toolNames: ["shell", "get_metrics"],
   },
   {
     id: "identity",
     name: "Identity",
     description: "Self, user, and relationship identity management",
-    toolNames: [
-      "maintain_identity",
-      "list_identity_snapshots",
-      "custom_identity_file",
-    ],
+    toolNames: ["maintain_identity", "custom_identity_file"],
   },
   {
     id: "vault",
@@ -133,13 +133,20 @@ export const TOOL_CATEGORIES: ToolCategory[] = [
     id: "vision",
     name: "Vision",
     description: "Image generation, captioning, and visual analysis",
-    toolNames: ["generate_image", "describe_image", "look_closer"],
+    toolNames: ["generate_image", "describe_image"],
   },
   {
     id: "conversation",
     name: "Conversation",
     description: "Cross-conversation awareness",
     toolNames: ["conversation_peek"],
+  },
+  {
+    id: "flux",
+    name: "Flux",
+    description:
+      "Nervous system agency — direct attention, tune what I notice, sleep",
+    toolNames: ["pay_attention", "tune_attention", "sleep"],
   },
   {
     id: "skills",

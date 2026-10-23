@@ -202,6 +202,7 @@ function migrateLegacySettings(
     thinkingEnabled: old.thinkingEnabled ?? FALLBACK_DEFAULTS.thinkingEnabled,
     persistentReasoningIntraTurn: "auto",
     persistentReasoningInterTurns: 0,
+    multimodal: false,
   };
 
   console.log(
@@ -266,6 +267,9 @@ export async function loadProfileSettings(
         }
         if (profile.persistentReasoningInterTurns === undefined) {
           profile.persistentReasoningInterTurns = 0;
+        }
+        if (profile.multimodal === undefined) {
+          profile.multimodal = false;
         }
       }
       return settings;

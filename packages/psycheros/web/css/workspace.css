@@ -37,7 +37,8 @@
 }
 
 @keyframes workspace-pulse {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
     opacity: 0.5;
   }
@@ -65,7 +66,8 @@
 }
 
 @keyframes workspace-stalled-pulse {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
     opacity: 0.6;
   }
@@ -362,7 +364,8 @@ body.workspace-mode .chat::before {
 }
 
 @keyframes workspace-suspended-pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -919,7 +922,8 @@ body.workspace-mode .chat::before {
   border: 1px solid;
 }
 
-.wt-status--running, .wt-status--pending {
+.wt-status--running,
+.wt-status--pending {
   color: var(--c-accent);
   border-color: var(--c-accent);
   animation: wt-status-blink 2s ease-in-out infinite;
@@ -940,7 +944,8 @@ body.workspace-mode .chat::before {
   border-color: var(--c-text-terminal-dim);
 }
 
-.wt-status--suspended, .wt-status--paused {
+.wt-status--suspended,
+.wt-status--paused {
   color: var(--c-warning);
   border-color: var(--c-warning);
 }
@@ -951,7 +956,8 @@ body.workspace-mode .chat::before {
 }
 
 @keyframes wt-status-blink {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -1103,7 +1109,8 @@ body.workspace-mode .chat::before {
 }
 
 @keyframes wt-cursor-blink {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {

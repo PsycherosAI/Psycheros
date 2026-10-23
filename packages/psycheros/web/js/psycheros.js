@@ -156,6 +156,103 @@ function initPersistentSSE() {
     }
   });
 
+  // Ego-wake streaming in classic chat: self-initiated wakes
+  // (promotions) have no per-request stream on this client — their
+  // thinking/content fragments arrive via the flux_ego_* broadcasts. Grow
+  // a temp assistant bubble live; the final dom_update row replaces it.
+  // Routed turns are excluded (isStreaming true — the per-request stream
+  // is already rendering).
+  function fluxWakeBubbleEl() {
+    var messages = document.getElementById('messages');
+    if (!messages) return null;
+    var el = document.getElementById('flux-wake-bubble');
+    if (el) return el;
+    if (isStreaming) return null;
+    if (!currentConversationId || currentConversationId !== actionState.flux.hostConversationId) return null;
+    el = document.createElement('div');
+    el.className = 'msg msg--assistant';
+    el.id = 'flux-wake-bubble';
+    el.innerHTML =
+      '<div class="msg-header"><span>' +
+      (globalThis.PsycherosSettings.entityName || 'Assistant') +
+      '</span><span></span></div>' +
+      '<div class="thinking expanded"><div class="thinking-header"><span class="thinking-toggle">&#9660;</span><span>Thinking</span></div><div class="thinking-content"></div></div>' +
+      '<div class="msg-content"></div>';
+    messages.appendChild(el);
+    AutoScroll.streamStart();
+    return el;
+  }
+
+  function fluxWakeFeed(kind, fragment) {
+    var el = fluxWakeBubbleEl();
+    if (!el) return;
+    if (kind === 'thinking') {
+      var t = el.querySelector('.thinking-content');
+      if (t) t.textContent += fragment;
+    } else {
+      var c = el.querySelector('.msg-content');
+      // Text NODE, not textContent += — tool cards appended below live in
+      // this same container; textContent assignment would wipe them.
+      if (c) c.appendChild(document.createTextNode(fragment));
+      var th = el.querySelector('.thinking');
+      if (th) th.classList.remove('expanded');
+    }
+    AutoScroll.streamTick();
+  }
+
+  persistentSSE.addEventListener('flux_ego_thinking', function(event) {
+    try { fluxWakeFeed('thinking', JSON.parse(event.data).fragment || ''); } catch (_) {}
+  });
+  persistentSSE.addEventListener('flux_ego_stream', function(event) {
+    try { fluxWakeFeed('content', JSON.parse(event.data).fragment || ''); } catch (_) {}
+  });
+
+  // "The entity is speaking — read your screen": the same
+  // rising two-note earcon the voice call uses for spontaneous speech,
+  // played when an Ego wake lands with no call open to speak it. A live
+  // call plays its own cue off spontaneous_start, so we stay silent there.
+  persistentSSE.addEventListener('flux_ego_spoke', function() {
+    if (document.getElementById('voice-overlay')) return;
+    try { globalThis.playSpontaneousCue(); } catch (_) {}
+  });
+
+  // Wake-turn tool calls (toolcall parity): the same classic
+  // tool cards the chat stream renders, grown live in the wake bubble.
+  // The persisted Ego row (dom_update) replaces the bubble with full
+  // cards + results on arrival.
+  persistentSSE.addEventListener('flux_tool_call', function(event) {
+    try {
+      var data = JSON.parse(event.data);
+      if (!data.toolCallId) return;
+      var el = fluxWakeBubbleEl();
+      if (!el) return;
+      var card = createToolCard({
+        id: data.toolCallId,
+        function: { name: data.name, arguments: data.args || '{}' },
+      });
+      card.dataset.toolCallId = data.toolCallId;
+      var c = el.querySelector('.msg-content');
+      if (c) c.appendChild(card);
+      AutoScroll.streamTick();
+    } catch (_) {}
+  });
+  persistentSSE.addEventListener('flux_tool_result', function(event) {
+    try {
+      var data = JSON.parse(event.data);
+      var card = document.querySelector(
+        '#flux-wake-bubble .tool[data-tool-call-id="' + (data.toolCallId || '') + '"]'
+      );
+      if (card) {
+        addToolResult(card, {
+          toolCallId: data.toolCallId,
+          content: data.result || '',
+          isError: !!data.isError,
+        });
+        AutoScroll.streamTick();
+      }
+    } catch (_) {}
+  });
+
   persistentSSE.addEventListener('dom_update', (event) => {
     try {
       const update = JSON.parse(event.data);
@@ -167,6 +264,12 @@ function initPersistentSSE() {
         if (update.html === '') {
           target.innerHTML = '';
         } else {
+          // A live-appended row REPLACES the Ego-wake temp bubble (the
+          // streamed fragments it grew from are now persisted).
+          if (update.target === '#messages' && update.swap === 'beforeend') {
+            var wake = document.getElementById('flux-wake-bubble');
+            if (wake) wake.remove();
+          }
           htmx.swap(target, update.html, { swapStyle: update.swap || 'innerHTML' });
         }
         // Auto-scroll when content is appended to messages
@@ -179,18 +282,17 @@ function initPersistentSSE() {
     }
   });
 
-  // Pulse streaming state (persistent SSE)
-  let pulseAssistantEl = null;
-  let pulseContent = null;
-  let pulseSegmentRaw = '';
-  let pulseThinking = null;
+  // Pulse streaming state (persistent SSE). The turn stream is created
+  // lazily on first content (the bubble only exists once the Pulse says
+  // something) and discarded on done; a later Pulse builds a fresh one.
+  let pulseStreamState = null;
   let pulseStreamed = false;
 
   persistentSSE.addEventListener('content', (event) => {
     try {
       const data = JSON.parse(event.data);
-      // Lazily create the assistant message element on first content
-      if (!pulseAssistantEl) {
+      // Lazily open the Pulse's turn stream on first content
+      if (!pulseStreamState) {
         const messages = document.getElementById('messages');
         if (!messages) return;
         document.getElementById('empty-state')?.remove();
@@ -199,29 +301,10 @@ function initPersistentSSE() {
         enterPulseStreamingMode();
         pulseStreamed = true;
 
-        pulseAssistantEl = document.createElement('div');
-        pulseAssistantEl.className = 'msg msg--assistant';
-        const streamTime = formatChatTimestamp(new Date());
-        pulseAssistantEl.innerHTML = `
-          <div class="msg-header">
-            <span>${globalThis.PsycherosSettings.entityName || 'Assistant'}</span>
-            <span class="msg-timestamp">${streamTime}</span>
-            <div class="streaming"><span></span><span></span><span></span></div>
-          </div>
-          <div class="msg-content"></div>
-        `;
-        messages.appendChild(pulseAssistantEl);
+        pulseStreamState = createTurnStreamState({ conversationId: null });
         AutoScroll.streamStart();
       }
-      handleSSEEvent('content', data, pulseAssistantEl, {
-        getThinking: () => pulseThinking,
-        setThinking: (el) => pulseThinking = el,
-        getContent: () => pulseContent,
-        setContent: (el) => pulseContent = el,
-        getSegmentRaw: () => pulseSegmentRaw,
-        setSegmentRaw: (text) => pulseSegmentRaw = text,
-        appendSegmentRaw: (text) => pulseSegmentRaw += text,
-      });
+      handleSSEEvent('content', data, pulseStreamState);
     } catch (e) {
       console.error('Failed to handle persistent content:', e);
     }
@@ -229,16 +312,8 @@ function initPersistentSSE() {
 
   persistentSSE.addEventListener('thinking', (event) => {
     try {
-      if (!pulseAssistantEl) return;
-      handleSSEEvent('thinking', JSON.parse(event.data), pulseAssistantEl, {
-        getThinking: () => pulseThinking,
-        setThinking: (el) => pulseThinking = el,
-        getContent: () => pulseContent,
-        setContent: (el) => pulseContent = el,
-        getSegmentRaw: () => pulseSegmentRaw,
-        setSegmentRaw: (text) => pulseSegmentRaw = text,
-        appendSegmentRaw: (text) => pulseSegmentRaw += text,
-      });
+      if (!pulseStreamState) return;
+      handleSSEEvent('thinking', JSON.parse(event.data), pulseStreamState);
     } catch (e) {
       console.error('Failed to handle persistent thinking:', e);
     }
@@ -246,16 +321,8 @@ function initPersistentSSE() {
 
   persistentSSE.addEventListener('tool_call', (event) => {
     try {
-      if (!pulseAssistantEl) return;
-      handleSSEEvent('tool_call', event.data, pulseAssistantEl, {
-        getThinking: () => pulseThinking,
-        setThinking: (el) => pulseThinking = el,
-        getContent: () => pulseContent,
-        setContent: (el) => pulseContent = el,
-        getSegmentRaw: () => pulseSegmentRaw,
-        setSegmentRaw: (text) => pulseSegmentRaw = text,
-        appendSegmentRaw: (text) => pulseSegmentRaw += text,
-      });
+      if (!pulseStreamState) return;
+      handleSSEEvent('tool_call', event.data, pulseStreamState);
     } catch (e) {
       console.error('Failed to handle persistent tool_call:', e);
     }
@@ -263,16 +330,8 @@ function initPersistentSSE() {
 
   persistentSSE.addEventListener('tool_result', (event) => {
     try {
-      if (!pulseAssistantEl) return;
-      handleSSEEvent('tool_result', event.data, pulseAssistantEl, {
-        getThinking: () => pulseThinking,
-        setThinking: (el) => pulseThinking = el,
-        getContent: () => pulseContent,
-        setContent: (el) => pulseContent = el,
-        getSegmentRaw: () => pulseSegmentRaw,
-        setSegmentRaw: (text) => pulseSegmentRaw = text,
-        appendSegmentRaw: (text) => pulseSegmentRaw += text,
-      });
+      if (!pulseStreamState) return;
+      handleSSEEvent('tool_result', event.data, pulseStreamState);
     } catch (e) {
       console.error('Failed to handle persistent tool_result:', e);
     }
@@ -282,17 +341,9 @@ function initPersistentSSE() {
     try {
       const status = JSON.parse(event.data);
       if (status.error) {
-        // If we have an active assistant element, inject the error there
-        if (pulseAssistantEl) {
-          handleSSEEvent('status', event.data, pulseAssistantEl, {
-            getThinking: () => pulseThinking,
-            setThinking: (el) => pulseThinking = el,
-            getContent: () => pulseContent,
-            setContent: (el) => pulseContent = el,
-            getSegmentRaw: () => pulseSegmentRaw,
-            setSegmentRaw: (text) => pulseSegmentRaw = text,
-            appendSegmentRaw: (text) => pulseSegmentRaw += text,
-          });
+        // If we have an active stream, inject the error there
+        if (pulseStreamState) {
+          handleSSEEvent('status', event.data, pulseStreamState);
         } else {
           // No assistant element exists yet — create an error indicator
           // directly in the messages area so the user sees what happened.
@@ -320,16 +371,8 @@ function initPersistentSSE() {
         }
       } else if (status.retry) {
         // Transient retry during Pulse streaming
-        if (pulseAssistantEl) {
-          handleSSEEvent('status', event.data, pulseAssistantEl, {
-            getThinking: () => pulseThinking,
-            setThinking: (el) => pulseThinking = el,
-            getContent: () => pulseContent,
-            setContent: (el) => pulseContent = el,
-            getSegmentRaw: () => pulseSegmentRaw,
-            setSegmentRaw: (text) => pulseSegmentRaw = text,
-            appendSegmentRaw: (text) => pulseSegmentRaw += text,
-          });
+        if (pulseStreamState) {
+          handleSSEEvent('status', event.data, pulseStreamState);
           showToast(status.message, 'warning');
         }
       }
@@ -340,8 +383,8 @@ function initPersistentSSE() {
 
   persistentSSE.addEventListener('done', (event) => {
     try {
-      if (!pulseAssistantEl) {
-        // No assistant element on this connection. If the Pulse was streaming
+      if (!pulseStreamState) {
+        // No stream on this connection. If the Pulse was streaming
         // when the old SSE connection was torn down, pulseStreamingPulseId
         // will still be set at module level. The done event on this new
         // connection signals the Pulse finished — exit streaming mode.
@@ -351,21 +394,10 @@ function initPersistentSSE() {
         }
         return;
       }
-      handleSSEEvent('done', event.data, pulseAssistantEl, {
-        getThinking: () => pulseThinking,
-        setThinking: (el) => pulseThinking = el,
-        getContent: () => pulseContent,
-        setContent: (el) => pulseContent = el,
-        getSegmentRaw: () => pulseSegmentRaw,
-        setSegmentRaw: (text) => pulseSegmentRaw = text,
-        appendSegmentRaw: (text) => pulseSegmentRaw += text,
-      });
+      handleSSEEvent('done', event.data, pulseStreamState);
       // Reset pulse streaming state (keep pulseStreamed so pulse_complete
       // knows we received the stream and doesn't unnecessarily reload)
-      pulseAssistantEl = null;
-      pulseContent = null;
-      pulseSegmentRaw = '';
-      pulseThinking = null;
+      pulseStreamState = null;
       pulseStreamingPulseId = null;
 
       // Re-enable input and restore send button
@@ -386,7 +418,7 @@ function initPersistentSSE() {
         const lastUserMsg = userMsgs[userMsgs.length - 1];
         if (lastUserMsg) addMessageEditCapability(lastUserMsg, id);
       } else if (role === 'assistant') {
-        // pulseAssistantEl is nulled after done, so query the DOM
+        // The stream state is discarded after done, so query the DOM
         const asstMsgs = messages.querySelectorAll('.msg--assistant:not([data-message-id])');
         const lastAsstMsg = asstMsgs[asstMsgs.length - 1];
         if (lastAsstMsg) addMessageEditCapability(lastAsstMsg, id);
@@ -402,7 +434,7 @@ function initPersistentSSE() {
       // Don't reload the conversation if the user is viewing settings —
       // they'll see the Pulse response when they navigate back to the chat.
       const viewingSettings = document.getElementById('settings-content') !== null;
-      if (!pulseStreamed && !pulseAssistantEl && conversationId === currentConversationId && !viewingSettings) {
+      if (!pulseStreamed && !pulseStreamState && conversationId === currentConversationId && !viewingSettings) {
         // Streaming was missed entirely — reload the conversation to show the response
         loadConversationFromUrl(conversationId, { silent: true });
       }
@@ -1049,6 +1081,10 @@ function selectConversation(id) {
 
   // Close sidebar after selecting conversation (only if open — don't toggle)
   closeSidebarAfterNav();
+
+  // Re-evaluate the hosted-conversation composer guard for the newly
+  // selected conversation immediately (the 8s poll would lag a switch).
+  updateFluxButtonVisibility();
 }
 
 // =============================================================================
@@ -1398,25 +1434,16 @@ async function sendMessage() {
   }
   AutoScroll.jumpToBottom();
 
-  // Create assistant message container with current timestamp
-  const assistantEl = document.createElement('div');
-  assistantEl.className = 'msg msg--assistant';
-  const streamTime = formatChatTimestamp(new Date());
-  assistantEl.innerHTML = `
-    <div class="msg-header">
-      <span>${globalThis.PsycherosSettings.entityName || 'Assistant'}</span>
-      <span class="msg-timestamp">${streamTime}</span>
-      <div class="streaming"><span></span><span></span><span></span></div>
-    </div>
-    <div class="msg-content"></div>
-  `;
-  assistantEl.dataset.conversationId = currentConversationId;
+  // Create the turn's first assistant bubble; tool turns open one
+  // bubble per generation (createTurnStreamState).
+  const assistantEl = createAssistantBubble(currentConversationId);
   messages?.appendChild(assistantEl);
   AutoScroll.streamStart();
 
-  let currentThinking = null;
-  let currentContent = null;
-  let currentSegmentRaw = ""; // Raw markdown buffer for current content segment
+  const turnStream = createTurnStreamState({
+    conversationId: currentConversationId,
+    firstBubble: assistantEl,
+  });
 
   // Create abort controller
   currentAbortController = new AbortController();
@@ -1480,15 +1507,7 @@ async function sendMessage() {
         // Empty line signals end of event - dispatch accumulated data
         if (line === '' && dataLines.length > 0) {
           const data = dataLines.join('\n');
-          handleSSEEvent(currentEventType, data, assistantEl, {
-            getThinking: () => currentThinking,
-            setThinking: (el) => currentThinking = el,
-            getContent: () => currentContent,
-            setContent: (el) => currentContent = el,
-            getSegmentRaw: () => currentSegmentRaw,
-            setSegmentRaw: (text) => currentSegmentRaw = text,
-            appendSegmentRaw: (text) => currentSegmentRaw += text,
-          });
+          handleSSEEvent(currentEventType, data, turnStream);
           currentEventType = 'content';
           dataLines = [];
         }
@@ -1512,14 +1531,14 @@ async function sendMessage() {
     if (error.name === 'AbortError') {
       console.log('Request aborted by user');
       // Freeze whatever content was streaming with a clean render
-      if (currentContent && currentSegmentRaw) {
-        renderFinalContent(currentContent, currentSegmentRaw);
+      if (turnStream.getContent() && turnStream.getSegmentRaw()) {
+        renderFinalContent(turnStream.getContent(), turnStream.getSegmentRaw());
       }
-      // Show stopped indicator
+      // Show stopped indicator on the bubble that was streaming
       const stoppedEl = document.createElement('div');
       stoppedEl.className = 'stopped-indicator';
       stoppedEl.textContent = '[Stopped]';
-      assistantEl.querySelector('.msg-content')?.appendChild(stoppedEl);
+      turnStream.currentBubble()?.querySelector('.msg-content')?.appendChild(stoppedEl);
       // Don't return — fall through to finally for full cleanup
     } else {
       console.error('Stream error:', error);
@@ -1528,7 +1547,7 @@ async function sendMessage() {
       const errorEl = document.createElement('div');
       errorEl.style.color = 'var(--c-error)';
       errorEl.textContent = 'Error: ' + error.message;
-      assistantEl.querySelector('.msg-content')?.appendChild(errorEl);
+      turnStream.currentBubble()?.querySelector('.msg-content')?.appendChild(errorEl);
     }
 
   } finally {
@@ -1550,19 +1569,19 @@ async function sendMessage() {
       _renderTimer = null;
     }
 
-    // Remove streaming indicator (header dots)
-    assistantEl.querySelector('.streaming')?.remove();
-
-    // Clean up all streaming artifacts from content area
-    assistantEl.querySelectorAll('.typing-cursor').forEach(el => el.remove());
-    assistantEl.querySelectorAll('.streaming-active').forEach(el => {
-      el.classList.remove('streaming-active');
-    });
+    // Clean streaming artifacts from every bubble the turn opened (a
+    // tool turn opens one per generation)
+    for (const bubbleEl of turnStream.allBubbles()) {
+      bubbleEl.querySelector('.streaming')?.remove();
+      bubbleEl.querySelectorAll('.typing-cursor').forEach(el => el.remove());
+      bubbleEl.querySelectorAll('.streaming-active').forEach(el => {
+        el.classList.remove('streaming-active');
+      });
+    }
 
     // Clear state
     pendingToolCalls.clear();
     currentAbortController = null;
-    currentSegmentRaw = ""; // Reset markdown buffer
     streamingConversationId = null;
 
     // Re-enable input
@@ -1633,9 +1652,12 @@ async function retryFailedTurn(failedAssistantEl) {
 
   AutoScroll.streamStart();
 
-  let currentThinking = null;
-  let currentContent = null;
-  let currentSegmentRaw = '';
+  // The retried turn streams into the recovered bubble; tool turns open
+  // one bubble per generation from there (createTurnStreamState).
+  const turnStream = createTurnStreamState({
+    conversationId,
+    firstBubble: failedAssistantEl,
+  });
 
   currentAbortController = new AbortController();
 
@@ -1677,15 +1699,7 @@ async function retryFailedTurn(failedAssistantEl) {
         }
         if (line === '' && dataLines.length > 0) {
           const data = dataLines.join('\n');
-          handleSSEEvent(currentEventType, data, failedAssistantEl, {
-            getThinking: () => currentThinking,
-            setThinking: (el) => currentThinking = el,
-            getContent: () => currentContent,
-            setContent: (el) => currentContent = el,
-            getSegmentRaw: () => currentSegmentRaw,
-            setSegmentRaw: (text) => currentSegmentRaw = text,
-            appendSegmentRaw: (text) => currentSegmentRaw += text,
-          });
+          handleSSEEvent(currentEventType, data, turnStream);
           currentEventType = 'content';
           dataLines = [];
         }
@@ -1693,20 +1707,20 @@ async function retryFailedTurn(failedAssistantEl) {
     }
   } catch (error) {
     if (error.name === 'AbortError') {
-      if (currentContent && currentSegmentRaw) {
-        renderFinalContent(currentContent, currentSegmentRaw);
+      if (turnStream.getContent() && turnStream.getSegmentRaw()) {
+        renderFinalContent(turnStream.getContent(), turnStream.getSegmentRaw());
       }
       const stoppedEl = document.createElement('div');
       stoppedEl.className = 'stopped-indicator';
       stoppedEl.textContent = '[Stopped]';
-      contentContainer?.appendChild(stoppedEl);
+      turnStream.currentBubble()?.querySelector('.msg-content')?.appendChild(stoppedEl);
     } else {
       console.error('Retry stream error:', error);
       showToast('Retry failed: ' + error.message);
       const errorEl = document.createElement('div');
       errorEl.style.color = 'var(--c-error)';
       errorEl.textContent = 'Error: ' + error.message;
-      contentContainer?.appendChild(errorEl);
+      turnStream.currentBubble()?.querySelector('.msg-content')?.appendChild(errorEl);
     }
   } finally {
     if (_renderTimer) {
@@ -1714,15 +1728,18 @@ async function retryFailedTurn(failedAssistantEl) {
       _renderTimer = null;
     }
 
-    failedAssistantEl.querySelector('.streaming')?.remove();
-    failedAssistantEl.querySelectorAll('.typing-cursor').forEach(el => el.remove());
-    failedAssistantEl.querySelectorAll('.streaming-active').forEach(el => {
-      el.classList.remove('streaming-active');
-    });
+    // Clean streaming artifacts from every bubble the turn opened (a
+    // tool turn opens one per generation)
+    for (const bubbleEl of turnStream.allBubbles()) {
+      bubbleEl.querySelector('.streaming')?.remove();
+      bubbleEl.querySelectorAll('.typing-cursor').forEach(el => el.remove());
+      bubbleEl.querySelectorAll('.streaming-active').forEach(el => {
+        el.classList.remove('streaming-active');
+      });
+    }
 
     pendingToolCalls.clear();
     currentAbortController = null;
-    currentSegmentRaw = '';
     streamingConversationId = null;
 
     if (input) input.disabled = false;
@@ -1743,6 +1760,19 @@ async function retryFailedTurn(failedAssistantEl) {
  * Start a voice call for the current conversation.
  * Checks voice status first, then delegates to voice.js openVoiceChat.
  */
+async function startFluxOverlay() {
+  const convId = currentConversationId;
+  if (!convId) {
+    showToast('Select a conversation first');
+    return;
+  }
+  if (typeof window.startFluxOverlayFn !== 'function') {
+    showToast('Flux interface not loaded');
+    return;
+  }
+  window.startFluxOverlayFn(convId);
+}
+
 async function startVoiceCall() {
   if (isStreaming) {
     showToast('Wait for the current response to finish');
@@ -1855,7 +1885,7 @@ function gatherVoiceProfile() {
     audioEffects: [],
     contextWindowSize: parseInt(document.getElementById('voice-context-window').value) || 64000,
     vadThreshold: parseFloat(document.getElementById('voice-vad-threshold').value) || 0.5,
-    idleTimeoutSeconds: parseInt(document.getElementById('voice-idle-timeout').value) || 300,
+    idleTimeoutSeconds: parseInt(document.getElementById('voice-idle-timeout').value, 10) || 0,
     ttsKeepAliveDays: parseInt(document.getElementById('voice-keep-alive-days').value) || 0,
     pushToTalk: document.getElementById('voice-push-to-talk')?.checked ?? false,
     disableReasoning: document.getElementById('voice-disable-reasoning')?.checked ?? true,
@@ -2424,11 +2454,117 @@ function renderFinalContent(contentEl, rawContent) {
 // SSE Event Handling
 // =============================================================================
 
-function handleSSEEvent(eventType, data, messageEl, state) {
-  const contentContainer = messageEl.querySelector('.msg-content');
+/**
+ * Create an empty assistant bubble for streaming: header (name,
+ * timestamp, streaming dots) + empty content container.
+ */
+function createAssistantBubble(conversationId) {
+  const el = document.createElement('div');
+  el.className = 'msg msg--assistant';
+  const streamTime = formatChatTimestamp(new Date());
+  el.innerHTML = `
+    <div class="msg-header">
+      <span>${globalThis.PsycherosSettings.entityName || 'Assistant'}</span>
+      <span class="msg-timestamp">${streamTime}</span>
+      <div class="streaming"><span></span><span></span><span></span></div>
+    </div>
+    <div class="msg-content"></div>
+  `;
+  if (conversationId) el.dataset.conversationId = conversationId;
+  return el;
+}
+
+/**
+ * Per-turn live-bubble state. A turn renders ONE BUBBLE PER GENERATION:
+ * each done event with finish_reason tool_calls finalizes the current
+ * bubble, and the next generation streams into a fresh element —
+ * mirroring the per-generation rows the daemon persists (and the
+ * server's per-row render). Each bubble binds its own message_id, so an
+ * edit targets exactly the row the bubble displays. A single merged
+ * bubble across generations bound one edit to the last row while its
+ * prefill read the first generation's text — saving overwrote the
+ * answer with the opening line.
+ *
+ * firstBubble seeds an existing element (chat streams into a bubble
+ * created up front; a retried turn reuses its failed bubble). Without
+ * one, the first bubble is created lazily inside #messages (the Pulse
+ * path, where the element only exists once content arrives).
+ */
+function createTurnStreamState({ conversationId, firstBubble }) {
+  const bubbles = firstBubble ? [firstBubble] : [];
+  let bubble = firstBubble || null;
+  let finalized = false;
+  let thinking = null;
+  let content = null;
+  let segmentRaw = '';
+
+  function appendBubble() {
+    const anchor = bubble; // the finalized bubble the new one follows
+    const parent = anchor ? anchor.parentElement : document.getElementById('messages');
+    if (!parent) return null;
+    // The finalized bubble's streaming dots retire here — the fresh
+    // bubble carries the one live indicator from now on, so "still
+    // working" stays visible through tool execution without two
+    // bubbles ever animating at once.
+    anchor?.querySelector('.streaming')?.remove();
+    // Tool results re-expand their cards after this bubble's done
+    // collapsed them (so the result lands in view). With the turn
+    // moving on, the finished bubble settles into its resting state —
+    // cards folded, still toggleable. Without this, only the FINAL
+    // done would collapse, and it reaches just the last bubble.
+    anchor?.querySelectorAll('.tool.expanded').forEach(el => {
+      el.classList.remove('expanded');
+    });
+    const el = createAssistantBubble(conversationId);
+    if (anchor) anchor.after(el);
+    else parent.appendChild(el);
+    bubble = el;
+    finalized = false;
+    thinking = null;
+    content = null;
+    segmentRaw = '';
+    bubbles.push(el);
+    AutoScroll.streamTick();
+    return el;
+  }
+
+  return {
+    // The active bubble, opening the next one when the previous
+    // generation finalized it (or none exists yet).
+    openBubble: () => (finalized || !bubble) ? appendBubble() : bubble,
+    // The active bubble without creating anything.
+    currentBubble: () => bubble,
+    finalizeBubble: () => { finalized = true; },
+    allBubbles: () => [...bubbles],
+    getThinking: () => thinking,
+    setThinking: (el) => thinking = el,
+    getContent: () => content,
+    setContent: (el) => content = el,
+    getSegmentRaw: () => segmentRaw,
+    setSegmentRaw: (text) => segmentRaw = text,
+    appendSegmentRaw: (text) => segmentRaw += text,
+  };
+}
+
+function handleSSEEvent(eventType, data, state) {
+  // A generation's OWN events (thinking, content, tool_call, status,
+  // thinking_corrected) open the turn's next bubble when the previous
+  // generation finalized one — a tool turn renders one bubble per
+  // generation. Events that settle or fill the finished generation
+  // (metrics, message_id, tool_result, image_generated, done) target
+  // the current bubble without opening anything: its metrics describe
+  // the settled generation, its message_id binds that generation's row,
+  // and tool results / image sidecars fill artifacts that already live
+  // in the bubble that made the call.
+  const isGenerationEvent = eventType === 'thinking' ||
+    eventType === 'content' || eventType === 'tool_call' ||
+    eventType === 'status' || eventType === 'thinking_corrected';
+  const messageEl = isGenerationEvent ? state.openBubble() : state.currentBubble();
+  const contentContainer = messageEl?.querySelector('.msg-content');
 
   switch (eventType) {
     case 'thinking': {
+      if (!messageEl) return;
       // Clear retry indicator — upstream recovered
       const retryThink = contentContainer.querySelector('.status-retry');
       if (retryThink) retryThink.remove();
@@ -2451,6 +2587,7 @@ function handleSSEEvent(eventType, data, messageEl, state) {
     }
 
     case 'thinking_corrected': {
+      if (!messageEl) return;
       // Provider misroute recovery — server detected that the entire response
       // was streamed through the reasoning field. Clear the thinking section,
       // optionally re-create it with just the residual thinking, and render
@@ -2503,6 +2640,7 @@ function handleSSEEvent(eventType, data, messageEl, state) {
     }
 
     case 'content': {
+      if (!messageEl) return;
       // Clear retry indicator — upstream recovered
       const retryContent = contentContainer.querySelector('.status-retry');
       if (retryContent) retryContent.remove();
@@ -2521,6 +2659,7 @@ function handleSSEEvent(eventType, data, messageEl, state) {
     }
 
     case 'tool_call':
+      if (!messageEl) return;
       try {
         // Freeze the current content segment with a final render before tool card
         if (state.getContent() && state.getSegmentRaw()) {
@@ -2560,6 +2699,7 @@ function handleSSEEvent(eventType, data, messageEl, state) {
       break;
 
     case 'image_generated':
+      if (!messageEl) return;
       try {
         const img = JSON.parse(data);
         const container = document.createElement('div');
@@ -2603,6 +2743,7 @@ function handleSSEEvent(eventType, data, messageEl, state) {
       break;
 
     case 'status': {
+      if (!messageEl) return;
       try {
         const status = JSON.parse(data);
         if (status.retry) {
@@ -2653,6 +2794,7 @@ function handleSSEEvent(eventType, data, messageEl, state) {
     }
 
     case 'metrics':
+      if (!messageEl) return;
       try {
         const metrics = JSON.parse(data);
         const indicator = createMetricsIndicator(metrics);
@@ -2678,6 +2820,7 @@ function handleSSEEvent(eventType, data, messageEl, state) {
       break;
 
     case 'done': {
+      if (!messageEl) return;
       // Collapse all thinking and tool sections after streaming completes.
       contentContainer.querySelectorAll('.thinking.expanded, .tool.expanded').forEach(el => {
         el.classList.remove('expanded');
@@ -2696,12 +2839,16 @@ function handleSSEEvent(eventType, data, messageEl, state) {
         el.classList.remove('streaming-active');
       });
 
-      // When finish_reason is tool_calls, the agentic loop continues —
-      // keep the streaming indicator and auto-scroll alive so the user
-      // sees tool results and the next LLM iteration.
-      if (data !== 'tool_calls') {
-        const header = messageEl.querySelector('.msg-header');
-        header?.querySelector('.streaming')?.remove();
+      if (data === 'tool_calls') {
+        // This generation settled; its tool batch runs next and the
+        // generation after that streams into a FRESH bubble (one bubble
+        // per generation, mirroring the per-generation rows persisted
+        // server-side). Mark this one finalized — its streaming dots
+        // stay until the next bubble opens, so the "still working"
+        // indicator stays live through tool execution.
+        state.finalizeBubble();
+      } else {
+        messageEl.querySelector('.streaming')?.remove();
         AutoScroll.streamEnd();
       }
       break;
@@ -2719,7 +2866,10 @@ function handleSSEEvent(eventType, data, messageEl, state) {
             if (lastUserMsg) addMessageEditCapability(lastUserMsg, id);
           }
         } else if (role === 'assistant') {
-          addMessageEditCapability(messageEl, id);
+          // Binds the bubble that streamed THIS generation — with one
+          // bubble per generation, the edit button's row always matches
+          // the bubble's own text.
+          if (messageEl) addMessageEditCapability(messageEl, id);
         }
       } catch (e) {
         console.error('Failed to handle message_id:', e);
@@ -5503,6 +5653,12 @@ globalThis.Psycheros = {
   autoScrollJump: () => AutoScroll.jumpToBottom(),
   // Voice chat
   startVoiceCall,
+  startFluxOverlay,
+  toggleActionDrawer,
+  closeActionDrawer,
+  actionFluxEntry,
+  showHeldSkill,
+  showHeldSkills,
 };
 
 // Plugin manager functions stay global for my HTMX fragments.
@@ -6204,48 +6360,407 @@ document.body.addEventListener('htmx:afterSwap', function(e) {
 // conversationId, and the button has no business on settings or other
 // non-chat views. `#messages` is the conversation-view signal: it only
 // exists when renderChatView() has been swapped into #chat.
-function updateVoiceCallButtonVisibility() {
-  fetch('/api/voice/status').then(function(r) { return r.json(); }).then(function(status) {
-    var btn = document.getElementById('voice-call-btn');
-    if (!btn) return;
-    var inConversationView = document.getElementById('messages') !== null;
-    var shouldShow = status.enabled && inConversationView;
-    btn.style.display = shouldShow ? 'flex' : 'none';
-  }).catch(function() {});
+// =============================================================================
+// Action drawer + state sub-bar (docs/design/action-drawer.md).
+// One refresh: subsystem states → sub-bar segments and
+// drawer entry visibility. Succeeds updateFluxButtonVisibility and
+// updateVoiceCallButtonVisibility; runs on load, on afterSwap, after drawer
+// actions, and on a light interval.
+// =============================================================================
+
+var actionState = {
+  flux: { enabled: false, state: 'stopped', hostConversationId: null },
+  voice: { enabled: false },
+  workspace: { active: 0 },
+  skills: [],
+};
+
+function inConversationView() {
+  return document.getElementById('messages') !== null;
 }
 
-// Held-skill chips are conversation state, reconciled by polling like the BLE
-// connection badges — push updates (SSE dom_update + OOB swaps) make changes
-// instant when they land, and the poll guarantees the strip never goes stale
-// if one is missed.
-async function updateHeldSkillsStrip() {
-  var strip = document.getElementById('held-skills-strip');
-  if (!strip) return;
-  if (!currentConversationId || document.getElementById('messages') === null) {
-    strip.hidden = true;
-    return;
+async function refreshActionState() {
+  var inConv = inConversationView();
+  var fetches = [
+    fetch('/api/flux/status').then(function(r) { return r.json(); }),
+    fetch('/api/voice/status').then(function(r) { return r.json(); }),
+    fetch('/api/workspace/status').then(function(r) { return r.json(); }),
+  ];
+  // Held skills are per-conversation (the sub-bar is the catch-all state
+  // chip space).
+  if (currentConversationId) {
+    fetches.push(
+      fetch('/api/skills/held?conversationId=' + encodeURIComponent(currentConversationId))
+        .then(function(r) { return r.json(); }),
+    );
   }
-  try {
-    var resp = await fetch('/api/skills/held?conversationId=' + encodeURIComponent(currentConversationId));
-    if (!resp.ok) return;
-    var data = await resp.json();
-    var skills = data.skills || [];
-    strip.innerHTML = skills.map(function(name) {
-      return '<div class="held-skill-chip" title="Skill: ' + name + '">Skill: ' + name + '</div>';
-    }).join('');
-    strip.hidden = false;
-  } catch (_) { /* poll retries */ }
+  var results = await Promise.allSettled(fetches);
+  if (results[0].status === 'fulfilled') {
+    actionState.flux = {
+      enabled: !!results[0].value.enabled,
+      state: results[0].value.state || 'stopped',
+      eyesWanted: !!results[0].value.eyesWanted,
+      hostConversationId: results[0].value.hostConversationId || null,
+    };
+  }
+  if (results[1].status === 'fulfilled') {
+    actionState.voice = { enabled: !!results[1].value.enabled };
+  }
+  if (results[2].status === 'fulfilled') {
+    actionState.workspace = {
+      active: (results[2].value.activeSessions || []).length,
+    };
+  }
+  if (results[3] && results[3].status === 'fulfilled') {
+    actionState.skills = results[3].value.skills || [];
+  } else {
+    actionState.skills = [];
+  }
+
+  renderStateSubBar();
+  renderActionDrawerRows(inConv);
+
+  // Active-flux indicators:
+  // the brand heart glows while ANY State runs; the hosting conversation's
+  // sidebar entry glows with it — one shared accent pulse so they read as
+  // one signal.
+  var running = actionState.flux.state === 'running';
+  var logo = document.querySelector('.logo-btn');
+  if (logo) logo.classList.toggle('flux-live', running);
+  document.querySelectorAll('.conv-item').forEach(function(item) {
+    item.classList.toggle('flux-host',
+      running && actionState.flux.hostConversationId === item.dataset.convId);
+  });
+  // The voice overlay breathes too while its call's conversation hosts
+  // Flux — the same inner-glow pulse at the overlay's edges. The
+  // overlay element only exists while a call is
+  // open, so this doubles as the live mid-call Flux start/stop signal.
+  var voiceOverlay = document.getElementById('voice-overlay');
+  if (voiceOverlay) {
+    voiceOverlay.classList.toggle('flux-live',
+      running && actionState.flux.hostConversationId === currentConversationId);
+  }
+
+  // Browser eyes: reconcile the camera with eyesWanted on
+  // every poll — on when Flux runs with a browser-sourced motion-vision,
+  // off otherwise. The browser's own permission grant gates the ask.
+  updateFluxEyes(!!actionState.flux.eyesWanted);
 }
 
-updateVoiceCallButtonVisibility();
-updateHeldSkillsStrip();
-setInterval(updateHeldSkillsStrip, 5000);
+// =============================================================================
+// Browser eyes — the camera as a browser media device
+// =============================================================================
+
+var eyesActive = false;
+var eyesWs = null;
+var eyesStream = null;
+var eyesVideo = null;
+var eyesCanvas = null;
+var eyesTimer = null;
+
+function updateFluxEyes(wanted) {
+  if (wanted && !eyesActive) startFluxEyes();
+  else if (!wanted && eyesActive) stopFluxEyes();
+}
+
+function stopFluxEyes() {
+  eyesActive = false;
+  if (eyesTimer) { clearInterval(eyesTimer); eyesTimer = null; }
+  if (eyesWs) {
+    try { eyesWs.close(); } catch {}
+    eyesWs = null;
+  }
+  if (eyesStream) {
+    eyesStream.getTracks().forEach(function(tr) { tr.stop(); });
+    eyesStream = null;
+  }
+  if (eyesVideo) {
+    eyesVideo.srcObject = null;
+    eyesVideo = null;
+  }
+  eyesCanvas = null;
+  console.log('[flux-eyes] camera off');
+}
+
+function startFluxEyes() {
+  // Claim synchronously BEFORE any async work: the 5s poll must not
+  // re-enter while getUserMedia/video.play() are in flight — a second
+  // start would open a second WebSocket, the server's last-wins rule
+  // would close the first, and the onclose teardown would kill the
+  // stream the newer attempt was building (the thrash loop that starves
+  // the organ of frames).
+  eyesActive = true;
+  // Mic before camera where it matters: if a voice call is active its mic
+  // already holds the audio session; otherwise the camera may start first
+  // and the mic joins later — both orders work on desktop, and the mobile
+  // routing quirk (A2DP→HFP flip) is flagged for real-device verification.
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false })
+    .then(function(stream) {
+      if (!eyesActive) { stream.getTracks().forEach(function(tr) { tr.stop(); }); return; }  // superseded/stopped
+      eyesStream = stream;
+      eyesVideo = document.createElement('video');
+      eyesVideo.muted = true;
+      eyesVideo.playsInline = true;
+      eyesVideo.srcObject = stream;
+      eyesCanvas = document.createElement('canvas');
+      eyesCanvas.width = 480;
+      eyesCanvas.height = 360;
+      eyesWs = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/flux/eyes');
+      eyesWs.binaryType = 'arraybuffer';
+      var opened = false;
+      eyesWs.onopen = function() { opened = true; };
+      eyesWs.onclose = function() {
+        // Socket dropped while eyes are still wanted — tear down and let
+        // the 5s poll re-establish (natural backoff; also handles a
+        // superseded connection that lost last-wins).
+        if (eyesActive) stopFluxEyes();
+      };
+      eyesVideo.play().then(function() {
+        console.log('[flux-eyes] camera on');
+        pumpFluxEyes();
+        eyesTimer = setInterval(pumpFluxEyes, 400);
+      }).catch(function(err) {
+        console.warn('[flux-eyes] video element failed:', err);
+        stopFluxEyes();
+      });
+    })
+    .catch(function(err) {
+      // Permission denied or no camera — stay quiet; the poll retries
+      // only when the user re-opens and re-grants.
+      if (err && err.name !== 'NotAllowedError' && err.name !== 'NotFoundError') {
+        console.warn('[flux-eyes] getUserMedia failed:', err);
+      }
+      eyesActive = false;
+    });
+}
+
+function pumpFluxEyes() {
+  if (!eyesActive || !eyesWs || eyesWs.readyState !== WebSocket.OPEN) return;
+  if (document.hidden) return; // backgrounded app — no frames
+  if (!eyesVideo || !eyesVideo.videoWidth) return;
+  var ctx = eyesCanvas.getContext('2d');
+  // Cover-fit the video into the lean frame (aspect preserved, cropped).
+  var vw = eyesVideo.videoWidth, vh = eyesVideo.videoHeight;
+  var cw = eyesCanvas.width, ch = eyesCanvas.height;
+  var scale = Math.max(cw / vw, ch / vh);
+  var dw = vw * scale, dh = vh * scale;
+  ctx.drawImage(eyesVideo, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+  eyesCanvas.toBlob(function(blob) {
+    if (!blob || !eyesWs || eyesWs.readyState !== WebSocket.OPEN) return;
+    blob.arrayBuffer().then(function(buf) { eyesWs.send(buf); });
+  }, 'image/jpeg', 0.6);
+}
+
+
+// Held-skill viewer: tapping the skill chip
+// SHOWS the skill. Event delegation on the bar handles the taps.
+async function showHeldSkill(name) {
+  try {
+    var resp = await fetch('/api/skills/' + encodeURIComponent(name));
+    if (!resp.ok) { showToast('Could not load ' + name); return; }
+    var skill = await resp.json();
+    var panel = document.createElement('div');
+    panel.className = 'skill-viewer';
+    panel.setAttribute('role', 'dialog');
+    panel.innerHTML =
+      '<div class="skill-viewer-card">' +
+      '<div class="skill-viewer-title">' + escapeHtml(skill.name || name) + '</div>' +
+      (skill.description
+        ? '<div class="skill-viewer-desc">' + escapeHtml(skill.description) + '</div>'
+        : '') +
+      '<pre class="skill-viewer-body">' + escapeHtml(skill.body || '') + '</pre>' +
+      '<button class="skill-viewer-close">Close</button>' +
+      '</div>';
+    document.body.appendChild(panel);
+    panel.querySelector('.skill-viewer-close').addEventListener('click', function() {
+      panel.remove();
+    });
+    panel.addEventListener('click', function(e) {
+      if (e.target === panel) panel.remove();
+    });
+  } catch (_) {
+    showToast('Could not load ' + name);
+  }
+}
+
+// The collapsed chip: list the held skills, tap one to open it.
+function showHeldSkills() {
+  var names = actionState.skills;
+  if (names.length === 1) { showHeldSkill(names[0]); return; }
+  var panel = document.createElement('div');
+  panel.className = 'skill-viewer';
+  panel.setAttribute('role', 'dialog');
+  panel.innerHTML = '<div class="skill-viewer-card">' +
+    '<div class="skill-viewer-title">Held skills</div>' +
+    names.map(function(n) {
+      return '<button class="skill-viewer-row" data-name="' + escapeHtml(n) + '">' + escapeHtml(n) + '</button>';
+    }).join('') +
+    '<button class="skill-viewer-close">Close</button>' +
+    '</div>';
+  document.body.appendChild(panel);
+  panel.querySelectorAll('.skill-viewer-row').forEach(function(row) {
+    row.addEventListener('click', function() {
+      panel.remove();
+      showHeldSkill(row.getAttribute('data-name'));
+    });
+  });
+  panel.querySelector('.skill-viewer-close').addEventListener('click', function() {
+    panel.remove();
+  });
+  panel.addEventListener('click', function(e) {
+    if (e.target === panel) panel.remove();
+  });
+}
+
+// One line, `<subprocess> <state>` segments: Flux ON | Workspace (2) | Voice ON.
+// Hidden entirely when nothing is active. Segments tap through to their
+// surface (Voice's overlay is inherently visible during a call — plain text).
+function renderStateSubBar() {
+  var bar = document.getElementById('state-sub-bar');
+  if (!bar) return;
+  var segs = [];
+  if (actionState.flux.state === 'running') {
+    segs.push('<span class="state-seg state-flux" onclick="Psycheros.startFluxOverlay()">Flux ON</span>');
+  }
+  if (actionState.workspace.active > 0) {
+    var wsLabel = actionState.workspace.active === 1
+      ? 'Workspace Active'
+      : 'Workspace (' + actionState.workspace.active + ')';
+    segs.push('<span class="state-seg" onclick="Psycheros.openWorkspaceList()">' + wsLabel + '</span>');
+  }
+  if (typeof globalThis.isVoiceCallActive === 'function' && globalThis.isVoiceCallActive()) {
+    segs.push('<span class="state-seg">Voice ON</span>');
+  }
+  if (actionState.skills.length === 1) {
+    var sk = actionState.skills[0];
+    // "Skill: name" — the bare name reads as a mystery chip;
+    // the label names the subsystem, sub-bar format.
+    segs.push('<span class="state-seg" data-skill="' + escapeHtml(sk) + '">Skill: ' + escapeHtml(sk) + '</span>');
+  } else if (actionState.skills.length > 1) {
+    segs.push('<span class="state-seg state-seg-multi">Skill (' + actionState.skills.length + ')</span>');
+  }
+  bar.innerHTML = segs.join('<span class="state-sep">|</span>');
+  bar.classList.toggle('on', segs.length > 0);
+  // Skill segments show the skill on tap (delegation — the bar rerenders
+  // every sweep).
+  bar.querySelectorAll('.state-seg[data-skill]').forEach(function(seg) {
+    seg.addEventListener('click', function() {
+      showHeldSkill(seg.getAttribute('data-skill'));
+    });
+  });
+  var multi = bar.querySelector('.state-seg-multi');
+  if (multi) multi.addEventListener('click', showHeldSkills);
+  // The drawer attaches below the sub-bar when both are visible: the
+  // container flow handles it (sub-bar then drawer, both app-shell
+  // elements in DOM order).
+}
+
+// Drawer rows: Context / Voice / Workspace / Flux — hidden when the
+// subsystem is disabled; Voice/Flux need an open conversation (the old
+// FAB rule preserved).
+function renderActionDrawerRows(inConv) {
+  var drawer = document.getElementById('action-drawer');
+  if (!drawer) return;
+  var rows = [];
+  rows.push(
+    '<button class="action-row" onclick="Psycheros.toggleContextViewer(); Psycheros.closeActionDrawer()">Context</button>'
+  );
+  if (actionState.voice.enabled && inConv) {
+    rows.push(
+      '<button class="action-row" onclick="Psycheros.startVoiceCall(); Psycheros.closeActionDrawer()">Voice</button>'
+    );
+  }
+  if (inConv && actionState.workspace.active >= 0) {
+    rows.push(
+      '<button class="action-row" onclick="Psycheros.openWorkspaceList(); Psycheros.closeActionDrawer()">Workspace</button>'
+    );
+  }
+  if (actionState.flux.enabled && inConv) {
+    var fluxOn = actionState.flux.state === 'running' ||
+      actionState.flux.state === 'paused';
+    rows.push(
+      '<button class="action-row" onclick="Psycheros.actionFluxEntry(); Psycheros.closeActionDrawer()">' +
+      (fluxOn ? 'Flux · turn off' : 'Flux · turn on') + '</button>'
+    );
+  }
+  drawer.innerHTML = rows.join('');
+}
+
+// The Flux entry STARTS Flux — hosted in the open conversation — and
+// nothing else: the drawer is actions; the
+// sub-bar's `Flux ON` segment navigates to the view, where stop lives.
+async function actionFluxEntry() {
+  var fluxOn = actionState.flux.state === 'running' ||
+    actionState.flux.state === 'paused';
+  try {
+    var res;
+    if (fluxOn) {
+      res = await fetch('/api/flux/stop', { method: 'POST' });
+    } else {
+      var body = currentConversationId
+        ? { conversationId: currentConversationId }
+        : {};
+      res = await fetch('/api/flux/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+    var data = await res.json();
+    if (data && data.ok === false) {
+      showToast(data.message || 'Flux action failed');
+    }
+  } catch (_) {
+    showToast('Flux action failed');
+  }
+  refreshActionState();
+}
+
+function toggleActionDrawer() {
+  var drawer = document.getElementById('action-drawer');
+  if (!drawer) return;
+  var willOpen = !drawer.classList.contains('open');
+  drawer.classList.toggle('open', willOpen);
+  var btn = document.getElementById('action-menu-btn');
+  if (btn) btn.classList.toggle('header-icon--open', willOpen);
+  if (willOpen) refreshActionState();
+}
+
+function closeActionDrawer() {
+  var drawer = document.getElementById('action-drawer');
+  if (drawer && drawer.classList.contains('open')) toggleActionDrawer();
+}
+
+// Outside-tap / Escape close.
+document.addEventListener('click', function(e) {
+  var drawer = document.getElementById('action-drawer');
+  if (!drawer || !drawer.classList.contains('open')) return;
+  if (drawer.contains(e.target)) return;
+  var btn = document.getElementById('action-menu-btn');
+  if (btn && btn.contains(e.target)) return;
+  closeActionDrawer();
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeActionDrawer();
+});
+
+// Thin legacy wrappers — old call sites keep working.
+function updateFluxButtonVisibility() { refreshActionState(); }
+function updateVoiceCallButtonVisibility() { refreshActionState(); }
+
+refreshActionState();
+setInterval(refreshActionState, 5000);
 
 // Re-evaluate whenever #chat is swapped via HTMX (settings nav, sidebar, etc.).
 document.body.addEventListener('htmx:afterSwap', function(e) {
   if (e.detail.target && e.detail.target.id === 'chat') {
     updateVoiceCallButtonVisibility();
-    updateHeldSkillsStrip();
+    updateFluxButtonVisibility();
+    populateFluxCameraList();
+  }
+  if (e.detail.target && e.detail.target.id === 'conv-list') {
+    // The sidebar re-render wipes the flux-host glow — re-apply it.
+    updateFluxButtonVisibility();
   }
 });
 
@@ -6568,9 +7083,11 @@ function gatherProfile() {
     presencePenalty: parseFloat(document.getElementById('llm-pres-penalty').value),
     maxTokens: parseInt(document.getElementById('llm-max-tokens').value) || 4096,
     contextLength: parseInt(document.getElementById('llm-context-length').value) || 128000,
+    contextStyle: (document.getElementById('llm-context-style') || {}).checked ? 'cache-friendly' : 'regular',
     thinkingEnabled: document.getElementById('llm-thinking').checked,
     persistentReasoningIntraTurn: (document.getElementById('llm-persistent-intra') || {}).value || 'auto',
     persistentReasoningInterTurns: parseInt((document.getElementById('llm-persistent-inter') || {}).value) || 0,
+    multimodal: !!(document.getElementById('llm-multimodal') || {}).checked,
   };
 }
 
@@ -7088,6 +7605,301 @@ globalThis.showWsStatus = showWsStatus;
 globalThis.saveWebSearchSettings = saveWebSearchSettings;
 globalThis.resetWebSearchDefaults = resetWebSearchDefaults;
 globalThis.saveSASettings = saveSASettings;
+
+// --- Flux nervous-system settings ---
+// Lives here (not inline in the fragment) so the functions persist
+// across HTMX fragment swaps — the card is loaded via hx-get into #chat,
+// and inline <script> tags don't reliably re-execute after a swap.
+async function saveFluxSettings() {
+  function num(id, fallback) {
+    var el = document.getElementById(id);
+    if (!el || el.value === '') return fallback;
+    var v = parseFloat(el.value);
+    return isNaN(v) ? fallback : v;
+  }
+  var profileId = document.getElementById('flux-profile');
+  var body = {
+    enabled: document.getElementById('flux-enabled').checked,
+    profileId: profileId ? (profileId.value || null) : null,
+    shorthandIdentity: (document.getElementById('flux-identity') || {}).value || undefined,
+    baseTickMs: Math.round(num('flux-base-tick', 3) * 1000),
+    minTickMs: Math.round(num('flux-min-tick', 1) * 1000),
+    maxTickMs: Math.round(num('flux-max-tick', 30) * 1000),
+    arousalInfluence: num('flux-arousal', 0.3),
+    quietThresholdMs: Math.round(num('flux-quiet', 5) * 60000),
+    retentionDays: num('flux-retention', 7),
+    reverieCadenceMs: Math.round(num('flux-reverie-cadence', 3) * 60000),
+    ambientSpeechMs: Math.round(num('flux-musing', 2) * 60000),
+    dreamPaceMs: Math.round(num('flux-dream-pace', 10) * 60000),
+    dreamCycleFragments: num('flux-dream-cycle', 7),
+    compactionCadenceMs: Math.round(num('flux-compaction', 15) * 60000),
+    longformCompactionCadenceMs: Math.round(num('flux-compaction-long', 60) * 60000),
+    moodDecayPerSec: num('flux-mood-decay', 0.005),
+    baselineDriftPerSec: num('flux-baseline-drift', 0.0001),
+    moodClassifierMaxChars: num('flux-mood-max-chars', 2000),
+    promotionThresholds: {
+      salience: num('flux-th-salience', 0.5),
+      relevance: num('flux-th-relevance', 0.3),
+      corroboration: num('flux-th-corroboration', 0.6),
+      combined: num('flux-th-combined', 0.5),
+      escalation: num('flux-th-escalation', 0.75),
+      corroborationWindowMs: Math.round(num('flux-th-window', 5) * 60000)
+    },
+    familiarityHalfLifeMs: Math.round(num('flux-fam-half-life', 45) * 60000),
+    familiarityTopK: num('flux-fam-topk', 3),
+    familiarityRatioThreshold: num('flux-fam-ratio', 1.3),
+    familiarityFullRatio: num('flux-fam-full', 1.7),
+    familiarityMaxEntries: num('flux-fam-max', 64),
+    familiarityMinPoolSize: num('flux-fam-minpool', 4),
+    thalamusSlotMs: Math.round(num('flux-th-slot', 3) * 1000),
+    thalamusFlushMass: num('flux-th-mass', 1.6),
+    thalamusReflexThreshold: num('flux-th-reflex', 0.7),
+    thalamusHoldCooldownMs: Math.round(num('flux-th-hold', 60) * 1000)
+  };
+  // Model hookups — each card's fields ride data-hookup="<job>.<field>".
+  // An all-empty card is OMITTED (no entry = ride the profile worker);
+  // a masked/blank API key round-trips and the server preserves the
+  // stored real key.
+  var hookups = {};
+  document.querySelectorAll('[data-hookup]').forEach(function(el) {
+    var parts = el.getAttribute('data-hookup').split('.');
+    var job = parts[0], field = parts.slice(1).join('.');
+    var v;
+    if (el.type === 'checkbox') v = el.checked;
+    else if (el.type === 'number') { v = el.value === '' ? undefined : parseFloat(el.value); }
+    else v = el.value;
+    if (!hookups[job]) hookups[job] = {};
+    hookups[job][field] = v;
+  });
+  var hookupEntries = {};
+  Object.keys(hookups).forEach(function(job) {
+    var h = hookups[job];
+    if (!h.url && !h.model) return; // empty card — no entry
+    var entry = { url: h.url || '', model: h.model || '' };
+    if (h.apiKey) entry.apiKey = h.apiKey;
+    if (h.thinkingEnabled === true) entry.thinkingEnabled = true;
+    var params = {};
+    ['temperature', 'top_p', 'top_k', 'max_tokens'].forEach(function(p) {
+      if (h[p] !== undefined && !isNaN(h[p])) params[p] = h[p];
+    });
+    if (Object.keys(params).length > 0) entry.params = params;
+    hookupEntries[job] = entry;
+  });
+  if (Object.keys(hookupEntries).length > 0) body.modelHookups = hookupEntries;
+  // Sensory Organs — card toggles + per-field values
+  // (data-so-setting="<organId>.<key>"), plus extra ids without cards.
+  var soSettings = {};
+  document.querySelectorAll('[data-so-setting]').forEach(function(el) {
+    var parts = el.getAttribute('data-so-setting').split('.');
+    var v;
+    if (el.type === 'checkbox') v = el.checked;
+    else if (el.type === 'number') v = parseFloat(el.value);
+    else v = el.value;
+    if (!soSettings[parts[0]]) soSettings[parts[0]] = {};
+    soSettings[parts[0]][parts[1]] = v;
+  });
+  if (Object.keys(soSettings).length > 0) body.sensoryOrganSettings = soSettings;
+  var enabled = [];
+  document.querySelectorAll('[data-flux-organ]').forEach(function(el) {
+    if (el.checked) enabled.push(el.getAttribute('data-flux-organ'));
+  });
+  var extra = ((document.getElementById('flux-organs-extra') || {}).value || '')
+    .split(',').map(function(s){return s.trim();}).filter(Boolean);
+  body.enabledOrgans = enabled.concat(extra);
+  var statusEl = document.getElementById('flux-settings-status');
+  if (!statusEl) return;
+  try {
+    var res = await fetch('/api/flux/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    if (res.ok) {
+      var data = await res.json();
+      statusEl.className = 'settings-status visible success';
+      statusEl.textContent = data.applied && data.applied.ok
+        ? 'Saved — flux restarted to apply changes.'
+        : 'Saved.';
+    } else {
+      statusEl.className = 'settings-status visible error';
+      statusEl.textContent = 'Failed to save (HTTP ' + res.status + ')';
+    }
+  } catch (e) {
+    statusEl.className = 'settings-status visible error';
+    statusEl.textContent = 'Failed to save';
+  }
+  setTimeout(function(){ statusEl.className = 'settings-status'; }, 5000);
+}
+
+// Flux settings tabs: General | Hookups | Sensory. Lives
+// here, not inline in the fragment — HTMX-swapped inline scripts don't
+// reliably re-execute (the house rule).
+function moodModelRefresh() {
+  var el = document.getElementById('mood-model-status');
+  if (!el) return false;
+  fetch('/api/flux/mood-model').then(function(r) { return r.json(); }).then(function(st) {
+    var active = st.variants.find(function(v) { return v.variant === st.variant; }) || {};
+    var bits = [];
+    st.variants.forEach(function(v) {
+      var label = v.variant + ': ';
+      if (v.onDisk) label += 'on disk (' + Math.round(v.bytes / 1048576) + 'MB)';
+      else if (v.download && v.download.state === 'downloading') {
+        label += 'downloading ' + Math.round(v.download.bytes / 1048576) + 'MB' +
+          (v.download.totalBytes ? ' of ' + Math.round(v.download.totalBytes / 1048576) + 'MB' : '');
+      } else if (v.download && v.download.state === 'error') label += 'error — ' + v.download.error;
+      else label += 'not downloaded';
+      bits.push(label);
+    });
+    el.className = 'settings-status visible ' + (active.onDisk ? 'success' : 'error');
+    el.textContent = bits.join(' · ') + (st.repoId ? '' : ' · no repository set');
+    if (st.variants.some(function(v) { return v.download && v.download.state === 'downloading'; })) {
+      setTimeout(moodModelRefresh, 2000);
+    }
+  }).catch(function() {});
+  return true;
+}
+globalThis.moodModelRefresh = moodModelRefresh;
+
+function moodModelSave() {
+  var repo = document.getElementById('mood-model-repo');
+  var variant = document.getElementById('mood-model-variant');
+  if (!repo || !variant) return;
+  fetch('/api/flux/mood-model', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repoId: repo.value, variant: variant.value }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    moodModelRefresh();
+    var el = document.getElementById('mood-model-status');
+    if (el && d.message) el.textContent = d.message;
+  });
+}
+globalThis.moodModelSave = moodModelSave;
+
+function moodModelDownload() {
+  var repo = document.getElementById('mood-model-repo');
+  var variant = document.getElementById('mood-model-variant');
+  if (!repo || !variant) return;
+  fetch('/api/flux/mood-model', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ download: true, repoId: repo.value, variant: variant.value }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    var el = document.getElementById('mood-model-status');
+    if (el) {
+      el.className = 'settings-status visible ' + (d.ok ? 'success' : 'error');
+      el.textContent = d.message || (d.ok ? 'download started' : 'failed');
+    }
+    if (d.ok) setTimeout(moodModelRefresh, 1500);
+  });
+}
+globalThis.moodModelDownload = moodModelDownload;
+
+function switchFluxSettingsTab(tab) {
+  document.querySelectorAll('[data-flux-tab]').forEach(function(b) {
+    b.classList.toggle('active', b.getAttribute('data-flux-tab') === tab);
+  });
+  ['general', 'hookups', 'sensory'].forEach(function(name) {
+    var panel = document.getElementById('flux-tab-' + name);
+    if (panel) panel.style.display = name === tab ? '' : 'none';
+  });
+}
+globalThis.switchFluxSettingsTab = switchFluxSettingsTab;
+
+// Test a hookup card's TYPED values (not saved state) with one tiny
+// completion. A masked key round-trips and the server substitutes the
+// stored real one.
+function testFluxHookup(job, btn) {
+  var get = function(field) {
+    var el = document.querySelector('[data-hookup="' + job + '.' + field + '"]');
+    return el ? el.value : '';
+  };
+  var thinkEl = document.querySelector('[data-hookup="' + job + '.thinkingEnabled"]');
+  btn.disabled = true;
+  btn.textContent = 'Testing…';
+  fetch('/api/flux/test-hookup', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      job: job,
+      url: get('url'),
+      model: get('model'),
+      apiKey: get('apiKey') || undefined,
+      thinkingEnabled: thinkEl ? thinkEl.checked : false
+    })
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      btn.disabled = false;
+      if (data.ok) {
+        btn.style.color = 'var(--c-success)';
+        btn.textContent = 'OK ' + data.latencyMs + 'ms';
+      } else {
+        btn.style.color = 'var(--c-error)';
+        btn.textContent = 'Failed';
+        console.warn('[flux] hookup test (' + job + '):', data.error);
+        alert('Hookup test failed for ' + job + ':\n\n' + (data.error || 'unknown error'));
+      }
+      setTimeout(function() {
+        btn.textContent = 'Test';
+        btn.style.color = '';
+      }, 4000);
+    })
+    .catch(function(e) {
+      btn.disabled = false;
+      btn.textContent = 'Test';
+      alert('Hookup test failed for ' + job + ': ' + e.message);
+    });
+}
+globalThis.testFluxHookup = testFluxHookup;
+
+// Populate the camera datalist on the Sensory tab from the daemon's
+// device enumeration. Best-effort — an empty list leaves free text.
+function populateFluxCameraList() {
+  var list = document.getElementById('flux-camera-devices');
+  if (!list || list.options.length > 0) return;
+  fetch('/api/flux/camera-devices')
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      if (!data || !data.devices || !list.isConnected) return;
+      data.devices.forEach(function(d) {
+        var opt = document.createElement('option');
+        opt.value = d;
+        list.appendChild(opt);
+      });
+    })
+    .catch(function() {});
+}
+globalThis.populateFluxCameraList = populateFluxCameraList;
+
+async function fluxAction(action) {
+  var statusEl = document.getElementById('flux-settings-status');
+  try {
+    var res = await fetch('/api/flux/' + action, { method: 'POST' });
+    var data = await res.json();
+    if (statusEl) {
+      statusEl.className = 'settings-status visible ' + (data.ok ? 'success' : 'error');
+      statusEl.textContent = action + ': ' + (data.message || (data.ok ? 'ok' : 'failed'));
+    }
+    if (data.ok) {
+      // Reload the fragment so the Active/Inactive badge and button
+      // states reflect the new runtime state.
+      var r = await fetch('/fragments/settings/flux');
+      if (r.ok) {
+        var chat = document.getElementById('chat');
+        if (chat) chat.innerHTML = await r.text();
+      }
+    }
+  } catch (e) {
+    if (statusEl) {
+      statusEl.className = 'settings-status visible error';
+      statusEl.textContent = action + ' failed';
+    }
+  }
+  if (statusEl) setTimeout(function(){ statusEl.className = 'settings-status'; }, 4000);
+}
+globalThis.saveFluxSettings = saveFluxSettings;
+globalThis.fluxAction = fluxAction;
 
 // =============================================================================
 // Event Rules (Webhooks)
@@ -8041,3 +8853,9 @@ function initEmbeddingsTab() {
   }
 }
 globalThis.initEmbeddingsTab = initEmbeddingsTab;
+
+// Mood-model status (Flux settings fragment): populate whenever the
+// fragment lands in #chat (HTMX never runs inline scripts).
+document.body.addEventListener('htmx:afterSwap', function(e) {
+  if (e.target && e.target.id === 'chat') moodModelRefresh();
+});

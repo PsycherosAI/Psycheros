@@ -7,8 +7,8 @@
  *
  * Message persistence is handled by `EntityTurn.process()` — each voice
  * turn (user utterance + entity response) is persisted to the conversation
- * DB as it happens, with a `[Voice Chat] ` prefix. The session manager
- * no longer batches transcripts at session end.
+ * DB as it happens, with a `[Voice Chat] ` prefix. Transcripts are never
+ * batched at session end.
  */
 
 import type { EntityTurn } from "../entity/loop.ts";
@@ -126,6 +126,12 @@ export class VoiceSessionManager {
     entityTurn: EntityTurn,
     voiceSuffix: string,
     pttEnabled: boolean,
+    /** Flux-session routing for hosted conversations (see the pipeline's
+     * fluxTurn opt) — null/omitted leaves the classic path. */
+    fluxTurn?: (
+      prompt: string,
+      sourceDescription: string,
+    ) => Promise<string | null>,
   ): { session: VoiceSession } | { error: string } {
     // Multi-device lock: reject if conversation already in voice
     const existingId = this.conversationLocks.get(conversationId);
@@ -140,6 +146,7 @@ export class VoiceSessionManager {
       entityTurn,
       conversationId,
       systemPromptSuffix: voiceSuffix,
+      fluxTurn,
     });
 
     const session: VoiceSession = {
@@ -411,7 +418,18 @@ export class VoiceSessionManager {
           `[Voice:debug] ptt_start — buffer cleared (was ${session.pipeline.audioBufferLength()} bytes)`,
         );
         session.pipeline.clearAudioBuffer();
-        session.pipeline.setState("recording");
+        // HE WINS: while he's generating or
+        // speaking, the hold defers — recording never starts mid-response,
+        // and overlap frames drop (pushAudio's gate). The idle state
+        // handler above arms the hold with a clean buffer once he's done.
+        // Browser-STT transcripts that land mid-response queue instead of
+        // dropping (the press was intentional) — same as Pulse turns.
+        if (
+          session.pipeline.state !== "processing" &&
+          session.pipeline.state !== "speaking"
+        ) {
+          session.pipeline.setState("recording");
+        }
         break;
 
       case "ptt_end":
@@ -425,6 +443,12 @@ export class VoiceSessionManager {
 
       case "user_silence":
         // Browser-side VAD detected end of speech — process accumulated audio.
+        // Speech ended: clear the speaking flag (ONE MOUTH).
+        // In server-STT mode this is the ONLY clear site — the browser-STT
+        // "transcript" case never fires here, and a latched-true flag made
+        // the call-state seam read "user-speaking" for the rest of the
+        // call, so the wake door never opened in listening mode.
+        session.userSpeaking = false;
         console.log(
           `[Voice:debug] user_silence — UNEXPECTED IN PTT MODE, processing ${session.pipeline.audioBufferLength()} bytes`,
         );
@@ -475,14 +499,28 @@ export class VoiceSessionManager {
       case "state":
         this.sendToBrowser(session, { type: "state", state: event.state });
         session.lastActivityAt = Date.now();
-        // When pipeline returns to idle (entity done speaking), check for
-        // queued Pulses. The drain method handles its own state check — if
-        // the user has already started speaking (state moved to recording
-        // between the pipeline emitting idle and us processing it), the
-        // Pulse defers until the next idle.
         if (event.state === "idle") {
+          // HE WINS: a PTT hold deferred
+          // while he spoke (spontaneous or reply) arms NOW, with a clean
+          // buffer — the held button takes the mic before queued Pulses.
+          if (session.pttMode === "ptt" && session.pttHolding) {
+            session.pipeline.clearAudioBuffer();
+            session.pipeline.setState("recording");
+          }
+          // When pipeline returns to idle (entity done speaking), check for
+          // queued Pulses. The drain method handles its own state check — if
+          // the user has already started speaking (state moved to recording
+          // between the pipeline emitting idle and us processing it), the
+          // Pulse defers until the next idle.
           this.maybeDrainPulse(session);
         }
+        break;
+
+      case "spontaneous_start":
+        // He opened his mouth unprompted (the wake door passed during
+        // quiet). Browser plays the pre-speech earcon off this cue.
+        this.sendToBrowser(session, { type: "spontaneous_start" });
+        session.lastActivityAt = Date.now();
         break;
 
       case "pulse_start":
@@ -632,4 +670,10 @@ export class VoiceSessionManager {
       // Socket may have closed
     }
   }
+}
+
+/** The singleton accessor (ONE MOUTH): the Flux host seam
+ *  reads live call state and pushes spontaneous speech through here. */
+export function getVoiceSessionManager(): VoiceSessionManager {
+  return VoiceSessionManager.getInstance();
 }

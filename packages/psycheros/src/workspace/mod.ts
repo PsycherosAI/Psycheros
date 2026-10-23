@@ -77,5 +77,4 @@ export {
   broadcastWorkspaceResumed,
   broadcastWorkspaceStalled,
   broadcastWorkspaceTerminal,
-  truncateForEntityContext,
 } from "./transcript.ts";

@@ -17,6 +17,7 @@ import type {
 import { resolveIdentityConflict } from "../sync/mod.ts";
 import { cleanupOldSnapshots, createSnapshot } from "../snapshot/mod.ts";
 import { getExtractionHealth } from "../graph/memory-integration.ts";
+import type { RegisteredInstance } from "../registry/mod.ts";
 
 /**
  * Input schema for sync/pull tool.
@@ -256,12 +257,19 @@ export function createSyncPushHandler(store: FileStore) {
 
 /**
  * Create the sync/status tool handler.
+ *
+ * `connectedInstances` is this process's in-memory view of who synced
+ * recently; `registeredInstances` is the persistent name-claim registry
+ * (data/instances.json) — every instance that has ever connected, which
+ * is the list to check before claiming a new name.
  */
-export function createSyncStatusHandler() {
-  // deno-lint-ignore require-await
+export function createSyncStatusHandler(
+  registry?: { list(): Promise<RegisteredInstance[]> },
+) {
   return async (): Promise<{
     serverVersion: number;
     connectedInstances: Array<{ id: string; lastSync: string }>;
+    registeredInstances: RegisteredInstance[];
     extraction: ReturnType<typeof getExtractionHealth>;
   }> => {
     return {
@@ -270,6 +278,7 @@ export function createSyncStatusHandler() {
         id: i.id,
         lastSync: i.lastSync ?? "never",
       })),
+      registeredInstances: registry ? await registry.list() : [],
       extraction: getExtractionHealth(),
     };
   };

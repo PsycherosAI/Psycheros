@@ -59,9 +59,7 @@ export interface Message {
 
 /**
  * Sidecar metadata stored on tool-result messages. The `image` shape is
- * populated by `generate_image`; the `fade` shape is populated by tools whose
- * result content should be replaced with a shorter version after the
- * IMAGE_DESCRIPTION_FADE_TURNS threshold (describe_image, look_closer).
+ * populated by `generate_image`.
  */
 export interface MessageMetadata {
   image?: {
@@ -73,10 +71,6 @@ export interface MessageMetadata {
     generatorName: string;
     description?: string;
     shortDescription?: string;
-  };
-  fade?: {
-    /** Content text to swap in after IMAGE_DESCRIPTION_FADE_TURNS */
-    replacementContent: string;
   };
   /**
    * Tombstone metadata — populated when a message is soft-deleted. The
@@ -133,8 +127,7 @@ export interface ToolResult {
   affectedRegions?: string[];
   /**
    * Optional sidecar metadata. Persisted as-is to the tool-message
-   * `metadata` column. generate_image populates `metadata.image`;
-   * describe_image and look_closer populate `metadata.fade`.
+   * `metadata` column. generate_image populates `metadata.image`.
    */
   metadata?: MessageMetadata;
 }
@@ -262,6 +255,11 @@ export interface LLMContextSnapshot {
   userMessage: string;
   /** The system message with all identity files and RAG context */
   systemMessage: string;
+  /** Context placement used this turn: "regular" (systemMessage is the
+   * whole assembly) or "cache-friendly" (systemMessage is the joined
+   * record; the leading message was the stable core and the dynamic
+   * block trailed after the user message). */
+  contextStyle?: "regular" | "cache-friendly";
   /** Base instructions loaded from identity/self/base_instructions.md */
   baseInstructions: string;
   /** Self content loaded from self/ directory */

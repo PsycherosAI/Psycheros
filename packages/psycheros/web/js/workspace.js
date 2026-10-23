@@ -300,7 +300,7 @@ async function openWorkspaceList() {
       const meta = document.createElement("div");
       meta.className = "session-meta";
       const mode = session.mode ?? "sync";
-      // Partyhard badge suppressed 2026-08-12 — mode is disabled server-side.
+      // Partyhard badge suppressed — mode is disabled server-side.
       meta.textContent = `${mode} · ${session.status}`;
       row.appendChild(meta);
 
@@ -959,7 +959,7 @@ function showQueryToast(query) {
     }
   });
 
-  // Per plan §14 (revised 2026-08-10): 5-min idle timer signals the server
+  // Per plan §14: 5-min idle timer signals the server
   // to suspend the workspace. While the toast is up the workspace stays
   // RUNNING with the OpenCode process blocked on ask_origin_conversation.
   // After 5 min of no engagement, we POST /suspend — the server unblocks
@@ -1105,7 +1105,7 @@ async function saveWorkspaceSettings(form) {
   if (!form) return false;
   const data = {
     contextBlock: form.contextBlock?.value ?? "",
-    // partyhardDefault disabled 2026-08-12 (mode disabled server-side).
+    // partyhardDefault disabled (mode disabled server-side).
     // Field kept in the persisted JSON for compatibility with older saves.
     partyhardDefault: false,
     defaultIsolation: form.defaultIsolation?.value ?? "sandboxed",

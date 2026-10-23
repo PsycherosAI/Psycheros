@@ -1,22 +1,23 @@
 # Security Audit
 
-Status: **Complete** — reviewed for homelab deployment behind Authelia.
+Status: **Complete**.
 
 > **How to read this document.** This audit assumes Psycheros is deployed as a
 > **single-user installation behind an authentication layer** (the maintainer's
-> reference setup is Authelia in front of a Docker container). Every finding is
-> either **fixed in the shipped code** or **explicitly accepted by design** for
-> that deployment shape. The "Accepted" entries below (open CORS, no per-route
-> auth, the optional shell tool, the LLM test endpoint) are not live exposure in
-> a properly-deployed Psycheros — they rely on the reverse-proxy auth layer to
-> gate them. If you intend to run Psycheros **multi-user, on the open internet,
-> or without an upstream auth layer**, treat the Accepted entries as
-> work-required-before-deploy and harden them yourself before publishing.
+> reference setup is an auth proxy in front of a Docker container). Every
+> finding is either **fixed in the shipped code** or **explicitly accepted by
+> design** for that deployment shape. The "Accepted" entries below (open CORS,
+> no per-route auth, the optional shell tool, the LLM test endpoint) are not
+> live exposure in a properly-deployed Psycheros — they rely on the
+> reverse-proxy auth layer to gate them. If you intend to run Psycheros
+> **multi-user, on the open internet, or without an upstream auth layer**, treat
+> the Accepted entries as work-required-before-deploy and harden them yourself
+> before publishing.
 
 ## Threat Model
 
-Single-user homelab, Docker container, Authelia reverse proxy. All HTTP
-endpoints are auth-gated by Authelia before reaching Psycheros. This context
+Single-user homelab, Docker container, authenticating reverse proxy. All HTTP
+endpoints are auth-gated by that proxy before reaching Psycheros. This context
 downgrades many theoretical risks that would be critical in a multi-user or
 public deployment.
 
@@ -29,10 +30,10 @@ public deployment.
 | S3  | XSS in templates.ts background gallery onclick handlers | High     | **FIXED**                                     |
 | S4  | Shell tool — no sandboxing                              | High     | **Accepted** — by design                      |
 | S5  | SSRF via LLM test endpoint                              | Medium   | **Accepted** — by design                      |
-| S6  | Open CORS (`*`) on all endpoints                        | Medium   | **Accepted** — behind Authelia                |
+| S6  | Open CORS (`*`) on all endpoints                        | Medium   | **Accepted** — behind the auth proxy          |
 | S7  | No request body size limits (most endpoints)            | Low      | **FIXED**                                     |
 | S8  | Error messages leak internal paths                      | Low      | **FIXED**                                     |
-| S9  | No auth/IDOR checks on HTTP routes                      | Low      | **Accepted** — Authelia handles auth          |
+| S9  | No auth/IDOR checks on HTTP routes                      | Low      | **Accepted** — the auth proxy handles auth    |
 | S10 | MIME type validation trusts client-provided type        | Low      | **Accepted** — filenames are server-generated |
 
 ## Fixed in Psycheros
@@ -67,19 +68,19 @@ operations, git, etc. Gated by `PSYCHEROS_TOOLS` env var which defaults to `[]`
 ### S5: SSRF via LLM test endpoint
 
 Accepts arbitrary `baseUrl` for LLM connection testing. By design — users
-configure their own LLM provider URL. Behind Authelia, only the homelab owner
-can access this.
+configure their own LLM provider URL. Behind the auth proxy, only the homelab
+owner can access this.
 
 ### S6: Open CORS
 
-`Access-Control-Allow-Origin: *` on all endpoints. Behind Authelia reverse
-proxy, cross-origin requests still need valid auth cookies. Not exploitable in
+`Access-Control-Allow-Origin: *` on all endpoints. Behind a reverse-proxy auth
+layer, cross-origin requests still need valid auth cookies. Not exploitable in
 this deployment model.
 
 ### S9: No per-route auth
 
 All endpoints access resources by ID without user-level authorization.
-Single-user system behind Authelia — no concept of multiple users.
+Single-user system behind an auth proxy — no concept of multiple users.
 
 ## Confirmed Safe Patterns
 

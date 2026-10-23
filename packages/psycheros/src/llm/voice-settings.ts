@@ -161,7 +161,13 @@ export interface VoiceProfile {
   audioEffects: AudioEffect[];
   /** Rolling context window size for voice mode in tokens (default 64000) */
   contextWindowSize: number;
-  /** VAD silence threshold 0.0–1.0 (default 0.5, higher = longer pause needed) */
+  /**
+   * Speech-detection sensitivity 0.0–1.0 (default 0.5). Higher = less
+   * sensitive: the mic must be louder before a sound counts as the user
+   * speaking. Feeds the browser silence detector (server-side STT modes)
+   * as an RMS gate — 0.5 maps to ~0.0525 RMS, above a typical room's
+   * ambient noise. Not the pause length (that's endOfTurnSilence).
+   */
   vadThreshold: number;
   /** Idle timeout in seconds before session auto-ends (default 300) */
   idleTimeoutSeconds: number;

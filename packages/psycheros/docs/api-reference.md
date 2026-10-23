@@ -367,27 +367,27 @@ bridge errors.
 Entity-plexus (Android app connected to Bangle.js via BLE) sends sensor readings
 and receives commands over these endpoints. Two transports, same JSON protocol.
 
-**Localhost / dev paths** (no Authelia):
+**Localhost / dev paths** (no auth proxy):
 
 | Method | Path                 | Description                                          |
 | ------ | -------------------- | ---------------------------------------------------- |
 | `GET`  | `/api/device/stream` | WebSocket upgrade for real-time bidirectional stream |
 | `POST` | `/api/device/data`   | HTTP fallback for sensor data ingestion              |
 
-**Production paths** (gated by Authelia `client_credentials` bearer auth):
+**Production paths** (gated by reverse-proxy `client_credentials` bearer auth):
 
 | Method | Path                 | Description                                          |
 | ------ | -------------------- | ---------------------------------------------------- |
 | `GET`  | `/api/ingest/stream` | WebSocket upgrade for real-time bidirectional stream |
 | `POST` | `/api/ingest`        | HTTP fallback for sensor data ingestion              |
 
-Both path sets delegate to the same handlers. Use `/api/ingest/*` when behind
-Authelia (the access-control rule only allows bearer-authenticated requests on
-those paths). Use `/api/device/*` for localhost/dev without Authelia.
+Both path sets delegate to the same handlers. Use `/api/ingest/*` when behind an
+auth proxy (the access-control rule only allows bearer-authenticated requests on
+those paths). Use `/api/device/*` for localhost/dev without the proxy.
 
-**Auth:** In production, Authelia validates the bearer token before the request
-reaches Psycheros — no server-side JWT handling needed. In localhost/dev mode,
-no auth header is required.
+**Auth:** In production, the auth proxy validates the bearer token before the
+request reaches Psycheros — no server-side JWT handling needed. In localhost/dev
+mode, no auth header is required.
 
 **Inbound (app → server):**
 
@@ -547,12 +547,24 @@ endpoint.
 | `GET`  | `/chat-attachments/:filename` | Serve chat attachment image file                                        |
 
 Attachments are stored in `.psycheros/chat-attachments/`. The chat request body
-includes an optional `attachmentId` field; if provided and captioning is
-configured, the attachment is auto-captioned via the configured vision model and
-prefixed to the user message as
-`[USER_IMAGE: /chat-attachments/filename | Caption: description]`. If captioning
-fails or is not configured, falls back to
-`[USER_IMAGE: /chat-attachments/filename]`.
+includes an optional `attachmentId` field. Routing depends on the active LLM
+profile's **Multimodal** toggle (declared per-profile, off by default — never
+assumed from the model string; currently images only):
+
+- **Toggle on**: the stored image is read server-side and rides the turn as a
+  native `image_url` content part — the model sees the pixels. The persisted
+  transcript keeps the path-only marker
+  (`[USER_IMAGE: /chat-attachments/filename]`); pixels are transient, never
+  stored in the transcript.
+- **Toggle off** (default): if captioning is configured, the attachment is
+  auto-captioned via the configured vision model and prefixed to the user
+  message as `[USER_IMAGE: /chat-attachments/filename | Caption: description]`.
+  If captioning fails or is not configured, falls back to
+  `[USER_IMAGE: /chat-attachments/filename]`.
+
+The same rule governs Discord image attachments (the profile toggle is
+authoritative there too — the old unknown-model-string vision guess is gone).
+Upload limit: 16MB (image/jpeg, png, gif, webp).
 
 ### Generated Images
 
@@ -655,6 +667,35 @@ reloaded. Returns `{ "success": true, "toolName": "..." }` or
 | `GET`    | `/fragments/settings/pulse/:id/edit`  | Edit Pulse editor                                                  |
 | `GET`    | `/fragments/settings/pulse/list`      | Prompt list partial (for HTMX reload)                              |
 | `GET`    | `/fragments/settings/pulse/log`       | Execution log partial (paginated)                                  |
+
+### Flux (Nervous System)
+
+Conversation-hosted consciousness (2026-09-14): Flux starts FROM a conversation
+— that conversation hosts the Ego for the run (dialogue posts live into it); the
+Subconscious/Sensory layers stay a global conversation-agnostic undercurrent.
+One instance; off unless started.
+
+| Method | Path                              | Purpose                                                                                                                                                                                                                          |
+| ------ | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/flux/status`                | State (running/paused/stopped), host conversation + title, mood, familiarity pool, Sensory Organ health                                                                                                                          |
+| `GET`  | `/api/flux/settings`              | Flux settings                                                                                                                                                                                                                    |
+| `POST` | `/api/flux/settings`              | Save settings (auto-restarts; the host binding is preserved)                                                                                                                                                                     |
+| `POST` | `/api/flux/start`                 | Start Flux. Body `{ "conversationId": "…" }` binds the Ego to that conversation (absent body → legacy Flux Space). **Refuses** (`ok:false`, clear message) when already active on a different conversation; a bare start resumes |
+| `POST` | `/api/flux/pause`                 | Pause ticking (state preserved; the session log stays readable)                                                                                                                                                                  |
+| `POST` | `/api/flux/stop`                  | Full stop                                                                                                                                                                                                                        |
+| `POST` | `/api/flux/restart`               | Stop + start (host binding preserved)                                                                                                                                                                                            |
+| `GET`  | `/api/flux/entries?since=&limit=` | Durable ambient timeline                                                                                                                                                                                                         |
+| `POST` | `/api/flux/message`               | User message into the hosted Ego session (`{ content }`)                                                                                                                                                                         |
+| `GET`  | `/api/flux/session`               | The Ego session log (dialogue rows from the host conversation's messages + session entries)                                                                                                                                      |
+| `POST` | `/api/flux/session/edit`          | Edit one session entry's content (pause-edit-resume flow)                                                                                                                                                                        |
+| `POST` | `/api/flux/clear`                 | Clear observations/timeline/textures (dialogue + mood preserved)                                                                                                                                                                 |
+| `GET`  | `/fragments/flux/:conversationId` | The Flux overlay fragment (markup + JSON config; logic lives in `web/js/flux.js`)                                                                                                                                                |
+| `GET`  | `/flux`                           | The standalone legacy page (kept during transition)                                                                                                                                                                              |
+
+SSE events (persistent channel): `flux_entry` (dialogue + ambient rows),
+`flux_generating`, `flux_ego_thinking` (streamed fragments), `flux_tool_call`,
+`flux_organ_health`. Dialogue writes also push conversation-scoped `dom_update`
+events so an open conversation view renders hosted dialogue live.
 
 ### Voice Chat
 

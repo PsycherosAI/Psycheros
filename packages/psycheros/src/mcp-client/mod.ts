@@ -537,7 +537,9 @@ export class MCPClient {
 
       // Server→client notifications (embedding-rebuild progress). Set
       // BEFORE connect so an early `started` can't slip past us.
-      this.client.fallbackNotificationHandler = (notification) => {
+      this.client.fallbackNotificationHandler = (
+        notification: unknown,
+      ) => {
         this.handleServerNotification(
           notification as {
             method?: string;
@@ -1716,6 +1718,7 @@ export class MCPClient {
     options?: {
       minScore?: number;
       maxResults?: number;
+      queryEmbedding?: number[];
     },
   ): Promise<
     Array<{
@@ -1736,6 +1739,7 @@ export class MCPClient {
         instanceId: this.config.instanceId,
         minScore: options?.minScore,
         maxResults: options?.maxResults,
+        queryEmbedding: options?.queryEmbedding,
       });
 
       const textContent = extractTextContent(result);

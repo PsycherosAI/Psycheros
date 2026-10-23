@@ -13,7 +13,8 @@ For lifecycle invariants and load-bearing wirings, see "Workspace subsystem" in
 
 - **sync** — blocks the entity's turn, returns a summary inline.
 - **async** — fire-and-forget; completion fires a transient Pulse carrying the
-  summary back to the origin conversation.
+  distilled summary (worker LLM, same distiller as sync mode) back to the origin
+  conversation — whole, never truncated.
 - **engaged** — turn-based loop in `engaged-runner.ts`: OpenCode responds →
   entity turn with full context → repeat until the entity calls `end_session` or
   the iteration cap hits. OpenCode never talks to the user directly —
@@ -31,6 +32,35 @@ opt-in for host access). **Windows has no OS sandbox** — soft enforcement only
 Feral. Partyhard is disabled (code commented out, not deleted — OpenCode's
 `--auto` doesn't reliably gate headless; see supervisor.ts for the one-line
 rationale).
+
+### macOS Seatbelt profile (sandbox.ts)
+
+Two Seatbelt semantics shape the profile and bite hard if violated:
+
+- **Path filters match resolved paths.** `/tmp`, `/etc`, `/var` are symlinks
+  (`/private/tmp`, `/private/etc`, `/private/var/...`), and `$TMPDIR` lives
+  under `/private/var/folders/…/T` — rules on the symlink forms alone never
+  fire. Every rule targets the realpath form.
+- **Last matching rule wins.** The Tier 5 deny on `<dataRoot>/.psycheros` must
+  precede the sandbox / workdir / shared-runtime allows (all inside that
+  subtree), or it silently denies OpenCode its own work area — the v0.11.3
+  all-sessions-die-at-birth bug.
+
+Beyond paths, the profile grants the "birth rights" a modern runtime
+(Bun/OpenCode, node, python) needs to start at all — process-fork, signal,
+sysctl-read, posix shm/sem, `/dev/{null,zero,random,urandom}`, directory
+metadata reads (realpath traversal), and a named mach-service list. The grant
+set follows Claude Code's macOS sandbox (anthropic-experimental/
+sandbox-runtime). `process-exec` is unfiltered; the read policy is the fence —
+what can't be read can't be executed.
+
+Debugging a sandboxed failure: the deny-default is tagged `psycheros-sbx`, so
+denied operations are greppable —
+`log stream --predicate 'eventMessage CONTAINS "psycheros-sbx"'`. A failed
+session's error field carries the profile path and a
+`sandbox-exec -f <profile> <opencode> --version` repro one-liner; the profile
+itself persists at `<sandbox>/.opencode/sandbox-profile.sb` for the session's
+lifetime.
 
 ## Workdir sessions
 

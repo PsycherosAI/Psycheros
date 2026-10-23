@@ -544,11 +544,6 @@ async function executeDescribeImage(
     return {
       toolCallId: ctx.toolCallId,
       content: `Image description: ${caption.long}`,
-      metadata: {
-        fade: {
-          replacementContent: `Image description: ${caption.short}`,
-        },
-      },
     };
   } catch (error) {
     return {

@@ -17,6 +17,7 @@ export type ImageGenProvider =
   | "gemini"
   | "venice"
   | "nanogpt"
+  | "gateway"
   | "comfyui"
   | "native";
 
@@ -43,6 +44,21 @@ export interface NanoGPTImageSettings {
   baseUrl?: string;
 }
 
+export interface GatewayImageSettings {
+  baseUrl: string;
+  apiKey: string;
+  /** API route path appended to the base URL. Defaults to /v1/images/generations. */
+  modelPath?: string;
+  /** Optional model id. Omitted from the request body when unset — gateways may assume a default. */
+  model?: string;
+  /**
+   * Transmit negative_prompt. Guidance-free deployments (CFG fixed at 1)
+   * reject nonempty negative prompts, so the default is not to send the
+   * field; enable only when the gateway actually weighs it (CFG > 1).
+   */
+  acceptsNegativePrompt?: boolean;
+}
+
 export interface ComfyUIImageSettings {
   serverUrl: string;
   workflow: string;
@@ -67,6 +83,7 @@ export interface ImageGenProviderSettings {
   gemini?: GeminiImageSettings;
   venice?: VeniceImageSettings;
   nanogpt?: NanoGPTImageSettings;
+  gateway?: GatewayImageSettings;
   comfyui?: ComfyUIImageSettings;
   native?: NativeImageSettings;
   params: CommonImageGenParams;
@@ -190,6 +207,12 @@ export function maskImageGenSettings(
           ? {
             ...g.settings.nanogpt,
             apiKey: maskApiKey(g.settings.nanogpt.apiKey || ""),
+          }
+          : undefined,
+        gateway: g.settings.gateway
+          ? {
+            ...g.settings.gateway,
+            apiKey: maskApiKey(g.settings.gateway.apiKey || ""),
           }
           : undefined,
       },

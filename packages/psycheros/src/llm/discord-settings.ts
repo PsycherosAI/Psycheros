@@ -117,7 +117,6 @@ export function getDefaultDiscordGatewayConfig(): DiscordGatewayConfig {
       "web_search",
       "generate_image",
       "describe_image",
-      "look_closer",
       "create_significant_memory",
       "vault",
       "act_in_discord",

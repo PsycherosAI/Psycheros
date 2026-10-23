@@ -85,7 +85,15 @@ function voiceDebug(category, message) {
 const PCM_FRAME_SIZE = 640; // 20ms of 16kHz mono Int16
 const SAMPLE_RATE = 16000;
 const RESAMPLE_RATIO = 48000 / SAMPLE_RATE;
-const SILENCE_THRESHOLD = 0.02; // RMS below this counts as silence
+// Speech-detection gate (RMS). Fed from the profile's vadThreshold
+// slider (0–1) via mapVadThreshold; 0.5 → ~0.0525 RMS, which sits above
+// a typical room's ambient noise. A hardcoded 0.02 sits BELOW many
+// rooms' noise floors — faint household sound flips the call through
+// record → STT → empty cycles.
+function mapVadThreshold(v) {
+  return 0.005 + v * 0.095;
+}
+let SILENCE_THRESHOLD = mapVadThreshold(0.5); // RMS below this counts as silence
 const VAD_CHECK_INTERVAL_MS = 100;
 
 // =============================================================================
@@ -326,6 +334,9 @@ async function openVoiceChat(conversationId) {
       pttEnabled = !!parsed.pttEnabled;
       pttKeys = Array.isArray(parsed.pttKeys) ? parsed.pttKeys : ["Space"];
       endOfTurnSilence = parsed.endOfTurnSilence ?? 1.5;
+      if (parsed.vadThreshold !== undefined) {
+        SILENCE_THRESHOLD = mapVadThreshold(parsed.vadThreshold);
+      }
       phraseDebounceMs = parsed.phraseDebounceMs ?? 1200;
       sttDebug = !!parsed.sttDebug;
       voiceChatDebug = !!parsed.voiceChatDebug;
@@ -336,6 +347,20 @@ async function openVoiceChat(conversationId) {
 
   // Show voice banner in chat
   showVoiceBanner(true);
+
+  // Flux alive behind the call? The overlay's edges breathe (ONE MOUTH).
+  // The action-state poll re-checks this every cycle;
+  // this fetch covers the moment of opening so the glow doesn't lag the
+  // call by a poll period. Non-host or no Flux: no class, no glow.
+  fetch('/api/flux/status')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((s) => {
+      const el = document.getElementById('voice-overlay');
+      if (el && s && s.active) {
+        el.classList.toggle('flux-live', s.hostConversationId === conversationId);
+      }
+    })
+    .catch(() => {});
 
   // Connect WS before mic capture so frames aren't dropped while WS opens.
   connectVoiceWs(conversationId);
@@ -431,7 +456,7 @@ function isMobileBrowser() {
 /**
  * Mobile-only. Claims the OS media session for Bluetooth headset button
  * routing and acts as a screen-off fallback. Disabled on desktop — an
- * empty WAV data URL previously spun Chrome's audio thread (browser-wide
+ * empty WAV data URL spins Chrome's audio thread (browser-wide
  * freeze), and desktop doesn't need it anyway (Wake Lock + media keys
  * work without claiming the session).
  *
@@ -579,7 +604,13 @@ function cleanup() {
   toolChips.clear();
 
   const overlay = document.getElementById('voice-overlay');
-  if (overlay) overlay.remove();
+  // Drop the Flux edge-glow class with the element it rode — it's removed
+  // right below, so this is belt-and-braces for any future hide-not-remove
+  // path: a reopened call must never flash a stale glow.
+  if (overlay) {
+    overlay.classList.remove('flux-live');
+    overlay.remove();
+  }
 
   showVoiceBanner(false);
 
@@ -1085,7 +1116,7 @@ function startSilenceDetector() {
   if (silenceDetectorStarted) return;
   silenceDetectorStarted = true;
   if (voiceChatDebug) {
-    try { fetch('/api/voice/log', { method: 'POST', body: `VAD: silence detector started (native=${nativeCaptureActive}, sttProvider=${sttProvider})` }); } catch {}
+    try { fetch('/api/voice/log', { method: 'POST', body: `VAD: silence detector started (native=${nativeCaptureActive}, sttProvider=${sttProvider}, threshold=${SILENCE_THRESHOLD.toFixed(4)} RMS)` }); } catch {}
   }
   let vadCheckCount = 0;
   let lastLoggedRms = -1;
@@ -1617,6 +1648,12 @@ function handleVoiceMessage(data) {
         showPulseToast(msg.name);
         break;
 
+      case 'spontaneous_start':
+        // He opened his mouth unprompted (the Flux wake door passed during
+        // quiet — ONE MOUTH). Rising two-note earcon; his voice follows.
+        playSpontaneousCue();
+        break;
+
       case 'tool_start':
         // Entity is calling a tool — play ascending chime + add a chip to
         // the tool toast. Multiple parallel tool calls stack vertically.
@@ -1884,6 +1921,42 @@ function escapeHtmlAttr(s) {
  * tool_call chunk before any TTS audio has flowed, in which case the
  * playback gain node hasn't been set up yet.
  */
+/**
+ * Play a soft ASCENDING two-note figure (C5 → E5, a major third, ~250ms)
+ * signaling "he's about to speak, unprompted" — the pre-speech earcon for
+ * spontaneous Flux speech (ONE MOUTH). Everything else in the
+ * cue vocabulary descends or thumps (800Hz tick, 880→660 your-turn glide,
+ * 70/95Hz Pulse heartbeat, long G4 tool chime), so a quiet rising interval
+ * is unmistakable by contour alone. It also covers first-frame TTS latency
+ * — his "opening his mouth" moment never reads as dead air. Gentler attack
+ * and lower peak than the turn cues: this is ambience, not an alert.
+ */
+function playSpontaneousCue() {
+  if (isDeafened) return;
+  const ctx = audioContext;
+  if (!ctx || !playbackGain) return;
+  try {
+    const note = (startOffset, freq) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + startOffset);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + startOffset);
+      gain.gain.exponentialRampToValueAtTime(0.22, ctx.currentTime + startOffset + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + startOffset + 0.22);
+      osc.connect(gain);
+      gain.connect(playbackGain);
+      osc.start(ctx.currentTime + startOffset);
+      osc.stop(ctx.currentTime + startOffset + 0.23);
+    };
+    // Rising major third — the second note overlaps the first's decay
+    note(0, 523.25);   // C5
+    note(0.11, 659.25); // E5
+  } catch (err) {
+    console.warn('[Voice] Failed to play spontaneous cue:', err);
+  }
+}
+
 function playToolChime() {
   if (isDeafened) return;
   const ctx = audioContext;
@@ -2300,3 +2373,5 @@ globalThis.startPTT = startPTT;
 globalThis.endPTT = endPTT;
 globalThis.buildVoiceEffectChain = buildVoiceEffectChain;
 globalThis.testVoiceEffect = testVoiceEffect;
+
+globalThis.playSpontaneousCue = playSpontaneousCue;

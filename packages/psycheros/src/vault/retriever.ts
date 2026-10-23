@@ -13,9 +13,7 @@ import type { VaultSearchResult } from "./types.ts";
 export function formatVaultContext(results: VaultSearchResult[]): string {
   if (results.length === 0) return "";
 
-  const parts: string[] = [
-    "---\n\nRelevant Documents from Data Vault:",
-  ];
+  const parts: string[] = [];
 
   for (let i = 0; i < results.length; i++) {
     const r = results[i];

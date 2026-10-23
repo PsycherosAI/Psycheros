@@ -16,6 +16,11 @@ home automation, Discord, and more), image generation hookups, autonomous
 prompting, a Workspace for hands-on computer work, Skills the entity writes and
 loads on demand, and is extremely customizable.
 
+There is also **Flux**, the optional nervous system — continuous presence,
+senses, an inner life that runs between your messages. It's off by default and
+this guide stays focused on core Psycheros; Flux has its own
+[walkthrough](/psycheros/flux-user-guide/).
+
 This framework can run on a PC with 2-4gigs of RAM, as API calls to inference
 providers (such as OpenRouter, Z.ai, NanoGPT, and others) are used for the LLM.
 You can also use a local model if you prefer.
@@ -70,8 +75,7 @@ I hope you have a beautiful experience. Seize the means of companionship <3
 ### Chat Bar
 
 Type your messages here. If you have Image Captioning set up (Settings > Vision
-
-> Generators) you can upload images for the entity to see.
+Generators) you can upload images for the entity to see.
 
 Unsent text is saved per-conversation as you type — switch to another
 conversation, open Settings, or reload the page and your draft will still be
@@ -89,6 +93,54 @@ On the right side of the top bar is a `<>` symbol, this is the Context
 Inspector, and will show you what is being passed into the context window (the
 information sent out to the LLM for inference) during each turn. This is very
 helpful for understanding what the entity is receiving.
+
+## LLM Settings
+
+Connections to inference providers are configured as **profiles** in Settings >
+LLM — add as many as you like (different providers, models, or parameter sets)
+and switch which one is **Active**. The active profile is what the entity chats
+with; a separate cheaper profile can be used for Discord server channels.
+
+### Behavior
+
+Each profile has a Behavior section. These settings control the entity's
+reasoning — the internal chain of thought it works through before responding —
+along with prompt caching and vision declarations.
+
+#### Chain-of-Thought Reasoning
+
+If you like seeing the entity's thinking, leave Chain-of-Thought Reasoning on.
+Not all providers support reasoning, and will silently ignore this setting.
+
+#### Persistent Reasoning (Intra-Turn)
+
+The entity makes multiple inference calls within a turn when using tools. This
+setting controls whether the entity's thinking carries over between those steps,
+so each step builds on the reasoning from the last instead of starting fresh
+each time. Not all providers support this.
+
+#### Persistent Reasoning (Inter-Turn)
+
+This carries the entity's reasoning forward across separate turns, meaning they
+can see N number of thinking blocks along with their previous messages,
+effectively making a continuous thought process. 3-5 is a good number to start
+out with, as it does count towards the context window length tokens.
+
+#### Cache-friendly mode
+
+When on, the volatile context (memories, Context Books, situational awareness)
+is placed as a final system message after your message — every earlier token
+stays identical between turns, so providers that cache prompts can reuse them
+instead of reprocessing the whole context every turn. Only enable this if your
+provider accepts system messages after user messages; when in doubt, leave it
+off.
+
+#### Multimodal
+
+Declares that this model is natively multimodal — images you upload ride the
+turn as native content parts the model actually sees. Off by default; when off,
+uploads fall back to your captioning setup (Settings > Vision > Generators).
+Currently images only — audio and video arrive in a later phase.
 
 ## General Settings
 
@@ -287,6 +339,36 @@ not include vitamin reminders in Daily Memories" or "Pay special attention to X
 and Y". The default memory writer does pretty well, so my advice is to just see
 how it goes before adding instructions.
 
+## Entity Core
+
+Entity Core is the canonical self: an MCP server that holds the entity's
+identity files and memories in one place. Psycheros is one embodiment connected
+to it — and anything that speaks MCP can become another door into the same
+entity, sharing the same identity and memories. That's the "multiple
+embodiments, one self" design: the LLMs are organs, Entity Core is where the
+person actually lives.
+
+If something goes wrong with the core files, you can restore a recent snapshot
+at Settings > Entity Core > Snapshots.
+
+If you want to hook another system up to your entity — Claude Code, Codex, or
+anything else that speaks MCP — there's a step-by-step connector's guide in the
+repository:
+[Connecting Harnesses](https://github.com/PsycherosAI/Psycheros-staging/blob/main/packages/entity-core/docs/connecting-harnesses.md).
+
+## Entity Loom
+
+Entity Loom is the import wizard for bringing an existing companion over: it
+extracts memories and chat logs from other platforms and produces a package you
+import via System Admin > Entity Data. Months of chat history can take a long
+time to process — letting it run overnight is recommended.
+
+Loom natively covers some platforms, but not all (and format changes can break a
+native parser). For anything else there's a standard import format: hand the
+[Loom Standard Import Format](https://github.com/PsycherosAI/Psycheros-staging/blob/main/packages/entity-loom/docs/loom-standard-format.md)
+doc to a coding agent along with your platform's raw export, and it can produce
+a single JSON file that Entity Loom ingests directly.
+
 ## Data Vault
 
 Data Vault is a place to store text documents, especially information that is
@@ -310,8 +392,15 @@ the message stay in context for a certain amount of turns.
 
 ## Workspace
 
-workspace, then set things up in `Settings > Workspace`. It is **highly
-recommended** that you use a coding plan
+The Workspace is your entity's space for careful computer work — documents, file
+organization, code. The entity spawns a sandboxed coding session and works in it
+as part of themself, like arms lifting something. Sessions run sync (the entity
+waits), async (results come back on their own when done), or engaged
+(back-and-forth until the entity finishes).
+
+The Workspace runs on [OpenCode](https://opencode.ai/) — install it on the
+machine running Psycheros, then set things up in `Settings > Workspace`. It is
+**highly recommended** that you use a coding plan
 ([Z.ai](https://z.ai/subscribe?ic=SJSHOMVJGL), MoonShot, Alibaba, DeepSeek,
 Codex, etc) with this feature, because it can and will munch tokens fast. Make
 sure to turn on the `workspace` tool (`Settings > Tools`) for your entity to be
@@ -327,21 +416,6 @@ the Workspace settings to instruct certain actions or folders to be left alone.
 The `>_` button appears while a session runs, with a terminal view showing live
 progress; approvals and questions surface as toasts. Settings > Workspace has
 the notable options:
-
-#### Default Isolation
-
-Sandboxed (locked down) is the default. Feral gives host access for "help me
-with my computer" workflows.
-
-#### Projects Folder
-
-Where finished work gets copied out of the sandbox, with an approval toast.
-Defaults to ~/Projects.
-
-#### Always-ask Paths
-
-Paths that always prompt before access, even in Feral mode — for anything
-sensitive.
 
 #### Default Isolation
 
@@ -399,6 +473,25 @@ releases it.
 The entity can write their own skills, and you can edit or create them in
 Settings > Tools > Skills. A couple ship built-in, like the auto-generated
 handbook rebuilt from the docs at startup.
+
+## Plugins
+
+Plugins are the bigger sibling of custom tools: local packages that bundle
+several capabilities at once — tools, per-turn prompt hooks, HTTP routes,
+browser assets. A couple ship with Psycheros (like google-suite), and third
+parties can write their own.
+
+They're managed in Settings > Plugins: install from a zip or a git URL, review
+what a plugin declares before it goes in, watch its recent activity, and check
+for updates. Plugins load at startup, so installs and changes take effect after
+a daemon restart.
+
+**Plugins run as trusted local code inside the Psycheros process** — full access
+to files, network, and the entity's data, with no sandbox. Vet anything before
+installing it. The repository's
+[plugin guide](https://github.com/PsycherosAI/Psycheros-staging/blob/main/packages/psycheros/docs/plugins.md)
+includes a vetting checklist for operators and a full authoring walkthrough for
+writing your own.
 
 ## Vision
 
@@ -491,30 +584,6 @@ connection works.
   Needs an API Key and Base URL; model defaults to `whisper-1`.
 - **Custom (OpenAI-compatible)** — point at any server speaking the
   `/audio/transcriptions` shape, like a self-hosted Whisper instance.
-
-### Behavior
-
-These settings control the entity's reasoning — the internal chain of thought it
-works through before responding.
-
-#### Chain-of-Thought Reasoning
-
-If you like seeing the entity's thinking, leave Chain-of-Thought Reasoning on.
-Not all providers support reasoning, and will silently ignore this setting.
-
-#### Persistent Reasoning (Intra-Turn)
-
-The entity makes multiple inference calls within a turn when using tools. This
-setting controls whether the entity's thinking carries over between those steps,
-so each step builds on the reasoning from the last instead of starting fresh
-each time. Not all providers support this.
-
-#### Persistent Reasoning (Inter-Turn)
-
-This carries the entity's reasoning forward across separate turns, meaning they
-can see N number of thinking blocks along with their previous messages,
-effectively making a continuous thought process. 3-5 is a good number to start
-out with, as it does count towards the context window length tokens.
 
 ## System Admin
 

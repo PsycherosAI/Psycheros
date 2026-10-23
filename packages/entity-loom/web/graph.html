@@ -47,7 +47,9 @@
         --transition: 0.15s ease;
       }
 
-      *, *::before, *::after {
+      *,
+      *::before,
+      *::after {
         box-sizing: border-box;
         margin: 0;
         padding: 0;
@@ -1170,17 +1172,17 @@
 
           if (!graphData.nodes || graphData.nodes.length === 0) {
             const emptyHtml = `
-            <div class="gv-empty">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
-                <circle cx="12" cy="12" r="3"/>
-                <circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/>
-                <circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/>
-                <line x1="7" y1="7" x2="10" y2="10"/><line x1="17" y1="7" x2="14" y2="10"/>
-                <line x1="7" y1="17" x2="10" y2="14"/><line x1="17" y1="17" x2="14" y2="14"/>
-              </svg>
-              <p>Knowledge graph is empty</p>
-              <p class="gv-empty-hint">Run entity-loom import first, or create nodes manually</p>
-            </div>`;
+          <div class="gv-empty">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
+              <circle cx="12" cy="12" r="3"/>
+              <circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/>
+              <circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/>
+              <line x1="7" y1="7" x2="10" y2="10"/><line x1="17" y1="7" x2="14" y2="10"/>
+              <line x1="7" y1="17" x2="10" y2="14"/><line x1="17" y1="17" x2="14" y2="14"/>
+            </svg>
+            <p>Knowledge graph is empty</p>
+            <p class="gv-empty-hint">Run entity-loom import first, or create nodes manually</p>
+          </div>`;
             if (listView) listView.innerHTML = emptyHtml;
             return;
           }
@@ -1189,11 +1191,11 @@
           if (currentView === "graph" && graphView) renderGraph();
         } catch (error) {
           const errorHtml = `
-          <div class="gv-empty">
-            <p>Failed to load graph data</p>
-            <p class="gv-empty-hint">${escapeHtml(error.message)}</p>
-            <button onclick="initGraph()" class="btn btn--ghost" style="margin-top: var(--sp-3)">Retry</button>
-          </div>`;
+        <div class="gv-empty">
+          <p>Failed to load graph data</p>
+          <p class="gv-empty-hint">${escapeHtml(error.message)}</p>
+          <button onclick="initGraph()" class="btn btn--ghost" style="margin-top: var(--sp-3)">Retry</button>
+        </div>`;
           if (listView) listView.innerHTML = errorHtml;
         }
       }
@@ -1260,10 +1262,10 @@
         if (!container) return;
         if (filteredNodes.length === 0) {
           container.innerHTML = `
-          <div class="gv-empty">
-            <p>No matching nodes</p>
-            <p class="gv-empty-hint">Try adjusting your search or filter</p>
-          </div>`;
+        <div class="gv-empty">
+          <p>No matching nodes</p>
+          <p class="gv-empty-hint">Try adjusting your search or filter</p>
+        </div>`;
           return;
         }
         renderVisibleCards(container);
@@ -1355,18 +1357,18 @@
         return `<div class="gv-card" data-node-id="${
           escapeHtml(node.id)
         }" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
-        <div class="gv-card-header">
-          <span class="gv-badge" style="background:${
+      <div class="gv-card-header">
+        <span class="gv-badge" style="background:${
           hslColor(typeInfo.hue, 55, 35)
         };color:${hslColor(typeInfo.hue, 55, 70)}">${
           escapeHtml(typeInfo.label)
         }</span>
-          <span class="gv-card-label">${escapeHtml(node.label)}</span>
-          <span class="gv-card-conns">${
+        <span class="gv-card-label">${escapeHtml(node.label)}</span>
+        <span class="gv-card-conns">${
           conns > 0 ? conns + " conn" + (conns > 1 ? "s" : "") : ""
         }</span>
-        </div>
-      </div>`;
+      </div>
+    </div>`;
       }
 
       function renderNodeDetail(node) {
@@ -1391,47 +1393,47 @@
         return `<div class="gv-card gv-card--expanded" data-node-id="${
           escapeHtml(node.id)
         }">
-        <div class="gv-card-header" onclick="toggleNodeCard('${
+      <div class="gv-card-header" onclick="toggleNodeCard('${
           escapeHtml(node.id)
         }')">
-          <span class="gv-badge" style="background:${
+        <span class="gv-badge" style="background:${
           hslColor(typeInfo.hue, 55, 35)
         };color:${hslColor(typeInfo.hue, 55, 70)}">${
           escapeHtml(typeInfo.label)
         }</span>
-          <span class="gv-card-label">${escapeHtml(node.label)}</span>
-          <span class="gv-card-conns">${conns} conn${
+        <span class="gv-card-label">${escapeHtml(node.label)}</span>
+        <span class="gv-card-conns">${conns} conn${
           conns !== 1 ? "s" : ""
         }</span>
-        </div>
-        <div class="gv-card-detail">
-          ${
+      </div>
+      <div class="gv-card-detail">
+        ${
           node.description
             ? `<div class="gv-card-desc">${escapeHtml(node.description)}</div>`
             : ""
         }
-          ${
+        ${
           connHtml
             ? `
-            <div class="gv-card-section">
-              <div class="gv-detail-label">Connections (${edges.length})</div>
-              <ul class="gv-conn-list">${connHtml}</ul>
-            </div>`
+          <div class="gv-card-section">
+            <div class="gv-detail-label">Connections (${edges.length})</div>
+            <ul class="gv-conn-list">${connHtml}</ul>
+          </div>`
             : ""
         }
-          <div class="gv-card-actions">
-            <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation(); openEdgeModalFromNode('${
+        <div class="gv-card-actions">
+          <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation(); openEdgeModalFromNode('${
           escapeHtml(node.id)
         }')">Connect</button>
-            <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation(); openEditModal('${
+          <button class="btn btn--ghost btn--sm" onclick="event.stopPropagation(); openEditModal('${
           escapeHtml(node.id)
         }')">Edit</button>
-            <button class="btn btn--ghost btn--sm gv-action-danger" onclick="event.stopPropagation(); renderDeleteConfirmModal('${
+          <button class="btn btn--ghost btn--sm gv-action-danger" onclick="event.stopPropagation(); renderDeleteConfirmModal('${
           escapeHtml(node.id)
         }')">Delete</button>
-          </div>
         </div>
-      </div>`;
+      </div>
+    </div>`;
       }
 
       function toggleNodeCard(nodeId) {
@@ -1639,45 +1641,45 @@
 
         label.textContent = node.label;
         content.innerHTML = `
-        <div class="gv-detail-row">
-          <span class="gv-detail-label">Type</span>
-          <span class="gv-detail-value" style="color: ${typeColor}">${
+      <div class="gv-detail-row">
+        <span class="gv-detail-label">Type</span>
+        <span class="gv-detail-value" style="color: ${typeColor}">${
           escapeHtml(node.type)
         }</span>
-        </div>
-        ${
+      </div>
+      ${
           node.description
             ? `
-          <div class="gv-detail-section">
-            <div class="gv-detail-label">Description</div>
-            <p class="gv-detail-desc">${escapeHtml(node.description)}</p>
-          </div>`
+        <div class="gv-detail-section">
+          <div class="gv-detail-label">Description</div>
+          <p class="gv-detail-desc">${escapeHtml(node.description)}</p>
+        </div>`
             : ""
         }
-        ${
+      ${
           connections
             ? `
-          <div class="gv-detail-section">
-            <div class="gv-detail-label">Connections (${connectedEdges.length})</div>
-            <ul class="gv-conn-list">${connections}</ul>
-          </div>`
+        <div class="gv-detail-section">
+          <div class="gv-detail-label">Connections (${connectedEdges.length})</div>
+          <ul class="gv-conn-list">${connections}</ul>
+        </div>`
             : ""
         }
-        <div class="gv-detail-section">
-          <div class="gv-detail-label">ID</div>
-          <code class="gv-node-id">${escapeHtml(node.id)}</code>
-        </div>
-        <div class="gv-panel-actions">
-          <button class="btn btn--ghost gv-edit-btn" onclick="openEdgeModalFromNode('${
+      <div class="gv-detail-section">
+        <div class="gv-detail-label">ID</div>
+        <code class="gv-node-id">${escapeHtml(node.id)}</code>
+      </div>
+      <div class="gv-panel-actions">
+        <button class="btn btn--ghost gv-edit-btn" onclick="openEdgeModalFromNode('${
           escapeHtml(node.id)
         }')">Connect</button>
-          <button class="btn btn--ghost gv-edit-btn" onclick="openEditModal('${
+        <button class="btn btn--ghost gv-edit-btn" onclick="openEditModal('${
           escapeHtml(node.id)
         }')">Edit</button>
-          <button class="btn btn--ghost gv-edit-btn gv-action-danger" onclick="renderDeleteConfirmModal('${
+        <button class="btn btn--ghost gv-edit-btn gv-action-danger" onclick="renderDeleteConfirmModal('${
           escapeHtml(node.id)
         }')">Delete</button>
-        </div>`;
+      </div>`;
 
         panel.classList.add("gv-panel-open");
       }
@@ -1847,13 +1849,13 @@
                 return `<div class="gv-node-search-item" data-node-id="${
                   escapeHtml(n.id)
                 }">
-              <span class="gv-badge" style="background:${
+            <span class="gv-badge" style="background:${
                   hslColor(info.hue, 55, 35)
                 };color:${hslColor(info.hue, 55, 70)}">${
                   escapeHtml(info.label)
                 }</span>
-              <span class="gv-node-search-label">${escapeHtml(n.label)}</span>
-            </div>`;
+            <span class="gv-node-search-label">${escapeHtml(n.label)}</span>
+          </div>`;
               }).join("");
               results.classList.add("gv-node-search-results--open");
             }, opts);
@@ -1925,17 +1927,17 @@
           return `<div class="gv-edit-conn-row" data-edge-id="${
             escapeHtml(edge.id)
           }">
-          <span class="gv-edit-conn-info">
-            <span class="gv-conn-dir">${dir}</span>
-            <span class="gv-conn-type">${escapeHtml(edge.type)}</span>
-            <span class="gv-conn-label">${
+        <span class="gv-edit-conn-info">
+          <span class="gv-conn-dir">${dir}</span>
+          <span class="gv-conn-type">${escapeHtml(edge.type)}</span>
+          <span class="gv-conn-label">${
             escapeHtml(otherNode?.label || "?")
           }</span>
-          </span>
-          <button class="gv-edit-conn-del" data-edge-id="${
+        </span>
+        <button class="gv-edit-conn-del" data-edge-id="${
             escapeHtml(edge.id)
           }" title="Remove">&times;</button>
-        </div>`;
+      </div>`;
         }).join("");
 
         list.querySelectorAll(".gv-edit-conn-del").forEach((btn) => {
@@ -2040,7 +2042,8 @@
         document.getElementById("edit-node-type").value = node.type;
         document.getElementById("edit-node-label").value = node.label;
         document.getElementById("edit-node-description").value =
-          node.description || "";
+          node.description ||
+          "";
         renderEditConnections(node.id);
         modal.classList.add("gv-modal-open");
       }

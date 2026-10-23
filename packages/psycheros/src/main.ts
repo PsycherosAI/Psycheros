@@ -8,6 +8,9 @@ import "@std/dotenv/load";
 import { configureLogLevelsFromFile, initLogCapture } from "./server/logger.ts";
 initLogCapture();
 
+import { warnOnDenoVersionMismatch } from "./deno-version-guard.ts";
+warnOnDenoVersionMismatch();
+
 import { Server } from "./server/mod.ts";
 import { createMCPClient, type MCPClient } from "./mcp-client/mod.ts";
 import { initialize } from "./init/mod.ts";
@@ -69,6 +72,10 @@ const config = {
   projectRoot,
   dataRoot,
   allowedTools,
+  // PSYCHEROS_MEMORY_ENABLED=false skips the daily memory schedule AND the
+  // boot-time catch-up pass — used around full-entity imports so residual
+  // conversations don't get summarized into entity-core mid-import.
+  memoryEnabled: Deno.env.get("PSYCHEROS_MEMORY_ENABLED") !== "false",
   ragConfig: {
     enabled: ragEnabled,
     maxChunks: parseInt(Deno.env.get("PSYCHEROS_RAG_MAX_CHUNKS") || "8"),

@@ -1,6 +1,6 @@
 {
   "name": "@psycheros/daemon",
-  "version": "0.11.3",
+  "version": "1.0.0",
   "exports": "./src/main.ts",
   "imports": {
     "marked": "npm:marked@^15",
@@ -17,7 +17,8 @@
   "tasks": {
     "dev": "deno run --watch --watch-exclude=identity/ -A src/main.ts",
     "start": "deno run -A src/main.ts",
-    "stop": "pkill -INT -f 'deno.*main.ts' || true"
+    "stop": "pkill -INT -f 'deno.*main.ts' || true",
+    "check:flux-page": "deno run -A scripts/check-flux-page.ts"
   },
   "lint": {
     "exclude": [

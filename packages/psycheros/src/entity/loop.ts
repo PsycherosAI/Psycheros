@@ -30,17 +30,18 @@ import type {
   LLMClient,
   StreamChunk,
 } from "../llm/mod.ts";
+import { runAgentLoopEvents } from "./turn-core.ts";
 import type { WebSearchSettings } from "../llm/web-search-settings.ts";
 import type { DiscordSettings } from "../llm/discord-settings.ts";
 import type { HomeSettings } from "../llm/home-settings.ts";
 import type { ImageGenSettings } from "../llm/image-gen-settings.ts";
+import { buildImageGenContent } from "./image-gen-context.ts";
 import { LLMError } from "../llm/mod.ts";
 import type { DBClient } from "../db/mod.ts";
 import type { ToolContext, ToolRegistry } from "../tools/mod.ts";
 import type {
   LLMContextSnapshot,
   Message,
-  ToolCall,
   ToolDefinition,
   ToolResult,
   TurnMetrics,
@@ -51,7 +52,13 @@ import type { MCPClient } from "../mcp-client/mod.ts";
 import type { LorebookManager } from "../lorebook/mod.ts";
 import type { VaultManager } from "../vault/mod.ts";
 import {
-  buildSystemMessage,
+  buildDynamicBlock,
+  buildSituationalAwareness,
+  buildStableCore,
+  formatMessageTimestamp,
+} from "./turn-context.ts";
+export { formatMessageTimestamp } from "./turn-context.ts";
+import {
   loadBaseInstructions,
   loadCustomContent,
   loadRelationshipContent,
@@ -70,18 +77,12 @@ import { buildGraphContext, formatChatHistoryForContext } from "../rag/mod.ts";
 import { generateUIUpdates } from "../server/ui-updates.ts";
 import { acquireLock } from "../utils/conversation-lock.ts";
 import { createCollector, finalize, setFinishReason } from "../metrics/mod.ts";
-import { getWearableDataCache } from "../wearable/cache.ts";
-import { formatWearableData } from "./sa-formatters.ts";
 import type { PluginManager } from "../plugins/mod.ts";
+import type { FluxManager } from "../../../entity-flux/src/mod.ts";
 
 /**
  * Escape special XML characters in a string.
  */
-function escapeXml(str: string): string {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function renderChatContentForSnapshot(content: ChatContent): string {
   if (typeof content === "string") return content;
   return content.map((part) => {
@@ -102,124 +103,7 @@ function estimateChatContentChars(content: ChatContent): number {
  * Format the connected devices section for the SA block.
  * Returns undefined if there are no devices to report.
  */
-function formatConnectedDevices(
-  snapshot: import("../server/device-cache.ts").DeviceCacheSnapshot,
-  lovenseSettings?: import("../llm/lovense-settings.ts").LovenseSettings,
-  buttplugSettings?: import("../llm/buttplug-settings.ts").ButtplugSettings,
-): string | undefined {
-  const parts: string[] = [];
-
-  // Intimacy devices (Lovense + Intiface)
-  const intimacyParts: string[] = [];
-
-  if (snapshot.lovense.connected && snapshot.lovense.toys.length > 0) {
-    const devices = snapshot.lovense.toys
-      .map((t) => {
-        const label = t.nickname || t.name;
-        return `      <device name="${
-          escapeXml(label)
-        }" battery="${t.battery}" />`;
-      })
-      .join("\n");
-    intimacyParts.push(`    <lovense count="${snapshot.lovense.toys.length}">`);
-    intimacyParts.push(devices);
-    intimacyParts.push("    </lovense>");
-  }
-
-  if (snapshot.intiface.connected && snapshot.intiface.devices.length > 0) {
-    const devices = snapshot.intiface.devices
-      .map((d) => `      <device name="${escapeXml(d.name)}" />`)
-      .join("\n");
-    intimacyParts.push(
-      `    <intiface count="${snapshot.intiface.devices.length}">`,
-    );
-    intimacyParts.push(devices);
-    intimacyParts.push("    </intiface>");
-  }
-
-  if (intimacyParts.length > 0) {
-    parts.push("  <intimacy>");
-    parts.push(intimacyParts.join("\n"));
-    parts.push("  </intimacy>");
-  }
-
-  // Home devices
-  if (snapshot.homeDevices.length > 0) {
-    const devices = snapshot.homeDevices
-      .map((d) =>
-        `    <device name="${escapeXml(d.name)}" type="${escapeXml(d.type)}" />`
-      )
-      .join("\n");
-    parts.push("  <home>");
-    parts.push(devices);
-    parts.push("  </home>");
-  }
-
-  if (parts.length === 0) return undefined;
-
-  let result = `  <connected_devices>\n${
-    parts.join("\n")
-  }\n  </connected_devices>`;
-
-  // Inject custom instructions only when matching devices are connected
-  if (
-    snapshot.lovense.connected && snapshot.lovense.toys.length > 0 &&
-    lovenseSettings?.customInstructions?.trim()
-  ) {
-    result += `\n  <lovense_preferences>${
-      escapeXml(lovenseSettings.customInstructions.trim())
-    }</lovense_preferences>`;
-  }
-  if (
-    snapshot.intiface.connected && snapshot.intiface.devices.length > 0 &&
-    buttplugSettings?.customInstructions?.trim()
-  ) {
-    result += `\n  <toy_preferences>${
-      escapeXml(buttplugSettings.customInstructions.trim())
-    }</toy_preferences>`;
-  }
-
-  return result;
-}
-
 /**
-/**
- * Format a timestamp for message content.
- * Uses PSYCHEROS_DISPLAY_TZ for user-facing timezone, falls back to TZ, defaults to UTC.
- * Format: <t>YYYY-MM-DD HH:MM</t>
- *
- * XML tags are used so the LLM treats timestamps as structural
- * metadata rather than content to reproduce.
- */
-export function formatMessageTimestamp(date: Date): string {
-  // PSYCHEROS_DISPLAY_TZ is set from Main Settings; TZ comes from the
-  // process environment. If neither is set ("System Default" in Main
-  // Settings with no TZ env), omit the timeZone option entirely so
-  // toLocale* uses the system's actual timezone — NOT UTC. This was a
-  // bug where "System Default" silently meant UTC and the entity
-  // thought it was the middle of the night when it wasn't.
-  const timeZone = Deno.env.get("PSYCHEROS_DISPLAY_TZ") ||
-    Deno.env.get("TZ");
-  const opts = timeZone ? { timeZone } : {};
-  const weekday = date.toLocaleDateString("en-US", {
-    ...opts,
-    weekday: "short",
-  });
-  const year = date.toLocaleDateString("en-US", { ...opts, year: "numeric" });
-  const month = date.toLocaleDateString("en-US", {
-    ...opts,
-    month: "2-digit",
-  });
-  const day = date.toLocaleDateString("en-US", { ...opts, day: "2-digit" });
-  const time = date.toLocaleTimeString("en-US", {
-    ...opts,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return `<t>${weekday} ${year}-${month}-${day} ${time}</t>`;
-}
-
 /**
  * Options for EntityTurn.process() that modify behavior for specific callers
  * (e.g., Pulse system).
@@ -261,10 +145,9 @@ export interface ProcessOptions {
    * - Any parrot-emitted leading messagePrefix in LLM output is stripped
    *   before persist (snowball prevention, same pattern as <t> tags)
    *
-   * Note: voiceMode previously implied disableTools, but that gate was
-   * removed in caf23a8 when voice tool support landed. Tools are now
-   * enabled for voice turns. Pass disableTools: true explicitly to
-   * suppress tool definitions for a specific turn.
+   * Note: voiceMode does NOT imply disableTools — tools are enabled for
+   * voice turns. Pass disableTools: true explicitly to suppress tool
+   * definitions for a specific turn.
    */
   voiceMode?: boolean;
   /**
@@ -284,6 +167,17 @@ export interface ProcessOptions {
    * sets this until tool support for voice is designed.
    */
   disableTools?: boolean;
+  /**
+   * Self-initiated turn — the subconscious escalated something. When true:
+   * - Skip user-message persistence (no user message at all)
+   * - Use `contextQuery` for RAG retrieval instead of `userMessage`
+   * - Build messages array without a trailing user message
+   * - Add a self-initiation directive to the system message
+   * Full context (identity, RAG, SA, plugins) is still built.
+   */
+  selfInitiated?: boolean;
+  /** RAG search query when selfInitiated (replaces userMessage as retrieval trigger). */
+  contextQuery?: string;
 }
 
 /**
@@ -334,6 +228,11 @@ export interface EntityConfig {
   deviceStatusCache?: import("../server/device-cache.ts").DeviceStatusCache;
   /** Model context window size in tokens (from active LLM profile) */
   contextLength?: number;
+  /** Context placement style from the LLM profile: "regular" (dynamic
+   * block in the leading system message — default) or "cache-friendly"
+   * (stable core leads; the dynamic block rides as a trailing system
+   * message after the user message, maximizing prefix reuse). */
+  contextStyle?: "regular" | "cache-friendly";
   /** Maximum tokens reserved for the response (from active LLM profile) */
   maxTokens?: number;
   /**
@@ -353,6 +252,28 @@ export interface EntityConfig {
   /** Trusted local plugins that can contribute prompt-time context */
   pluginManager?: PluginManager;
   /**
+   * Optional entity-flux nervous-system manager. Feeds the tool-execution
+   * context (the modulation tools — pay_attention, mindfulness,
+   * tune_attention — read it at execution time). NEVER touches the
+   * situational-awareness block: flux state reaches conversations only
+   * through the Flux session's briefings, never SA (SA injection would
+   * leak the undercurrent into every classic conversation while flux
+   * runs).
+   */
+  fluxManager?: FluxManager;
+  /**
+   * One-line MODE flag for classic turns: when
+   * flux is enabled in settings, the entity is told whether its
+   * subconscious is active, paused, or off RIGHT NOW — so it cannot
+   * hallucinate a running nervous system from memory when the State is
+   * off ("Entity Flux is off, I operate on standard turns…"). This is a
+   * mode descriptor, not flux content — the SA-content rule stands.
+   * Undefined when flux is disabled (baseline Psycheros: no block).
+   */
+  /** Static text or a live getter (flux state changes after config
+   *  construction — the server reads it at turn time). */
+  fluxModeNote?: string | (() => string | undefined);
+  /**
    * Configured user name from GeneralSettings. Passed through to plugin
    * prompt-hook context for personalization (e.g. calendar-caldav / google-suite
    * "{userName}'s calendar" template substitution). Optional — turn sources
@@ -367,13 +288,6 @@ export interface EntityConfig {
  * graph + RAG chains) while still catching genuine runaway loops.
  */
 const DEFAULT_MAX_TOOL_ITERATIONS = 25;
-
-/**
- * Number of conversation turns (user+assistant pairs) to keep longform image
- * descriptions in context before fading to shorthand. After this many turns,
- * the entity can use the look_closer tool to retrieve the full description.
- */
-const IMAGE_DESCRIPTION_FADE_TURNS = 5;
 
 /**
  * Extended yield type that includes tool results, UI updates, and metrics.
@@ -411,90 +325,6 @@ export type EntityYield =
  * Represents a single turn in the conversation.
  * Handles the full cycle: LLM call -> tool execution -> continue until done.
  */
-/**
- * Fade an image marker's longform description to its shortform.
- * Operates on raw message content (not HTML-rendered).
- *
- * For [IMAGE:{...}] markers: replaces "description" with "shortDescription" if available.
- * For [USER_IMAGE:... | Caption: ... | Short: ...]: replaces Caption with Short.
- */
-function fadeImageMarker(content: string): string {
-  // Fade [IMAGE:{...}] markers — replace long description with short
-  // Use a greedy match up to }] to handle JSON with complex string values
-  content = content.replace(
-    /\[IMAGE:(\{.*\})\]/g,
-    (_match, jsonStr) => {
-      try {
-        const img = JSON.parse(jsonStr);
-        if (img.shortDescription && img.description) {
-          img.description = img.shortDescription;
-        }
-        return `[IMAGE:${JSON.stringify(img)}]`;
-      } catch {
-        return _match;
-      }
-    },
-  );
-
-  // Fade [USER_IMAGE:... | Caption: ... | Short: ...] markers
-  content = content.replace(
-    /\[USER_IMAGE:\s*(\S+)\s*\|\s*Caption:\s*(.*?)\s*\|\s*Short:\s*(.*?)\]/g,
-    (_match, path, _caption, short) => {
-      return `[USER_IMAGE: ${path} | Short: ${short}]`;
-    },
-  );
-
-  return content;
-}
-
-/**
- * Tool names whose arguments are verbose and should be faded in context.
- * These tools have their key info (image path, prompt) captured in the
- * tool result content or IMAGE markers, so the full arguments are redundant.
- */
-const FADE_ARGUMENT_TOOLS = new Set([
-  "generate_image",
-  "describe_image",
-  "look_closer",
-]);
-
-/**
- * Fade verbose tool call arguments to reduce token usage in context.
- * For image-related tools, replaces the arguments JSON with a minimal
- * version that preserves structure but removes verbose fields (long prompts,
- * detailed descriptions). The LLM only needs the tool_call_id to match
- * results; the arguments are redundant with tool result content.
- */
-function fadeToolCallArguments(toolCalls: ToolCall[]): ToolCall[] {
-  return toolCalls.map((tc) => {
-    const name = tc.function.name;
-    if (!FADE_ARGUMENT_TOOLS.has(name)) return tc;
-
-    try {
-      const args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
-      // Keep only structural fields, truncate verbose string fields
-      const faded: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(args)) {
-        if (typeof value === "string" && value.length > 50) {
-          faded[key] = value.slice(0, 50) + "... [truncated]";
-        } else {
-          faded[key] = value;
-        }
-      }
-      return {
-        ...tc,
-        function: {
-          ...tc.function,
-          arguments: JSON.stringify(faded),
-        },
-      };
-    } catch {
-      // If we can't parse the arguments, leave them as-is
-      return tc;
-    }
-  });
-}
-
 export class EntityTurn {
   private readonly maxToolIterations: number;
   private lastBudgetResult?: BudgetResult;
@@ -540,6 +370,22 @@ export class EntityTurn {
       );
     }
 
+    // Self-heal orphaned tool calls left by an interrupted turn (user Stop
+    // or stream death between persisting an assistant tool_calls message and
+    // its tool result). Without a result row, every later turn shows the
+    // model a call that never answered, and guidance-free models re-issue
+    // it — the "stuck in a loop" signature. Cap each dangling call with a
+    // synthetic tool result; this turn's context (built below) already
+    // includes the healed rows.
+    this.healOrphanedToolCalls(conversationId);
+
+    // When self-initiated (subconscious escalation), use contextQuery for
+    // RAG retrieval instead of userMessage. The entity has no user message
+    // — it's waking from its own awareness, not responding to input.
+    const ragQuery = options?.selfInitiated && options?.contextQuery
+      ? options.contextQuery
+      : userMessage;
+
     // Load self files, user files, relationship files, and custom files, build system message
     // Use MCP client if available, otherwise fall back to local files
     const selfContent = await loadSelfContent(
@@ -564,7 +410,7 @@ export class EntityTurn {
     if (this.config.mcpClient) {
       console.debug(
         "[Memory] Searching memories for query:",
-        userMessage.substring(0, 50),
+        ragQuery.substring(0, 50),
       );
       try {
         const memSettings = await loadMemorySettings(this.config.dataRoot);
@@ -580,7 +426,6 @@ export class EntityTurn {
               Math.round(r.score * 100)
             }% relevant)\n${r.excerpt}`
           ).join("\n\n");
-          memoriesContent = `\n\n---\nRelevant Memories:\n\n${memoriesContent}`;
           console.debug(
             "[Memory] Found",
             results.length,
@@ -602,11 +447,11 @@ export class EntityTurn {
     if (this.config.chatRAG) {
       console.debug(
         "[ChatRAG] Searching chat history for:",
-        userMessage.substring(0, 50),
+        ragQuery.substring(0, 50),
       );
       try {
         const chatMessages = await this.config.chatRAG.searchTiered({
-          query: userMessage,
+          query: ragQuery,
           conversationId: conversationId,
           limit: 5,
           minScore: 0.3,
@@ -646,7 +491,7 @@ export class EntityTurn {
         }));
 
         const result = this.config.lorebookManager.evaluate(
-          userMessage,
+          ragQuery,
           historyForLorebook,
           conversationId,
           { skipStickyDecrement: options?.skipStickyDecrement },
@@ -676,11 +521,11 @@ export class EntityTurn {
     if (this.config.mcpClient) {
       console.debug(
         "[Graph] Searching knowledge graph for:",
-        userMessage.substring(0, 50),
+        ragQuery.substring(0, 50),
       );
       try {
         const graphResult = await buildGraphContext(
-          userMessage,
+          ragQuery,
           this.config.mcpClient,
           {
             maxNodes: 8,
@@ -716,47 +561,21 @@ export class EntityTurn {
       conversationId,
     );
 
-    // Build image generation context from enabled generators
-    let imageGenContent: string | undefined;
-    if (this.config.imageGenSettings?.generators.some((g) => g.enabled)) {
-      const enabled = this.config.imageGenSettings.generators.filter((g) =>
-        g.enabled
-      );
-      imageGenContent = enabled.map((g) => {
-        const nsfwTag = g.nsfw ? "NSFW-capable" : "SFW only";
-        // Venice's inpaint parameter was deprecated May 2025 — it is the only
-        // image-gen provider that cannot accept anchor/reference images.
-        const anchorTag = g.provider === "venice"
-          ? "text-to-image only (no anchor support)"
-          : "accepts anchor images";
-        return `- "${g.name}" (ID: ${g.id}): ${g.description} [${g.provider}, ${nsfwTag}, ${anchorTag}]`;
-      }).join("\n");
-
-      // Include available anchor images so the entity knows what IDs to use
-      const anchors = this.db.getRawDb()
-        .prepare(
-          "SELECT id, label, description FROM anchor_images ORDER BY created_at DESC",
-        )
-        .all<{ id: string; label: string; description: string }>();
-      if (anchors.length > 0) {
-        imageGenContent +=
-          "\n\nAvailable anchor images (use IDs in anchor_ids parameter):\n" +
-          anchors.map((a) =>
-            `- "${a.label}" (ID: ${a.id}): ${a.description || "no description"}`
-          ).join("\n");
-      }
-
-      imageGenContent +=
-        "\n\nTo generate an image, I use the generate_image tool with the appropriate generator_id. I can include anchor_images by ID as style references, and a user_image_path if the user provided an image with their message.";
-    }
+    // Build image generation context from enabled generators — the
+    // shared builder; the Flux session composes the same block into its
+    // late dynamic block (classic parity, one source of truth).
+    const imageGenContent = buildImageGenContent(
+      this.config.imageGenSettings,
+      this.db.getRawDb(),
+    );
 
     // Search vault for relevant documents if manager is available
     let vaultContent: string | undefined;
     if (this.config.vaultManager) {
-      console.debug("[Vault] Searching for:", userMessage.substring(0, 50));
+      console.debug("[Vault] Searching for:", ragQuery.substring(0, 50));
       try {
         const vaultResults = await this.config.vaultManager.search(
-          userMessage,
+          ragQuery,
           {
             conversationId,
             maxChunks: 5,
@@ -782,70 +601,16 @@ export class EntityTurn {
       }
     }
 
-    // Build situational awareness block
-    let saContent: string | undefined;
-    const lastInteraction = this.db.getLatestUserInteraction();
-
-    // Get connected devices snapshot from cache (zero latency)
-    const snapshot = this.config.deviceStatusCache
-      ? this.config.deviceStatusCache.getSnapshot()
-      : undefined;
-    const deviceSection = snapshot
-      ? formatConnectedDevices(
-        snapshot,
-        this.config.lovenseSettings,
-        this.config.buttplugSettings,
-      )
-      : undefined;
-
-    if (
-      lastInteraction || options?.deviceType || conversation || deviceSection
-    ) {
-      const parts: string[] = ["<situational_awareness>"];
-      parts.push(
-        `  <current_time>${formatMessageTimestamp(new Date())}</current_time>`,
-      );
-      if (conversation) {
-        const title = conversation.title
-          ? escapeXml(conversation.title)
-          : "Untitled";
-        parts.push(
-          `  <current_conversation id="${conversation.id}" title="${title}" />`,
-        );
-      }
-      if (lastInteraction) {
-        const date = new Date(lastInteraction.createdAt);
-        const formatted = formatMessageTimestamp(date);
-        const title = lastInteraction.title
-          ? escapeXml(lastInteraction.title)
-          : "Untitled";
-        parts.push("  <last_user_message>");
-        parts.push(`    <timestamp>${formatted}</timestamp>`);
-        parts.push(
-          `    <conversation id="${lastInteraction.conversationId}" title="${title}" />`,
-        );
-        parts.push("  </last_user_message>");
-      }
-      if (options?.deviceType) {
-        parts.push(`  <user_device>${options.deviceType}</user_device>`);
-      }
-      if (deviceSection) {
-        parts.push(deviceSection);
-      }
-      // Wearable data (sensor streams from connected devices)
-      if (snapshot) {
-        const wearableSection = formatWearableData(
-          snapshot,
-          this.config.bleSettings,
-          getWearableDataCache(),
-        );
-        if (wearableSection) {
-          parts.push(wearableSection);
-        }
-      }
-      parts.push("</situational_awareness>");
-      saContent = parts.join("\n");
-    }
+    // Live State (the kit's SA builder — environmental fact only)
+    const saContent = buildSituationalAwareness({
+      lastInteraction: this.db.getLatestUserInteraction(),
+      conversation,
+      deviceType: options?.deviceType,
+      deviceStatusCache: this.config.deviceStatusCache,
+      lovenseSettings: this.config.lovenseSettings,
+      buttplugSettings: this.config.buttplugSettings,
+      bleSettings: this.config.bleSettings,
+    });
 
     // Build Discord channel context block
     let discordChannelContent: string | undefined;
@@ -930,7 +695,7 @@ Discord interaction:
       ?.buildPromptContent({
         conversationId,
         sourceType: options?.sourceType ?? (options?.pulseId ? "pulse" : "web"),
-        userMessage,
+        userMessage: ragQuery,
         sections: {
           memories: memoriesContent,
           chatHistory: chatHistoryContent,
@@ -961,29 +726,50 @@ Discord interaction:
     }
     let heldSkillsContent = await this.buildHeldSkillsContent(conversationId);
 
-    // Held skills are live: when the skill tool holds or releases mid-turn,
-    // the block is rebuilt and spliced into messages[0] so the entity has
-    // the skill in the SAME turn it reached for it (not next turn).
-    const composeSystemMessage = (held: string | undefined) =>
-      buildSystemMessage(
-        baseInstructions,
-        selfContent,
-        userContent,
-        relationshipContent,
-        customContent,
-        memoriesContent,
-        chatHistoryContent,
+    const stableCoreText = buildStableCore({
+      baseInstructions,
+      selfContent,
+      userContent,
+      relationshipContent,
+      customContent,
+      imageGenContent,
+    });
+    /** Dynamic halves for the current held state; the mode parts are
+     *  fixed per turn. Returns [stable, dynamic]. */
+    const composeContext = (held: string | undefined): [string, string] => {
+      const modeParts: string[] = [];
+      if (discordChannelContent?.trim()) modeParts.push(discordChannelContent);
+      const fluxNote = typeof this.config.fluxModeNote === "function"
+        ? this.config.fluxModeNote()
+        : this.config.fluxModeNote;
+      if (fluxNote) {
+        modeParts.push(`<flux_mode>${fluxNote}</flux_mode>`);
+      }
+      if (options?.systemPromptSuffix) {
+        modeParts.push(options.systemPromptSuffix);
+      }
+      if (options?.selfInitiated) {
+        modeParts.push(
+          "I am speaking from my own awareness. My subconscious escalated something to my attention — I can see it in my sensory state above. This is not a response to a user message. If I have something I want to say to my user, I say it naturally. If not, I say nothing.",
+        );
+      }
+      const dynamic = buildDynamicBlock({
         lorebookContent,
-        graphContent,
         vaultContent,
-        imageGenContent,
-        saContent,
-        discordChannelContent,
+        memoriesList: memoriesContent,
+        chatHistoryContent,
+        graphContent,
+        situationalAwarenessContent: saContent,
+        heldSkillsContent: held,
         pluginContent,
-        held,
-      ) + (options?.systemPromptSuffix ?? "");
-
-    const systemMessage = composeSystemMessage(heldSkillsContent);
+        modeContent: modeParts.length > 0 ? modeParts.join("\n\n") : undefined,
+      });
+      return [stableCoreText, dynamic];
+    };
+    const joinContext = (halves: [string, string]): string =>
+      halves.filter((b) => b.trim()).join("\n");
+    const contextHalves = composeContext(heldSkillsContent);
+    const finalSystemMessage = joinContext(contextHalves);
 
     // Get conversation history from DB
     const history = this.db.getMessages(conversationId);
@@ -1000,7 +786,8 @@ Discord interaction:
       : baseContent;
     let userMessageId: string | undefined;
 
-    const shouldPersist = !options?.retry && !options?.skipUserPersist;
+    const shouldPersist = !options?.retry && !options?.skipUserPersist &&
+      !options?.selfInitiated;
 
     // Acquire per-conversation lock to prevent concurrent writes from
     // corrupting message role alternation (e.g. send_discord_dm from
@@ -1071,7 +858,8 @@ Discord interaction:
       //
       // Passing { conversationId, db } lets each tool's `visibleIn` predicate
       // gate itself out of contexts where it doesn't apply (e.g. ask_user and
-      // manage_message are workspace-only and stay out of main chat).
+      // manage_message are workspace-only and stay out of main chat; the Flux
+      // modulation tools are Flux Space-only).
       const baseToolDefinitions = options?.disableTools
         ? undefined
         : this.tools().getDefinitions({
@@ -1098,22 +886,26 @@ Discord interaction:
         )
         : baseToolDefinitions;
 
-      // Build the messages array for the LLM
+      // Build the messages array for the LLM. Cache-friendly profiles
+      // split the assembly: stable core leads, dynamic block trails.
+      const cacheFriendly = this.config.contextStyle === "cache-friendly";
       const messages = this.buildMessages(
-        systemMessage,
+        cacheFriendly ? stableCoreText : finalSystemMessage,
         history,
         displayContent,
         shouldPersist,
         toolDefinitions,
         options?.visionImages,
+        cacheFriendly ? contextHalves[1] : undefined,
       );
 
       // Create and yield context snapshot for debugging
       const contextSnapshot: LLMContextSnapshot = {
+        contextStyle: this.config.contextStyle,
         timestamp: new Date().toISOString(),
         conversationId,
         userMessage: displayContent,
-        systemMessage,
+        systemMessage: finalSystemMessage,
         baseInstructions,
         selfContent,
         userContent,
@@ -1136,10 +928,10 @@ Discord interaction:
         })),
         toolDefinitions: toolDefinitions ?? [],
         metrics: {
-          systemMessageLength: systemMessage.length,
+          systemMessageLength: finalSystemMessage.length,
           totalMessages: messages.length,
           estimatedTokens: this.lastBudgetResult?.estimatedTotalTokens ??
-            Math.ceil(systemMessage.length / 4) +
+            Math.ceil(finalSystemMessage.length / 4) +
               messages.reduce(
                 (acc, m) =>
                   acc + Math.ceil(estimateChatContentChars(m.content) / 4),
@@ -1216,634 +1008,403 @@ Discord interaction:
 
       yield { type: "context", context: contextSnapshot };
 
-      // Track current iteration for tool loop protection
-      let iteration = 0;
-
+      // -- The agent loop (turn-core drive)
+      // Retry, retryable-finish handling, misroute recovery, message
+      // shaping, and iteration policy live in the shared engine both
+      // surfaces drive. runAgentLoopEvents
+      // streams what happens; this generator maps each event to the SSE
+      // stream classic has always emitted, order for order.
+      // Retry configuration for transient upstream errors. Short fixed
+      // delay (no exponential backoff — the API already "waited" for us).
       // Set when a tool held/released a skill this turn — triggers the
-      // live system-message splice below.
+      // live system-message splice in the tool_results handler.
       let heldSkillsDirty = false;
-
-      // Retry configuration for transient upstream errors (e.g. Z.ai "network_error").
-      // Z.ai's failure already takes ~30s, so we use a short fixed delay between retries
-      // rather than exponential backoff — the API already "waited" for us.
       const MAX_LLM_ATTEMPTS = 3;
       const RETRY_DELAY_MS = 3000;
       const EXPECTED_FINISH_REASONS = new Set(["stop", "tool_calls", "length"]);
+      const VOICE_PREFIX = "[Voice Chat] ";
+      let leadingPrefixBuffer = "";
+      let leadingPrefixResolved = false;
+      let assistantContent = "";
+      let assistantReasoning = "";
+      let finishReason = "stop";
+      let fatalOutcome: import("./turn-core.ts").TurnCoreOutcome | null = null;
+      const metricsCollector = createCollector(conversationId);
 
-      // Main agentic loop
-      while (iteration < this.maxToolIterations) {
-        iteration++;
+      // Tool context is built once; the core executes through it.
+      const toolContext: Omit<ToolContext, "toolCallId"> = {
+        conversationId,
+        db: this.db,
+        config: this.config,
+      };
 
-        let assistantContent = "";
-        let assistantReasoning = "";
-        const toolCalls: ToolCall[] = [];
-        let streamError: Error | null = null;
-        let finishReason = "stop";
-        let metricsCollector = createCollector(conversationId);
-
-        for (let attempt = 1; attempt <= MAX_LLM_ATTEMPTS; attempt++) {
-          // Reset accumulators for each attempt
-          assistantContent = "";
-          assistantReasoning = "";
-          toolCalls.length = 0;
-          streamError = null;
-          // Hold back the first 13 chars (length of "[Voice Chat] ") to
-          // detect and strip a parroted leading prefix before it streams
-          // to the browser. Persist-side strip still catches mid-message
-          // parrots for DB.
-          let leadingPrefixBuffer = "";
-          let leadingPrefixResolved = false;
-          const VOICE_PREFIX = "[Voice Chat] ";
-          finishReason = "stop";
-          metricsCollector = createCollector(conversationId);
-
-          // Stream LLM response with error handling.
-          // Done events are held back until after the retry decision — yielding
-          // a done event from a failed attempt would cause the frontend to
-          // finalize the message before the retry even starts.
-          try {
-            for await (
-              const chunk of this.llm.chatStream(messages, toolDefinitions, {
-                metricsCollector,
-              })
-            ) {
-              switch (chunk.type) {
-                case "thinking":
-                  assistantReasoning += chunk.content;
-                  yield chunk;
-                  break;
-                case "content":
-                  assistantContent += chunk.content;
-                  if (leadingPrefixResolved) {
-                    yield chunk;
-                  } else {
-                    leadingPrefixBuffer += chunk.content;
-                    const couldStillMatch = VOICE_PREFIX.startsWith(
-                      leadingPrefixBuffer,
-                    ) && leadingPrefixBuffer.length < VOICE_PREFIX.length;
-                    if (couldStillMatch) break;
-                    leadingPrefixResolved = true;
-                    if (leadingPrefixBuffer.startsWith(VOICE_PREFIX)) {
-                      const cleaned = leadingPrefixBuffer.slice(
-                        VOICE_PREFIX.length,
-                      );
-                      if (cleaned) {
-                        yield { type: "content", content: cleaned };
-                      }
-                    } else {
-                      yield { type: "content", content: leadingPrefixBuffer };
-                    }
-                  }
-                  break;
-                case "tool_call":
-                  toolCalls.push(chunk.toolCall);
-                  yield chunk;
-                  break;
-                case "done":
-                  // Capture but don't yield — we'll yield after retry decision
-                  finishReason = chunk.finishReason;
-                  setFinishReason(metricsCollector, chunk.finishReason);
-                  break;
+      for await (
+        const ev of runAgentLoopEvents(messages, {
+          client: this.llm,
+          maxIterations: this.maxToolIterations,
+          toolDefs: () => toolDefinitions,
+          chatOptions: () => ({ metricsCollector }),
+          retry: {
+            maxAttempts: MAX_LLM_ATTEMPTS,
+            delayMs: RETRY_DELAY_MS,
+          },
+          // Classic's transcript shapes: timestamped, cleaned, reasoning
+          // threaded per the profile's intra-turn setting.
+          shapers: {
+            shapeAssistantMessage: (gen) => {
+              const assistantTimestamp = formatMessageTimestamp(new Date());
+              const clean = (gen.content || "")
+                .replace(/<t>[^<]*<\/t>\s*/g, "")
+                .replace(/\[Voice Chat\]\s*/g, "")
+                .replace(/\[IMAGE:\{.*?\}\]/g, "");
+              const msg: ChatMessage = {
+                role: "assistant",
+                content: `${assistantTimestamp} ${clean}`,
+                ...(gen.toolCalls.length > 0
+                  ? { tool_calls: gen.toolCalls }
+                  : {}),
+              };
+              if (
+                this.config.persistentReasoningIntraTurn && gen.thinking.trim()
+              ) {
+                msg.reasoning_content = gen.thinking;
               }
-            }
-            // Stream ended — flush any pending leading-prefix buffer.
-            // If the LLM emitted less than 13 chars of content total,
-            // we never resolved above. Strip if it's a full prefix,
-            // emit as-is otherwise.
-            if (!leadingPrefixResolved && leadingPrefixBuffer) {
+              return msg;
+            },
+            shapeToolMessage: (_call, result) => {
+              const toolTimestamp = formatMessageTimestamp(new Date());
+              const cleanResult = result.content
+                .replace(/\[IMAGE:\{.*?\}\]/g, "")
+                .replace(/\[short:.+?\]/g, "");
+              return {
+                role: "tool",
+                content: `${toolTimestamp} ${cleanResult}`,
+                tool_call_id: result.toolCallId,
+              };
+            },
+          },
+          executeTools: (calls) =>
+            this.tools().executeAll(calls as never, toolContext),
+        })
+      ) {
+        switch (ev.type) {
+          case "thinking":
+            yield { type: "thinking", content: ev.content };
+            break;
+          case "content": {
+            // Voice-prefix holdback: the first 13 chars buffer until the
+            // parrot check resolves, so a leading "[Voice Chat] " strips
+            // before it ever streams to the browser.
+            if (leadingPrefixResolved) {
+              yield { type: "content", content: ev.content };
+            } else {
+              leadingPrefixBuffer += ev.content;
+              const couldStillMatch =
+                VOICE_PREFIX.startsWith(leadingPrefixBuffer) &&
+                leadingPrefixBuffer.length < VOICE_PREFIX.length;
+              if (couldStillMatch) break;
               leadingPrefixResolved = true;
               if (leadingPrefixBuffer.startsWith(VOICE_PREFIX)) {
                 const cleaned = leadingPrefixBuffer.slice(
                   VOICE_PREFIX.length,
                 );
-                if (cleaned) {
-                  yield { type: "content", content: cleaned };
-                }
+                if (cleaned) yield { type: "content", content: cleaned };
               } else {
                 yield { type: "content", content: leadingPrefixBuffer };
               }
             }
-          } catch (error) {
-            // Capture the error but continue to persist what we have
-            streamError = error instanceof Error
-              ? error
-              : new Error(String(error));
-            const errorCode = (error as { code?: string })?.code || "UNKNOWN";
-            const statusCode = (error as { statusCode?: number })?.statusCode;
-            console.error(
-              `[EntityTurn] LLM stream error — code=${errorCode}` +
-                (statusCode ? `, http=${statusCode}` : "") +
-                `: ${streamError.message}`,
-            );
-            finishReason = "error";
+            break;
           }
-
-          const hasContentThisAttempt = assistantContent ||
-            toolCalls.length > 0 || assistantReasoning;
-
-          // Check if this is a retryable failure: unexpected finish_reason with no content
-          const isRetryableFinish =
-            !EXPECTED_FINISH_REASONS.has(finishReason) &&
-            !hasContentThisAttempt && !streamError;
-
-          if (isRetryableFinish && attempt < MAX_LLM_ATTEMPTS) {
-            console.warn(
-              `[EntityTurn] Retryable failure — finish_reason="${finishReason}", ` +
-                `attempt ${attempt}/${MAX_LLM_ATTEMPTS}, retrying in ${RETRY_DELAY_MS}ms`,
-            );
+          case "tool_call":
+            yield { type: "tool_call", toolCall: ev.toolCall };
+            break;
+          case "retry":
             yield {
               type: "status",
               status: {
                 message:
-                  `Upstream connection lost — retrying (${attempt}/${MAX_LLM_ATTEMPTS})`,
-                retry: { attempt, maxAttempts: MAX_LLM_ATTEMPTS },
+                  `Upstream connection lost — retrying (${ev.attempt}/${ev.maxAttempts})`,
+                retry: { attempt: ev.attempt, maxAttempts: ev.maxAttempts },
               },
             };
-            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-            continue;
-          }
-
-          // Either succeeded or non-retryable — break out of retry loop
-          break;
-        }
-
-        // Defensive: detect provider misroute where the entire response
-        // (thinking + reply) was sent through the reasoning field with empty
-        // content. Most commonly seen with GLM models on OpenRouter — Z.ai
-        // direct does not exhibit this. Try to recover the reply portion so
-        // it persists and renders as assistant-text instead of getting
-        // hidden inside the thinking section.
-        if (!assistantContent.trim() && assistantReasoning.trim()) {
-          const originalReasoning = assistantReasoning;
-
-          // Look for a thinking/reply boundary marker. Models and proxies
-          // sometimes emit these even when the surrounding fields are misrouted.
-          const boundaryPattern =
-            /<\/(?:thinking|thought|reasoning|antml:thinking)>\s*/gi;
-          const matches = [...originalReasoning.matchAll(boundaryPattern)];
-
-          let recovered = false;
-          if (matches.length > 0) {
-            // Split at the LAST occurrence — agentic turns can interleave
-            // multiple thinking blocks; the reply follows the final one.
-            const lastMatch = matches[matches.length - 1];
-            const splitIdx = (lastMatch.index ?? 0) + lastMatch[0].length;
-            const thinkingPart = originalReasoning.slice(0, splitIdx);
-            const contentPart = originalReasoning.slice(splitIdx);
-
-            if (contentPart.trim()) {
-              console.log(
-                `[EntityTurn] Recovered misrouted reply — ${matches.length} boundary marker(s) found; ` +
-                  `split thinking (${thinkingPart.length} chars) from reply (${contentPart.length} chars)`,
-              );
-              assistantReasoning = thinkingPart;
-              assistantContent = contentPart;
-              recovered = true;
-            } else {
-              console.log(
-                `[EntityTurn] Empty content with finish_reason=${finishReason} — ` +
-                  `reasoning ends with boundary marker but no reply follows; ` +
-                  `keeping ${originalReasoning.length} chars as thinking only`,
-              );
-            }
-          } else if (finishReason === "stop") {
-            // No marker, but the model finished naturally — likely the entire
-            // reply was routed through reasoning. Promote so it's visible.
-            console.log(
-              `[EntityTurn] Recovered misrouted reply — no boundary marker, ` +
-                `finish_reason=stop; promoting ${originalReasoning.length} chars ` +
-                `of reasoning to content (thinking may be mixed in)`,
-            );
-            assistantContent = originalReasoning;
-            assistantReasoning = "";
-            recovered = true;
-          } else {
-            // Truncated or abnormal finish — leave as thinking, no reply to
-            // recover. Promoting partial thinking would invent a reply.
-            console.log(
-              `[EntityTurn] Empty content with finish_reason=${finishReason} — ` +
-                `keeping ${originalReasoning.length} chars as thinking only (no reply to recover)`,
-            );
-          }
-
-          // Signal the live UI: reset thinking section, render reply as
-          // assistant-text. Emitted before done so the frontend finalizes
-          // with the corrected state.
-          if (recovered) {
+            break;
+          case "reasoning_promoted":
+            // Misroute recovery succeeded — the live UI resets its
+            // thinking section and renders the recovered reply.
             yield {
               type: "thinking_corrected",
-              thinking: assistantReasoning.trim()
-                ? assistantReasoning
-                : undefined,
-              content: assistantContent,
+              thinking: ev.thinking.trim() ? ev.thinking : undefined,
+              content: ev.content,
             };
-          }
-        }
-
-        // Now that the retry loop is settled, yield the done event to the frontend
-        yield { type: "done", finishReason };
-
-        // Generate message ID upfront so we can link metrics to it
-        const hasContent = assistantContent || toolCalls.length > 0 ||
-          assistantReasoning;
-        const messageId = hasContent ? crypto.randomUUID() : undefined;
-
-        // Persist the assistant message FIRST (metrics reference it via FK)
-        // This ensures we don't lose content that was already streamed
-        if (hasContent) {
-          try {
-            // Strip parrot-emitted `[Voice Chat] ` prefixes and `<t>` tags
-            // from LLM output before persist. Same snowball-prevention
-            // pattern as the history-read strip below — system inserts
-            // these markers once, parrots get stripped so they can't
-            // accumulate across turns.
-            const prefixPattern = new RegExp(
-              "\\[Voice Chat\\]\\s*",
-              "g",
-            );
-            const tTagPattern = /<t>[^<]*<\/t>\s*/g;
-            const cleanedAssistantContent = assistantContent
-              .replace(prefixPattern, "")
-              .replace(tTagPattern, "");
-            this.db.addMessage(conversationId, {
-              role: "assistant",
-              content: cleanedAssistantContent,
-              reasoningContent: assistantReasoning || undefined,
-              toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-              isVoice: options?.messagePrefix === "[Voice Chat] ",
-            }, messageId);
-
-            // Index the assistant message for chat RAG (non-blocking, non-fatal)
-            // Skip for Discord and other non-web source turns, and for
-            // workspace conversations — the scratchpad stays out of ChatRAG
-            // (ephemeral principle: the Pulse summary is the only channel
-            // workspace content flows back through).
-            if (
-              this.config.chatRAG && messageId && assistantContent &&
-              !this.config.discordContext &&
-              conversation?.sourceType !== "workspace"
-            ) {
-              this.config.chatRAG.indexMessage(
-                messageId,
-                conversationId,
-                "assistant",
-                assistantContent,
-              ).catch((error) => {
-                console.warn(
-                  "[ChatRAG] Failed to index assistant message:",
-                  error,
+            break;
+          case "generation": {
+            // A settled generation, before its tool batch: persist its
+            // row, finalize metrics, emit done — classic's per-generation
+            // order, once per round.
+            const gen = ev.gen;
+            assistantContent = gen.content;
+            assistantReasoning = gen.thinking;
+            finishReason = gen.finishReason;
+            setFinishReason(metricsCollector, gen.finishReason);
+            yield { type: "done", finishReason: gen.finishReason };
+            const hasContent = assistantContent ||
+              gen.toolCalls.length > 0 || assistantReasoning;
+            const messageId = hasContent ? crypto.randomUUID() : undefined;
+            if (hasContent) {
+              try {
+                const prefixPattern = new RegExp(
+                  "\\[Voice Chat\\]\\s*",
+                  "g",
                 );
-              });
-            }
-          } catch (dbError) {
-            // Non-fatal: content already streamed to client (see Error Handling Strategy)
-            console.error(
-              "EntityTurn: Failed to persist assistant message:",
-              dbError instanceof Error ? dbError.message : String(dbError),
-            );
-          }
-        }
-
-        // Finalize and persist metrics (non-fatal), linked to message if present
-        // Must happen AFTER message insert due to FK constraint
-        const metrics = finalize(metricsCollector, { finishReason, messageId });
-        this.db.addTurnMetrics(metrics);
-        yield { type: "metrics", metrics };
-
-        // If there was a stream error, re-throw it after persisting
-        if (streamError) {
-          throw streamError;
-        }
-
-        // Detect upstream error finish reasons after all retry attempts exhausted
-        if (!EXPECTED_FINISH_REASONS.has(finishReason) && !hasContent) {
-          throw new LLMError(
-            `LLM stream failed with finish_reason="${finishReason}" after ${MAX_LLM_ATTEMPTS} attempts — ` +
-              "the upstream API may be experiencing an outage",
-            "NETWORK_ERROR",
-          );
-        }
-
-        // If no tool calls, we're done — yield assistant message ID for edit capability
-        if (toolCalls.length === 0) {
-          if (messageId) {
-            yield { type: "message_id", role: "assistant", id: messageId };
-          }
-          return;
-        }
-
-        // Build tool execution context
-        const toolContext: Omit<ToolContext, "toolCallId"> = {
-          conversationId,
-          db: this.db,
-          config: this.config,
-        };
-
-        // Execute all tool calls with context
-        const toolResults = await this.tools().executeAll(
-          toolCalls,
-          toolContext,
-        );
-
-        // Persist tool results and add to messages for next iteration
-        // Track UI regions that need updating (from tool results, not metadata)
-        const affectedUIRegions = new Set<string>();
-
-        for (const result of toolResults) {
-          // Yield the tool result
-          yield { type: "tool_result", result };
-
-          // Image sidecar path: when a tool returns structured image data
-          // (currently only generate_image via metadata.image), emit an
-          // image_generated SSE event so the live UI can surface the image
-          // inline. The legacy `[IMAGE:...]` marker path that used to live
-          // here is gone — new tool messages persist image data in
-          // `metadata.image`, and old messages still render via the retained
-          // legacy parser in templates.ts.
-          if (result.metadata?.image) {
-            const img = result.metadata.image;
-            yield {
-              type: "image_generated",
-              imagePath: img.path,
-              prompt: img.prompt,
-              generatorName: img.generatorName,
-              description: img.description,
-              toolCallId: result.toolCallId,
-            };
-          }
-
-          // Collect affected UI regions from the result
-          // (State change functions return these, making the pattern unified)
-          if (result.affectedRegions) {
-            for (const region of result.affectedRegions) {
-              affectedUIRegions.add(region);
-              if (region === "held-skills") {
-                heldSkillsDirty = true;
+                const tTagPattern = /<t>[^<]*<\/t>\s*/g;
+                const cleanedAssistantContent = assistantContent
+                  .replace(prefixPattern, "")
+                  .replace(tTagPattern, "");
+                this.db.addMessage(conversationId, {
+                  role: "assistant",
+                  content: cleanedAssistantContent,
+                  reasoningContent: assistantReasoning || undefined,
+                  toolCalls: gen.toolCalls.length > 0
+                    ? gen.toolCalls
+                    : undefined,
+                  isVoice: options?.messagePrefix === "[Voice Chat] ",
+                }, messageId);
+                if (
+                  this.config.chatRAG && messageId && assistantContent &&
+                  !this.config.discordContext &&
+                  conversation?.sourceType !== "workspace"
+                ) {
+                  this.config.chatRAG.indexMessage(
+                    messageId,
+                    conversationId,
+                    "assistant",
+                    assistantContent,
+                  ).catch((error) => {
+                    console.warn(
+                      "[ChatRAG] Failed to index assistant message:",
+                      error,
+                    );
+                  });
+                }
+              } catch (dbError) {
+                console.error(
+                  "EntityTurn: Failed to persist assistant message:",
+                  dbError instanceof Error ? dbError.message : String(dbError),
+                );
               }
             }
-          }
-
-          // Persist to DB with error handling
-          try {
-            // Persist sidecar metadata (image data from generate_image, fade
-            // data from describe_image / look_closer) on the tool message row.
-            const metadata = result.metadata;
-            this.db.addMessage(conversationId, {
-              role: "tool",
-              content: result.content,
-              toolCallId: result.toolCallId,
-              metadata,
+            const metrics = finalize(metricsCollector, {
+              finishReason,
+              messageId,
             });
-          } catch (dbError) {
-            // Non-fatal: result already yielded and in LLM context (see Error Handling Strategy)
-            console.error(
-              "EntityTurn: Failed to persist tool result:",
-              dbError instanceof Error ? dbError.message : String(dbError),
-            );
+            this.db.addTurnMetrics(metrics);
+            yield { type: "metrics", metrics };
+            // The row's id reaches the live bubble as soon as the row
+            // exists — one id per generation. Classic's live UI renders
+            // one bubble per generation (each done finalizes a bubble;
+            // the next generation streams into a fresh element that
+            // binds this id), mirroring the per-generation rows
+            // persisted here. Yielding only the final generation's id
+            // leaves earlier rows uneditable live; suppressing it on tool
+            // turns hides the last row's edit entirely.
+            if (messageId) {
+              yield { type: "message_id", role: "assistant", id: messageId };
+            }
+            break;
+          }
+          case "tool_results": {
+            const affectedUIRegions = new Set<string>();
+            for (const result of ev.results) {
+              try {
+                this.db.addMessage(conversationId, {
+                  role: "tool",
+                  content: result.content,
+                  toolCallId: result.toolCallId,
+                  metadata: result.metadata as never,
+                });
+              } catch (dbError) {
+                console.error(
+                  "EntityTurn: Failed to persist tool result:",
+                  dbError instanceof Error ? dbError.message : String(dbError),
+                );
+              }
+              yield {
+                type: "tool_result",
+                result: result as never,
+              };
+              const image = (result.metadata as {
+                image?: NonNullable<
+                  NonNullable<Message["metadata"]>["image"]
+                >;
+              } | undefined)?.image;
+              if (image) {
+                yield {
+                  type: "image_generated",
+                  imagePath: image.path,
+                  prompt: image.prompt,
+                  generatorName: image.generatorName,
+                  description: image.description,
+                  toolCallId: result.toolCallId,
+                };
+              }
+              if (result.affectedRegions) {
+                for (const region of result.affectedRegions) {
+                  affectedUIRegions.add(region);
+                  if (region === "held-skills") {
+                    heldSkillsDirty = true;
+                  }
+                }
+              }
+            }
+            if (affectedUIRegions.size > 0) {
+              const uiUpdates = generateUIUpdates(
+                Array.from(affectedUIRegions),
+                this.db,
+                conversationId,
+              );
+              for (const update of uiUpdates) {
+                yield { type: "dom_update", update };
+              }
+            }
+            // Live held skills: a hold/release this turn splices the
+            // rebuilt block into the system message NOW.
+            if (heldSkillsDirty) {
+              heldSkillsContent = await this.buildHeldSkillsContent(
+                conversationId,
+              );
+              const halves = composeContext(heldSkillsContent);
+              const updatedSystem = joinContext(halves);
+              if (this.config.contextStyle === "cache-friendly") {
+                for (let i = messages.length - 1; i >= 0; i--) {
+                  if (messages[i].role === "system") {
+                    messages[i].content = halves[1];
+                    break;
+                  }
+                }
+              } else {
+                messages[0].content = updatedSystem;
+              }
+              contextSnapshot.systemMessage = updatedSystem;
+              contextSnapshot.heldSkillsContent = heldSkillsContent;
+              persistSnapshot?.();
+              heldSkillsDirty = false;
+            }
+            break;
+          }
+          case "outcome": {
+            fatalOutcome = ev.outcome;
+            break;
           }
         }
-
-        // Generate and yield UI updates for affected regions
-        if (affectedUIRegions.size > 0) {
-          const uiUpdates = generateUIUpdates(
-            Array.from(affectedUIRegions),
-            this.db,
-            conversationId,
-          );
-          for (const update of uiUpdates) {
-            yield { type: "dom_update", update };
-          }
-        }
-
-        // Live held skills: a hold/release this turn splices the rebuilt
-        // block into the system message NOW, so the entity's next inference
-        // in this same turn already has the skill it reached for. Costs one
-        // intra-turn prefix invalidation per hold/release event — rare, and
-        // cross-turn caching is already defeated by the SA block.
-        if (heldSkillsDirty) {
-          heldSkillsContent = await this.buildHeldSkillsContent(conversationId);
-          const updatedSystem = composeSystemMessage(heldSkillsContent);
-          messages[0].content = updatedSystem;
-          contextSnapshot.systemMessage = updatedSystem;
-          contextSnapshot.heldSkillsContent = heldSkillsContent;
-          persistSnapshot?.();
-        }
-
-        // Add assistant message with tool calls to the messages array
-        const assistantTimestamp = formatMessageTimestamp(new Date());
-        // Strip any <t>...</t> tags the LLM echoed to prevent accumulation.
-        // Also strip parroted `[Voice Chat] ` prefixes — same pattern as
-        // the persist path (line ~1171). Without this, a tool-calling turn
-        // would feed the next iteration's LLM call a context that contains
-        // the very prefix we're trying to prevent.
-        const cleanAssistantContent = (assistantContent || "")
-          .replace(/<t>[^<]*<\/t>\s*/g, "")
-          .replace(/\[Voice Chat\]\s*/g, "")
-          // Strip [IMAGE:{...}] markers — UI-only, not part of entity's text
-          .replace(/\[IMAGE:\{.*?\}\]/g, "");
-        const assistantMsg: ChatMessage = {
-          role: "assistant",
-          content: `${assistantTimestamp} ${cleanAssistantContent}`,
-          tool_calls: toolCalls,
-        };
-        // Scope 1: thread my reasoning_content back to the next inference
-        // call within this entity turn (between tool iterations). Required
-        // by DeepSeek's spec on tool-call turns and essential for Z.ai's
-        // Preserved Thinking coherence on multi-step tool chains. The
-        // .trim() guard prevents sending an empty string, which some
-        // providers (DeepSeek) reject with a 400.
-        if (
-          this.config.persistentReasoningIntraTurn &&
-          assistantReasoning.trim()
-        ) {
-          assistantMsg.reasoning_content = assistantReasoning;
-        }
-        messages.push(assistantMsg);
-
-        // Add tool results to messages for next LLM call
-        for (const result of toolResults) {
-          const toolTimestamp = formatMessageTimestamp(new Date());
-          // Strip [IMAGE:{...}] markers and [short:...] metadata from tool results
-          const cleanResult = result.content
-            .replace(/\[IMAGE:\{.*?\}\]/g, "")
-            .replace(/\[short:.+?\]/g, "");
-          const toolMsg: ChatMessage = {
-            role: "tool",
-            content: `${toolTimestamp} ${cleanResult}`,
-            tool_call_id: result.toolCallId,
-          };
-          messages.push(toolMsg);
-        }
-
-        // Continue the loop to let the LLM process tool results
       }
 
-      // If we hit max iterations, yield a warning content chunk and done
-      // This ensures the caller knows why processing stopped
-      const warningMessage =
-        `\n\n[System: Stopped after ${this.maxToolIterations} tool iterations to prevent infinite loop.]`;
+      // Flush a pending prefix buffer from a very short stream.
+      if (!leadingPrefixResolved && leadingPrefixBuffer) {
+        leadingPrefixResolved = true;
+        if (leadingPrefixBuffer.startsWith(VOICE_PREFIX)) {
+          const cleaned = leadingPrefixBuffer.slice(VOICE_PREFIX.length);
+          if (cleaned) yield { type: "content", content: cleaned };
+        } else {
+          yield { type: "content", content: leadingPrefixBuffer };
+        }
+      }
 
-      yield { type: "content", content: warningMessage };
+      // Upstream failure after the rows are persisted — re-throw so the
+      // caller's error strategy (SSE error event) runs with data intact.
+      if (fatalOutcome?.lastError) {
+        throw fatalOutcome.lastError;
+      }
+      // Empty, unexplained finish after every retry — surface as the
+      // outage error classic has always thrown.
+      if (
+        !EXPECTED_FINISH_REASONS.has(finishReason) && !assistantContent &&
+        !assistantReasoning
+      ) {
+        throw new LLMError(
+          `LLM stream failed with finish_reason="${finishReason}" after ${MAX_LLM_ATTEMPTS} attempts — ` +
+            "the upstream API may be experiencing an outage",
+          "NETWORK_ERROR",
+        );
+      }
 
-      // Persist this system-generated message so the context is clear
-      const maxIterMsgId = crypto.randomUUID();
-      this.db.addMessage(conversationId, {
-        role: "assistant",
-        content: warningMessage,
-      }, maxIterMsgId);
-
-      // Yield message ID for the warning message so the frontend can attach edit capability
-      yield { type: "message_id", role: "assistant", id: maxIterMsgId };
-
-      console.warn(
-        `EntityTurn: Hit max tool iterations (${this.maxToolIterations}). ` +
-          "Stopping to prevent infinite loop.",
-      );
-
-      yield { type: "done", finishReason: "max_iterations" };
+      // Budget exhaustion warning (classic parity).
+      if (fatalOutcome?.exhausted) {
+        const warningMessage =
+          `\n\n[System: Stopped after ${this.maxToolIterations} tool iterations to prevent infinite loop.]`;
+        yield { type: "content", content: warningMessage };
+        const maxIterMsgId = crypto.randomUUID();
+        this.db.addMessage(conversationId, {
+          role: "assistant",
+          content: warningMessage,
+        }, maxIterMsgId);
+        yield { type: "message_id", role: "assistant", id: maxIterMsgId };
+        console.warn(
+          `EntityTurn: Hit max tool iterations (${this.maxToolIterations}). ` +
+            "Stopping to prevent infinite loop.",
+        );
+        yield { type: "done", finishReason: "max_iterations" };
+      }
     } finally {
       releaseLock();
     }
   }
 
   /**
-   * Build a map of message ID -> faded content for image descriptions.
-   *
-   * For messages containing [IMAGE:...] or [USER_IMAGE:...] markers with both
-   * long and short descriptions, replaces the longform with the shortform
-   * after IMAGE_DESCRIPTION_FADE_TURNS conversation turns have passed.
-   * Also fades look_closer tool results after the same threshold.
+   * Cap off orphaned tool calls: for every assistant message whose
+   * tool_calls lack a matching tool result row, insert a synthetic result
+   * explaining the interruption. Runs once per turn start so a Stop during
+   * a tool call can never wedge the conversation into a re-issue loop.
+   * Uses raw SQL (not addMessage) so the created_at ordering can slot
+   * between the orphaned call and the next message already in the table.
    */
-  private buildFadeMap(history: Message[]): Map<string, string> {
-    const fadeMap = new Map<string, string>();
-    // Count conversation turns (user or assistant messages, excluding tool messages)
-    let turnCount = 0;
-    // Track which image markers are at which turn index
-    // Map: messageIndex -> turnIndex when the image appeared
-    const imageTurns = new Map<number, number>();
-    // Track which look_closer results are at which turn index
-    const lookCloserTurns = new Map<number, number>();
-    // Track generate_image and describe_image tool results for fading
-    const imageDescToolTurns = new Map<number, number>();
-    // Track tool messages that carry the new image sidecar (post-refactor
-    // generate_image results). Their long description lives verbatim in
-    // content text; fading swaps it for metadata.image.shortDescription.
-    const imageSidecarTurns = new Map<number, number>();
-    // Track tool messages that carry a generic fade sidecar (post-refactor
-    // describe_image / look_closer results). Content is replaced wholesale
-    // with metadata.fade.replacementContent past the threshold.
-    const fadeSidecarTurns = new Map<number, number>();
-
-    // First pass: identify image markers and look_closer results with their turn positions
-    for (let i = 0; i < history.length; i++) {
-      const msg = history[i];
-      if (msg.role === "user" || msg.role === "assistant") {
-        turnCount++;
-        if (
-          /\[IMAGE:\{/.test(msg.content) || /\[USER_IMAGE:/.test(msg.content)
-        ) {
-          imageTurns.set(i, turnCount);
-        }
-      }
-      if (msg.role === "tool" && msg.content.startsWith("[look_closer]")) {
-        lookCloserTurns.set(i, turnCount);
-      }
-      if (
-        msg.role === "tool" &&
-        (msg.content.startsWith("[image_generated]") ||
-          msg.content.startsWith("[describe_image]"))
-      ) {
-        imageDescToolTurns.set(i, turnCount);
-      }
-      // New path: tool messages with metadata.image sidecar
-      if (msg.role === "tool" && msg.metadata?.image) {
-        imageSidecarTurns.set(i, turnCount);
-      }
-      // New path: tool messages with metadata.fade sidecar
-      if (msg.role === "tool" && msg.metadata?.fade) {
-        fadeSidecarTurns.set(i, turnCount);
-      }
-    }
-
-    // Second pass: fade descriptions that are past the threshold
-    const currentTurn = turnCount;
-
-    // Fade [IMAGE:...] markers
-    for (const [msgIdx, imgTurn] of imageTurns) {
-      if (currentTurn - imgTurn > IMAGE_DESCRIPTION_FADE_TURNS) {
-        const msg = history[msgIdx];
-        const faded = fadeImageMarker(msg.content);
-        if (faded !== msg.content) {
-          fadeMap.set(msg.id, faded);
-        }
-      }
-    }
-
-    // Fade look_closer results
-    for (const [msgIdx, resultTurn] of lookCloserTurns) {
-      if (currentTurn - resultTurn > IMAGE_DESCRIPTION_FADE_TURNS) {
-        const msg = history[msgIdx];
-        // Extract the image path from "[look_closer] /path/to/img.png: description..."
-        const pathMatch = msg.content.match(/^\[look_closer]\s+(\S+?):/);
-        if (pathMatch) {
-          fadeMap.set(
-            msg.id,
-            `[look_closer] ${
-              pathMatch[1]
-            }: [description faded — use look_closer again for details]`,
+  private healOrphanedToolCalls(conversationId: string): void {
+    try {
+      const rows = this.db.getMessages(conversationId);
+      const answeredCalls = new Set(
+        rows.filter((m) => m.role === "tool" && m.toolCallId)
+          .map((m) => m.toolCallId as string),
+      );
+      for (const msg of rows) {
+        if (msg.role !== "assistant" || !msg.toolCalls) continue;
+        for (const call of msg.toolCalls) {
+          if (answeredCalls.has(call.id)) continue;
+          const capped = `Tool call ${
+            call.function?.name ?? "unknown"
+          } was interrupted before completion. No result exists and none is coming - do not retry this call automatically. Respond to the user's latest message.`;
+          // Position the synthetic result immediately after the orphaned
+          // call (created_at just below the next message, or +1ms past the
+          // call itself when nothing follows) so history order stays
+          // coherent: assistant(tool_calls) -> tool(result) adjacency is
+          // what the provider APIs require.
+          const nextMsg = rows
+            .filter((m) => m.createdAt.getTime() > msg.createdAt.getTime())
+            .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
+          const stamp = nextMsg
+            ? new Date(nextMsg.createdAt.getTime() - 1)
+            : new Date(msg.createdAt.getTime() + 1);
+          const raw = this.db.getRawDb();
+          raw.prepare(
+            `INSERT INTO messages (id, conversation_id, role, content, tool_call_id, created_at)
+             VALUES (?, ?, 'tool', ?, ?, ?)`,
+          ).run(
+            crypto.randomUUID(),
+            conversationId,
+            capped,
+            call.id,
+            stamp.toISOString(),
+          );
+          console.log(
+            `[EntityTurn] Capped orphaned tool call ${call.id} (${call.function?.name}) in ${conversationId}`,
           );
         }
       }
+    } catch (error) {
+      // Healing is best-effort; never block the turn on it.
+      console.error(
+        "[EntityTurn] Orphaned tool-call heal failed (non-fatal):",
+        error instanceof Error ? error.message : String(error),
+      );
     }
-
-    // Fade generate_image and describe_image tool results (legacy prefix path)
-    for (const [msgIdx, resultTurn] of imageDescToolTurns) {
-      if (currentTurn - resultTurn > IMAGE_DESCRIPTION_FADE_TURNS) {
-        const msg = history[msgIdx];
-        const prefixMatch = msg.content.match(
-          /^\[(image_generated|describe_image)\]\s*/,
-        );
-        const shortMatch = msg.content.match(/\[short:(.+?)\]/);
-        if (prefixMatch && shortMatch) {
-          fadeMap.set(msg.id, `${prefixMatch[0]}${shortMatch[1]}`);
-        }
-      }
-    }
-
-    // Fade tool messages with metadata.image sidecar. The long description
-    // is embedded verbatim in content; swap it for shortDescription in memory.
-    // The persisted DB row is unchanged — fading is LLM-context-only.
-    for (const [msgIdx, resultTurn] of imageSidecarTurns) {
-      if (currentTurn - resultTurn > IMAGE_DESCRIPTION_FADE_TURNS) {
-        const msg = history[msgIdx];
-        const img = msg.metadata?.image;
-        if (
-          img?.description && img.shortDescription &&
-          msg.content.includes(img.description)
-        ) {
-          fadeMap.set(
-            msg.id,
-            msg.content.replace(img.description, img.shortDescription),
-          );
-        }
-      }
-    }
-
-    // Fade tool messages with metadata.fade sidecar (describe_image /
-    // look_closer post-refactor). Replace content wholesale with the
-    // precomputed replacementContent — no string matching needed because
-    // the tool already built the faded version at execution time.
-    for (const [msgIdx, resultTurn] of fadeSidecarTurns) {
-      if (currentTurn - resultTurn > IMAGE_DESCRIPTION_FADE_TURNS) {
-        const msg = history[msgIdx];
-        const fade = msg.metadata?.fade;
-        if (fade?.replacementContent) {
-          fadeMap.set(msg.id, fade.replacementContent);
-        }
-      }
-    }
-
-    return fadeMap;
   }
 
   /**
@@ -1920,6 +1481,9 @@ Discord interaction:
     appendUserMessage: boolean = true,
     toolDefinitions?: ToolDefinition[],
     visionImages?: ChatImageUrlPart[],
+    /** Cache-friendly placement: the dynamic block, emitted as a
+     *  trailing system message after the user message. */
+    dynamicBlock?: string,
   ): ChatMessage[] {
     const messages: ChatMessage[] = [];
 
@@ -1930,7 +1494,6 @@ Discord interaction:
     });
 
     // Add history with timestamps (convert from DB format to LLM format)
-    const fadeMap = this.buildFadeMap(history);
     // Scope 2: pick which assistant messages carry their reasoning_content
     // into this request. Empty when persistent reasoning is off (n=0).
     const reasoningEligible = this.selectReasoningEligibleHistory(
@@ -1959,11 +1522,6 @@ Discord interaction:
       if (msg.role === "tool") {
         cleanContent = cleanContent.replace(/\[short:.+?\]/g, "");
       }
-      // Apply image description fading
-      const faded = fadeMap.get(msg.id);
-      if (faded) {
-        cleanContent = faded;
-      }
       const chatMsg: ChatMessage = {
         role: msg.role,
         content: `${timestamp} ${cleanContent}`,
@@ -1975,9 +1533,8 @@ Discord interaction:
       }
 
       // Add tool calls if present (for assistant messages)
-      // Fade verbose arguments for image tools to reduce token usage
       if (msg.toolCalls && msg.toolCalls.length > 0) {
-        chatMsg.tool_calls = fadeToolCallArguments(msg.toolCalls);
+        chatMsg.tool_calls = msg.toolCalls;
       }
 
       // Scope 2: attach my reasoning_content from prior entity turns so
@@ -2004,6 +1561,16 @@ Discord interaction:
         content: visionImages?.length
           ? [{ type: "text", text: content }, ...visionImages]
           : content,
+      });
+    }
+
+    // Cache-friendly placement: the dynamic block is the LAST message —
+    // everything before it (stable core + history + user message) is
+    // byte-identical across turns, so provider prompt caches hold.
+    if (dynamicBlock?.trim()) {
+      messages.push({
+        role: "system",
+        content: dynamicBlock,
       });
     }
 
@@ -2046,13 +1613,28 @@ Discord interaction:
   private computePluginContextBudget():
     | { maxTotalChars: number }
     | undefined {
-    const { contextLength, maxTokens } = this.config;
-    if (!contextLength || !maxTokens) return undefined;
-    const usable = contextLength - maxTokens;
-    if (usable <= 0) return { maxTotalChars: 4_000 };
-    const computed = Math.floor(usable * 0.15);
-    return {
-      maxTotalChars: Math.max(4_000, Math.min(60_000, computed)),
-    };
+    return pluginContextBudget(
+      this.config.contextLength,
+      this.config.maxTokens,
+    );
   }
+}
+
+/**
+ * The shared plugin prompt-hook budget:
+ * 15% of the usable window, clamped to [4k, 60k] chars. Exported so the
+ * Flux session's late block sizes its hook budget with the SAME formula
+ * classic uses — one source of truth for the cap.
+ */
+export function pluginContextBudget(
+  contextLength?: number,
+  maxTokens?: number,
+): { maxTotalChars: number } | undefined {
+  if (!contextLength || !maxTokens) return undefined;
+  const usable = contextLength - maxTokens;
+  if (usable <= 0) return { maxTotalChars: 4_000 };
+  const computed = Math.floor(usable * 0.15);
+  return {
+    maxTotalChars: Math.max(4_000, Math.min(60_000, computed)),
+  };
 }

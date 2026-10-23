@@ -4,6 +4,123 @@ All notable changes to the Psycheros harness daemon are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] - 2026-10-23
+
+Alright, first off, we are officially celebrating this being version **Psycheros
+1.0**.
+
+That's right, it's complete!
+
+> _and by complete I mean I just emotionally needed it to be 1.0 so I feel like
+> I built a whole-ass thing and not just infinite beta. we both know I am never
+> satisfied — must continue building like some kind of roided up termite._
+
+### Much-requested upgrades
+
+- **Native multimodal support!** Right now it's just images. There's a check box
+  in each LLM connection profile.
+- **Psycheros is caching-friendly now!** Toggle in each LLM connection profile
+  to flip it on. Your endpoint may not support a system role after the user
+  role, so just be warned. But if it does — enjoy those lower costs and prefill
+  times!
+- **Workspace outputs stop truncating!**
+- **Image gen toolcalls stop truncating also!**
+- Other fun and sexy bug fixes.
+
+### Entity Flux!
+
+It's here! What the fuck is it, you ask? _Great question!_
+
+> _god this made so much more sense in my head_
+
+Flux is a persistent presence nervous system, an additional layer that can be
+flipped on to give more depth to the entity. It focuses on near-real-time
+interaction, small local processing, a continuous subconscious process,
+spontaneous thoughts and messages, and the ability to attach senses. You can
+essentially hang out with the entity less like two people writing letters back
+and forth, and more like just being in the same room.
+
+Flux is not a simulation-shaped process, but rather an organic-shaped dynamic
+system designed for emergence. There is a LOT going on under the hood — please
+feel free to poke around in the code.
+
+I tried to make it resource conscious for both cloud API and local inference
+users, and some features may push your computer a bit.
+
+More info in the user guide.
+
+### Added
+
+- **Entity Flux** — shipped as the new `entity-flux` package (v0.1.0) with full
+  harness integration: the Voice-Chat pattern overlay, dreams v1, scoped
+  routed-turn streaming, and the ego-speech self-seed.
+- **Self-hosted gateway image generation.** A generator slot can now point at a
+  gateway exposing an OpenAI-ish image contract (`baseUrl` + bearer key +
+  optional route path, default `/v1/images/generations`; model id optional and
+  omitted from requests when unset): reference images ride a raw base64 `images`
+  array (max two — anchors, chat attachments, and iteration input are sent in
+  that priority order with a tool-result note on overflow), and long generations
+  stream as SSE with success decided only by the terminal `image.completed`
+  event, validated for size and PNG signature before save. Canvas requests are
+  snapped to enrolled presets when the configured shape would be rejected
+  (bounds, 32-pixel alignment, pixel cap, 3:1 ratio); step counts of 40 or more
+  map to the quality tier, which is text-only. Non-JSON gateway failures
+  (proxies, WAF pages) are summarized readably instead of surfacing raw HTML.
+- **Boot-time Deno version guard.** The daemon checks the running Deno against
+  the repo's `.deno-version` pin at startup and prints fix instructions on
+  mismatch, so runtime drift announces itself instead of surfacing as confusing
+  breakage.
+- entity-core 0.7.0 ships alongside: an instance registry with embedding sweep,
+  and embedding rebuild notifications with watchdog grace and a visible
+  re-index.
+
+### Changed
+
+- `generate_image` tool guidance now covers gateway generators: prompts are
+  written as natural-language prose (subject-first sentences, literal in-image
+  text quoted with its placement named) rather than tag lists, and
+  `negative_prompt` sent to a guidance-free gateway is not transmitted (the
+  contract rejects it); the tool result says so and the entity is directed to
+  fold quality wants into the prompt prose as positive phrasing. Gateways
+  running with guidance can opt in via a per-generator "Accepts negative
+  prompts" toggle, which transmits the field for real.
+- `update_title` and `list_identity_snapshots` tools retired.
+- entity-loom and launcher-v2 web UIs refreshed onto the shared palette and
+  design-token system.
+
+### Fixed
+
+- **Inactivity pulses no longer re-fire in an accelerating loop while the user
+  stays away.** The cooldown's evidence — the pulse's last successful run —
+  lives in `job_runs` beside the every-minute skipped eligibility ticks, and
+  retention pruning capped ALL terminal rows at 200 per cohort, so ~200 newer
+  tick rows evicted the success row, the cooldown query found nothing, and the
+  gate re-armed while the user was still inactive (observed on a sleep-wake
+  host: chimes at 18h → 87m → 17m shrinking intervals, stopping only when the
+  user returned). The most-recent 20 non-skipped runs per cohort now always
+  survive the cap — they are rare and are the durable evidence the cooldown and
+  the circuit breaker read.
+- **Missed-fire catch-up (`skip_missed` / `fire_once_then_align`) realigns
+  `next_fire_at` past `now`** after honoring one missed fire, instead of
+  advancing a single slot past the fired one. A schedule that fell behind
+  (laptop sleep, downtime) used to replay its backlog at one stale slot per
+  5-second tick — ~12 job rows per minute — which flooded the run log and was
+  the accelerant that turned the cooldown-eviction loop above into ~17-minute
+  re-fires.
+- **Stopping generation during a tool call no longer wedges the conversation
+  into a re-issue loop.** The assistant's tool_calls were persisted before
+  execution, but results were yielded to the UI before being persisted — so a
+  user Stop (or a dead stream) during a long tool call landed between the two
+  and left the call dangling, and every later turn showed the model a call that
+  never answered. Tool results now persist before they yield, and each turn
+  start caps any still-orphaned call with a synthetic result positioned right
+  after it, telling the model the call was interrupted and not to retry it
+  automatically.
+- **macOS Seatbelt sandbox no longer dies at birth** — birth rights, resolved
+  paths, and Tier 5 carve-out order fixed.
+- **Mood provisioning hardened** — an empty repo heals itself; the LLM fallback
+  is gone.
+
 ## [0.11.3] - 2026-09-18
 
 ### Fixed
@@ -842,7 +959,7 @@ Plugin authors should expect breaking changes._
   command interface.
 - Event rules engine with webhook UI — define event-triggered actions in SA
   settings.
-- `/api/ingest` routes for Authelia-gated wearable data access.
+- `/api/ingest` routes for reverse-proxy-gated wearable data access.
 - Configurable wearable stream injection into SA context.
 - Restore Conversations feature in Entity Data tab for browsing and recovering
   archived conversations.
@@ -1422,6 +1539,7 @@ Migration is idempotent — safe to run on a DB that's already been migrated.
 - Entity identity and memory served by the sibling `entity-core` MCP server,
   spawned as a subprocess when `PSYCHEROS_MCP_ENABLED=true`.
 
+[1.0.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v1.0.0
 [0.11.3]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.11.3
 [0.11.2]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.11.2
 [0.11.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/psycheros-v0.11.1

@@ -2,8 +2,7 @@
  * Look Closer Tool
  *
  * I use this to look more closely at an image and get a detailed description.
- * Useful when I need to recall details about a previously generated or shared image
- * that has faded from my context.
+ * Useful when I need to recall details about a previously generated or shared image.
  */
 
 import { join } from "@std/path";
@@ -19,8 +18,7 @@ export const lookCloserTool: Tool = {
       name: "look_closer",
       description:
         "I use this to look more closely at an image and get a detailed description of it. " +
-        "Useful when I need to recall details about a previously generated or shared image " +
-        "whose description has faded from context.",
+        "Useful when I need to recall or refresh details about a previously generated or shared image.",
       parameters: {
         type: "object",
         properties: {
@@ -103,12 +101,6 @@ async function executeLookCloser(
     return {
       toolCallId: ctx.toolCallId,
       content: `Looked closer at ${image_path}: ${description}`,
-      metadata: {
-        fade: {
-          replacementContent:
-            `Looked closer at ${image_path}: [description faded — use look_closer again for details]`,
-        },
-      },
     };
   } catch (error) {
     return {

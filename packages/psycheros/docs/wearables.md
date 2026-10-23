@@ -52,9 +52,10 @@ and editable regardless of connection state.
 ## Production vs localhost routes
 
 The wearable endpoints are registered under two path sets: `/api/device/stream`
-and `/api/device/data` are for localhost/dev (no Authelia); `/api/ingest/stream`
-and `/api/ingest` are for production behind Authelia's `client_credentials`
-bearer auth — the access-control rule only allows authenticated requests on
-`/api/ingest`. Both path sets delegate to the same handlers. Route registration
-is in `server.ts` `handleAPIRoute()`. The endpoint protocol is documented in
-[`api-reference.md`](api-reference.md) ("Wearable Data Streaming").
+and `/api/device/data` are for localhost/dev (no auth proxy);
+`/api/ingest/stream` and `/api/ingest` are for production behind the proxy's
+`client_credentials` bearer auth — the access-control rule only allows
+authenticated requests on `/api/ingest`. Both path sets delegate to the same
+handlers. Route registration is in `server.ts` `handleAPIRoute()`. The endpoint
+protocol is documented in [`api-reference.md`](api-reference.md) ("Wearable Data
+Streaming").

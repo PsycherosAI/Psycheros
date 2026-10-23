@@ -21,6 +21,29 @@
   -webkit-backdrop-filter: blur(12px);
 }
 
+/* Flux is alive behind the call: the overlay's EDGES breathe with the
+   same inner-glow language and cadence as the hosting sidebar entry
+   (flux-host-glow, flux.css) — one signal, read as one signal. Inset
+   only: the overlay is full-screen, so an outer glow would render
+   off-viewport. Scaled wider and softer than the sidebar's 18px row
+   glow (48px spread, gentler mix) so at screen scale it reads as the
+   room breathing around the call, not an alert. No background tint —
+   the screen stays clear; only the edges carry it. */
+@keyframes voice-flux-glow {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: inset 0 0 48px 8px
+      color-mix(in srgb, var(--c-accent) 40%, white 15%);
+  }
+}
+
+.voice-overlay.flux-live {
+  animation: voice-flux-glow 2.4s ease-in-out infinite;
+}
+
 .voice-overlay--hidden {
   display: none;
 }
@@ -74,7 +97,8 @@
 }
 
 @keyframes pulse-dot {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -358,7 +382,8 @@
 /* Subtle whole-toast glow pulse layered on top of the icon heartbeat —
    reinforces "something is happening" without being distracting. */
 @keyframes pulse-toast-glow {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 8px var(--c-accent-subtle);
   }
   50% {
@@ -367,7 +392,8 @@
 }
 
 @keyframes pulse-heartbeat {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
   }
   20% {
@@ -552,6 +578,9 @@
     animation: none;
   }
   .voice-toast {
+    animation: none;
+  }
+  .voice-overlay.flux-live {
     animation: none;
   }
 }

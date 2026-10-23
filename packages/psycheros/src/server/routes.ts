@@ -10,6 +10,7 @@
 
 import type { SSEEvent, TurnMetrics } from "../types.ts";
 import type { DBClient } from "../db/mod.ts";
+import type { Message } from "../types.ts";
 import { archiveIfAvailable } from "../backup/mod.ts";
 import type {
   ChatImageUrlPart,
@@ -202,6 +203,11 @@ import entityCoreDenoJson from "../../../entity-core/deno.json" with {
   type: "json",
 };
 import type { PluginManager } from "../plugins/mod.ts";
+import { getFluxHostConversationId } from "../flux/host-state.ts";
+import {
+  triggerFluxTurnInSession,
+  triggerRoutedSessionTurn,
+} from "../flux/mod.ts";
 
 /**
  * Context passed to route handlers containing dependencies.
@@ -226,6 +232,10 @@ export interface RouteContext {
   dataRoot: string;
   /** Pulse engine for autonomous entity prompts */
   pulseEngine?: import("../pulse/mod.ts").PulseEngine;
+  /** Optional flux nervous-system manager (when flux is enabled). */
+  fluxManager?: import("../../../entity-flux/src/mod.ts").FluxManager;
+  /** Flux settings (always present — defaults when flux is disabled). */
+  fluxSettings: import("../../../entity-flux/src/mod.ts").FluxSettings;
   /** Durable scheduler — schedules and job_runs. */
   scheduler?: import("../scheduler/mod.ts").Scheduler;
   /** Optional chat RAG for searching conversation history */
@@ -380,9 +390,10 @@ const ALLOWED_IMAGE_TYPES = [
 ];
 
 /**
- * Maximum file size for background uploads (5MB).
+ * Maximum file size for uploads (16MB — OpenRouter's documented image
+ * ceiling, the strictest of our provider set).
  */
-const MAX_BACKGROUND_SIZE = 5 * 1024 * 1024;
+const MAX_BACKGROUND_SIZE = 16 * 1024 * 1024;
 
 /**
  * Get MIME type for a file path.
@@ -951,10 +962,24 @@ export async function handleUpdateMessage(
     metrics = dbMetrics ?? undefined;
   }
 
-  // Render updated message HTML for HTMX swap
+  // Render updated message HTML for HTMX swap. The tool-results map is
+  // REQUIRED — without it an edited row loses its tool cards (editing an
+  // entity message makes the call vanish).
+  // Same pairing renderMessages does: role=tool rows keyed by call id.
   const { renderMessage } = await import("./templates.ts");
   const displayNames = await loadGeneralSettings(ctx.dataRoot);
-  const html = renderMessage(updatedMsg, metrics, displayNames);
+  const toolResultsByCallId = new Map<string, Message>();
+  for (const m of messages) {
+    if (m.role === "tool" && m.toolCallId) {
+      toolResultsByCallId.set(m.toolCallId, m);
+    }
+  }
+  const html = renderMessage(
+    updatedMsg,
+    metrics,
+    displayNames,
+    toolResultsByCallId,
+  );
 
   return new Response(html, {
     headers: {
@@ -1548,6 +1573,29 @@ interface RetryChatRequestBody {
 // Network disconnect must drain the generator so tool results persist and
 // don't orphan.
 //
+/**
+ * The flux MODE line for classic turns: one sentence telling
+ * the entity whether its subconscious is active, paused, or off RIGHT NOW
+ * — so memory of a running nervous system can't become hallucination
+ * while the State is off. Undefined when flux is disabled in settings
+ * (baseline turns carry no block at all).
+ */
+function computeFluxModeNote(
+  fluxSettings: import("../../../entity-flux/src/mod.ts").FluxSettings,
+  fluxManager:
+    | import("../../../entity-flux/src/mod.ts").FluxManager
+    | undefined,
+): string | undefined {
+  if (!fluxSettings.enabled) return undefined;
+  if (fluxManager?.isRunning) {
+    return "My Flux State is active — my subconscious layers (Noticing, Musing, Reverie) are running and surface to me there. This conversation runs on standard turns.";
+  }
+  if (fluxManager) {
+    return "Entity Flux is paused — I operate on standard turns right now; my subconscious layer is suspended, its state preserved.";
+  }
+  return "Entity Flux is off — I operate on standard turns right now; my subconscious layer is not active.";
+}
+
 // The client differentiates by POSTing to /api/chat/stop before aborting the
 // SSE connection. The chat handler's stream.cancel() consumes the flag and
 // uses it to pick an abort reason. The for-await then branches on the reason.
@@ -1644,6 +1692,81 @@ export async function handleChat(
     );
   }
 
+  // Flux-host routing: while this conversation is the live Flux host,
+  // a text post feeds the SESSION — the user row persists via the record
+  // hook, the Ego generates from its continuous context, and the reply
+  // lands as a normal row (rendered live via the record hook's
+  // conversation-scoped dom_update). The per-request SSE stream carries a
+  // heartbeat while the session generates, then the final content and
+  // done — the client's optimistic rows and streaming machinery work
+  // unchanged. The session is discrete generations with an open-call
+  // park: the input stays live, sends QUEUE (the driver's one-in-flight
+  // guard), and classic's own lock is untouched for every other
+  // conversation.
+  if (body.conversationId === getFluxHostConversationId()) {
+    // Live fragments: the session's thinking + content stream through the
+    // per-request SSE as they happen (the classic renderer draws the
+    // thinking block during the turn — not only after a re-render pulls
+    // the persisted row). The final string is
+    // a fallback for turns that streamed nothing.
+    const events: SSEEvent[] = [];
+    let notify: (() => void) | null = null;
+    let turnSettled = false;
+    let finalResponse: string | null = null;
+    let streamedContent = false;
+    void triggerRoutedSessionTurn(body.message, (kind, fragment) => {
+      if (kind === "content") streamedContent = true;
+      events.push({ type: kind, data: fragment });
+      notify?.();
+    }).then((r) => {
+      finalResponse = r;
+    }).catch(() => {
+      // Generation failed — done still fires; the client resets cleanly.
+    }).finally(() => {
+      turnSettled = true;
+      notify?.();
+    });
+
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
+    const stream = new ReadableStream<SSEEvent>({
+      async start(controller) {
+        heartbeat = setInterval(() => {
+          try {
+            controller.enqueue({ type: "ping", data: "" });
+          } catch {
+            /* closed */
+          }
+        }, 15_000);
+        try {
+          while (true) {
+            while (events.length > 0) {
+              controller.enqueue(events.shift()!);
+            }
+            if (turnSettled) break;
+            await new Promise<void>((resolve) => {
+              notify = resolve;
+            });
+          }
+          if (!streamedContent && finalResponse && finalResponse.trim()) {
+            controller.enqueue({ type: "content", data: finalResponse });
+          }
+          controller.enqueue({ type: "done", data: "" });
+        } finally {
+          if (heartbeat) clearInterval(heartbeat);
+          try {
+            controller.close();
+          } catch {
+            /* already closed */
+          }
+        }
+      },
+      cancel() {
+        if (heartbeat) clearInterval(heartbeat);
+      },
+    });
+    return createSSEResponse(stream.pipeThrough(createSSEEncoder()));
+  }
+
   // Check if conversation exists
   const conversation = ctx.db.getConversation(body.conversationId);
   if (!conversation) {
@@ -1672,7 +1795,7 @@ export async function handleChat(
 
   // Create a ReadableStream that will produce SSE events
   // Heartbeat: emit a ping every 15s to keep the connection alive through
-  // reverse proxies (nginx, Authelia, Cloudflare) and browser idle timeouts.
+  // reverse proxies (nginx, Cloudflare, etc.) and browser idle timeouts.
   // Without this, any long-running tool call (image generation, workspace
   // blocking on ask_origin_conversation, etc.) would let the connection go
   // idle long enough for an upstream proxy to drop it — surfacing as a
@@ -1707,8 +1830,37 @@ export async function handleChat(
             }
           } catch { /* dir may not exist yet */ }
 
+          // NATIVE MULTIMODAL: the active
+          // profile's DECLARED toggle routes the stored image as a
+          // native content part — pixels transient, marker persists,
+          // same discipline as Discord. The captioner is the fallback
+          // for non-multimodal profiles, exactly as before.
+          const nativeProfile = ctx.getActiveLLMProfile() ?? undefined;
+          if (nativeProfile?.multimodal) {
+            try {
+              const attachmentPath =
+                `${ctx.dataRoot}/.psycheros/chat-attachments/${attachmentFilename}`;
+              const fileData = await Deno.readFile(attachmentPath);
+              const base64 = uint8ToBase64(fileData);
+              const mediaType = getImageMediaType(attachmentFilename);
+              visionImages = [{
+                type: "image_url",
+                image_url: { url: `data:${mediaType};base64,${base64}` },
+              }];
+              userMessage =
+                `[USER_IMAGE: /chat-attachments/${attachmentFilename}] ${body.message}`;
+            } catch (readError) {
+              console.error(
+                "[Chat] Native multimodal read failed, falling back:",
+                readError instanceof Error
+                  ? readError.message
+                  : String(readError),
+              );
+            }
+          }
+
           const captioningSettings = ctx.getImageGenSettings().captioning;
-          if (captioningSettings?.enabled) {
+          if (!visionImages.length && captioningSettings?.enabled) {
             try {
               const attachmentPath =
                 `${ctx.dataRoot}/.psycheros/chat-attachments/${attachmentFilename}`;
@@ -1770,11 +1922,17 @@ export async function handleChat(
             bleSettings: ctx.getBLESettings(),
             deviceStatusCache: ctx.getDeviceStatusCache(),
             contextLength: activeProfile?.contextLength,
+            contextStyle: activeProfile?.contextStyle,
             maxTokens: activeProfile?.maxTokens,
             persistentReasoningIntraTurn: ctx.llm.persistentReasoningIntraTurn,
             persistentReasoningInterTurns: activeProfile
               ?.persistentReasoningInterTurns,
             pluginManager: ctx.pluginManager,
+            fluxManager: ctx.fluxManager,
+            fluxModeNote: computeFluxModeNote(
+              ctx.fluxSettings,
+              ctx.fluxManager,
+            ),
           },
         );
 
@@ -1998,11 +2156,17 @@ export async function handleChatRetry(
             bleSettings: ctx.getBLESettings(),
             deviceStatusCache: ctx.getDeviceStatusCache(),
             contextLength: retryProfile?.contextLength,
+            contextStyle: retryProfile?.contextStyle,
             maxTokens: retryProfile?.maxTokens,
             persistentReasoningIntraTurn: ctx.llm.persistentReasoningIntraTurn,
             persistentReasoningInterTurns: retryProfile
               ?.persistentReasoningInterTurns,
             pluginManager: ctx.pluginManager,
+            fluxManager: ctx.fluxManager,
+            fluxModeNote: computeFluxModeNote(
+              ctx.fluxSettings,
+              ctx.fluxManager,
+            ),
           },
         );
 
@@ -6118,6 +6282,8 @@ export async function handleSaveLLMProfile(
 
     const settings = ctx.getLLMProfileSettings();
     const existingIdx = settings.profiles.findIndex((p) => p.id === profile.id);
+    // Multimodal toggle: coerce — older UI payloads omit it.
+    profile.multimodal = profile.multimodal === true;
 
     if (existingIdx >= 0) {
       // Update existing profile — preserve real API key if masked value sent
@@ -7558,6 +7724,18 @@ export async function handleSaveImageGenSlot(
       if (generator.settings.gemini?.apiKey?.includes("••••")) {
         generator.settings.gemini.apiKey = existing.settings.gemini?.apiKey ||
           generator.settings.gemini.apiKey;
+      }
+      if (generator.settings.venice?.apiKey?.includes("••••")) {
+        generator.settings.venice.apiKey = existing.settings.venice?.apiKey ||
+          generator.settings.venice.apiKey;
+      }
+      if (generator.settings.nanogpt?.apiKey?.includes("••••")) {
+        generator.settings.nanogpt.apiKey = existing.settings.nanogpt?.apiKey ||
+          generator.settings.nanogpt.apiKey;
+      }
+      if (generator.settings.gateway?.apiKey?.includes("••••")) {
+        generator.settings.gateway.apiKey = existing.settings.gateway?.apiKey ||
+          generator.settings.gateway.apiKey;
       }
       if (generator.settings.comfyui) {
         generator.settings.comfyui = existing.settings.comfyui ||
@@ -12001,14 +12179,35 @@ export function handleVoiceWebSocket(
         ? `\n\n${profile.customInstructions}`
         : "");
 
+    // Flux-host routing: a voice call in the LIVE HOST
+    // runs its user turns through the Flux session (continuous context,
+    // briefings — voice chat finally has memory), same ownership rule
+    // as Pulse routing. Non-host conversations: undefined → classic.
+    const fluxTurn = getFluxHostConversationId() === conversationId
+      ? (
+        prompt: string,
+        _source: string,
+        opts?: { systemSuffix?: string },
+      ) => triggerFluxTurnInSession(prompt, opts?.systemSuffix)
+      : undefined;
+
+    // ONE MOUTH: a Flux-hosted call never idle-times-out —
+    // quiet is when spontaneous speech happens (the walk-with-a-camera
+    // shape); five silent minutes must not end the call. Classic calls
+    // keep the profile's setting (0 = never, honored).
+    const effectiveProfile = fluxTurn
+      ? { ...profile, idleTimeoutSeconds: 0 }
+      : profile;
+
     const result = sessionManager.createSession(
       conversationId,
       profile.id,
       socket,
-      profile,
+      effectiveProfile,
       entityTurn,
       voiceSuffix,
       false,
+      fluxTurn,
     );
 
     if ("error" in result) {

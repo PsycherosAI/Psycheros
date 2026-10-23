@@ -258,7 +258,9 @@ export class EntityCorePluginManager {
 
   registerTools(server: McpServer): void {
     for (const { plugin, tool } of this.getTools()) {
-      server.tool(tool.name, tool.description, tool.schema, async (args) => ({
+      server.tool(tool.name, tool.description, tool.schema, async (
+        args: Record<string, unknown>,
+      ) => ({
         content: [{
           type: "text" as const,
           text: JSON.stringify(

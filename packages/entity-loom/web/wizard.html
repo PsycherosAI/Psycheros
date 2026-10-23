@@ -58,7 +58,9 @@
         --transition: 0.15s ease;
       }
 
-      *, *::before, *::after {
+      *,
+      *::before,
+      *::after {
         box-sizing: border-box;
         margin: 0;
         padding: 0;
@@ -194,7 +196,8 @@
         animation: step-spin 1.2s linear infinite;
       }
       @keyframes step-pulse {
-        0%, 100% {
+        0%,
+        100% {
           box-shadow: 0 0 0 3px var(--accent-subtle);
         }
         50% {
@@ -1167,7 +1170,8 @@
         margin-bottom: var(--sp-3);
         flex-wrap: wrap;
       }
-      .wiz-staging-toolbar-left, .wiz-staging-toolbar-right {
+      .wiz-staging-toolbar-left,
+      .wiz-staging-toolbar-right {
         display: flex;
         align-items: center;
         gap: var(--sp-2);
@@ -2696,9 +2700,9 @@
           html += `<div class="wiz-step ${dotClass}${
             !canNavigate ? " wiz-step--disabled" : ""
           }" onclick="${canNavigate ? `goToStage('${stage}')` : ""}">
-          <div class="wiz-step-dot">${isCompleted ? "&#x2713;" : (i + 1)}</div>
-          <span class="wiz-step-label">${STAGE_LABELS[stage]}</span>
-        </div>`;
+        <div class="wiz-step-dot">${isCompleted ? "&#x2713;" : (i + 1)}</div>
+        <span class="wiz-step-label">${STAGE_LABELS[stage]}</span>
+      </div>`;
         });
 
         el.innerHTML = html;
@@ -2855,12 +2859,12 @@
         return `<div class="wiz-resume-item" data-dir="${
           escAttr(p.dir)
         }" data-name="${escAttr(p.name)}">
-            <span class="wiz-resume-name">${esc(p.name)}</span>
-            <div style="display:flex;gap:var(--sp-2)">
-              <button class="btn btn--sm btn--ghost" data-action="resume">Resume</button>
-              <button class="btn btn--sm btn--danger" data-action="purge">Purge</button>
-            </div>
-          </div>`;
+          <span class="wiz-resume-name">${esc(p.name)}</span>
+          <div style="display:flex;gap:var(--sp-2)">
+            <button class="btn btn--sm btn--ghost" data-action="resume">Resume</button>
+            <button class="btn btn--sm btn--danger" data-action="purge">Purge</button>
+          </div>
+        </div>`;
       }
 
       async function resumePackage(dir) {
@@ -2877,7 +2881,8 @@
           // Prefill form with loaded config
           if (res.config) {
             document.getElementById("setup-entity").value =
-              res.config.entityName || "";
+              res.config.entityName ||
+              "";
             document.getElementById("setup-user").value = res.config.userName ||
               "";
             document.getElementById("setup-entity-pronouns").value =
@@ -2889,7 +2894,8 @@
             document.getElementById("setup-context").value =
               res.config.contextNotes || "";
             document.getElementById("setup-baseurl").value =
-              res.config.llmBaseUrl || "";
+              res.config.llmBaseUrl ||
+              "";
             document.getElementById("setup-model").value =
               res.config.llmModel || "";
             document.getElementById("setup-apikey").value = res.config
@@ -2960,21 +2966,21 @@
 
           if (res.ok) {
             resultEl.innerHTML = `
-            <div class="wiz-test-result wiz-test-result--ok">&#x2713; Connected</div>
-            <div class="wiz-test-meta">Model: ${
+          <div class="wiz-test-result wiz-test-result--ok">&#x2713; Connected</div>
+          <div class="wiz-test-meta">Model: ${
               esc(res.model)
             } &middot; Latency: ${res.latencyMs}ms</div>`;
           } else {
             resultEl.innerHTML = `
-            <div class="wiz-test-result wiz-test-result--fail">&#x2717; Failed</div>
-            <div class="wiz-test-meta">${
+          <div class="wiz-test-result wiz-test-result--fail">&#x2717; Failed</div>
+          <div class="wiz-test-meta">${
               esc(res.error || "Unknown error")
             }</div>`;
           }
         } catch (e) {
           resultEl.innerHTML = `
-          <div class="wiz-test-result wiz-test-result--fail">&#x2717; Error</div>
-          <div class="wiz-test-meta">${esc(e.message)}</div>`;
+        <div class="wiz-test-result wiz-test-result--fail">&#x2717; Error</div>
+        <div class="wiz-test-meta">${esc(e.message)}</div>`;
         } finally {
           btn.disabled = false;
           btn.textContent = "Test Connection";
@@ -3085,8 +3091,8 @@
           activeEntries.filter((e) => e.status === "queued").length;
 
         let html = `<div class="wiz-upload-queue-header">
-        <span>File</span><span>Platform</span><span>Size</span><span></span>
-      </div>`;
+      <span>File</span><span>Platform</span><span>Size</span><span></span>
+    </div>`;
 
         for (const entry of activeEntries) {
           const statusIcon = entry.status === "parsed"
@@ -3138,22 +3144,22 @@
           }
 
           html += `<div class="wiz-upload-queue-row${rowClass}">
-          <div class="wiz-upload-queue-filename" title="${esc(entry.filename)}${
+        <div class="wiz-upload-queue-filename" title="${esc(entry.filename)}${
             entry.error ? "\n" + esc(entry.error) : ""
           }">${esc(entry.filename)}${
             entry.error
               ? ' <span style="color:var(--error);font-size:10px">error</span>'
               : ""
           }</div>
-          ${platformHtml}
-          <div class="wiz-upload-queue-size">${formatBytes(entry.size)}</div>
-          <div style="display:flex;align-items:center;gap:var(--sp-2)">
-            <span class="wiz-upload-queue-status" style="${statusColor}">${statusIcon}</span>
-            <button class="wiz-upload-queue-remove" data-filename="${
+        ${platformHtml}
+        <div class="wiz-upload-queue-size">${formatBytes(entry.size)}</div>
+        <div style="display:flex;align-items:center;gap:var(--sp-2)">
+          <span class="wiz-upload-queue-status" style="${statusColor}">${statusIcon}</span>
+          <button class="wiz-upload-queue-remove" data-filename="${
             esc(entry.filename)
           }" title="Remove">&#x2715;</button>
-          </div>
-        </div>`;
+        </div>
+      </div>`;
         }
 
         queueEl.innerHTML = html;
@@ -3268,9 +3274,9 @@
           if (res.preview && res.preview.conversationCount > 0) {
             const preview = res.preview;
             document.getElementById("preview-stats").innerHTML = `
-            <div class="wiz-stat"><div class="wiz-stat-label">Conversations</div><div class="wiz-stat-value">${preview.conversationCount}</div></div>
-            <div class="wiz-stat"><div class="wiz-stat-label">Messages</div><div class="wiz-stat-value">${preview.messageCount.toLocaleString()}</div></div>
-            <div class="wiz-stat"><div class="wiz-stat-label">Date Range</div><div class="wiz-stat-value" style="font-size:var(--font-size-sm)">${
+          <div class="wiz-stat"><div class="wiz-stat-label">Conversations</div><div class="wiz-stat-value">${preview.conversationCount}</div></div>
+          <div class="wiz-stat"><div class="wiz-stat-label">Messages</div><div class="wiz-stat-value">${preview.messageCount.toLocaleString()}</div></div>
+          <div class="wiz-stat"><div class="wiz-stat-label">Date Range</div><div class="wiz-stat-value" style="font-size:var(--font-size-sm)">${
               preview.dateFrom || "?"
             } &rarr; ${preview.dateTo || "?"}</div></div>`;
 
@@ -3353,13 +3359,13 @@
             return;
           }
           costEl.innerHTML = `
-          <div class="wiz-cost">
-            <span class="wiz-cost-label">Requests</span><span class="wiz-cost-value">${est.requests}</span>
-            <span class="wiz-cost-label">Input Tokens</span><span class="wiz-cost-value">${est.inputTokens.toLocaleString()}</span>
-            <span class="wiz-cost-label">Output Tokens</span><span class="wiz-cost-value">${est.outputTokens.toLocaleString()}</span>
-            <span class="wiz-cost-label">Est. Cost</span><span class="wiz-cost-highlight">${est.estimatedCost}</span>
-          </div>
-          <div style="font-size:var(--font-size-xs);color:var(--fg-subtle);margin-top:var(--sp-2)">${
+        <div class="wiz-cost">
+          <span class="wiz-cost-label">Requests</span><span class="wiz-cost-value">${est.requests}</span>
+          <span class="wiz-cost-label">Input Tokens</span><span class="wiz-cost-value">${est.inputTokens.toLocaleString()}</span>
+          <span class="wiz-cost-label">Output Tokens</span><span class="wiz-cost-value">${est.outputTokens.toLocaleString()}</span>
+          <span class="wiz-cost-label">Est. Cost</span><span class="wiz-cost-highlight">${est.estimatedCost}</span>
+        </div>
+        <div style="font-size:var(--font-size-xs);color:var(--fg-subtle);margin-top:var(--sp-2)">${
             esc(est.description)
           }</div>`;
         } catch (e) {
@@ -3496,32 +3502,32 @@
             ? "Significant Memories"
             : "Daily Memories";
           listEl.innerHTML = `
-          <div class="wiz-section-title" style="margin-top:var(--sp-6);margin-bottom:var(--sp-3)">${sectionTitle} (${files.length})</div>
-          ${
+        <div class="wiz-section-title" style="margin-top:var(--sp-6);margin-bottom:var(--sp-3)">${sectionTitle} (${files.length})</div>
+        ${
             files.map((f) => `
-            <div class="wiz-memory-item" data-file="${
+          <div class="wiz-memory-item" data-file="${
               esc(f)
             }" id="mem-${type}-${f}">
-              <div class="wiz-memory-header" onclick="toggleMemory('${type}','${
+            <div class="wiz-memory-header" onclick="toggleMemory('${type}','${
               esc(f)
             }')">
-                <span class="wiz-memory-name">${esc(f)}</span>
-                <div class="wiz-memory-actions">
-                  <button class="btn btn--sm btn--ghost" onclick="event.stopPropagation();openMemoryEdit('${type}','${
+              <span class="wiz-memory-name">${esc(f)}</span>
+              <div class="wiz-memory-actions">
+                <button class="btn btn--sm btn--ghost" onclick="event.stopPropagation();openMemoryEdit('${type}','${
               esc(f)
             }')">Edit</button>
-                  <button class="btn btn--sm btn--ghost" style="color:var(--error)" onclick="event.stopPropagation();deleteMemory('${type}','${
+                <button class="btn btn--sm btn--ghost" style="color:var(--error)" onclick="event.stopPropagation();deleteMemory('${type}','${
               esc(f)
             }')">Delete</button>
-                </div>
-              </div>
-              <div class="wiz-memory-body" id="mem-body-${type}-${f}">
-                <div class="wiz-memory-content" id="mem-content-${type}-${f}">Loading...</div>
               </div>
             </div>
-          `).join("")
+            <div class="wiz-memory-body" id="mem-body-${type}-${f}">
+              <div class="wiz-memory-content" id="mem-content-${type}-${f}">Loading...</div>
+            </div>
+          </div>
+        `).join("")
           }
-        `;
+      `;
         } catch { /* ignore */ }
       }
 
@@ -3557,10 +3563,10 @@
         );
         if (!bodyEl) return;
         bodyEl.innerHTML = `
-            <div class="wiz-memory-content" id="mem-content-${type}-${filename}">${
+          <div class="wiz-memory-content" id="mem-content-${type}-${filename}">${
           esc(content)
         }</div>
-          `;
+        `;
       }
 
       async function openMemoryEdit(type, filename) {
@@ -3585,17 +3591,17 @@
         );
         if (!bodyEl) return;
         bodyEl.innerHTML = `
-          <textarea id="mem-edit-${type}-${filename}" class="wiz-memory-edit">${
+        <textarea id="mem-edit-${type}-${filename}" class="wiz-memory-edit">${
           esc(res.content || "")
         }</textarea>
-          <div class="wiz-actions" style="border:none;margin:0">
-            <button class="btn btn--sm btn--primary" onclick="saveMemoryEdit('${type}','${
+        <div class="wiz-actions" style="border:none;margin:0">
+          <button class="btn btn--sm btn--primary" onclick="saveMemoryEdit('${type}','${
           esc(filename)
         }')">Save</button>
-            <button class="btn btn--sm btn--ghost" onclick="cancelMemoryEdit('${type}','${
+          <button class="btn btn--sm btn--ghost" onclick="cancelMemoryEdit('${type}','${
           esc(filename)
         }')">Cancel</button>
-          </div>`;
+        </div>`;
       }
 
       async function saveMemoryEdit(type, filename) {
@@ -3820,12 +3826,12 @@
           }" style="background:${color}22;color:${color}" onclick="togglePaletteFilter('${
             esc(name)
           }')">
-          <span class="wiz-staging-palette-chip-dot" style="background:${color}"></span>
-          ${esc(name)}
-          <span class="wiz-staging-palette-chip-remove" onclick="event.stopPropagation();deletePaletteTag('${
+        <span class="wiz-staging-palette-chip-dot" style="background:${color}"></span>
+        ${esc(name)}
+        <span class="wiz-staging-palette-chip-remove" onclick="event.stopPropagation();deletePaletteTag('${
             esc(name)
           }')">&times;</span>
-        </span>`;
+      </span>`;
         }).join("");
       }
 
@@ -3844,9 +3850,9 @@
             return `<span class="wiz-staging-palette-chip" style="background:${color}22;color:${color}" onclick="applyTagToSelectedFromPalette('${
               esc(name)
             }')">
-            <span class="wiz-staging-palette-chip-dot" style="background:${color}"></span>
-            ${esc(name)}
-          </span>`;
+          <span class="wiz-staging-palette-chip-dot" style="background:${color}"></span>
+          ${esc(name)}
+        </span>`;
           }).join("");
       }
 
@@ -4067,29 +4073,29 @@
           const tags = (c.tags || []).map((t) => {
             const color = getTagColor(t);
             return `<span class="wiz-staging-tag" style="background:${color}22;color:${color}" onclick="event.stopPropagation();removeTagFromConv('${c.id}','${t}')">
-            <span class="wiz-staging-tag-dot" style="background:${color}"></span>${
+          <span class="wiz-staging-tag-dot" style="background:${color}"></span>${
               esc(t)
             }<span class="wiz-staging-tag-remove">&times;</span>
-          </span>`;
+        </span>`;
           }).join("");
           return `<div class="wiz-staging-item${excl}" data-id="${esc(c.id)}">
-          <div class="wiz-staging-item-check"><input type="checkbox" ${
+        <div class="wiz-staging-item-check"><input type="checkbox" ${
             c.included ? "checked" : ""
           } onchange="toggleConvIncluded('${c.id}', this.checked)"></div>
-          <div class="wiz-staging-item-info">
-            <div class="wiz-staging-item-title" onclick="openStagingMessages('${c.id}', ${
+        <div class="wiz-staging-item-info">
+          <div class="wiz-staging-item-title" onclick="openStagingMessages('${c.id}', ${
             JSON.stringify(JSON.stringify(c.title || "Untitled"))
               .replace(/"/g, "&quot;")
           })">${esc(c.title || "Untitled")}</div>
-            <div class="wiz-staging-item-meta">
-              <span>${c.platform}</span>
-              <span>${c.messageCount} msgs</span>
-              <span>${dateStr}</span>
-            </div>
-            ${tags ? `<div class="wiz-staging-item-tags">${tags}</div>` : ""}
+          <div class="wiz-staging-item-meta">
+            <span>${c.platform}</span>
+            <span>${c.messageCount} msgs</span>
+            <span>${dateStr}</span>
           </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">${badge}</div>
-        </div>`;
+          ${tags ? `<div class="wiz-staging-item-tags">${tags}</div>` : ""}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">${badge}</div>
+      </div>`;
         }).join("");
 
         // Pagination
@@ -4186,20 +4192,20 @@
               : "";
             const content = esc(m.content || "(empty)");
             return `<div class="wiz-staging-msg ${roleClass}">
-            <div class="wiz-staging-msg-role">${esc(m.role)} ${
+          <div class="wiz-staging-msg-role">${esc(m.role)} ${
               m.isEdited ? "(edited)" : ""
             }</div>
-            <div class="wiz-staging-msg-content">${content}</div>
-            ${editedBadge}
-            <div class="wiz-staging-msg-actions">
-              <button class="btn btn--sm btn--ghost" onclick="editStagingMessage('${m.id}','${m.conversationId}')">Edit</button>
-              ${
+          <div class="wiz-staging-msg-content">${content}</div>
+          ${editedBadge}
+          <div class="wiz-staging-msg-actions">
+            <button class="btn btn--sm btn--ghost" onclick="editStagingMessage('${m.id}','${m.conversationId}')">Edit</button>
+            ${
               m.isEdited
                 ? `<button class="btn btn--sm btn--ghost" onclick="revertStagingMessage('${m.id}')">Revert</button>`
                 : ""
             }
-            </div>
-          </div>`;
+          </div>
+        </div>`;
           }).join("");
 
           // Pagination
@@ -4338,31 +4344,31 @@
           const tags = (c.tags || []).map((t) => {
             const color = getTagColor(t);
             return `<span class="wiz-staging-tag" style="background:${color}22;color:${color}" onclick="event.stopPropagation();removeTagFromSearchResult('${c.id}','${t}')">
-            <span class="wiz-staging-tag-dot" style="background:${color}"></span>${
+          <span class="wiz-staging-tag-dot" style="background:${color}"></span>${
               esc(t)
             }<span class="wiz-staging-tag-remove">&times;</span>
-          </span>`;
+        </span>`;
           }).join("");
           return `<div class="wiz-staging-item" data-id="${esc(c.id)}">
-          <div class="wiz-staging-item-check"><input type="checkbox" onchange="updateSearchCount()"></div>
-          <div class="wiz-staging-item-info">
-            <div class="wiz-staging-item-title" onclick="openStagingMessages('${c.id}', ${
+        <div class="wiz-staging-item-check"><input type="checkbox" onchange="updateSearchCount()"></div>
+        <div class="wiz-staging-item-info">
+          <div class="wiz-staging-item-title" onclick="openStagingMessages('${c.id}', ${
             JSON.stringify(JSON.stringify(c.title || "Untitled"))
               .replace(/"/g, "&quot;")
           })">${esc(c.title || "Untitled")}</div>
-            <div class="wiz-staging-item-meta">
-              <span>${c.platform}</span>
-              <span>${c.messageCount} msgs</span>
-              <span>${dateStr}</span>
-            </div>
-            ${tags ? `<div class="wiz-staging-item-tags">${tags}</div>` : ""}
+          <div class="wiz-staging-item-meta">
+            <span>${c.platform}</span>
+            <span>${c.messageCount} msgs</span>
+            <span>${dateStr}</span>
           </div>
-          <div style="text-align:right">
-            <span style="font-family:var(--font-mono);font-size:var(--font-size-xs);color:var(--accent)">${c.matchCount} match${
+          ${tags ? `<div class="wiz-staging-item-tags">${tags}</div>` : ""}
+        </div>
+        <div style="text-align:right">
+          <span style="font-family:var(--font-mono);font-size:var(--font-size-xs);color:var(--accent)">${c.matchCount} match${
             c.matchCount !== 1 ? "es" : ""
           }</span>
-          </div>
-        </div>`;
+        </div>
+      </div>`;
         }).join("");
 
         // Pagination
@@ -4436,9 +4442,9 @@
             return `<span class="wiz-staging-palette-chip" style="background:${color}22;color:${color}" onclick="applyTagToSearchResults('${
               esc(name)
             }')">
-            <span class="wiz-staging-palette-chip-dot" style="background:${color}"></span>
-            ${esc(name)}
-          </span>`;
+          <span class="wiz-staging-palette-chip-dot" style="background:${color}"></span>
+          ${esc(name)}
+        </span>`;
           }).join("");
       }
 
@@ -4528,11 +4534,11 @@
           );
           const s = res.summary;
           el.innerHTML = `<div class="wiz-staging-compare-summary">
-          <div class="wiz-staging-compare-item"><b>${s.new}</b> new</div>
-          <div class="wiz-staging-compare-item"><b>${s.existing}</b> already in Psycheros</div>
-          <div class="wiz-staging-compare-item"><b>${s.changed}</b> changed</div>
-        </div>
-        <div style="font-size:var(--font-size-xs);color:var(--fg-subtle);margin-top:var(--sp-2)">Use the "All" filter to see status badges on each conversation.</div>`;
+        <div class="wiz-staging-compare-item"><b>${s.new}</b> new</div>
+        <div class="wiz-staging-compare-item"><b>${s.existing}</b> already in Psycheros</div>
+        <div class="wiz-staging-compare-item"><b>${s.changed}</b> changed</div>
+      </div>
+      <div style="font-size:var(--font-size-xs);color:var(--fg-subtle);margin-top:var(--sp-2)">Use the "All" filter to see status badges on each conversation.</div>`;
           loadStagingConversations();
           loadStagingStats();
         } catch (e) {

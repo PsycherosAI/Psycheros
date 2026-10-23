@@ -56,6 +56,7 @@ data/
 ├── relationship/
 ├── custom/
 ├── identity-meta.json # prompt-label mappings for identity files
+├── instances.json     # instance registry — every name that has connected
 ├── memories/
 │   ├── daily/
 │   ├── weekly/
@@ -122,6 +123,11 @@ model + chunk params at spawn time via `ENTITY_CORE_EMBEDDING_*` env vars
 `deno task dev` standalone) I fall back to MiniLM defaults. See
 `src/embeddings/settings.ts:loadEmbeddingRuntimeConfig()`.
 
+A periodic embedding **sweep** (every 5 minutes, `src/mod.ts`) re-runs the
+boot-backfill loop so memory files written by other processes sharing the data
+dir — or plain drop-ins — become searchable without a restart. It is embed-only:
+it never triggers graph extraction.
+
 Deep reference — date-prefix enrichment, dynamic vec0 dimension, schema
 fingerprint classification, rebuild notification protocol, maintenance tools:
 [`docs/embeddings.md`](docs/embeddings.md).
@@ -159,6 +165,7 @@ Batch backfill from an existing memory tree is
 | MCP tool reference, schemas, examples | [docs/mcp-tools.md](docs/mcp-tools.md)                       |
 | First-person philosophy               | [../../PHILOSOPHY.md](../../PHILOSOPHY.md)                   |
 | Sync protocol, memory retrieval       | [docs/sync-and-memory.md](docs/sync-and-memory.md)           |
+| Connecting harnesses (instances)      | [docs/connecting-harnesses.md](docs/connecting-harnesses.md) |
 | Knowledge graph internals             | [docs/knowledge-graph.md](docs/knowledge-graph.md)           |
 | Snapshots: retention, restore         | [docs/snapshots.md](docs/snapshots.md)                       |
 | Embedding pipeline                    | [docs/embeddings.md](docs/embeddings.md)                     |

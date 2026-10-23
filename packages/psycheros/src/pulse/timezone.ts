@@ -15,13 +15,19 @@
 // =============================================================================
 
 /**
- * Read the user's configured display timezone.
- * Returns `undefined` when no timezone is configured, making all
- * conversion functions fall through to existing (UTC / passthrough) behaviour.
+ * Read the user's configured timezone.
+ *
+ * Resolution order: `PSYCHEROS_DISPLAY_TZ` (set from Main Settings) →
+ * `TZ` (process environment) → the machine's actual system timezone, as
+ * Intl resolves it with no override. "System Default" in Main Settings
+ * must mean the machine's timezone everywhere — scheduling included —
+ * never a silent UTC. `undefined` survives only for the exotic case
+ * where Intl cannot resolve a system timezone at all; consumers then
+ * fall through to their UTC fallback.
  */
 export function getDisplayTimezone(): string | undefined {
   return Deno.env.get("PSYCHEROS_DISPLAY_TZ") ?? Deno.env.get("TZ") ??
-    undefined;
+    Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
 // =============================================================================

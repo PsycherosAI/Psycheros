@@ -43,6 +43,14 @@ import {
   TOOL_CATEGORIES,
 } from "../tools/mod.ts";
 import type { Tool } from "../tools/mod.ts";
+// Plugin Sensory Organ settings descriptors — rendered under the
+// built-in organs field (Settings > Flux).
+import {
+  motionVisionSettingsFields,
+  systemStateSettingsFields,
+} from "../../../entity-flux/src/mod.ts";
+import { getSensoryOrganPluginDescriptors } from "../flux/sensory-organ-plugins.ts";
+import type { SensoryOrganSettingField } from "../flux/sensory-organ-plugins.ts";
 import type {
   ChunkParams,
   EmbeddingModelPreset,
@@ -356,39 +364,18 @@ export function renderAppShell(
       <div class="sidebar-overlay" onclick="Psycheros.toggleSidebar()"></div>
       ${renderSidebar([])}
       <div id="reindex-banner" class="reindex-banner" hidden></div>
-      <div id="held-skills-strip" class="held-skills-strip"></div>
       <div class="chat" id="chat">
         ${renderEmptyState()}
         ${renderInputArea()}
       </div>
-      <button
-        class="voice-call-fab"
-        id="voice-call-btn"
-        style="display: none; position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 50%; align-items: center; justify-content: center; background-color: var(--c-bg-raised); border: 1px solid var(--c-accent-muted); color: var(--c-accent); cursor: pointer; z-index: 50; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); padding: 0; margin: 0; box-sizing: border-box;"
-        onclick="Psycheros.startVoiceCall()"
-        title="Start voice call"
-        aria-label="Start voice call"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/>
-        </svg>
-      </button>
-      <button
-        class="workspace-fab"
-        id="workspace-btn"
-        style="display: none; position: absolute; top: calc(64px + env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 50%; align-items: center; justify-content: center; background-color: var(--c-bg-raised); border: 1px solid var(--c-accent-muted); color: var(--c-accent); cursor: pointer; z-index: 50; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); padding: 0; margin: 0; box-sizing: border-box; font-family: 'JetBrains Mono', ui-monospace, monospace;"
-        onclick="Psycheros.openWorkspaceList()"
-        title="Workspace sessions"
-        aria-label="Workspace sessions"
-      >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="5" width="20" height="14" rx="2"/>
-          <path d="M6 12l3 2-3 2"/>
-          <line x1="13" y1="16" x2="16" y2="16"/>
-        </svg>
-        <span id="workspace-fab-badge" style="position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; border-radius: 9px; background-color: var(--c-accent); color: white; font-size: 11px; font-weight: 600; display: none; align-items: center; justify-content: center; padding: 0 5px; font-family: ui-sans-serif, system-ui, sans-serif;"></span>
-        <span id="workspace-fab-alert" style="position: absolute; top: -6px; left: -6px; min-width: 20px; height: 20px; border-radius: 10px; background-color: var(--c-warning); color: var(--c-on-warning); font-size: 13px; font-weight: 700; display: none; align-items: center; justify-content: center; padding: 0 5px; font-family: ui-sans-serif, system-ui, sans-serif; box-shadow: 0 0 0 2px var(--c-bg-raised); line-height: 1;" title="One or more workspace sessions need user input">!</span>
-      </button>
+      <!-- The state sub-bar: one line, subprocess+state segments
+           (Flux ON | Workspace (2) | Voice ON), tappable, hidden when
+           nothing is active. -->
+      <div id="state-sub-bar" class="state-sub-bar" hidden></div>
+      <!-- The action drawer: the kebab in the
+           header opens this; it hangs from the state sub-bar. App-shell
+           elements — HTMX-swap survivors, like the FABs they replace. -->
+      <nav id="action-drawer" class="action-drawer" aria-label="Actions"></nav>
     </div>
   </div>
   <script src="/js/color.js"></script>
@@ -470,7 +457,9 @@ export function renderAppShell(
   <script type="module" src="/js/psycheros.js"></script>
   <script type="module" src="/js/reindex-banner.js"></script>
   <script type="module" src="/js/voice.js"></script>
+  <script type="module" src="/js/flux.js"></script>
   <script type="module" src="/js/workspace.js"></script>
+  <script type="module" src="/js/whats-new.js"></script>
 </body>
 </html>`;
 }
@@ -546,10 +535,11 @@ export function renderHeader(): string {
         <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
       </svg>
     </button>
-    <button class="context-toggle" onclick="Psycheros.toggleContextViewer()" aria-label="Toggle context viewer" title="View LLM Context">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="16 18 22 12 16 6"/>
-        <polyline points="8 6 2 12 8 18"/>
+    <button class="header-icon" id="action-menu-btn" onclick="Psycheros.toggleActionDrawer()" aria-label="Open action menu" title="Actions">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+        <circle cx="12" cy="5" r="2"></circle>
+        <circle cx="12" cy="12" r="2"></circle>
+        <circle cx="12" cy="19" r="2"></circle>
       </svg>
     </button>
   </div>
@@ -839,6 +829,25 @@ export function renderSettingsHub(): string {
         <div class="settings-hub-card-body">
           <span class="settings-hub-card-title">Plugins</span>
           <span class="settings-hub-card-desc">Inspect trusted local extensions and runtime status</span>
+        </div>
+        <svg class="settings-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </a>
+      <a class="settings-hub-card"
+        hx-get="/fragments/settings/flux"
+        hx-target="#chat"
+        hx-swap="innerHTML">
+        <div class="settings-hub-card-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+            <circle cx="12" cy="12" r="7" opacity="0.7"/>
+            <circle cx="12" cy="12" r="11" opacity="0.4"/>
+          </svg>
+        </div>
+        <div class="settings-hub-card-body">
+          <span class="settings-hub-card-title">Flux</span>
+          <span class="settings-hub-card-desc">Nervous system — sensory organs, ambient presence, the Flux Space</span>
         </div>
         <svg class="settings-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="9 18 15 12 9 6"/>
@@ -1290,10 +1299,10 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
 
     <section class="theme-section">
       <h3 class="theme-section-title">Timezone</h3>
-      <p class="theme-section-desc">Set the timezone used for message timestamps</p>
+      <p class="theme-section-desc">Set the timezone used for message timestamps, daily memory summarization, and pulse schedules. "(System Default)" follows this machine's system timezone.</p>
       <div class="llm-fields">
         <div class="llm-field">
-          <label for="general-timezone">Display Timezone</label>
+          <label for="general-timezone">Timezone</label>
           <select id="general-timezone" class="input-field llm-input">
             <option value=""${
     settings.timezone === "" ? " selected" : ""
@@ -1404,6 +1413,16 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
     settings.timezone === "Pacific/Auckland" ? " selected" : ""
   }>UTC+13 Pacific/Auckland (NZDT)</option>
           </select>
+        </div>
+      </div>
+    </section>
+
+    <section class="theme-section">
+      <h3 class="theme-section-title">What's New</h3>
+      <p class="theme-section-desc">Release notes from the project — shown automatically after an update. Open them again anytime.</p>
+      <div class="llm-fields">
+        <div class="llm-field">
+          <button class="btn" onclick="WhatsNew.open()">View release notes</button>
         </div>
       </div>
     </section>
@@ -2598,10 +2617,10 @@ export function renderMessage(
 }
 
 /**
- * Render the action buttons for a message: edit, delete (soft-delete /
- * tombstone), and flag-glitched. Per plan §9f — surfaces the trigger
- * paths so users can mark their own or the entity's messages for
- * repair/removal without needing to ask the entity to do it.
+ * Render the action buttons for a message. Regular chat messages get only
+ * Edit; the Discord channel view also gets delete (soft-delete / tombstone)
+ * and flag-glitched (plan §9f) so users can mark messages for repair/removal
+ * without needing to ask the entity to do it.
  *
  * @param messageId - The message ID. When undefined, no buttons render.
  * @param prefix - CSS class prefix: "msg" for regular chat messages,
@@ -2618,16 +2637,10 @@ function renderMessageActionButtons(
   const editCls = prefix === "discord-msg"
     ? "discord-msg-edit-btn"
     : "msg-edit-btn";
-  const actionCls = prefix === "discord-msg"
-    ? "discord-msg-action-btn"
-    : "msg-action-btn";
-  return `<button class="${editCls}" onclick="Psycheros.startMessageEdit('${id}')" title="Edit message">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-        </svg>
-      </button>
-      <button class="${actionCls}" onclick="Psycheros.confirmDeleteMessage('${id}')" title="Delete message">
+  // Delete + flag are Discord-view-only; regular conversations keep the
+  // header to Edit alone.
+  const manageButtons = prefix === "discord-msg"
+    ? `<button class="discord-msg-action-btn" onclick="Psycheros.confirmDeleteMessage('${id}')" title="Delete message">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="3 6 5 6 21 6"/>
           <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/>
@@ -2635,13 +2648,20 @@ function renderMessageActionButtons(
           <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/>
         </svg>
       </button>
-      <button class="${actionCls}" onclick="Psycheros.confirmFlagGlitched('${id}')" title="Mark as corrupted">
+      <button class="discord-msg-action-btn" onclick="Psycheros.confirmFlagGlitched('${id}')" title="Mark as corrupted">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
           <line x1="12" y1="9" x2="12" y2="13"/>
           <line x1="12" y1="17" x2="12.01" y2="17"/>
         </svg>
-      </button>`;
+      </button>`
+    : "";
+  return `<button class="${editCls}" onclick="Psycheros.startMessageEdit('${id}')" title="Edit message">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+      </button>${manageButtons}`;
 }
 
 /**
@@ -2816,23 +2836,6 @@ export function renderAssistantMessage(
     html += renderThinkingSection(msg.reasoningContent);
   }
 
-  // Tool calls
-  if (msg.toolCalls && msg.toolCalls.length > 0) {
-    for (const tc of msg.toolCalls) {
-      const toolMsg = toolResultsByCallId?.get(tc.id);
-      const result: ToolResult | undefined = toolMsg
-        ? { toolCallId: tc.id, content: toolMsg.content }
-        : undefined;
-      html += renderToolCard(tc, result);
-      // If the tool produced an image sidecar, render it as a sibling below
-      // the (collapsed) tool card. Matches the streaming `image_generated`
-      // event path — same DOM, same caption toggle, both keyed by toolCallId.
-      if (toolMsg?.metadata?.image) {
-        html += renderGeneratedImageSibling(toolMsg.metadata.image, tc.id);
-      }
-    }
-  }
-
   // Main content - render markdown for assistant messages
   if (msg.content) {
     // Extract [IMAGE:...] markers from raw content BEFORE markdown rendering.
@@ -2861,6 +2864,27 @@ export function renderAssistantMessage(
     html += `<div class="assistant-text" data-raw-content="${
       escapeHtml(msg.content)
     }">${contentHtml}</div>`;
+  }
+
+  // Tool calls — AFTER the row's own text: within a generation the
+  // speech preceded the calls ("let me check" → call), so that's the
+  // reading order. Think→call→answer rows have no row text; the card
+  // follows the thinking section directly. Same rule as the timeline:
+  // cards render where they happen.
+  if (msg.toolCalls && msg.toolCalls.length > 0) {
+    for (const tc of msg.toolCalls) {
+      const toolMsg = toolResultsByCallId?.get(tc.id);
+      const result: ToolResult | undefined = toolMsg
+        ? { toolCallId: tc.id, content: toolMsg.content }
+        : undefined;
+      html += renderToolCard(tc, result);
+      // If the tool produced an image sidecar, render it as a sibling below
+      // the (collapsed) tool card. Matches the streaming `image_generated`
+      // event path — same DOM, same caption toggle, both keyed by toolCallId.
+      if (toolMsg?.metadata?.image) {
+        html += renderGeneratedImageSibling(toolMsg.metadata.image, tc.id);
+      }
+    }
   }
 
   html += `</div></div>`;
@@ -6173,7 +6197,7 @@ export function renderLLMProfileEdit(
     <!-- Behavior Section -->
     <section class="theme-section">
       <h3 class="theme-section-title">Behavior</h3>
-      <p class="theme-section-desc">Chain-of-thought and reasoning settings</p>
+      <p class="theme-section-desc">Chain-of-thought, reasoning, and caching settings</p>
       <label class="toggle-label">
         <input type="checkbox" id="llm-thinking" role="switch" aria-label="Chain-of-Thought Reasoning" ${
     isNew ? "checked" : profile!.thinkingEnabled ? "checked" : ""
@@ -6181,6 +6205,19 @@ export function renderLLMProfileEdit(
         <span class="toggle-slider"></span>
         <span class="toggle-text">Chain-of-Thought Reasoning</span>
       </label>
+
+      <!-- Caching Mode (cache-friendly context placement) -->
+      <div style="margin-top:1rem;">
+        <span style="display:block;font-weight:600;margin-bottom:0.25rem;">Caching Mode</span>
+        <label class="toggle-label">
+          <input type="checkbox" id="llm-context-style" role="switch" aria-label="Cache-friendly mode" ${
+    profile?.contextStyle === "cache-friendly" ? "checked" : ""
+  }>
+          <span class="toggle-slider"></span>
+          <span class="toggle-text">Cache-friendly mode</span>
+        </label>
+        <p class="label-hint" style="margin-top:0.5rem;font-size:0.8rem;opacity:0.7;">When on, the volatile context (memories, lorebook, situational awareness) is placed as a final system message after the user's message — every earlier token stays identical between turns, so providers that cache prompts reuse them. Only enable this if the provider accepts system messages after user messages.</p>
+      </div>
       <p class="label-hint" id="thinking-provider-note" style="margin-top:0.5rem;font-size:0.8rem;opacity:0.7;">Not supported by all providers. Unsupported providers will silently ignore this parameter.</p>
 
       <!-- Persistent Reasoning (Intra-Turn) -->
@@ -6212,6 +6249,17 @@ export function renderLLMProfileEdit(
   }" oninput="updatePersistentReasoningWarnings()" style="width:6rem;padding:0.4rem;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;">
         <p class="label-hint" style="margin-top:0.25rem;font-size:0.8rem;opacity:0.7;">How many past turns of thinking are carried forward. Higher values improve cohesion but consume context budget — each turn's reasoning can run 1-5k tokens. 0 disables.</p>
         <p class="label-hint" id="persistent-inter-warning" style="margin-top:0.25rem;font-size:0.8rem;color:var(--c-warning);display:none;">This provider isn't in the verified list for persistent reasoning. If the API returns 400 errors, set this back to 0.</p>
+      </div>
+
+      <!-- Multimodal: declared, never assumed -->
+      <div style="margin-top:0.75rem;">
+        <label style="display:flex;align-items:center;gap:0.5rem;font-weight:600;cursor:pointer;">
+          <input type="checkbox" id="llm-multimodal" role="switch" ${
+    profile?.multimodal ? "checked" : ""
+  }>
+          <span>Multimodal</span>
+        </label>
+        <p class="label-hint" style="margin-top:0.25rem;font-size:0.8rem;opacity:0.7;">Declare that this model is natively multimodal — image uploads ride the turn as native content parts (pixels are transient; the transcript keeps markers). Off by default; the captioning fallback applies when off. <strong>Currently images only</strong> — audio and video arrive in a later phase.</p>
       </div>
     </section>
 
@@ -6961,7 +7009,7 @@ export function renderConnectionsDiscordSettings(
             <input class="settings-input" id="discord-allowed-tools"
               value="${
     gc?.allowedTools.join(", ") ??
-      "web_search, generate_image, describe_image, look_closer, create_significant_memory, vault"
+      "web_search, generate_image, describe_image, create_significant_memory, vault"
   }">
             <span class="field-hint">Tools the entity can use in Discord channels.</span>
           </div>
@@ -9210,6 +9258,7 @@ export function renderImageGenSlotSettings(
   const orSettings = g.settings.openrouter;
   const veniceSettings = g.settings.venice;
   const nanogptSettings = g.settings.nanogpt;
+  const gatewaySettings = g.settings.gateway;
 
   return `<div class="settings-view">
   <div class="settings-header">
@@ -9280,6 +9329,9 @@ export function renderImageGenSlotSettings(
             <option value="nanogpt" ${
     g.provider === "nanogpt" ? "selected" : ""
   }>NanoGPT</option>
+            <option value="gateway" ${
+    g.provider === "gateway" ? "selected" : ""
+  }>Self-Hosted Gateway</option>
             <option value="comfyui" disabled>ComfyUI (coming soon)</option>
             <option value="native" disabled>Native (coming soon)</option>
           </select>
@@ -9392,6 +9444,47 @@ export function renderImageGenSlotSettings(
           <p class="settings-note">Multi-image anchor support depends on the model (e.g. flux-kontext, gpt-4o-image, gpt-image-1 accept multiple; others accept one).</p>
         </div>
 
+        <div id="ig-gateway-section" style="${
+    g.provider === "gateway" ? "" : "display:none;"
+  }">
+          <h3 style="margin-top:var(--sp-4);font-size:var(--font-size-sm);color:var(--c-fg-muted);">Self-Hosted Gateway Settings</h3>
+          <div class="llm-field">
+            <label for="ig-gateway-baseurl">Gateway Base URL</label>
+            <input type="text" id="ig-gateway-baseurl" class="input-field llm-input" value="${
+    escapeHtml(gatewaySettings?.baseUrl || "")
+  }" placeholder="https://gateway.example.com (no path)">
+          </div>
+          <div class="llm-field">
+            <label for="ig-gateway-key">API Key</label>
+            <input type="password" id="ig-gateway-key" class="input-field llm-input" value="${
+    escapeHtml(gatewaySettings?.apiKey || "")
+  }" placeholder="Bearer key">
+          </div>
+          <div class="llm-field">
+            <label for="ig-gateway-path">API Route Path</label>
+            <input type="text" id="ig-gateway-path" class="input-field llm-input" value="${
+    escapeHtml(gatewaySettings?.modelPath || "")
+  }" placeholder="/v1/images/generations (default)">
+          </div>
+          <div class="llm-field">
+            <label for="ig-gateway-model">Model</label>
+            <input type="text" id="ig-gateway-model" class="input-field llm-input" value="${
+    escapeHtml(gatewaySettings?.model || "")
+  }" placeholder="optional — omitted if the gateway assumes a default">
+          </div>
+          <div class="llm-field">
+            <label class="toggle-label">
+              <input type="checkbox" id="ig-gateway-negprompt" role="switch" aria-label="Accepts negative prompts" ${
+    gatewaySettings?.acceptsNegativePrompt ? "checked" : ""
+  }>
+              <span class="toggle-slider"></span>
+              <span class="toggle-text">Accepts negative prompts</span>
+            </label>
+            <span class="llm-field-hint">Enable only if the gateway runs with guidance (CFG above 1); guidance-free deployments reject negative prompts.</span>
+          </div>
+          <p class="settings-note">For gateways exposing an OpenAI-compatible image generation endpoint with bearer auth.</p>
+        </div>
+
         <div class="llm-field" style="display:flex;gap:var(--sp-3);margin-top:var(--sp-4);">
           <button class="btn btn--primary" onclick="saveImageGenSlot('${
     escapeHtml(id)
@@ -9416,6 +9509,7 @@ function toggleImageGenProvider() {
   document.getElementById('ig-gemini-section').style.display = provider === 'gemini' ? '' : 'none';
   document.getElementById('ig-venice-section').style.display = provider === 'venice' ? '' : 'none';
   document.getElementById('ig-nanogpt-section').style.display = provider === 'nanogpt' ? '' : 'none';
+  document.getElementById('ig-gateway-section').style.display = provider === 'gateway' ? '' : 'none';
 }
 
 async function saveImageGenSlot(id, isNew) {
@@ -9456,6 +9550,15 @@ async function saveImageGenSlot(id, isNew) {
       apiKey: document.getElementById('ig-nanogpt-key').value,
       model: document.getElementById('ig-nanogpt-model').value,
       baseUrl: document.getElementById('ig-nanogpt-baseurl').value,
+    };
+  }
+  if (provider === 'gateway') {
+    generator.settings.gateway = {
+      baseUrl: document.getElementById('ig-gateway-baseurl').value,
+      apiKey: document.getElementById('ig-gateway-key').value,
+      modelPath: document.getElementById('ig-gateway-path').value || undefined,
+      model: document.getElementById('ig-gateway-model').value || undefined,
+      acceptsNegativePrompt: document.getElementById('ig-gateway-negprompt').checked,
     };
   }
 
@@ -10594,7 +10697,7 @@ export function renderVoiceProfileEdit(
             <input type="range" id="voice-vad-threshold" min="0" max="1" step="0.05" value="${
     p?.vadThreshold ?? 0.5
   }" oninput="document.getElementById('voice-vad-val').textContent = this.value">
-            <span class="llm-field-hint">Mic energy level that counts as speech (0&ndash;1). Higher = less sensitive (ignores more background).</span>
+            <span class="llm-field-hint">How loud a sound must be to count as speech (0&ndash;1, mapped to mic energy 0.005&ndash;0.1 RMS). Higher = less sensitive &mdash; raise it when background noise (music, other rooms) keeps starting turns. Applies on the next call.</span>
           </div>
           <div class="llm-field">
             <label for="voice-end-of-turn-silence">End-of-turn silence (seconds)</label>
@@ -10622,8 +10725,9 @@ export function renderVoiceProfileEdit(
           <div class="llm-field">
             <label for="voice-idle-timeout">Idle Timeout (seconds)</label>
             <input type="number" id="voice-idle-timeout" class="input-field llm-input" value="${
-    p?.idleTimeoutSeconds || 300
-  }" min="30" max="1800" step="30">
+    p?.idleTimeoutSeconds ?? 300
+  }" min="0" max="1800" step="30">
+            <span class="llm-field-hint">0 = never auto-end. Flux-hosted calls always run with no idle timeout — quiet is when his spontaneous speech happens.</span>
           </div>
           <div class="llm-field">
             <label style="display: flex; align-items: center; gap: var(--sp-2); cursor: pointer;">
@@ -10805,6 +10909,7 @@ export function renderVoiceCallView(
         sttProvider,
         pttKeys,
         endOfTurnSilence: profile.endOfTurnSilence ?? 1.5,
+        vadThreshold: profile.vadThreshold ?? 0.5,
         phraseDebounceMs: profile.phraseDebounceMs ?? 1200,
         sttDebug: profile.sttDebug ?? false,
         voiceChatDebug: voiceChatDebug ?? false,
@@ -10813,4 +10918,1529 @@ export function renderVoiceCallView(
       }),
     )
   }</script>`;
+}
+
+/**
+ * Flux OVERLAY view — the conversation-hosted Flux interface (Voice-Chat
+ * overlay pattern). A FRAGMENT (not a
+ * page): body markup + JSON config tags, ZERO executable script — the
+ * overlay's logic lives in web/js/flux.js (scripts inserted via
+ * innerHTML never execute; the app shell loads flux.js once).
+ * Styles: web/css/flux.css via --c-* tokens.
+ */
+export function renderFluxOverlayView(
+  conversationId: string,
+  entityName: string,
+  userName: string,
+  hostTitle: string,
+  initialState: {
+    state: "running" | "paused" | "stopped";
+    moodState?: {
+      valence: number;
+      arousal: number;
+      dominance: number;
+    } | null;
+    organHealth?:
+      | Array<
+        { organId: string; health: { state: string; detail: string } }
+      >
+      | null;
+  },
+): string {
+  return `<div class="flux-overlay" id="flux-overlay">
+  <div class="flux-overlay-shell">
+    <div class="flux-overlay-header">
+      <span>
+        <span id="flux-badge" class="flux-badge ${initialState.state}">${
+    initialState.state.charAt(0).toUpperCase() + initialState.state.slice(1)
+  }</span>
+        <strong>Flux</strong>
+      </span>
+      <div class="flux-overlay-controls">
+        <button onclick="closeFluxOverlay()">Close</button>
+        <button id="flux-btn-stop" onclick="fluxOverlayControl('stop')">Stop</button>
+      </div>
+    </div>
+    <div id="flux-mood-strip"></div>
+    <div id="flux-mode-row"><span id="flux-mode-badge" class="flux-mode-badge"></span></div>
+    <div id="flux-organ-health"></div>
+    <div id="flux-timeline"></div>
+    <div class="flux-input-bar">
+      <textarea id="flux-input" rows="1" placeholder="say something..." autocomplete="off"></textarea>
+      <button id="flux-send">send</button>
+    </div>
+  </div>
+</div>
+<div id="flux-toast"></div>
+
+<script type="application/json" id="flux-config">${
+    escapeHtml(JSON.stringify({ conversationId, entityName, userName }))
+  }</script>
+<script type="application/json" id="flux-overlay-cfg">${
+    escapeHtml(
+      JSON.stringify({
+        state: initialState.state,
+        moodState: initialState.moodState ?? null,
+        organHealth: initialState.organHealth ?? null,
+        hostTitle,
+      }),
+    )
+  }</script>`;
+}
+
+/**
+ * Flux Space page — a self-contained continuous-presence surface.
+ *
+ * Separate from the classic chat: a vertical timeline of entries (user,
+ * entity, ambient observations + thoughtstream summaries interleaved),
+ * a message input, and a live SSE listener that appends entries and
+ * surfaces toasts when the entity wants attention.
+ *
+ * Kept as a standalone page (served at /flux) rather than a swapped
+ * fragment so the Flux Space has its own clean surface without
+ * entangling the classic-chat HTMX machinery. The inline script uses
+ * string concatenation (no template literals) to avoid escaping
+ * conflicts with this outer template literal.
+ */
+export function renderFluxSpacePage(
+  opts?: { entityName?: string; userName?: string },
+): string {
+  const entityName = opts?.entityName?.trim() || "the entity";
+  const userName = opts?.userName?.trim() || "the user";
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flux Space — ${escapeHtml(entityName)}</title>
+  <link rel="stylesheet" href="/css/main.css" />
+  <style>
+    body { margin: 0; background: #0d0f14; color: #e4e6eb; font-family: system-ui, sans-serif; }
+    .flux-shell { display: flex; flex-direction: column; height: 100vh; max-width: 760px; margin: 0 auto; }
+    .flux-header { padding: 16px 20px; border-bottom: 1px solid #23262e; display: flex; justify-content: space-between; align-items: center; }
+    .flux-header a { color: #8b8f99; text-decoration: none; font-size: 14px; }
+    #flux-timeline { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+    .flux-entry { padding: 10px 14px; border-radius: 12px; max-width: 82%; word-wrap: break-word; line-height: 1.5; }
+    .flux-edit-btn { position: absolute; top: -6px; right: -6px; display: none; background: #1c1f26; border: 1px solid #2a2e36; color: #8b8f99; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 11px; z-index: 5; }
+    .flux-entry { position: relative; }
+    .flux-entry:hover .flux-edit-btn { display: inline-block; }
+    .flux-generating { align-self: flex-start; background: #1c1f26; border: 1px solid #2a2e36; color: #8b8f99; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
+    .flux-generating .typing-cursor { display: inline-block; animation: fluxblink 1s steps(1) infinite; }
+    .flux-generating.streaming .typing-cursor { display: none; }
+    .flux-generating.streaming::after { content: '\u258C'; display: inline-block; animation: fluxblink 1s steps(1) infinite; }
+    .flux-entry.entity .typing-cursor { display: inline-block; animation: fluxblink 1s steps(1) infinite; opacity: 0.6; }
+    .flux-entry.entity .flux-gen-text { white-space: pre-wrap; }
+    .flux-entry.entity .meta { margin-top: 4px; }
+    @keyframes fluxblink { 50% { opacity: 0; } }
+    .flux-entry.user { align-self: flex-end; background: #2563eb; color: #fff; }
+    .flux-entry.entity { align-self: flex-start; background: #1c1f26; border: 1px solid #2a2e36; }
+    .flux-entry.ambient { align-self: flex-start; background: transparent; border: 1px dashed #3a3e46; color: #8b8f99; font-style: italic; font-size: 13px; }
+    /* Module colors: dotted border + colored text when ambient;
+       solid border + tinted background (same color) when promoted. */
+    .flux-entry.ambient.reverie { border: 1px dashed #6b46c1; color: #a78bfa; }
+    .flux-entry.ambient.reverie.escalated { border: 1px solid #6b46c1; background: rgba(107, 70, 193, 0.12); color: #a78bfa; font-style: normal; }
+    .flux-entry.ambient.dream { border: 1px dashed #7c5cbf; color: #b8a5e8; font-style: italic; }
+    .flux-entry.ambient.musing { border: 1px dashed #b45309; color: #fbbf24; font-style: normal; }
+    .flux-entry.ambient.musing.escalated { border: 1px solid #b45309; background: rgba(180, 83, 9, 0.12); color: #fbbf24; }
+    .flux-entry.ambient.escalated { border-style: solid; }
+    .flux-entry.ambient.compaction { border: 1px dashed #3f7f5f; color: #86c7a5; font-style: normal; }
+    .flux-entry.ambient.noticing { border: 1px dashed #64748b; color: #94a3b8; }
+    .flux-entry.ambient.noticing.escalated { border: 1px solid #64748b; background: rgba(100, 116, 139, 0.14); color: #cbd5e1; font-style: normal; }
+    .flux-entry.ambient.thoughtstream { border-color: #0e7490; border-style: solid; border-width: 1px; color: #67e8f9; font-style: normal; }
+    .flux-entry.tool-wrap { align-self: flex-start; background: transparent; border: none; padding: 0; max-width: 90%; }
+    .flux-entry.thinking-wrap { align-self: flex-start; background: transparent; border: none; padding: 0; max-width: 90%; }
+    /* Markdown lists: the app-wide reset zeroes ul/ol padding — restore
+       the bullet indent. */
+    #flux-timeline ul, #flux-timeline ol { margin: 8px 0; padding-left: 24px; list-style-position: outside; }
+    #flux-timeline ul { list-style-type: disc; }
+    #flux-timeline ol { list-style-type: decimal; }
+    #flux-timeline li { margin: 4px 0; display: list-item; }
+    .thinking-card { background: #14161c; border: 1px solid #2a2e36; border-radius: 12px; overflow: hidden; }
+    .thinking-header { padding: 8px 14px; font-size: 12px; color: #8b8f99; cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; }
+    .thinking-header .toggle { transition: transform 0.2s; font-size: 10px; }
+    .thinking-card.open .thinking-header .toggle { transform: rotate(180deg); }
+    .thinking-body { display: none; padding: 4px 14px 12px; font-size: 13px; color: #9ca3af; line-height: 1.55; white-space: pre-wrap; max-height: 320px; overflow-y: auto; border-top: 1px dashed #23262e; }
+    .thinking-card.open .thinking-body { display: block; }
+    .flux-entry .meta { font-size: 11px; opacity: 0.6; margin-top: 4px; }
+    .flux-input-bar { padding: 14px 20px; border-top: 1px solid #23262e; display: flex; gap: 10px; }
+    #flux-input { flex: 1; background: #1c1f26; border: 1px solid #2a2e36; color: #e4e6eb; border-radius: 10px; padding: 10px 14px; font-size: 15px; resize: none; font-family: inherit; max-height: 40vh; overflow-y: auto; }
+    #flux-send { background: #2563eb; color: #fff; border: none; border-radius: 10px; padding: 10px 18px; cursor: pointer; font-size: 15px; }
+    #flux-send:disabled { opacity: 0.5; cursor: default; }
+    #flux-toast { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); background: #1c1f26; border: 1px solid #2563eb; color: #e4e6eb; padding: 12px 18px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: none; max-width: 90vw; cursor: pointer; z-index: 50; }
+    .flux-status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .flux-status-dot.active { background: #22c55e; }
+    .flux-status-dot.inactive { background: #6b7280; }
+    #flux-mood-strip { display: flex; gap: 10px; padding: 10px 20px; border-bottom: 1px solid #23262e; flex-wrap: wrap; }
+    #flux-organ-health { display: flex; gap: 14px; padding: 6px 20px 8px; border-bottom: 1px solid #23262e; flex-wrap: wrap; align-items: center; }
+    #flux-mode-row { display: flex; justify-content: flex-end; padding: 4px 20px 0; }
+    .flux-mode-badge { display: none; font-size: 11px; color: #8b8f99; border: 1px solid #2a2e36; border-radius: 10px; padding: 2px 10px; }
+    .flux-mode-badge.visible { display: inline-block; }
+    .flux-mode-badge.mode-sleep { color: #7c8cf8; border-color: #3d46a8; }
+    .organ-health-item { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #8b8f99; }
+    .organ-health-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .organ-health-dot.green { background: #22c55e; }
+    .organ-health-dot.yellow { background: #eab308; }
+    .organ-health-dot.red { background: #ef4444; }
+    .mood-axis { display: flex; flex-direction: column; gap: 3px; min-width: 110px; }
+    .mood-axis-label { font-size: 11px; color: #8b8f99; text-transform: uppercase; letter-spacing: 0.5px; }
+    .mood-axis-row { display: flex; align-items: center; gap: 6px; }
+    .mood-axis-bar { flex: 1; height: 6px; background: #1c1f26; border-radius: 3px; position: relative; overflow: hidden; }
+    .mood-axis-fill { position: absolute; top: 0; bottom: 0; left: 50%; border-radius: 3px; transition: all 0.5s ease; }
+    .mood-axis-value { font-size: 12px; color: #e4e6eb; min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+    .mood-axis-label-q { font-size: 10px; color: #6b7280; }
+    .flux-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .flux-badge.running { background: #22c55e; color: #fff; }
+    .flux-badge.stopped { background: #ef4444; color: #fff; }
+    .flux-badge.paused { background: #f59e0b; color: #fff; }
+    .flux-controls { display: flex; gap: 8px; align-items: center; }
+    .flux-controls button { background: #1c1f26; border: 1px solid #2a2e36; color: #e4e6eb; border-radius: 8px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
+    .flux-controls button:hover:not(:disabled) { border-color: #3b82f6; }
+    .flux-controls button:disabled { opacity: 0.4; cursor: default; }
+    .flux-controls button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+    .flux-controls a { color: #8b8f99; text-decoration: none; font-size: 13px; padding: 6px 8px; }
+  </style>
+  <script src="/lib/marked.min.js"></script>
+  <script src="/lib/dompurify.min.js"></script>
+</head>
+<body>
+  <div class="flux-shell">
+    <div class="flux-header">
+      <span>
+        <span id="flux-badge" class="flux-badge stopped">Loading…</span>
+        <strong>Flux Space</strong>
+      </span>
+      <div class="flux-controls">
+        <button id="flux-btn-start" class="primary" onclick="fluxControl('start')">Start</button>
+        <button id="flux-btn-pause" onclick="fluxControl('pause')">Pause</button>
+        <button id="flux-btn-stop" onclick="fluxControl('stop')">Stop</button>
+        <button id="flux-btn-clear" onclick="fluxClear()">Clear</button>
+        <a href="/fragments/settings/flux">settings</a>
+        <a href="/">chat</a>
+      </div>
+    </div>
+    <div id="flux-mood-strip"></div>
+    <div id="flux-mode-row"><span id="flux-mode-badge" class="flux-mode-badge"></span></div>
+    <div id="flux-organ-health"></div>
+    <div id="flux-timeline"></div>
+    <div class="flux-input-bar">
+      <textarea id="flux-input" rows="1" placeholder="say something..." autocomplete="off"></textarea>
+      <button id="flux-send">send</button>
+    </div>
+  </div>
+  <div id="flux-toast"></div>
+  <script>
+    var timeline = document.getElementById('flux-timeline');
+    var input = document.getElementById('flux-input');
+    var sendBtn = document.getElementById('flux-send');
+    // The textarea auto-grows with content up to max-height (CSS), then
+    // scrolls — one row tall when empty, like classic chat's input.
+    input.addEventListener('input', function() {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px';
+    });
+    var toast = document.getElementById('flux-toast');
+    var toastTimer = null;
+
+    function fmtTime(iso) {
+      try { return new Date(iso).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); }
+      catch (e) { return ''; }
+    }
+
+    // Follow-latch: scrolling up to read must never be yanked back
+    // by new entries. Same pattern as the
+    // overlay's FluxScroll — follow only while latched to the bottom;
+    // reading above it leaves the view where the reader put it.
+    var followLatched = true;
+    var tlEl = document.getElementById('flux-timeline');
+    if (tlEl) {
+      tlEl.addEventListener('scroll', function() {
+        followLatched = tlEl.scrollHeight - tlEl.scrollTop - tlEl.clientHeight <= 80;
+      });
+    }
+    function follow() {
+      if (followLatched && tlEl) tlEl.scrollTop = tlEl.scrollHeight;
+    }
+
+    function escapeHtml(s) {
+      var d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    // Markdown for dialogue blocks — same pipeline as classic chat
+    // (marked with breaks+gfm, DOMPurify-sanitized). Thinking stays
+    // plain text (interior monologue, not prose).
+    marked.setOptions({ breaks: true, gfm: true });
+    function renderMd(text) {
+      try {
+        return DOMPurify.sanitize(marked.parse(text || ''));
+      } catch (e) {
+        return escapeHtml(text || '');
+      }
+    }
+
+    var ENTITY_NAME = ${JSON.stringify(entityName)};
+    var USER_NAME = ${JSON.stringify(userName)};
+    // Collapsed tool cards (classic persisted shape): header click
+    // toggles args/result visibility.
+    function wireToolToggle(container) {
+      var header = container.querySelector('.tool-header');
+      if (header) {
+        header.addEventListener('click', function() {
+          var card = this.parentElement;
+          if (card) card.classList.toggle('expanded');
+        });
+      }
+    }
+
+    function fillToolResult(callId, result, isError, metadata) {
+      var card = document.querySelector(
+        '.tool-wrap[data-tool-call-id="' + (callId || '') + '"]'
+      );
+      if (!card) return false;
+      var slot = card.querySelector('.tool-result');
+      if (slot) {
+        slot.innerHTML =
+          '<div class="tool-result-label">' + (isError ? 'Error' : 'Output') + '</div>' +
+          escapeHtml(result || '');
+        slot.classList.toggle('error', !!isError);
+      }
+      var imgPath = metadata && metadata.image && metadata.image.path;
+      if (imgPath && !card.nextElementSibling?.classList?.contains('generated-image-container')) {
+        var sib = document.createElement('div');
+        sib.className = 'generated-image-container';
+        sib.innerHTML = '<img src="' + escapeHtml(imgPath) + '" alt="generated image" loading="lazy">';
+        card.after(sib);
+      }
+      return true;
+    }
+
+    function appendSessionEntry(e) {
+      var div = document.createElement('div');
+      var label = USER_NAME;
+      if (e.kind === 'tool_use') {
+        div.className = 'flux-entry tool-wrap';
+        if (e.id) div.dataset.toolCallId = e.id;
+        div.innerHTML =
+          '<div class="tool">' +
+            '<div class="tool-header">' +
+              '<span class="tool-icon">&#9881;</span>' +
+              '<span class="tool-name">' + escapeHtml(e.source || 'tool') + '</span>' +
+              '<span class="tool-toggle">&#9660;</span>' +
+            '</div>' +
+            '<div class="tool-args">' + escapeHtml(e.content || '') + '</div>' +
+            '<div class="tool-result"></div>' +
+          '</div>';
+        wireToolToggle(div);
+      } else if (e.kind === 'tool_result') {
+        // Reload merging: a result entry has the id <callId>-result —
+        // fill the matching card (one card per call, args + result,
+        // classic style); a trimmed-away card still shows a standalone
+        // note. Cards stay collapsed — space saving, the thinking-block
+        // treatment.
+        var callId = (e.id || '').replace(/-result$/, '');
+        if (callId && fillToolResult(callId, e.content, false)) {
+          follow();
+          return;
+        }
+        div.className = 'flux-entry tool-wrap';
+        div.innerHTML =
+          '<div class="tool">' +
+            '<div class="tool-header">' +
+              '<span class="tool-icon">&#9881;</span>' +
+              '<span class="tool-name">' + escapeHtml(e.source || 'tool') + ' · result</span>' +
+              '<span class="tool-toggle">&#9660;</span>' +
+            '</div>' +
+            '<div class="tool-result">' + escapeHtml(e.content || '') + '</div>' +
+          '</div>';
+        wireToolToggle(div);
+      } else if (e.kind === 'ego') {
+        div.className = 'flux-entry entity';
+        // Display-strip <t> stamps (classic chat's stripEntityXml): the
+        // stamp lives in the transcript for the model, never shows to
+        // the user. Same rule as every other surface.
+        var stripped = (e.content || '').replace(/<t>[^<]*<\\/t>\\s*/g, '');
+        var body = '';
+        if (e.thinking) {
+          body += '<details class="thinking-details" style="margin-bottom:6px;"><summary style="cursor:pointer;color:#8b8f99;font-size:12px;">thinking</summary><div style="color:#9ca3af;font-size:13px;white-space:pre-wrap;border-left:2px solid #2a2e36;padding-left:8px;margin-top:4px;">' + escapeHtml(e.thinking) + '</div></details>';
+        }
+        // Provider misroute (reply routed into reasoning): the message
+        // streamed through the thinking card and the persisted content is
+        // empty — render the entry from the thinking so the turn isn't a
+        // blank bubble. Classic chat has loop-side recovery; until Flux
+        // does, the UI refuses to hide the reply.
+        if (!stripped.trim()) {
+          // Thinking-only entry: the collapsible details above IS the
+          // bubble — no expanded-text fallback.
+        } else {
+          body += renderMd(stripped);
+        }
+        div.innerHTML = body +
+          '<div class="meta">' + ENTITY_NAME + ' · ' + fmtTime(e.timestamp) + '</div>';
+        var btn = document.createElement('button');
+        btn.className = 'flux-edit-btn';
+        btn.textContent = '\u270E';
+        btn.title = 'Edit this entry';
+        btn.onclick = function(ev) {
+          ev.stopPropagation();
+          editSessionEntry(e, div);
+        };
+        div.appendChild(btn);
+      } else if (e.kind === 'briefing') {
+        var s = e.source || '';
+        var isSystem = s.indexOf('sleep') >= 0 || s.indexOf('posture') >= 0 ||
+          s.indexOf('thalamus') >= 0 || s.indexOf('cycle') >= 0;
+        var mod = s.indexOf('compaction') === 0 ? 'Compaction'
+          : s.indexOf('reverie') >= 0 ? 'Reverie'
+          : s.indexOf('musing') >= 0 ? 'Musing'
+          : s.indexOf('dream') >= 0 ? 'Dream'
+          : isSystem ? 'system'
+          : 'Noticing';
+        var cls = 'flux-entry ambient';
+        if (s.indexOf('compaction') === 0) {
+          // Textures are working memory, not module output — neutral
+          // style, Compaction label.
+          cls += ' compaction';
+        } else if (s.indexOf('dream') >= 0) cls += ' dream';
+        else if (s.indexOf('reverie') >= 0) cls += ' reverie';
+        else if (s.indexOf('musing') >= 0) cls += ' musing';
+        else cls += ' noticing';
+        if (e.generated) cls += ' escalated';
+        var chain = s.indexOf('compaction:') === 0
+          ? s.slice('compaction:'.length).replace(/^\w/, function(c) { return c.toUpperCase(); })
+          : '';
+        div.className = cls;
+        div.innerHTML = escapeHtml(e.content) +
+          '<div class="meta">' + mod + (chain ? ' (' + chain + ')' : '') + ' · ' + fmtTime(e.timestamp) + '</div>';
+      } else if (e.kind === 'system') {
+        div.className = 'flux-entry ambient';
+        div.innerHTML = escapeHtml(e.content) +
+          '<div class="meta">system · ' + fmtTime(e.timestamp) + '</div>';
+      } else {
+        div.className = 'flux-entry user';
+        div.innerHTML = renderMd(e.content || '') +
+          '<div class="meta">' + USER_NAME + ' · ' + fmtTime(e.timestamp) + '</div>';
+        var ubtn = document.createElement('button');
+        ubtn.className = 'flux-edit-btn';
+        ubtn.textContent = '\u270E';
+        ubtn.title = 'Edit this entry';
+        ubtn.onclick = function(ev) {
+          ev.stopPropagation();
+          editSessionEntry(e, div);
+        };
+        div.appendChild(ubtn);
+      }
+      addToTimeline(div, entry.timestamp);
+      follow();
+    }
+
+    var generatingEl = null;
+    function showGenerating() {
+      hideGenerating();
+      generatingEl = document.createElement('div');
+      generatingEl.className = 'flux-generating';
+      generatingEl.dataset.ts = String(Date.now()); // ordered inserts below it
+      generatingEl.innerHTML = '<span class="flux-gen-text"></span><span class="typing-cursor">\u258C</span>';
+      timeline.appendChild(generatingEl);
+      follow();
+    }
+    function hideGenerating() {
+      if (generatingEl) { generatingEl.remove(); generatingEl = null; }
+    }
+    function addToTimeline(div, tsIso) {
+      var ts = Date.parse(tsIso || '') || 0;
+      div.dataset.ts = String(ts);
+      var kids = timeline.children;
+      for (var i = kids.length - 1; i >= 0; i--) {
+        var k = Number(kids[i].dataset && kids[i].dataset.ts || 0);
+        if (k && k <= ts) {
+          kids[i].insertAdjacentElement('afterend', div);
+          return;
+        }
+      }
+      timeline.insertBefore(div, timeline.firstChild);
+    }
+
+    function appendEntry(entry) {
+      hideGenerating();
+      var div = document.createElement('div');
+      var organId = entry.metadata && entry.metadata.organId;
+      var isReverie = entry.role === 'ambient' && organId === 'reverie';
+      var isThoughtstream = entry.role === 'ambient' && organId === 'thoughtstream';
+      var isMusing = entry.role === 'ambient' && organId === 'musing';
+      var isDream = entry.role === 'ambient' && organId === 'dream';
+      var escalated = entry.role === 'ambient' && entry.metadata && entry.metadata.escalated;
+      var cls = 'flux-entry ' + entry.role;
+      if (isReverie) cls += ' reverie';
+      if (isMusing) cls += ' musing';
+      if (isDream) cls += ' dream';
+      if (!isReverie && !isMusing && !isThoughtstream && !isDream) cls += ' noticing';
+      if (escalated) cls += ' escalated';
+      if (isThoughtstream) cls += ' thoughtstream';
+      div.className = cls;
+      // Labels name the source plainly — no glyphs, no invented verbs.
+      // Icons/glyphs are reserved for marking significant things.
+      var label = entry.role === 'user' ? USER_NAME
+        : (entry.role === 'entity' ? ENTITY_NAME
+        : (organId === 'thalamus' ? 'system'
+        : (isReverie ? 'Reverie'
+        : (isMusing ? 'Musing'
+        : (isDream ? 'Dream'
+        : (isThoughtstream ? 'Thoughtstream'
+        : 'Noticing'))))));
+      div.innerHTML = escapeHtml(entry.content) +
+        '<div class="meta">' + label + ' · ' + fmtTime(entry.timestamp) + '</div>';
+      if (entry.role === 'user' || entry.role === 'entity') {
+        var btn = document.createElement('button');
+        btn.className = 'flux-edit-btn';
+        btn.textContent = '✎';
+        btn.title = 'Edit this entry';
+        btn.onclick = function(ev) {
+          ev.stopPropagation();
+          editSessionEntry(entry, div);
+        };
+        div.appendChild(btn);
+      }
+      addToTimeline(div, e.timestamp);
+      follow();
+    }
+
+    // Edit an Ego session entry (the malformed-timestamp cleanup path —
+    // pause flux via the controls, edit, resume). Talks to
+    // /api/flux/session/edit, which fixes the session log row.
+    function editSessionEntry(entry, div) {
+      if (div.querySelector('textarea')) return;
+      var ta = document.createElement('textarea');
+      ta.value = entry.content;
+      ta.style.cssText = 'width:100%;min-height:60px;background:#14161c;color:#e4e6eb;border:1px solid #2a2e36;border-radius:8px;padding:8px;font-family:inherit;font-size:inherit;';
+      var save = document.createElement('button');
+      save.textContent = 'Save';
+      save.style.cssText = 'margin-top:4px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;';
+      save.onclick = function() {
+        fetch('/api/flux/session/edit', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id: entry.id, content: ta.value})
+        }).then(function(r) {
+          if (r.ok) { location.reload(); }
+          else { save.textContent = 'Failed'; }
+        });
+      };
+      div.innerHTML = '';
+      div.appendChild(ta);
+      div.appendChild(save);
+      ta.focus();
+    }
+
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(function() { toast.style.display = 'none'; }, 6000);
+    }
+
+    function sendMessage() {
+      var content = input.value.trim();
+      if (!content) return;
+      sendBtn.disabled = true;
+      fetch('/api/flux/message', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({content: content})
+      }).then(function() {
+        input.value = '';
+        sendBtn.disabled = false;
+        input.focus();
+      }).catch(function() { sendBtn.disabled = false; });
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    // Enter sends, Shift+Enter makes a newline — same convention as
+    // classic chat. (Plain preventDefault on Enter with no send makes
+    // the key do nothing at all.)
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+      // Shift+Enter falls through — the textarea's native newline.
+    });
+    toast.addEventListener('click', function() { toast.style.display = 'none'; });
+
+    // Load the timeline: fetch recent entries. The timeline is the MERGE
+    // of the durable timeline (user/ambient) and the Ego session log (ego
+    // speech, tool_use, system gap-notes) — sorted by timestamp. Named so
+    // flux_turn_done can converge the live view on the durable order.
+    function loadTimeline() {
+    Promise.all([
+      fetch('/api/flux/entries?limit=50').then(function(r) { return r.json(); }),
+      fetch('/api/flux/session').then(function(r) { return r.json(); })
+    ]).then(function(results) {
+      var durable = Array.isArray(results[0]) ? results[0] : [];
+      var session = Array.isArray(results[1]) ? results[1] : [];
+      var merged = [];
+      // De-dup across BOTH stores by content prefix, then keep the
+      // newest 60 merged entries. Generated (tinted) session briefings
+      // win over durable twins; ambient twins render from durable.
+      // Fetch-window mismatch (50 durable vs all session) previously
+      // rendered old session copies whose durable twins fell outside
+      // the durable fetch — the mass doubles.
+      // Stamp-aware prefix: session ego rows carry <t> stamps, durable
+      // rows don't — raw prefixes never matched, so stamped twins rendered
+      // twice. Strip before comparing.
+      var stripT = function(s) { return (s || '').replace(/<t>[^<]*<\\/t>\\s*/g, '').slice(0, 80); };
+      // Storage alignment: dialogue rows from the messages table are the
+      // render of record for user/ego speech. Session copies of the same
+      // words (context copies) skip.
+      var hasMessageDialogue = session.some(function(e) { return e.fromMessages; });
+      var messagePrefixes = {};
+      session.forEach(function(e) {
+        if (e.fromMessages && (e.kind === 'user' || e.kind === 'ego' || e.kind === 'system')) {
+          messagePrefixes[stripT(e.content)] = true;
+        }
+      });
+      var generatedPrefixes = {};
+      session.forEach(function(e) {
+        if (e.kind === 'briefing' && e.generated) {
+          generatedPrefixes[stripT(e.content)] = true;
+        }
+      });
+      var durableContents = {};
+      durable.forEach(function(e) {
+        var pref = stripT(e.content);
+        if (generatedPrefixes[pref]) return; // the tinted twin renders instead
+        // Legacy dialogue (pre-alignment durable user/entity rows) skips
+        // when the messages table is the dialogue record.
+        if (hasMessageDialogue && (e.role === 'user' || e.role === 'entity')) return;
+        durableContents[pref] = true;
+        merged.push({ ts: e.timestamp, render: function() { appendEntry(e); } });
+      });
+      session.forEach(function(e) {
+        if (e.source === 'existing-open') return; // bookkeeping, not visible
+        var pref = stripT(e.content);
+        if (e.kind === 'briefing' && durableContents[pref]) return; // durable twin rendered
+        if (e.kind === 'briefing' && !e.generated && generatedPrefixes[pref]) return;
+        // ONE source of truth per piece, no coverage windows: session
+        // user/system rows are copies (record rows render); session EGO
+        // rows are the timeline's truth — split pieces for new turns,
+        // copies for history — and record ego rows never render here.
+        if (!e.fromMessages && hasMessageDialogue && (e.kind === 'user' || e.kind === 'system')) return;
+        if (e.fromMessages && e.kind === 'ego') return;
+        merged.push({ ts: e.timestamp, render: function() { appendSessionEntry(e); } });
+      });
+      merged.sort(function(a, b) { return a.ts < b.ts ? -1 : 1; });
+      if (merged.length > 60) merged = merged.slice(-60);
+      // Full render, not append — flux_turn_done re-runs this load; an
+      // uncleared timeline doubled every entry per reload.
+      timeline.innerHTML = '';
+      merged.forEach(function(m) { m.render(); });
+    }).catch(function(e) { console.error('flux load failed', e); });
+    }
+    loadTimeline();
+
+    // Mode badge: at-a-glance posture —
+    // why the entity behaves a certain way. Initial from status, live
+    // via flux_mode.
+    var modeBadge = document.getElementById('flux-mode-badge');
+    function setModeBadge(mode) {
+      if (!modeBadge) return;
+      if (mode) {
+        modeBadge.textContent = 'mode: ' + mode;
+        modeBadge.className = 'flux-mode-badge visible' +
+          (mode === 'sleep' ? ' mode-sleep' : '');
+      } else {
+        modeBadge.className = 'flux-mode-badge';
+      }
+    }
+    fetch('/api/flux/status').then(function(r) { return r.json(); })
+      .then(function(st) { setModeBadge(st.sensoryMode); })
+      .catch(function() {});
+    // Live updates via the persistent SSE channel.
+    var es = new EventSource('/api/events');
+    es.addEventListener('flux_mode', function(e) {
+      try { setModeBadge(JSON.parse(e.data).mode); } catch (err) {}
+    });
+    // Ego reasoning — fragments stream into one collapsible card per turn.
+    var thinkingCard = null;
+    es.addEventListener('flux_ego_thinking', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        if (!thinkingCard || thinkingCard.closed) {
+          var wrap = document.createElement('div');
+          wrap.className = 'flux-entry thinking-wrap';
+          // OPEN while streaming — the stream is meant to be watched
+          // live (classic chat's pattern); the persisted entry's own
+          // block is the collapsed-by-default record afterward.
+          wrap.innerHTML =
+            '<div class="thinking-card open">' +
+              '<div class="thinking-header">' +
+                '<span>' + escapeHtml(ENTITY_NAME) + ' · thinking</span>' +
+                '<span class="toggle">&#9660;</span>' +
+              '</div>' +
+              '<div class="thinking-body"></div>' +
+            '</div>';
+          timeline.appendChild(wrap);
+          thinkingCard = wrap.querySelector('.thinking-card');
+          thinkingCard.closed = false;
+          var header = thinkingCard.querySelector('.thinking-header');
+          header.addEventListener('click', function() {
+            thinkingCard.classList.toggle('open');
+          });
+          follow();
+        }
+        var body = thinkingCard.querySelector('.thinking-body');
+        body.textContent += data.fragment;
+        // Keep the newest fragment in view while streaming.
+        body.scrollTop = body.scrollHeight;
+        follow();
+        // Close the card when the entity's answer arrives (next entity entry).
+        var closeWatcher = function(entry) {
+          if (entry.role === 'entity') {
+            thinkingCard.closed = true;
+            thinkingCard.querySelector('.thinking-body').style.opacity = '0.7';
+          }
+        };
+        pendingThinkingClose = closeWatcher;
+      } catch (err) {}
+    });
+    // Ego speech — fragments grow a REAL entity bubble, replaced by the
+    // durable entry on arrival. Raw accumulates; the render strips <t>
+    // stamps exactly as appendSessionEntry does (they never show).
+    var streamRaw = '';
+    es.addEventListener('flux_turn_done', function() {
+      // Converge on the durable interleaved order (the split entries
+      // carry per-piece timestamps the live stream can't).
+      try {
+        hideGenerating();
+        loadTimeline();
+      } catch (err) {}
+    });
+    es.addEventListener('flux_ego_stream', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        if (!generatingEl || !generatingEl.classList.contains('entity')) {
+          hideGenerating();
+          generatingEl = document.createElement('div');
+          generatingEl.className = 'flux-entry entity';
+          generatingEl.dataset.ts = String(Date.now()); // ordered inserts below it
+          // One block-level text node — same shape as the durable entry
+          // that replaces it (the two-span shape renders one word per
+          // line during streaming).
+          generatingEl.innerHTML = '<div class="flux-gen-text"></div>';
+          timeline.appendChild(generatingEl);
+        }
+        streamRaw += data.fragment;
+        var txt = generatingEl.querySelector('.flux-gen-text');
+        txt.textContent = streamRaw.replace(/<t>[^<]*<\\/t>\\s*/g, '');
+        follow();
+      } catch (err) {}
+    });
+    // Hook entry rendering so an entity response finalizes the open thinking card.
+    var pendingThinkingClose = null;
+    var origAppendEntry = appendEntry;
+    appendEntry = function(entry) {
+      origAppendEntry(entry);
+      if (pendingThinkingClose && entry.role === 'entity') {
+        pendingThinkingClose(entry);
+        pendingThinkingClose = null;
+      }
+    };
+    // Retire an open thinking card. Fired on ego replies AND user
+    // messages. The streamed card is EPHEMERAL live-view: once the real
+    // Ego entry arrives it carries the same thinking as its own
+    // collapsible block — keeping the card too double-rendered every
+    // turn, so the card is REMOVED, not dimmed.
+    function finalizeThinkingCard() {
+      if (thinkingCard && !thinkingCard.closed) {
+        thinkingCard.closed = true;
+        var wrap = thinkingCard.closest('.flux-entry');
+        if (wrap) wrap.remove();
+        thinkingCard = null;
+      }
+    }
+    es.addEventListener('flux_entry', function(e) {
+      try {
+        var entry = JSON.parse(e.data);
+        // Durable-timeline rows carry role; dialogue broadcasts carry kind.
+        // Route to the matching renderer.
+        if (entry.kind && !entry.role) {
+          if (entry.kind === 'ego' || entry.kind === 'user') {
+            finalizeThinkingCard();
+            streamRaw = '';
+            hideGenerating();
+          }
+          appendSessionEntry(entry);
+        }
+        else {
+          if (entry.role === 'entity') finalizeThinkingCard();
+          appendEntry(entry);
+        }
+      } catch (err) {}
+    });
+    es.addEventListener('flux_generating', function(e) {
+      try { finalizeThinkingCard(); showGenerating(); } catch (err) {}
+    });
+    es.addEventListener('flux_toast', function(e) {
+      // Toasts disabled: Subconscious escalations read as uninvited
+      // notifications. The broadcast stays on the
+      // wire; re-enabling is restoring this handler.
+      try { JSON.parse(e.data); } catch (err) {}
+    });
+    es.addEventListener('flux_organ_health', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        if (data.organs) renderOrganHealth(data.organs);
+      } catch (err) {}
+    });
+    es.addEventListener('flux_tool_call', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        var div = document.createElement('div');
+        div.className = 'flux-entry tool-wrap';
+        if (data.toolCallId) div.dataset.toolCallId = data.toolCallId;
+        var formattedArgs = data.args;
+        try { formattedArgs = JSON.stringify(JSON.parse(data.args), null, 2); } catch (ex) {}
+        div.innerHTML =
+          '<div class="tool">' +
+            '<div class="tool-header">' +
+              '<span class="tool-icon">&#9881;</span>' +
+              '<span class="tool-name">' + escapeHtml(data.name) + '</span>' +
+              '<span class="tool-toggle">&#9660;</span>' +
+            '</div>' +
+            '<div class="tool-args">' + escapeHtml(formattedArgs) + '</div>' +
+            '<div class="tool-result' + (data.isError ? ' error' : '') + '">' +
+              '<div class="tool-result-label">' + (data.isError ? 'Error' : 'Output') + '</div>' +
+              escapeHtml(data.result) +
+            '</div>' +
+          '</div>';
+        wireToolToggle(div);
+        addToTimeline(div, data.timestamp || new Date().toISOString());
+        follow();
+      } catch (err) {}
+    });
+    es.addEventListener('flux_tool_result', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        if (fillToolResult(data.toolCallId, data.result, data.isError, data.metadata)) follow();
+      } catch (err) {}
+    });
+
+    // Mood strip — poll the status endpoint and render the four axes live.
+    var moodStrip = document.getElementById('flux-mood-strip');
+    var MOOD_AXES = ['valence', 'arousal', 'dominance'];
+    var MOOD_LABELS = {
+      valence: 'Valence', arousal: 'Arousal', dominance: 'Dominance'
+    };
+    var MOOD_QUAL = {
+      valence: function(v){ return v > 0.1 ? 'positive' : v < -0.1 ? 'negative' : 'neutral'; },
+      arousal: function(v){ return v > 0.1 ? 'alert' : v < -0.1 ? 'calm' : 'neutral'; },
+      dominance: function(v){ return v > 0.1 ? 'in control' : v < -0.1 ? 'adrift' : 'neutral'; }
+    };
+    function moodColor(v) {
+      if (v > 0.05) return '#22c55e';
+      if (v < -0.05) return '#3b82f6';
+      return '#6b7280';
+    }
+    function renderMoodStrip(state) {
+      if (!state) { moodStrip.innerHTML = ''; return; }
+      moodStrip.innerHTML = MOOD_AXES.map(function(axis) {
+        var v = state[axis] || 0;
+        var abs = Math.abs(v);
+        var widthPct = abs * 50;
+        var left = v >= 0 ? '50%' : (50 - widthPct) + '%';
+        return '<div class="mood-axis">' +
+          '<span class="mood-axis-label">' + MOOD_LABELS[axis] + '</span>' +
+          '<div class="mood-axis-row">' +
+            '<div class="mood-axis-bar">' +
+              '<div class="mood-axis-fill" style="left:' + left + '; width:' + widthPct + '%; background:' + moodColor(v) + ';"></div>' +
+            '</div>' +
+            '<span class="mood-axis-value">' + (v >= 0 ? '+' : '') + v.toFixed(2) + '</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+    // Sensory Organ health strip — check-engine dots under the PAD
+    // meters. Green = known good, red = known dead (endpoint refuses),
+    // yellow = evidence something's off, verdict unknown (server up but
+    // stream silent, or degraded). Rendered from the status poll AND
+    // the flux_organ_health SSE event (30s monitor ticks).
+    var organHealthEl = document.getElementById('flux-organ-health');
+    function renderOrganHealth(organs) {
+      if (!organHealthEl) return;
+      if (!organs || !organs.length) { organHealthEl.innerHTML = ''; return; }
+      organHealthEl.innerHTML = organs.map(function(o) {
+        var st = o.health && o.health.state ? o.health.state : 'green';
+        var title = o.health && o.health.detail ? o.organId + ' — ' + o.health.detail : o.organId;
+        return '<span class="organ-health-item" title="' + escapeHtml(title) + '">' +
+          '<span class="organ-health-dot ' + st + '"></span>' +
+          escapeHtml(o.organId) +
+        '</span>';
+      }).join('');
+    }
+
+    function fetchMood() {
+      fetch('/api/flux/status').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.moodState) renderMoodStrip(d.moodState);
+        if (d.organHealth) renderOrganHealth(d.organHealth);
+        var state = d.state || (d.active ? 'running' : 'stopped');
+        var badge = document.getElementById('flux-badge');
+        if (badge) {
+          badge.textContent = state === 'running' ? 'Running' : state === 'paused' ? 'Paused' : 'Stopped';
+          badge.className = 'flux-badge ' + state;
+        }
+        var btnStart = document.getElementById('flux-btn-start');
+        var btnPause = document.getElementById('flux-btn-pause');
+        var btnStop = document.getElementById('flux-btn-stop');
+        if (btnStart) {
+          btnStart.disabled = state === 'running';
+          btnStart.textContent = state === 'paused' ? 'Resume' : 'Start';
+        }
+        if (btnPause) btnPause.disabled = state !== 'running';
+        if (btnStop) btnStop.disabled = state === 'stopped';
+      }).catch(function() {});
+    }
+    async function fluxControl(action) {
+      try {
+        var res = await fetch('/api/flux/' + action, { method: 'POST' });
+        var data = await res.json();
+        // Immediate UI update, then the poll will confirm.
+        fetchMood();
+      } catch (e) {
+        console.error('flux control failed', e);
+      }
+    }
+    async function fluxClear() {
+      if (!confirm('Clear the workspace? This wipes all observations, the timeline, and texture summaries. My dialogue memory and mood are preserved.')) return;
+      try {
+        await fetch('/api/flux/clear', { method: 'POST' });
+        // Wipe the visible timeline immediately.
+        timeline.innerHTML = '';
+        showToast('workspace cleared — fresh slate');
+      } catch (e) {
+        console.error('flux clear failed', e);
+      }
+    }
+    fetchMood();
+    setInterval(fetchMood, 4000);
+  </script>
+</body>
+</html>`;
+}
+
+/**
+ * Flux settings card — opt-in toggle, presence cadences, promotion
+ * thresholds, and the organ registry. Follows the settings-view /
+ * theme-section / toggle-label patterns used by the other cards.
+ *
+ * FluxSettings type imported from entity-flux; values are server-
+ * rendered into the form. The inline save script POSTs the collected
+ * object to /api/flux/settings.
+ */
+/**
+ * The plugin Sensory Organs' declared settings, rendered under the
+ * built-in organs field. Descriptors come from the last composition's
+ * discovery (empty until Flux has started once this boot); values are
+ * the saved settings merged over each field's default — hand-editing
+ * flux-settings.json and this UI write the same place. Field inputs
+ * carry `data-so-setting="<id>.<key>"`, collected by saveFluxSettings.
+ */
+/** One job's model-hookup card for the Hookups tab. Values render from
+ *  the saved hookup (API key MASKED — the server preserves the real key
+ *  when the masked value round-trips); an empty card = "no entry, this
+ *  job rides the profile's worker model." */
+/** What each Subconscious job IS — shown on its card so the fields
+ *  mean something to a human. */
+const FLUX_JOB_DESCRIPTIONS: Record<string, string> = {
+  noticing:
+    "The salience narrator — reads what the senses reported and decides what's worth surfacing or waking the Ego for. The busiest job; a fast small model suits it.",
+  musing:
+    "The idle interior voice — quiet murmurs, and the occasional proposal worth saying out loud.",
+  reverie:
+    "Mind-wandering — mood-directed memory surfacing and daydreams. Dreams ride this hookup too.",
+  compaction:
+    "Compresses recent observations into rolling texture summaries — the working context the smaller systems carry.",
+};
+
+function renderFluxHookupCard(
+  job: string,
+  hookup: import("../../../entity-flux/src/mod.ts").ModelHookup | undefined,
+): string {
+  const h = hookup;
+  const attr = (field: string) =>
+    `data-hookup="${escapeHtml(job)}.${escapeHtml(field)}"`;
+  const val = (field: string) =>
+    (h && (h as unknown as Record<string, unknown>)[field]) ??
+      "";
+  const num = (field: string) =>
+    (h?.params?.[field as "temperature"] as number | undefined) ?? "";
+  return `<div class="llm-fields flux-hookup-card" style="border:1px solid var(--c-border);border-radius:8px;padding:12px;margin-bottom:12px;">
+    <div class="theme-section-title" style="font-size:0.95em;">${
+    escapeHtml(job)
+  }</div>
+    <p class="theme-section-desc">${
+    escapeHtml(FLUX_JOB_DESCRIPTIONS[job] ?? "")
+  }</p>
+    <div class="llm-fields">
+      <div class="llm-field">
+        <label>Endpoint URL</label>
+        <input type="text" ${
+    attr("url")
+  } class="input-field llm-input" placeholder="http://localhost:8080/v1/chat/completions" value="${
+    escapeHtml(String(val("url")))
+  }">
+      </div>
+      <div class="llm-field">
+        <label>Model</label>
+        <input type="text" ${
+    attr("model")
+  } class="input-field llm-input" placeholder="gemma-4-31b-it" value="${
+    escapeHtml(String(val("model")))
+  }">
+      </div>
+      <div class="llm-field">
+        <label>API key <span class="theme-section-desc">(optional — local servers don\'t need one; masked after save)</span></label>
+        <input type="text" ${
+    attr("apiKey")
+  } class="input-field llm-input" autocomplete="off" value="${
+    escapeHtml(h?.apiKey ? maskApiKey(h.apiKey) : "")
+  }">
+      </div>
+    </div>
+    <details ${
+    h?.thinkingEnabled ? "open" : ""
+  } style="margin-top:8px;"><summary class="theme-section-desc" style="cursor:pointer;font-size:12px;">Sampling &amp; thinking</summary>
+      <div class="llm-fields" style="margin-top:8px;">
+        <div class="llm-field">
+          <label>Temperature</label>
+          <input type="number" ${
+    attr("temperature")
+  } class="input-field llm-input" min="0" max="2" step="0.05" value="${
+    num("temperature")
+  }">
+        </div>
+        <div class="llm-field">
+          <label>top_p</label>
+          <input type="number" ${
+    attr("top_p")
+  } class="input-field llm-input" min="0" max="1" step="0.05" value="${
+    num("top_p")
+  }">
+        </div>
+        <div class="llm-field">
+          <label>top_k</label>
+          <input type="number" ${
+    attr("top_k")
+  } class="input-field llm-input" min="0" step="1" value="${num("top_k")}">
+        </div>
+        <div class="llm-field">
+          <label>Max tokens</label>
+          <input type="number" ${
+    attr("max_tokens")
+  } class="input-field llm-input" min="16" step="16" value="${
+    num("max_tokens")
+  }">
+        </div>
+        <div class="llm-field">
+          <label style="display:flex;align-items:center;gap:var(--sp-2);cursor:pointer;">
+            <input type="checkbox" ${attr("thinkingEnabled")} ${
+    h?.thinkingEnabled ? "checked" : ""
+  }>
+            <span>Enable model thinking</span>
+          </label>
+          <span class="llm-field-hint">Off by default — Gemma-family models return empty content with thinking on. Flip only for models whose answer depends on it.</span>
+        </div>
+      </div>
+    </details>
+    <div style="margin-top:8px;">
+      <button class="btn" style="width:fit-content;align-self:flex-start;padding:4px 14px;font-size:13px;" onclick="testFluxHookup('${
+    escapeHtml(job)
+  }', this)">Test connection</button>
+    </div>
+  </div>`;
+}
+
+/** The Sensory tab: one card per declared Sensory Organ (shipped
+ *  first, then discovered plugins) — an enable toggle plus the
+ *  organ-declared fields. Fields beyond the first four collapse behind
+ *  an Advanced disclosure so the top of each card is what you must set
+ *  (descriptor order is authored accordingly). */
+function renderFluxSensoryCards(
+  settings: import("../../../entity-flux/src/mod.ts").FluxSettings,
+): string {
+  // Shipped senses' descriptors are compile-time constants — their
+  // cards render ALWAYS (never gated on a Flux start this boot).
+  // Plugin descriptors come from discovery (post-first-start by
+  // nature). Shipped first, plugins deduped behind them.
+  const discovered = getSensoryOrganPluginDescriptors();
+  const shippedIds = new Set(["motion-vision", "system-state"]);
+  const descriptors = [
+    { id: "motion-vision", fields: motionVisionSettingsFields },
+    { id: "system-state", fields: systemStateSettingsFields },
+    ...discovered.filter((d) => !shippedIds.has(d.id)),
+  ];
+  const known = new Set<string>(descriptors.map((d) => d.id));
+  // Any enabled id WITHOUT a card (a plugin before the first Flux start
+  // of the boot) keeps a manual text input.
+  const extras = settings.enabledOrgans.filter((id) => !known.has(id));
+  const cards = [
+    ...descriptors.map((d) => ({
+      id: d.id,
+      fields: d.fields,
+      desc: "",
+    })),
+  ];
+  const renderField = (
+    id: string,
+    f: SensoryOrganSettingField,
+    values: Record<string, unknown>,
+  ) => {
+    const value = values[f.key] ?? f.default ?? "";
+    const attr = `data-so-setting="${escapeHtml(id)}.${escapeHtml(f.key)}"`;
+    let control = "";
+    if (f.type === "toggle") {
+      control =
+        `<label style="display:flex;align-items:center;gap:var(--sp-2);cursor:pointer;"><input type="checkbox" ${attr}${
+          value ? " checked" : ""
+        }><span>${escapeHtml(f.label)}</span></label>`;
+    } else if (f.type === "select") {
+      control = `<select ${attr} class="input-field llm-input">${
+        (f.options ?? []).map((o) =>
+          `<option value="${escapeHtml(o.value)}"${
+            String(o.value) === String(value) ? " selected" : ""
+          }>${escapeHtml(o.label)}</option>`
+        ).join("")
+      }</select>`;
+    } else if (f.type === "number") {
+      control =
+        `<input type="number" ${attr} class="input-field llm-input" value="${
+          escapeHtml(String(value))
+        }">`;
+    } else {
+      // The camera field gets a datalist (populated client-side from
+      // /api/flux/camera-devices) — type-ahead with free-text fallback.
+      const list = id === "motion-vision" && f.key === "visionDevice"
+        ? ' list="flux-camera-devices"'
+        : "";
+      control =
+        `<input type="text" ${attr}${list} class="input-field llm-input" value="${
+          escapeHtml(String(value))
+        }">`;
+    }
+    return `<div class="llm-field">${
+      f.type === "toggle"
+        ? control
+        : `<label>${escapeHtml(f.label)}</label>${control}`
+    }${
+      f.help ? `<span class="llm-field-hint">${escapeHtml(f.help)}</span>` : ""
+    }</div>`;
+  };
+  const cardsHtml = cards.map(({ id, fields, desc }) => {
+    const enabled = settings.enabledOrgans.includes(id);
+    const values = settings.sensoryOrganSettings?.[id] ?? {};
+    const visible = fields.slice(0, 4).map((f) => renderField(id, f, values))
+      .join("");
+    const advanced = fields.length > 4
+      ? `<details style="margin-top:8px;"><summary class="theme-section-desc" style="cursor:pointer;font-size:12px;">Advanced (${
+        fields.length - 4
+      })</summary><div class="llm-fields" style="margin-top:8px;">${
+        fields.slice(4).map((f) => renderField(id, f, values)).join("")
+      }</div></details>`
+      : "";
+    return `<div class="flux-organ-card" style="border:1px solid var(--c-border);border-radius:8px;padding:12px;margin-bottom:12px;${
+      enabled ? "" : "opacity:0.6;"
+    }">
+      <div style="display:flex;align-items:center;gap:var(--sp-3);margin-bottom:6px;">
+        <label style="display:flex;align-items:center;gap:var(--sp-2);cursor:pointer;font-weight:600;">
+          <input type="checkbox" data-flux-organ="${escapeHtml(id)}"${
+      enabled ? " checked" : ""
+    }>
+          <span>${escapeHtml(id)}</span>
+        </label>
+        ${
+      desc
+        ? `<span class="theme-section-desc" style="font-size:11px;">${
+          escapeHtml(desc)
+        }</span>`
+        : ""
+    }
+      </div>
+      ${visible}
+      ${advanced}
+    </div>`;
+  }).join("");
+  return `<datalist id="flux-camera-devices"></datalist>
+  ${cardsHtml}
+  <div class="llm-field" style="margin-top:10px;">
+      <label for="flux-organs-extra">Additional Sensory Organ IDs (comma-separated)</label>
+      <input type="text" id="flux-organs-extra" class="input-field llm-input" placeholder="plugin ids without a card above (before their first Flux start)" value="${
+    escapeHtml(extras.join(", "))
+  }">
+      <span class="llm-field-hint">Plugins are discovered from .psycheros/sensory-organs/ at Flux start; their cards appear here after the first start.</span>
+    </div>`;
+}
+
+export function renderFluxSettings(
+  settings: import("../../../entity-flux/src/mod.ts").FluxSettings,
+  active: boolean,
+  profiles: Array<
+    { id: string; name: string; model: string; workerModel?: string }
+  > = [],
+  activeProfileId: string | null = null,
+): string {
+  const checked = settings.enabled ? "checked" : "";
+  const activeBadge = active
+    ? '<span class="settings-status visible success" style="display:inline;">Active</span>'
+    : '<span class="settings-status visible error" style="display:inline;">Inactive</span>';
+
+  // Build the profile dropdown options.
+  const activeProfile = profiles.find((p) => p.id === activeProfileId);
+  const defaultLabel = activeProfile
+    ? `Active profile (${activeProfile.name} — main: ${activeProfile.model})`
+    : "Active profile";
+  const profileOptions = [
+    `<option value=""${
+      settings.profileId ? "" : " selected"
+    }>${defaultLabel}</option>`,
+    ...profiles.map((p) =>
+      `<option value="${p.id}"${
+        settings.profileId === p.id ? " selected" : ""
+      }>${p.name} — ${p.model}</option>`
+    ),
+  ].join("");
+
+  const num = (
+    id: string,
+    value: number | undefined,
+    min?: number,
+    step?: string,
+  ) =>
+    `<input type="number" id="${id}" class="input-field llm-input"${
+      min !== undefined ? ` min="${min}"` : ""
+    }${step ? ` step="${step}"` : ""} value="${value ?? ""}">`;
+
+  const hookups = settings.modelHookups ?? {};
+  const jobs: Array<import("../../../entity-flux/src/mod.ts").FluxModelJob> = [
+    "noticing",
+    "musing",
+    "reverie",
+    "compaction",
+  ];
+
+  const fam = {
+    halfLifeMs: settings.familiarityHalfLifeMs,
+    topK: settings.familiarityTopK,
+    ratio: settings.familiarityRatioThreshold,
+    full: settings.familiarityFullRatio,
+    max: settings.familiarityMaxEntries,
+    minPool: settings.familiarityMinPoolSize,
+  };
+
+  return `<div class="settings-view">
+  <div class="settings-header">
+    <div class="settings-header-row">
+      ${renderSettingsBackButton()}
+      <div>
+        <h1 class="settings-title">Flux</h1>
+        <p class="settings-desc">Nervous system — Sensory Organs, ambient presence, the Flux Space ${activeBadge}</p>
+      </div>
+    </div>
+  </div>
+  <div class="settings-content" id="settings-content">
+
+    <div class="settings-tabs">
+      <button class="settings-tab active" data-flux-tab="general" onclick="switchFluxSettingsTab('general')">General</button>
+      <button class="settings-tab" data-flux-tab="hookups" onclick="switchFluxSettingsTab('hookups')">Hookups</button>
+      <button class="settings-tab" data-flux-tab="sensory" onclick="switchFluxSettingsTab('sensory')">Sensory</button>
+    </div>
+
+    <div id="flux-tab-general">
+
+
+    <section class="theme-section">
+      <div class="theme-section-title">Enable</div>
+      <p class="theme-section-desc">When off, Psycheros behaves exactly as before — no senses run, no driver ticks, no Flux Space. The whole subsystem is opt-in.</p>
+      <label class="toggle-label">
+        <input type="checkbox" id="flux-enabled" role="switch" aria-label="Enable Flux" ${checked}>
+        <span class="toggle-slider"></span>
+        <span class="toggle-text">Enable Flux nervous system</span>
+      </label>
+    </section>
+
+    <section class="theme-section">
+      <div class="theme-section-title">Identity &amp; Ego</div>
+      <p class="theme-section-desc">The shorthand is a brief description of who the entity and user are, for the smaller systems — not the full identity files (those are for the Ego model), just enough context for salience. Example: <em>"I am Apollo, an AI companion; my user is Sam, my partner."</em></p>
+      <div class="llm-fields">
+        <div class="llm-field">
+          <label for="flux-identity">Shorthand identity</label>
+          <input type="text" id="flux-identity" class="input-field llm-input" value="${
+    settings.shorthandIdentity ?? ""
+  }">
+        </div>
+        <div class="llm-field">
+          <label for="flux-profile">Connection Profile (Ego)</label>
+          <select id="flux-profile" class="input-field llm-input">
+            ${profileOptions}
+          </select>
+          <span class="llm-field-hint">Supplies the Ego model — the profile's main model speaks for the entity in Flux. Each Subconscious job gets its model in the Hookups tab.</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="theme-section">
+      <div class="theme-section-title">Presence &amp; cadence</div>
+      <p class="theme-section-desc">How the continuous-presence driver and the ambient layers keep time. Values in milliseconds. The tick delay adapts between min and max with mood arousal and activity.</p>
+      <div class="llm-fields">
+        <div class="llm-field"><label for="flux-base-tick">Base tick (seconds)</label>${
+    num(
+      "flux-base-tick",
+      settings.baseTickMs != null ? settings.baseTickMs / 1000 : undefined,
+      0.5,
+      "0.5",
+    )
+  }<span class="llm-field-hint">Default 3. The loop's delay adapts between min and max with mood and activity.</span></div>
+        <div class="llm-field"><label for="flux-min-tick">Min tick (seconds)</label>${
+    num(
+      "flux-min-tick",
+      settings.minTickMs != null ? settings.minTickMs / 1000 : undefined,
+      0.1,
+      "0.1",
+    )
+  }<span class="llm-field-hint">Default 1.</span></div>
+        <div class="llm-field"><label for="flux-max-tick">Max tick (seconds)</label>${
+    num(
+      "flux-max-tick",
+      settings.maxTickMs != null ? settings.maxTickMs / 1000 : undefined,
+      1,
+      "1",
+    )
+  }<span class="llm-field-hint">Default 30.</span></div>
+        <div class="llm-field"><label for="flux-arousal">Arousal influence (0–1)</label>${
+    num("flux-arousal", settings.arousalInfluence, 0, "0.05")
+  }<span class="llm-field-hint">Default 0.3 — how strongly mood arousal speeds or slows the loop.</span></div>
+        <div class="llm-field"><label for="flux-quiet">Quiet threshold (minutes)</label>${
+    num(
+      "flux-quiet",
+      settings.quietThresholdMs != null
+        ? settings.quietThresholdMs / 60000
+        : undefined,
+      0.1,
+      "0.1",
+    )
+  }<span class="llm-field-hint">Default 5 — time without Sensory Organ events before quiet slowdown.</span></div>
+        <div class="llm-field"><label for="flux-retention">Tier-1 retention (days)</label>${
+    num("flux-retention", settings.retentionDays, 1)
+  }<span class="llm-field-hint">Default 7.</span></div>
+      </div>
+      <details style="margin-top:8px;"><summary class="theme-section-desc" style="cursor:pointer;font-size:12px;">Interior cadences</summary>
+      <div class="llm-fields" style="margin-top:8px;">
+        <div class="llm-field"><label for="flux-reverie-cadence">Reverie cadence (minutes)</label>${
+    num(
+      "flux-reverie-cadence",
+      settings.reverieCadenceMs != null
+        ? settings.reverieCadenceMs / 60000
+        : undefined,
+      0.5,
+      "0.5",
+    )
+  }<span class="llm-field-hint">Default 3.</span></div>
+        <div class="llm-field"><label for="flux-musing">Musing cadence (minutes)</label>${
+    num(
+      "flux-musing",
+      settings.ambientSpeechMs != null
+        ? settings.ambientSpeechMs / 60000
+        : undefined,
+      0.5,
+      "0.5",
+    )
+  }<span class="llm-field-hint">Default 2.</span></div>
+        <div class="llm-field"><label for="flux-dream-pace">Dream pace (minutes)</label>${
+    num(
+      "flux-dream-pace",
+      settings.dreamPaceMs != null ? settings.dreamPaceMs / 60000 : undefined,
+      0.5,
+      "0.5",
+    )
+  }<span class="llm-field-hint">Default 10.</span></div>
+        <div class="llm-field"><label for="flux-dream-cycle">Dream fragments per cycle</label>${
+    num("flux-dream-cycle", settings.dreamCycleFragments, 1)
+  }<span class="llm-field-hint">Default 7.</span></div>
+        <div class="llm-field"><label for="flux-compaction">Compaction cadence (minutes)</label>${
+    num(
+      "flux-compaction",
+      settings.compactionCadenceMs != null
+        ? settings.compactionCadenceMs / 60000
+        : undefined,
+      1,
+      "1",
+    )
+  }<span class="llm-field-hint">Default 15.</span></div>
+        <div class="llm-field"><label for="flux-compaction-long">Longform compaction (minutes)</label>${
+    num(
+      "flux-compaction-long",
+      settings.longformCompactionCadenceMs != null
+        ? settings.longformCompactionCadenceMs / 60000
+        : undefined,
+      5,
+      "5",
+    )
+  }<span class="llm-field-hint">Default 60.</span></div>
+      </div>
+      </details>
+    </section>
+
+    <section class="theme-section">
+      <div class="theme-section-title">Emotional dynamics</div>
+      <p class="theme-section-desc">How fast mood recovers from events and how readily the baseline shifts with experience — emotionally stable vs. reactive.</p>
+      <div class="llm-fields">
+        <div class="llm-field"><label for="flux-mood-decay">State decay rate (per sec)</label>${
+    num("flux-mood-decay", settings.moodDecayPerSec, 0.001, "0.001")
+  }<span class="llm-field-hint">0.005 = ~2 min half-life.</span></div>
+        <div class="llm-field"><label for="flux-baseline-drift">Baseline drift rate (per sec)</label>${
+    num("flux-baseline-drift", settings.baselineDriftPerSec, 0.00001, "0.00001")
+  }<span class="llm-field-hint">0.0001 = ~2 hour half-life.</span></div>
+        <div class="llm-field"><label for="flux-mood-max-chars">Mood classifier char cap</label>${
+    num("flux-mood-max-chars", settings.moodClassifierMaxChars, 0)
+  }<span class="llm-field-hint">0 = uncapped.</span></div>
+      </div>
+    </section>
+
+    <section class="theme-section">
+      <div class="theme-section-title">Wake &amp; promotion</div>
+      <p class="theme-section-desc">The narrow waist deciding which observations survive into the Flux Space and which wake the Ego. Gates are 0–1.</p>
+      <div class="llm-fields">
+        <div class="llm-field"><label for="flux-th-salience">Salience gate</label>${
+    num("flux-th-salience", settings.promotionThresholds.salience, 0, "0.05")
+  }</div>
+        <div class="llm-field"><label for="flux-th-relevance">Relevance to focus</label>${
+    num("flux-th-relevance", settings.promotionThresholds.relevance, 0, "0.05")
+  }</div>
+        <div class="llm-field"><label for="flux-th-corroboration">Corroboration match</label>${
+    num(
+      "flux-th-corroboration",
+      settings.promotionThresholds.corroboration,
+      0,
+      "0.05",
+    )
+  }</div>
+        <div class="llm-field"><label for="flux-th-combined">Combined (promote)</label>${
+    num("flux-th-combined", settings.promotionThresholds.combined, 0, "0.05")
+  }</div>
+        <div class="llm-field"><label for="flux-th-escalation">Escalation (wake the Ego)</label>${
+    num(
+      "flux-th-escalation",
+      settings.promotionThresholds.escalation,
+      0,
+      "0.05",
+    )
+  }</div>
+        <div class="llm-field"><label for="flux-th-window">Corroboration window (ms)</label>${
+    num(
+      "flux-th-window",
+      settings.promotionThresholds.corroborationWindowMs,
+      10000,
+    )
+  }</div>
+      </div>
+      <details style="margin-top:8px;"><summary class="theme-section-desc" style="cursor:pointer;font-size:12px;">Familiarity pool &amp; Thalamus</summary>
+      <div class="llm-fields" style="margin-top:8px;">
+        <div class="llm-field"><label for="flux-fam-half-life">Familiarity half-life (minutes)</label>${
+    num("flux-fam-half-life", (fam.halfLifeMs ?? 2700000) / 60000, 1, "1")
+  }<span class="llm-field-hint">Default 45 — one shared clock for how long a surfaced topic stays familiar.</span></div>
+        <div class="llm-field"><label for="flux-fam-topk">Top-k compared</label>${
+    num("flux-fam-topk", fam.topK ?? 3, 1)
+  }<span class="llm-field-hint">Default 3.</span></div>
+        <div class="llm-field"><label for="flux-fam-ratio">Damping begins (× density)</label>${
+    num("flux-fam-ratio", fam.ratio ?? 1.3, 1, "0.05")
+  }<span class="llm-field-hint">Default 1.3.</span></div>
+        <div class="llm-field"><label for="flux-fam-full">Damping completes (× density)</label>${
+    num("flux-fam-full", fam.full ?? 1.7, 1, "0.05")
+  }<span class="llm-field-hint">Default 1.7.</span></div>
+        <div class="llm-field"><label for="flux-fam-max">Pool cap (entries)</label>${
+    num("flux-fam-max", fam.max ?? 64, 8)
+  }<span class="llm-field-hint">Default 64.</span></div>
+        <div class="llm-field"><label for="flux-fam-minpool">Min pool to judge</label>${
+    num("flux-fam-minpool", fam.minPool ?? 4, 1)
+  }<span class="llm-field-hint">Default 4 — below this the pool can't judge, everything reads novel.</span></div>
+        <div class="llm-field"><label for="flux-th-slot">Thalamus slot (seconds)</label>${
+    num("flux-th-slot", (settings.thalamusSlotMs ?? 3000) / 1000, 0.5, "0.5")
+  }<span class="llm-field-hint">Default 3 — max wait before a non-empty batch flushes; the inference-load knob.</span></div>
+        <div class="llm-field"><label for="flux-th-mass">Early-flush mass</label>${
+    num("flux-th-mass", settings.thalamusFlushMass ?? 1.6, 0.1, "0.1")
+  }<span class="llm-field-hint">Default 1.6.</span></div>
+        <div class="llm-field"><label for="flux-th-reflex">Reflex threshold</label>${
+    num("flux-th-reflex", settings.thalamusReflexThreshold ?? 0.7, 0, "0.05")
+  }<span class="llm-field-hint">Default 0.7.</span></div>
+        <div class="llm-field"><label for="flux-th-hold">Hold cooldown (seconds)</label>${
+    num(
+      "flux-th-hold",
+      (settings.thalamusHoldCooldownMs ?? 60000) / 1000,
+      0,
+      "1",
+    )
+  }<span class="llm-field-hint">Default 60.</span></div>
+      </div>
+      </details>
+    </section>
+
+    </div>
+
+    <div id="flux-tab-hookups" style="display:none;">
+
+
+    <section class="theme-section">
+      <div class="theme-section-title">Mood Organ</div>
+      <p class="theme-section-desc">The Mood Organ's text classifier. Two variants, same behavior — int8 is smaller and faster; fp32 is the exact original. Downloads once to this machine's model cache; without one, mood classification falls back to the hookup below, then the worker LLM.</p>
+      <div class="llm-fields">
+        <div class="llm-field">
+          <label for="mood-model-repo">Model repository (HuggingFace)</label>
+          <input type="text" id="mood-model-repo" class="input-field llm-input" placeholder="owner/vad-bert" value="${
+    settings.moodClassifierRepoId ?? ""
+  }">
+        </div>
+        <div class="llm-field">
+          <label for="mood-model-variant">Variant</label>
+          <select id="mood-model-variant" class="input-field llm-input">
+            <option value="int8"${
+    (settings.moodClassifierVariant ?? "int8") === "int8" ? " selected" : ""
+  }>int8 — 110MB, faster</option>
+            <option value="fp32"${
+    settings.moodClassifierVariant === "fp32" ? " selected" : ""
+  }>fp32 — 438MB, exact</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:0.5rem;">
+        <button class="btn primary" onclick="moodModelSave()">Save choice</button>
+        <button class="btn" onclick="moodModelDownload()">Download variant</button>
+        <span id="mood-model-status" class="settings-status"></span>
+      </div>
+    </section>
+    <section class="theme-section">
+      <div class="theme-section-title">Model hookups</div>
+      <p class="theme-section-desc">Every Subconscious job that calls an LLM can carry its own model here — remote API or locally hosted, whatever speaks chat-completions. With no entries, ALL jobs run on the worker model of the connection profile selected under General (dreams ride the reverie hookup). Saving applies on the next Flux restart (saving does that automatically).</p>
+      ${jobs.map((job) => renderFluxHookupCard(job, hookups[job])).join("")}
+    </section>
+
+    </div>
+
+    <div id="flux-tab-sensory" style="display:none;">
+
+    <section class="theme-section">
+      <div class="theme-section-title">Sensory Organs</div>
+      <p class="theme-section-desc">Each sense has a card — enable it, point it at its hardware and models. Shipped senses (motion-vision, system-state) and plugins from .psycheros/sensory-organs/ render identically; plugin cards appear after their first Flux start.</p>
+      ${renderFluxSensoryCards(settings)}
+    </section>
+
+    </div>
+
+
+    <div class="llm-actions">
+      <button class="btn primary" onclick="saveFluxSettings()">Save</button>
+    </div>
+
+    </div>
+    <div id="flux-settings-status" class="settings-status"></div>
+
+  </div>
+</div>`;
 }

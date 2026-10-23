@@ -87,7 +87,7 @@ export const pulseTool: Tool = {
           prompt_text: {
             type: "string",
             description:
-              "For create: the prompt I should process when this Pulse fires. Written in first-person as instructions to myself.",
+              "For create (required in practice): the prompt I should process when this Pulse fires. Written in first-person as instructions to myself. If I omit it, my description is used; if I omit both, the create fails.",
           },
           trigger_type: {
             type: "string",
@@ -171,7 +171,19 @@ function executeCreate(
   ctx: ToolContext,
 ): Promise<ToolResult> {
   const name = args.name;
-  const promptText = args.prompt_text;
+  // Schema/executor honesty: the schema
+  // only marks `operation` required, and the model reliably supplies a
+  // rich description instead of prompt_text — it retries the identical
+  // "missing prompt_text" call because nothing tells it the
+  // field was required. Derive: prompt_text ?? description ?? name.
+  const promptText = (typeof args.prompt_text === "string" &&
+      args.prompt_text.trim())
+    ? args.prompt_text
+    : (typeof args.description === "string" && args.description.trim())
+    ? args.description
+    : (typeof args.name === "string" && args.name.trim())
+    ? args.name
+    : "";
   const triggerType = args.trigger_type as string;
 
   if (typeof name !== "string" || !name.trim()) {

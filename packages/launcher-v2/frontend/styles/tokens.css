@@ -9,6 +9,18 @@
  */
 
 :root {
+  /* Flux briefing tints — mirror of psycheros tokens.css (keep in sync). */
+  --c-flux-reverie: #6b46c1;
+  --c-flux-reverie-fg: #a78bfa;
+  --c-flux-musing: #b45309;
+  --c-flux-musing-fg: #fbbf24;
+  --c-flux-noticing: #64748b;
+  --c-flux-noticing-fg: #94a3b8;
+  --c-flux-compaction: #3f7f5f;
+  --c-flux-compaction-fg: #86c7a5;
+  --c-flux-dream: #7c5cbf;
+  --c-flux-dream-fg: #b8a5e8;
+
   /* Picked slots */
   --c-bg: #000000;
   --c-fg: #e8e8e8;

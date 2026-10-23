@@ -10,12 +10,14 @@ on:
   #   launcher-vX.Y.Z      → launcher bundle (zip + tarball) + raw install scripts
   #   entity-core-vX.Y.Z   → source tarball of packages/entity-core/
   #   entity-loom-vX.Y.Z   → source tarball of packages/entity-loom/
+  #   entity-flux-vX.Y.Z   → source tarball of packages/entity-flux/
   #   psycheros-vX.Y.Z     → notes-only (container built by docker.yml)
   push:
     tags:
       - "launcher-v*"
       - "entity-core-v*"
       - "entity-loom-v*"
+      - "entity-flux-v*"
       - "psycheros-v*"
   workflow_dispatch:
 
@@ -413,6 +415,60 @@ jobs:
         run: |
           mkdir -p bundle
           cp -a packages/entity-loom "bundle/${REF}"
+          ( cd bundle && tar -czf "${REF}.tar.gz" "${REF}" )
+          ( cd bundle && zip -r   "${REF}.zip"    "${REF}" )
+
+      - name: Upload source asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF: ${{ github.ref_name }}
+        run: |
+          gh release upload "$REF" --clobber \
+            "bundle/${REF}.tar.gz" \
+            "bundle/${REF}.zip"
+
+  entity-flux:
+    if: github.repository == 'PsycherosAI/Psycheros' && startsWith(github.ref_name, 'entity-flux-v')
+    name: entity-flux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Ensure release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF: ${{ github.ref_name }}
+        run: |
+          if gh release view "$REF" >/dev/null 2>&1; then
+            echo "Release $REF already exists; skipping create."
+            exit 0
+          fi
+          PKG="${REF%-v*}"
+          VERSION="${REF#${PKG}-v}"
+          NOTES_FILE="$(mktemp)"
+          if .github/scripts/extract-changelog-entry.sh "$PKG" "$VERSION" > "$NOTES_FILE"; then
+            echo "Creating release from packages/${PKG}/CHANGELOG.md entry [$VERSION]."
+            # Append the per-package "How to install" footer so visitors on
+            # the release page can tell our scoped uploads apart from
+            # GitHub's auto-attached full-monorepo source archives (which
+            # are not real assets and cannot be disabled on free-tier
+            # public repos).
+            if [ -f ".github/release-footers/$PKG.md" ]; then
+              printf "\n" >> "$NOTES_FILE"
+              cat ".github/release-footers/$PKG.md" >> "$NOTES_FILE"
+            fi
+            gh release create "$REF" --title "$REF" --notes-file "$NOTES_FILE" --latest=false --verify-tag
+          else
+            echo "::warning::Falling back to --generate-notes for $REF (no CHANGELOG entry)."
+            gh release create "$REF" --title "$REF" --generate-notes --latest=false --verify-tag
+          fi
+
+      - name: Stage source tarball
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          mkdir -p bundle
+          cp -a packages/entity-flux "bundle/${REF}"
           ( cd bundle && tar -czf "${REF}.tar.gz" "${REF}" )
           ( cd bundle && zip -r   "${REF}.zip"    "${REF}" )
 

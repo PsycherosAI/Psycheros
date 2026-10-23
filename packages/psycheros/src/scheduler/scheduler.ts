@@ -833,12 +833,23 @@ export class Scheduler {
       }
     }
 
-    // Advance the schedule pointer past the last fire we materialized.
+    // Advance the schedule pointer past the last fire we materialized —
+    // and past `now` when the schedule ran behind (sleep, downtime). The
+    // +1ms preserves the healthy on-time case (next slot after the one
+    // just fired); the `now` floor is the realignment. Without it, a
+    // backlogged schedule replays missed slots one per tick: one
+    // materialized job_run every 5s (12/min) that re-runs the handler
+    // against real time — flooding the run log and accelerating
+    // retention eviction for every-minute inactivity pulses. One
+    // catch-up fire, then the next future slot.
     const lastFired = fireTimes[fireTimes.length - 1];
-    const next = this.advanceNextFire(
-      schedule,
-      new Date(new Date(lastFired).getTime() + 1),
+    const advanceFrom = new Date(
+      Math.max(
+        new Date(lastFired).getTime() + 1,
+        new Date(now).getTime(),
+      ),
     );
+    const next = this.advanceNextFire(schedule, advanceFrom);
 
     if (schedule.kind === "oneshot") {
       // One-shot schedules disable themselves after firing.
@@ -873,8 +884,10 @@ export class Scheduler {
     }
 
     if (policy === "fire_once_then_align" || policy === "skip_missed") {
-      // Fire once at the most recent due time. The advance step will
-      // realign next_fire_at to the next slot strictly after `now`.
+      // Fire once at the oldest due slot — its scheduled_for marks the
+      // missed slot being honored. The advance step realigns
+      // next_fire_at to the next slot strictly after `now`, so the rest
+      // of the backlog is dropped rather than replayed one slot per tick.
       return [nextFire];
     }
 
@@ -1058,6 +1071,13 @@ export class Scheduler {
   private readonly skippedRetentionMs = 24 * 60 * 60 * 1000;
   /** Always keep at least this many of every cohort's terminal runs. */
   private readonly minRunsRetained = 200;
+  /**
+   * Non-skipped terminal runs that always survive the `minRunsRetained`
+   * cap, however many newer skipped ticks pile on. Real fires and real
+   * failures are rare and are the durable evidence the inactivity
+   * cooldown (latest success) and circuit breaker (failure streak) read.
+   */
+  private readonly minTerminalRunsRetained = 20;
 
   private pruneCompletedRuns(jobId: string): void {
     const stmt = this.db.prepare(
@@ -1118,7 +1138,18 @@ export class Scheduler {
       [...cohortParams, skipCutoff, ...cohortParams],
     );
 
-    // Prune all terminal runs beyond `minRunsRetained` per cohort.
+    // Prune all terminal runs beyond `minRunsRetained` per cohort — with
+    // one carve-out: the most recent `minTerminalRunsRetained` non-skipped
+    // runs always survive the cap. Skipped ticks are the unbounded flood
+    // (an every-minute inactivity pulse writes ~1440/day), but non-skipped
+    // rows are rare AND load-bearing as durable evidence: the inactivity
+    // cooldown reads the latest success and the circuit breaker walks its
+    // failure streak from these rows. Without the carve-out, ~200 newer
+    // tick rows evict the cooldown's success row, the cooldown query
+    // finds nothing, and the pulse re-fires in a loop while the user is
+    // still inactive (observed on a sleep-wake host: chimes at 18h → 87m
+    // → 17m shrinking intervals, the flood running ~12 rows/min while
+    // the scheduler drained a sleep backlog).
     this.db.exec(
       `DELETE FROM job_runs
        WHERE ${cohortWhere}
@@ -1129,8 +1160,21 @@ export class Scheduler {
              AND status IN ('success', 'error', 'dead', 'skipped')
            ORDER BY COALESCE(completed_at, created_at) DESC
            LIMIT ?
+         )
+         AND id NOT IN (
+           SELECT id FROM job_runs
+           WHERE ${cohortWhere}
+             AND status IN ('success', 'error', 'dead')
+           ORDER BY COALESCE(completed_at, created_at) DESC
+           LIMIT ?
          )`,
-      [...cohortParams, ...cohortParams, this.minRunsRetained],
+      [
+        ...cohortParams,
+        ...cohortParams,
+        this.minRunsRetained,
+        ...cohortParams,
+        this.minTerminalRunsRetained,
+      ],
     );
   }
 }

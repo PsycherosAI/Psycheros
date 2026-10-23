@@ -1,0 +1,13 @@
+{
+  "name": "@entity/shell",
+  "version": "0.1.0",
+  "exports": "./src/mod.ts",
+  "imports": {
+    "@earendil-works/pi-agent-core": "npm:@earendil-works/pi-agent-core@0.85.0",
+    "@earendil-works/pi-ai": "npm:@earendil-works/pi-ai@0.85.0"
+  },
+  "tasks": {
+    "check": "deno check src/mod.ts",
+    "test": "deno test -A tests/"
+  }
+}

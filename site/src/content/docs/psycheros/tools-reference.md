@@ -10,8 +10,8 @@ installs. A few tools that require external configuration start **off by
 default**: `shell`, `control_device`, `control_lovense`, `control_toy`. These
 are auto-enabled when their respective integrations are configured (e.g.,
 `control_device` when home devices are added). Deprecated tools (currently
-`sync_mcp`) are hidden from both the UI and the LLM but remain registered for
-potential resurrection.
+`sync_mcp`, `update_title`, and `list_identity_snapshots`) are hidden from both
+the UI and the LLM but remain registered for potential resurrection.
 
 Tool enable/disable state can be overridden via the `PSYCHEROS_TOOLS`
 environment variable or the Settings > Tools UI. When
@@ -190,10 +190,10 @@ description guides the entity to pick appropriate section headings or create new
 ones, and emphasizes using actual filenames rather than XML tag names visible in
 context.
 
-| Tool                      | Description                                                                                 |
-| ------------------------- | ------------------------------------------------------------------------------------------- |
-| `maintain_identity`       | Identity file maintenance with operations: append, prepend, update_section, rewrite_section |
-| `list_identity_snapshots` | View available backups created automatically by entity-core                                 |
+| Tool                          | Description                                                                                           |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `maintain_identity`           | Identity file maintenance with operations: append, prepend, update_section, rewrite_section           |
+| ~~`list_identity_snapshots`~~ | ~~View available backups created automatically by entity-core~~ (deprecated — hidden from UI and LLM) |
 
 **Operations:**
 
@@ -530,19 +530,11 @@ the tool-result message row in the database. Old messages from before this
 refactor still carry `[IMAGE:...]` markers in assistant content and continue to
 render via the retained legacy parser — no backfill migration.
 
-**Context Fading:** Image descriptions fade from longform to shortform after 5
-conversation turns in the LLM context. The DB always retains the full
-description. The entity can use the `look_closer` tool to re-examine any image
-for full details. Fading applies to `generate_image` tool results via the
-`metadata.image` sidecar (long → short, in memory), `describe_image` and
-`look_closer` tool results via the `metadata.fade` sidecar (long → short or
-placeholder), legacy `[IMAGE:...]` / `[USER_IMAGE:...]` markers in
-user/assistant messages, and legacy `[describe_image]` / `[look_closer]`
-prefix-form tool results. Additionally, tool call arguments for image tools
-(`generate_image`, `describe_image`, `look_closer`) are truncated in context —
-string values over 50 characters are cut short. Non-image tools are unaffected.
-This reduces token usage from verbose prompts and descriptions stored in tool
-call history.
+**Context Fading (removed):** Image descriptions used to fade from longform to
+shortform after 5 turns in LLM context. The fading machinery was removed
+2026-09-26 — the entity was imitating the truncation markers in its own prompts.
+Descriptions now persist verbatim in context until ordinary token-budget FIFO
+trims them; the shortform remains for UI display.
 
 **Data flow:** Entity calls `generate_image` → server reads generator config →
 dispatches to provider (OpenRouter or Gemini API) → saves image to disk →
@@ -562,27 +554,24 @@ generators, disabled generators, and image read failures.
 | ------------------------------- | --------------------------------------------------------------------------- |
 | `src/tools/generate-image.ts`   | `generate_image` tool with OpenRouter and Gemini providers, auto-captioning |
 | `src/tools/describe-image.ts`   | Shared captioning functions (dual short/long), `describe_image` tool        |
-| `src/tools/look-closer.ts`      | `look_closer` tool for re-examining images after context fade               |
 | `src/llm/image-gen-settings.ts` | Settings type (generators + captioning), load/save, API key masking         |
 
 ## Image Captioning
 
 Image captioning provides automatic description of images via a configurable
-vision model. It serves three purposes: auto-captioning chat attachments and
-generated images, providing the entity with an explicit `describe_image` tool,
-and providing a `look_closer` tool for re-examining images after context fading.
+vision model. It serves two purposes: auto-captioning chat attachments and
+generated images, and providing the entity with an explicit `describe_image`
+tool.
 
 ### Dual Description System
 
 All auto-captioning produces both a **longform** (detailed, thorough) and
 **shortform** (single sentence, under 15 words) description. Both are stored in
-the message content in the database. When building LLM context, the
-`buildMessages()` method in the entity loop applies fading: after 5 conversation
-turns, longform is replaced with shortform. This significantly reduces token
-usage in long conversations with many images.
-
-The `IMAGE_DESCRIPTION_FADE_TURNS` constant (default: 5) controls the grace
-period.
+the message content in the database. (Context fading — swapping longform for
+shortform after 5 turns — was removed 2026-09-26: the entity was imitating the
+truncation markers in its own prompts. Descriptions now persist verbatim in
+context until ordinary token-budget FIFO trims them; the shortform remains for
+UI display.)
 
 ### Auto-Captioning
 
@@ -613,32 +602,22 @@ generated images, understanding user-attached images in more detail.
 
 ### look_closer Tool
 
-The entity can re-examine any image by path to get a fresh detailed description.
-This is useful when the image's description has faded from context.
+Disabled 2026-10-22 — context fading's removal (2026-09-26) took its purpose
+with it, and `describe_image` covers local re-examination (plus URLs, with the
+hardened path gate). The implementation stays in `src/tools/look-closer.ts`,
+commented out of the registry, for possible repurposing.
 
-| Tool          | Description                                    |
-| ------------- | ---------------------------------------------- |
-| `look_closer` | Re-examine an image for a detailed description |
-
-**Parameters:** `image_path` (required, path relative to `.psycheros/`).
-
-**Behavior:** Re-captions the image using the configured captioning provider and
-returns the full longform description. The result is prefixed with
-`[look_closer]` for identification and also fades from context after 5 turns.
-
-**Setup:** Both `describe_image` and `look_closer` are auto-enabled when a
-captioning provider is configured. Supports Gemini and OpenRouter as captioning
-providers with independent model selection.
+**Setup:** `describe_image` is auto-enabled when a captioning provider is
+configured. Supports Gemini and OpenRouter as captioning providers with
+independent model selection.
 
 ### Related Source Files
 
-| File                            | Purpose                                                                                 |
-| ------------------------------- | --------------------------------------------------------------------------------------- |
-| `src/tools/describe-image.ts`   | `describe_image` tool, `captionImage()`, `captionImageDual()`, `fetchAndCaptionUrl()`   |
-| `src/tools/look-closer.ts`      | `look_closer` tool                                                                      |
-| `src/server/routes.ts`          | Auto-caption flow for chat attachments                                                  |
-| `src/entity/loop.ts`            | Context fading logic (`buildFadeMap()`, `fadeImageMarker()`, `fadeToolCallArguments()`) |
-| `src/llm/image-gen-settings.ts` | `CaptioningSettings` type, part of `ImageGenSettings`                                   |
+| File                            | Purpose                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------- |
+| `src/tools/describe-image.ts`   | `describe_image` tool, `captionImage()`, `captionImageDual()`, `fetchAndCaptionUrl()` |
+| `src/server/routes.ts`          | Auto-caption flow for chat attachments                                                |
+| `src/llm/image-gen-settings.ts` | `CaptioningSettings` type, part of `ImageGenSettings`                                 |
 
 ## Identity File Structure (Core Prompts)
 

@@ -66,6 +66,15 @@ Common dependencies (`@std/*`, `@db/sqlite`, `@xenova/transformers`,
 `deno.json`. Package-specific dependencies stay in each package's own
 `deno.json`.
 
+## Context changes compose the turn builder
+
+Any PR that changes what the entity sees in context — a new section, a retrieval
+source, a mode block — must go through the baseline turn builder
+(`packages/psycheros/src/entity/turn-context.ts`) and slot in via the placement
+rubric in
+[`packages/psycheros/docs/context-assembly.md`](packages/psycheros/docs/context-assembly.md).
+No parallel assembly paths; verify with the Context Inspector before and after.
+
 ## Pull requests
 
 1. Open an issue first for non-trivial changes — happy to discuss approach

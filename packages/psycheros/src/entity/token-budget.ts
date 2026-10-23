@@ -129,59 +129,95 @@ function estimateToolDefinitionsTokens(tools: ToolDefinition[]): number {
 /**
  * Validate and fix a message sequence for LLM API compatibility.
  *
- * Most APIs require a specific role alternation pattern:
- * - First message after system must be "user"
- * - user -> assistant (normal response)
- * - assistant (with tool_calls) -> tool (one or more results)
- * - assistant (without tool_calls) -> user
- * - tool -> tool (more results) | assistant (continuation) | user (end of chain)
+ * Conversation rows are NEVER dropped for role-sequence reasons. A
+ * strict grammar that deletes consecutive same-role rows eats what a
+ * hosted-Flux conversation produces legitimately (Ego wake posts between
+ * user messages = continuous entity speech, like one multi-generation
+ * turn; duplicate user rows; orphaned tool rows). A cascade can eat the
+ * conversation tail INCLUDING the live user message — the model answers a
+ * question from days ago because today's was deleted before it ever saw
+ * the request.
  *
- * Messages that don't fit the expected pattern are dropped.
- * The system message (index 0) is always preserved.
+ * Rules:
+ * - Consecutive same-role rows MERGE into one message (content joined).
+ *   One entity turn that arrived in pieces reads as one turn — the same
+ *   way the agent loop's generations are one assistant turn. Identical
+ *   adjacent content keeps one copy (double-persist artifacts).
+ * - Orphaned tool rows (no preceding assistant carrying tool_calls) are
+ *   still dropped — APIs reject them and they carry no dialogue.
+ * - The LAST message of the input is hard-protected: if a rule would drop
+ *   it, it merges instead. The current user message can never vanish.
+ * - The trailing system message (cache-friendly dynamic block) is kept.
+ * - A trailing assistant with unresolved tool_calls is still popped.
  */
-function sanitizeMessageSequence(messages: ChatMessage[]): ChatMessage[] {
+export function sanitizeMessageSequence(
+  messages: ChatMessage[],
+): ChatMessage[] {
   if (messages.length <= 1) return messages;
 
   const result: ChatMessage[] = [messages[0]]; // Always keep system
+  // The previous kept message's role and whether it ended a tool_call
+  // chain that still expects results.
   let prevHadToolCalls = false;
+
+  const mergeInto = (target: ChatMessage, msg: ChatMessage) => {
+    // History content is string in practice; vision part-arrays only ride
+    // the live turn, never history rows. Coerce defensively.
+    const flat = (c: ChatMessage["content"]): string =>
+      typeof c === "string" ? c.trim() : c ? JSON.stringify(c) : "";
+    const a = flat(target.content);
+    const b = flat(msg.content);
+    if (!b) return;
+    if (!a) {
+      target.content = b;
+    } else if (a === b) {
+      // Double-persist artifact — one copy.
+    } else {
+      target.content = `${a}\n\n${b}`;
+    }
+  };
 
   for (let i = 1; i < messages.length; i++) {
     const msg = messages[i];
     const prev = result[result.length - 1];
-    const prevRole = prev.role;
+    const isLastInput = i === messages.length - 1;
 
-    let valid = false;
-
-    switch (prevRole) {
-      case "system":
-        // After system, only user is valid
-        valid = msg.role === "user";
-        break;
-      case "user":
-        // After user, assistant is expected
-        valid = msg.role === "assistant";
-        break;
-      case "assistant":
-        if (prevHadToolCalls) {
-          // Assistant had tool_calls — next must be a tool result
-          valid = msg.role === "tool";
-        } else {
-          // Normal assistant — next must be user
-          valid = msg.role === "user";
-        }
-        break;
-      case "tool":
-        // After tool result: more tools, or assistant/user (end of chain)
-        valid = msg.role === "tool" || msg.role === "assistant" ||
-          msg.role === "user";
-        break;
-    }
-
-    if (valid) {
+    // Cache-friendly placement (turn-builder Phase B): a TRAILING system
+    // message (the dynamic block, after the user message) is always kept.
+    if (msg.role === "system" && isLastInput) {
       result.push(msg);
-      prevHadToolCalls = !!(msg.tool_calls && msg.tool_calls.length > 0);
+      break;
     }
-    // Invalid transition — skip this message, prevRole unchanged
+
+    // Orphaned tool result: no assistant tool_calls precede it in the
+    // assembled sequence. APIs reject it; it carries no dialogue. The
+    // hard-protected last message merges instead of dropping.
+    if (
+      msg.role === "tool" && !prevHadToolCalls &&
+      !(prev.role === "tool")
+    ) {
+      if (isLastInput && prev.role !== "system") {
+        mergeInto(prev, msg);
+      }
+      continue;
+    }
+
+    // Consecutive same-role rows merge (continuous speech / double
+    // persists). Tool results NEVER merge — each is its own message,
+    // keyed by tool_call_id for the API; chain members take the keep
+    // path below.
+    if (
+      msg.role !== "tool" && msg.role === prev.role && !prevHadToolCalls
+    ) {
+      mergeInto(prev, msg);
+      // Merging cannot introduce tool_calls; state unchanged.
+      continue;
+    }
+
+    // Anything else keeps — role alternation and tool chains assemble
+    // naturally from the record's real order.
+    result.push(msg);
+    prevHadToolCalls = !!(msg.tool_calls && msg.tool_calls.length > 0);
   }
 
   // Final check: if the last message is an assistant with tool_calls but
@@ -228,21 +264,39 @@ export function applyContextBudget(
   // Budget available for conversation history
   const availableBudget = availableForInput - systemMessageTokens - toolTokens;
 
-  // The last message is always the current user message — it must never be dropped.
-  // Even when budget is zero, we need system + current user for a valid request.
-  const lastMessage = allMessages[allMessages.length - 1];
+  // Cache-friendly placement: the LAST message may be the dynamic block
+  // (a trailing system message). It is as untrimmable as the leading
+  // system — its tokens count against the system budget, not history.
+  const trailingSystem = allMessages.length > 1 &&
+      allMessages[allMessages.length - 1].role === "system"
+    ? allMessages[allMessages.length - 1]
+    : undefined;
+  const trailingSystemTokens = trailingSystem
+    ? estimateMessageTokens(trailingSystem)
+    : 0;
+  const systemTokensTotal = systemMessageTokens + trailingSystemTokens;
+
+  // The current user message — the last message, or the one just before
+  // the trailing dynamic block. It must never be dropped; even when
+  // budget is zero, we need system + current user for a valid request.
+  const currentUser = trailingSystem
+    ? allMessages[allMessages.length - 2]
+    : allMessages[allMessages.length - 1];
+  const lastMessage = currentUser;
   const lastMessageTokens = estimateMessageTokens(lastMessage);
   const isLastMessageUser = lastMessage.role === "user";
 
   if (availableBudget <= 0) {
     if (isLastMessageUser) {
       return {
-        messages: [systemMessage, lastMessage],
+        messages: trailingSystem
+          ? [systemMessage, lastMessage, trailingSystem]
+          : [systemMessage, lastMessage],
         truncated: allMessages.length > 2,
         messagesRemoved: allMessages.length - 2,
-        estimatedTotalTokens: systemMessageTokens + lastMessageTokens +
+        estimatedTotalTokens: systemTokensTotal + lastMessageTokens +
           toolTokens,
-        systemMessageTokens,
+        systemMessageTokens: systemTokensTotal,
         toolTokens,
         historyTokens: lastMessageTokens,
         availableBudget,
@@ -253,12 +307,14 @@ export function applyContextBudget(
     }
     // Last message isn't user (shouldn't happen in normal flow) — keep it anyway
     return {
-      messages: [systemMessage, lastMessage],
+      messages: trailingSystem
+        ? [systemMessage, lastMessage, trailingSystem]
+        : [systemMessage, lastMessage],
       truncated: allMessages.length > 2,
       messagesRemoved: allMessages.length - 2,
-      estimatedTotalTokens: systemMessageTokens + lastMessageTokens +
+      estimatedTotalTokens: systemTokensTotal + lastMessageTokens +
         toolTokens,
-      systemMessageTokens,
+      systemMessageTokens: systemTokensTotal,
       toolTokens,
       historyTokens: lastMessageTokens,
       availableBudget,
@@ -275,7 +331,10 @@ export function applyContextBudget(
   // alone was the budget offender — otherwise a single 5k-token reasoning
   // block could cascade into dropping a whole turn plus its preceding user
   // message via sanitization.
-  const historyMessages = allMessages.slice(1);
+  // History = everything between the two system bookends.
+  const historyMessages = trailingSystem
+    ? allMessages.slice(1, allMessages.length - 1)
+    : allMessages.slice(1);
   let historyTokens = 0;
   let fitCount = 0;
   const strippedIndices = new Set<number>();
@@ -347,14 +406,19 @@ export function applyContextBudget(
 
   // Sanitize the full sequence to catch remaining issues:
   // consecutive same-role messages, orphaned tool_calls without results, etc.
+  // Cache-friendly: the trailing dynamic block (if any) is re-appended
+  // after sanitization — it is a protected bookend, not history.
   const preSanitize = [systemMessage, ...trimmedHistory];
-  const sanitizedMessages = sanitizeMessageSequence(preSanitize);
-  const sanitizeDropped = preSanitize.length - sanitizedMessages.length;
+  const sanitizedCore = sanitizeMessageSequence(preSanitize);
+  const sanitizeDropped = preSanitize.length - sanitizedCore.length;
+  const sanitizedMessages = trailingSystem
+    ? [...sanitizedCore, trailingSystem]
+    : sanitizedCore;
 
   // Recalculate history tokens after sanitization
   historyTokens = 0;
-  for (let i = 1; i < sanitizedMessages.length; i++) {
-    historyTokens += estimateMessageTokens(sanitizedMessages[i]);
+  for (let i = 1; i < sanitizedCore.length; i++) {
+    historyTokens += estimateMessageTokens(sanitizedCore[i]);
   }
 
   // Recompute reasoning strip/retain counts from the final sanitized
@@ -373,14 +437,14 @@ export function applyContextBudget(
 
   const budgetDropped = historyMessages.length - fitCount;
   const totalRemoved = budgetDropped + cleanupDropped + sanitizeDropped;
-  const estimatedTotalTokens = systemMessageTokens + historyTokens + toolTokens;
+  const estimatedTotalTokens = systemTokensTotal + historyTokens + toolTokens;
 
   return {
     messages: sanitizedMessages,
     truncated: totalRemoved > 0,
     messagesRemoved: totalRemoved,
     estimatedTotalTokens,
-    systemMessageTokens,
+    systemMessageTokens: systemTokensTotal,
     toolTokens,
     historyTokens,
     availableBudget,

@@ -14,6 +14,7 @@ import {
   type ChatImageUrlPart,
   createClientFromProfile,
   createDefaultClient,
+  createWorkerClient,
   type DiscordGatewayConfig,
   type DiscordSettings,
   type EntityCoreLLMSettings,
@@ -54,6 +55,13 @@ import {
   type WebSearchSettings,
 } from "../llm/mod.ts";
 import { supportsVision } from "../llm/model-capabilities.ts";
+import { resetMoodClassifierCache } from "../flux/mood-classifier.ts";
+import {
+  moodModelBytes,
+  moodModelDownloadState,
+  moodModelOnDisk,
+  startMoodModelDownload,
+} from "../flux/mood-model-store.ts";
 import {
   AVAILABLE_TOOLS,
   createDefaultRegistry,
@@ -339,18 +347,20 @@ import {
 } from "../pulse/routes.ts";
 import { getBroadcaster } from "./broadcaster.ts";
 import { getDeviceBridge } from "./device-bridge.ts";
+import { handleWhatsNew, startWhatsNewRefresh } from "./whats-new.ts";
 import { getWearableConnectionManager } from "../wearable/mod.ts";
 import { VoiceSessionManager } from "../voice/mod.ts";
 import {
+  distillSummary,
   getApprovalQueue,
   getQueryQueue,
   getWorkspaceSupervisor,
+  type OpenCodeRunResult,
   readProjectsPath,
   readSandboxRetentionDays,
   readWorkspaceEntityName,
   runSandboxRetention,
   setWorkspaceSupervisor,
-  truncateForEntityContext,
   WorkspaceSupervisor,
 } from "../workspace/mod.ts";
 import { handleWorkspaceMcpRequest } from "../workspace/mod.ts";
@@ -362,6 +372,25 @@ import {
   type VoiceSettings,
 } from "../llm/voice-settings.ts";
 import { EventRulesEngine } from "../wearable/event-rules-engine.ts";
+import {
+  type FluxSettings,
+  getDefaultFluxSettings,
+  loadFluxSettings,
+  saveFluxSettings,
+} from "../../../entity-flux/src/mod.ts";
+import {
+  createFluxManager,
+  getFluxSession,
+  getHostDialogueRows,
+  noteFluxStopped,
+} from "../flux/mod.ts";
+import type { FluxServerDeps } from "../flux/mod.ts";
+import {
+  clearFluxManagerInstance,
+  disconnectFluxEgoTrigger,
+  setFluxManagerInstance,
+} from "../flux/mod.ts";
+import type { FluxManager } from "../../../entity-flux/src/mod.ts";
 import {
   handleAdminActionsFragment,
   handleAdminAddInstanceSuffix,
@@ -517,6 +546,18 @@ export interface ServerConfig {
 /** Keepalive interval in milliseconds (30 seconds) */
 const KEEPALIVE_INTERVAL_MS = 30_000;
 
+/** JSON response helper for flux API routes. */
+function jsonResponse(data: unknown): Response {
+  return new Response(JSON.stringify(data), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/** 403 response for flux routes when flux is disabled. */
+function fluxDisabled(): Response {
+  return new Response("Flux is disabled", { status: 403 });
+}
+
 function chunkParamsEqual(
   a: {
     thresholdChars: number;
@@ -603,6 +644,14 @@ export class Server {
   private discordConversationMapper: ConversationMapper | null = null;
   private discordResponseHandler: ResponseHandler | null = null;
   private voiceSettings: VoiceSettings;
+  private fluxSettings: FluxSettings;
+  private fluxManager: FluxManager | null = null;
+  /** Browser-eyes connection: the LAST-connected app's
+   *  camera WebSocket — freshest intent is the single active source. */
+  private eyesSocket: WebSocket | null = null;
+  private fluxPaused = false;
+  /** The conversation hosting the Ego this run (null = legacy Flux Space). */
+  private fluxHostConversationId: string | null = null;
 
   /**
    * Create a new Server instance.
@@ -679,6 +728,7 @@ export class Server {
 
     // Initialize voice settings (will be reloaded from settings in init())
     this.voiceSettings = getDefaultVoiceSettings();
+    this.fluxSettings = getDefaultFluxSettings();
 
     // Initialize tool registry with only allowed tools
     this.tools = createDefaultRegistry(config.allowedTools ?? []);
@@ -768,6 +818,9 @@ export class Server {
     this.entityCoreEmbeddingSettings = await loadEntityCoreEmbeddingSettings(
       this.config.dataRoot,
     );
+    // What's New feed — background-cache GitHub releases for the splash.
+    // Failures are non-fatal; the last cache keeps serving.
+    startWhatsNewRefresh(this.config.dataRoot);
     // Apply the saved model to the embedder singleton's config BEFORE any
     // getEmbedder() call. Without this, the singleton defaults to MiniLM
     // (384d) and the first chat turn embeds the query at the wrong dim —
@@ -835,6 +888,10 @@ export class Server {
     this.toolSettings = await loadToolsSettings(this.config.dataRoot);
     this.customTools = await loadCustomTools(this.config.dataRoot);
     this.voiceSettings = await loadVoiceSettings(this.config.dataRoot);
+    this.fluxSettings = await loadFluxSettings(this.config.dataRoot);
+    // The flux manager is constructed + started in start() via
+    // startFlux(), so it can be started/stopped at runtime without a
+    // full server bounce (POST /api/flux/start|stop|restart).
 
     // Initialize the workspace supervisor (sub-agent OpenCode sessions).
     // Off-by-default — only takes effect when the `workspace` tool is enabled
@@ -856,13 +913,8 @@ export class Server {
         entityName: await this.readEntityName(),
         contextBlock: await this.readWorkspaceContextBlock(),
         getWorkspaceLlmProfile: async () => this.readWorkspaceLlmProfile(),
-        onAsyncComplete: (sessionId, conversationId, ok, summary) => {
-          this.handleWorkspaceAsyncComplete(
-            sessionId,
-            conversationId,
-            ok,
-            summary,
-          );
+        onAsyncComplete: (sessionId, conversationId, run) => {
+          this.handleWorkspaceAsyncComplete(sessionId, conversationId, run);
         },
         runEntityTurn: async (conversationId, userMessage, options) =>
           await this.runWorkspaceEntityTurn(
@@ -1227,7 +1279,7 @@ export class Server {
    * then mark the session suspended. The query stays pending so the user
    * can still answer via the FAB `!` recovery path.
    *
-   * Per plan §14 (revised 2026-08-10): this is the suspend trigger. While
+   * Per plan §14: this is the suspend trigger. While
    * the toast is up the workspace stays RUNNING with the process alive
    * (blocking on the tool call). Only this signal transitions to suspended.
    */
@@ -1810,16 +1862,18 @@ export class Server {
    * Called when an async workspace completes. Broadcasts UI event + creates a
    * transient Pulse that triggers entity inference about the completed work.
    */
-  private handleWorkspaceAsyncComplete(
+  private async handleWorkspaceAsyncComplete(
     sessionId: string,
     conversationId: string,
-    ok: boolean,
-    summary: string | undefined,
-  ): void {
-    // Broadcast UI event — workspace.js surfaces a toast via the SSE listener.
+    run: OpenCodeRunResult | null,
+  ): Promise<void> {
+    const ok = run?.ok ?? false;
+
+    // Broadcast UI event — workspace.js renders the summary block in the
+    // terminal view. Carries OpenCode's own final message, untruncated.
     getBroadcaster().broadcastEvent(
       "workspace_async_complete",
-      { sessionId, conversationId, ok, summary },
+      { sessionId, conversationId, ok, summary: run?.finalText },
       null, // global — surfaces wherever the user is
     );
 
@@ -1835,11 +1889,22 @@ export class Server {
       const session = this.db.getWorkspaceSession(sessionId);
       const goal = session?.briefing.goal ?? "(unknown goal)";
       const statusLine = ok ? "completed successfully" : "failed";
-      // Smart truncation: respects paragraph boundaries, adds marker if cut.
-      // Full text lives in workspace_sessions.summary_text for reference.
-      const summaryText = summary
-        ? truncateForEntityContext(summary)
-        : "(no summary available)";
+      // Distill via the worker LLM — the same path sync mode uses — and
+      // deliver the summary whole. Paragraph-truncating the raw
+      // finalText at 2000 chars cuts on-target summaries mid-thought.
+      // Without a worker LLM, distillSummary falls back to OpenCode's final
+      // message, also whole. The raw text stays in
+      // workspace_sessions.summary_text for reference.
+      let summaryText = "(no summary available)";
+      if (run) {
+        let worker: LLMClient | null = null;
+        try {
+          worker = createWorkerClient();
+        } catch {
+          // Worker LLM unavailable — distillSummary falls back to finalText
+        }
+        summaryText = await distillSummary(run, worker);
+      }
       const promptText =
         `Workspace session for "${goal}" ${statusLine}.\n\nSummary:\n${summaryText}`;
 
@@ -1907,7 +1972,11 @@ export class Server {
         buttplugSettings: this.buttplugSettings,
         bleSettings: this.bleSettings,
         deviceStatusCache: this.deviceCache,
+        // Classic chat carries the Flux status line too:
+        // live getter — the same one the Pulse engine reads.
+        fluxModeNote: () => this.fluxModeNote(),
         contextLength: activeProfile?.contextLength,
+        contextStyle: activeProfile?.contextStyle,
         maxTokens: activeProfile?.maxTokens,
         persistentReasoningIntraTurn: this.llm.persistentReasoningIntraTurn,
         persistentReasoningInterTurns: activeProfile
@@ -2501,7 +2570,16 @@ export class Server {
         const captioning = this.imageGenSettings.captioning?.enabled
           ? this.imageGenSettings.captioning
           : undefined;
-        if (!model || supportsVision(model)) {
+        // The profile's multimodal toggle is AUTHORITATIVE
+        // (declared, never assumed — guessing sends pixels to
+        // unrecognized model strings). supportsVision demotes to an
+        // advisory hint.
+        if (activeProfile?.multimodal) {
+          if (model && !supportsVision(model)) {
+            console.log(
+              `[Discord] Profile declares multimodal; model string "${model}" isn't in the known vision list — trusting the declaration`,
+            );
+          }
           const downloaded = await downloadTurnImages(context.images);
           if (downloaded.length > 0) {
             visionImages = downloaded;
@@ -2945,7 +3023,7 @@ export class Server {
     }
     if (this.imageGenSettings.captioning?.provider) {
       autoEnabled.push("describe_image");
-      autoEnabled.push("look_closer");
+      // look_closer disabled — kept for repurposing (see registry.ts)
     }
 
     // Resolve the final enabled list
@@ -3366,11 +3444,17 @@ export class Server {
         bleSettings: () => this.bleSettings,
         imageGenSettings: () => this.imageGenSettings,
         contextLength: () => this.getActiveLLMProfile()?.contextLength,
+        contextStyle: () => this.getActiveLLMProfile()?.contextStyle,
         maxTokens: () => this.getActiveLLMProfile()?.maxTokens,
         persistentReasoningInterTurns: () =>
           this.getActiveLLMProfile()?.persistentReasoningInterTurns,
         deviceStatusCache: () => this.deviceCache,
         pluginManager: this.pluginManager,
+        // Live getter, not a capture: the engine is built before any flux
+        // start can exist, so a construction-time value is undefined for
+        // life. Read at fire time.
+        fluxManager: () => this.fluxManager ?? undefined,
+        fluxModeNote: () => this.fluxModeNote(),
       },
     );
     this.pulseEngine.start();
@@ -3382,6 +3466,16 @@ export class Server {
     if (this.eventRulesEngine) {
       this.eventRulesEngine.setPulseEngine(this.pulseEngine);
     }
+
+    // Flux is OFF UNTIL STARTED (off unless started includes boot): the
+    // nervous-system manager is NEVER auto-started with the daemon. It
+    // starts only via the explicit paths — the flux FAB / overlay
+    // (hosted in a conversation) or POST /api/flux/start. The `enabled`
+    // setting stays the master feature flag (routes 403 when off); it
+    // does not imply running.
+    // NOTE for the volatile snapshot: with no manager constructed at
+    // boot, mood/textures/pool restore happens on the first explicit
+    // start instead — unchanged behavior from the first start's view.
 
     // All handlers registered — start the scheduler ticker.
     this.scheduler.start();
@@ -3474,11 +3568,212 @@ export class Server {
     return await this.pluginInstaller.enrichStatuses([...statuses.values()]);
   }
 
+  // ===========================================================================
+  // Flux runtime controls — start/stop/restart the nervous system without a
+  // full server bounce. Used by POST /api/flux/start|stop|restart and by the
+  // settings-save path (to apply changes). Also called from start()/stop().
+  // ===========================================================================
+
+  /**
+   * The EntityConfig tool context shares with classic EntityTurns — the
+   * SAME member bundle the EntityTurn call sites pass (see runEntityTurn).
+   * The Flux session's executeTools borrows it so session-turn tool calls
+   * see every capability a classic-turn call would (vault, lorebook,
+   * image-gen, plugin hooks) — a hand-rolled partial here is what makes
+   * the vault tool return "not available" from session turns.
+   */
+  private entityToolConfig(): import("../entity/loop.ts").EntityConfig {
+    return {
+      projectRoot: this.config.projectRoot,
+      dataRoot: this.config.dataRoot,
+      mcpClient: this.mcpClient ?? undefined,
+      lorebookManager: this.lorebookManager,
+      vaultManager: this.vaultManager,
+      webSearchSettings: this.webSearchSettings,
+      discordSettings: this.discordSettings,
+      homeSettings: this.homeSettings,
+      imageGenSettings: this.imageGenSettings,
+      lovenseSettings: this.lovenseSettings,
+      buttplugSettings: this.buttplugSettings,
+      bleSettings: this.bleSettings,
+      deviceStatusCache: this.deviceCache,
+      pluginManager: this.pluginManager,
+      // The live manager — modulation tools compare conversation ids
+      // against it; a stopped flux reads as undefined here naturally.
+      fluxManager: this.fluxManager ?? undefined,
+    };
+  }
+
+  /** Build the FluxServerDeps bundle from current server state. */
+  private buildFluxDeps(): FluxServerDeps {
+    return {
+      db: this.db,
+      dataRoot: this.config.dataRoot,
+      projectRoot: this.config.projectRoot,
+      mcpClient: this.mcpClient ?? null,
+      getLlm: () => this.llm,
+      getEntityConfig: () => this.entityToolConfig(),
+      tools: () => this.tools,
+      getVaultManager: () => this.vaultManager ?? null,
+      getLorebookManager: () => this.lorebookManager ?? null,
+      getPluginManager: () => this.pluginManager ?? null,
+    };
+  }
+
+  /**
+   * Construct + start the flux manager. Re-reads settings from disk so
+   * runtime changes (via /api/flux/settings) apply. No-op if already
+   * running (use restartFlux to apply changes). Returns an outcome the
+   * API routes surface to the UI.
+   */
+  /**
+   * Start flux — optionally hosted in a specific conversation
+   * (conversation-hosted consciousness). No host → legacy mode (the
+   * resolved "Flux Space" conversation). ONE instance: starting while
+   * already running/paused on a different conversation refuses with a
+   * clear message; migration is future work.
+   */
+  async startFlux(
+    conversationId?: string | null,
+  ): Promise<{ ok: boolean; message: string }> {
+    if (this.fluxManager) {
+      // Manager exists (paused or running). One instance at a time: an
+      // EXPLICIT different host refuses. A bare start (no conversationId)
+      // means "resume whatever is there" — the pause/resume controls
+      // rely on that. (There is NO boot auto-start; nothing calls
+      // startFlux at boot.)
+      const requested = conversationId ?? null;
+      if (requested !== null && requested !== this.fluxHostConversationId) {
+        const currentTitle = this.fluxHostConversationId
+          ? this.db.getConversation(this.fluxHostConversationId)?.title ??
+            "its conversation"
+          : "Flux Space";
+        return {
+          ok: false,
+          message:
+            `Flux is already active in "${currentTitle}". Stop it first — moving a running Flux State between conversations isn't built yet.`,
+        };
+      }
+      // Same host — resume it. State (mood, textures, focus, mood
+      // embedding) is preserved across pause/resume.
+      this.fluxManager.start();
+      setFluxManagerInstance(this.fluxManager, this.fluxHostConversationId);
+      this.fluxPaused = false;
+      console.log("[Flux] Manager resumed from pause");
+      return { ok: true, message: "resumed" };
+    }
+    this.fluxSettings = await loadFluxSettings(this.config.dataRoot);
+    if (!this.fluxSettings.enabled) {
+      return { ok: false, message: "flux is disabled in settings" };
+    }
+    try {
+      this.fluxManager = await createFluxManager(
+        this.buildFluxDeps(),
+        this.fluxSettings,
+        conversationId ?? null,
+      );
+      this.fluxHostConversationId = conversationId ?? null;
+      this.fluxManager.start();
+      console.log(
+        `[Flux] Manager started at runtime${
+          conversationId ? " (hosted in conversation)" : ""
+        }`,
+      );
+      return { ok: true, message: "started" };
+    } catch (error) {
+      console.error(
+        "[Flux] Runtime start failed:",
+        error instanceof Error ? error.message : String(error),
+      );
+      this.fluxManager = null;
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /** Stop + close the flux manager, clear its cached instance. */
+  stopFlux(): { ok: boolean; message: string } {
+    if (!this.fluxManager) return { ok: false, message: "not running" };
+    // Stop state marker FIRST: the session's
+    // record hooks must still be wired to carry it into the host
+    // conversation with the actual stop moment. Graceful daemon shutdown
+    // routes through here too; ungraceful deaths backfill at next start.
+    try {
+      noteFluxStopped();
+    } catch {
+      // Non-fatal — the start-side backfill covers it.
+    }
+    try {
+      this.fluxManager.stop();
+      this.fluxManager.close();
+    } catch (error) {
+      console.error(
+        "[Flux] Stop error (continuing):",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    this.fluxManager = null;
+    this.fluxPaused = false;
+    this.fluxHostConversationId = null;
+    clearFluxManagerInstance();
+    console.log("[Flux] Manager stopped at runtime");
+    return { ok: true, message: "stopped" };
+  }
+
+  /**
+   * Pause the flux manager — stop ticking (driver, organs, cleanup) but
+   * keep the manager instance alive with all its state (mood, textures,
+   * focus overrides, mood embedding). Resume via startFlux(). The Ego
+   * trigger is disconnected so no turns process while paused.
+   */
+  pauseFlux(): { ok: boolean; message: string } {
+    if (!this.fluxManager) return { ok: false, message: "not running" };
+    this.fluxManager.stop();
+    this.fluxPaused = true;
+    // Keep the host binding (resume returns to the same conversation).
+    // disconnectFluxEgoTrigger — not the full clear — so the SESSION
+    // survives and the session API keeps serving the log while paused
+    // (the pause-edit-resume cleanup flow depends on it).
+    disconnectFluxEgoTrigger();
+    console.log("[Flux] Manager paused (state preserved)");
+    return { ok: true, message: "paused" };
+  }
+
+  /** Stop (if running) then start — applies the latest settings. */
+  async restartFlux(): Promise<{ ok: boolean; message: string }> {
+    // Preserve the host binding across restart — POST /api/flux/settings
+    // auto-restarts, and losing the binding here would silently revert
+    // a hosted run to Flux Space.
+    const host = this.fluxHostConversationId;
+    if (this.fluxManager) this.stopFlux();
+    const started = await this.startFlux(host);
+    return started.ok ? { ok: true, message: "restarted" } : started; // startFlux returns disabled/error reason.
+  }
+
   /**
    * Stop the server gracefully.
    *
    * Aborts the server, clears the keepalive timer, and closes the database connection.
    */
+  /**
+   * The Flux status line for every non-session turn: when Flux is
+   * enabled AT ALL, the entity sees its state — running, paused, or
+   * off — in the <flux_mode> mode block. When the feature is disabled,
+   * classic stays untouched: no block, no leak.
+   */
+  fluxModeNote(): string | undefined {
+    if (!this.fluxSettings.enabled) return undefined;
+    if (this.fluxManager?.isRunning) {
+      return "My Flux State — my persistent-presence nervous system — is running; my subconscious layers (Noticing, Musing, Reverie) are active and surface through it.";
+    }
+    if (this.fluxManager) {
+      return "My Flux State — my persistent-presence nervous system — is paused; its state is preserved.";
+    }
+    return "My Flux State — my persistent-presence nervous system — is currently OFF.";
+  }
+
   async stop(): Promise<void> {
     console.log("Stopping Psycheros server...");
 
@@ -3489,6 +3784,10 @@ export class Server {
     if (this.pulseEngine) {
       this.pulseEngine.stop();
     }
+
+    // Stop flux manager (organs, driver, cleanup timer) and close its
+    // tier-1 database.
+    this.stopFlux();
 
     // Stop the scheduler — clears the ticker and aborts in-flight handlers.
     if (this.scheduler) {
@@ -3536,6 +3835,8 @@ export class Server {
       lorebookManager: this.lorebookManager,
       vaultManager: this.vaultManager,
       pulseEngine: this.pulseEngine ?? undefined,
+      fluxManager: this.fluxManager ?? undefined,
+      fluxSettings: this.fluxSettings,
       scheduler: this.scheduler ?? undefined,
       getLLMSettings: () => this.getLLMSettings(),
       updateLLMSettings: (settings) => this.updateLLMSettings(settings),
@@ -3707,6 +4008,11 @@ export class Server {
       return handleDeviceBridge(ctx, request);
     }
 
+    // GET /api/whats-new - cached GitHub release notes for the splash
+    if (method === "GET" && path === "/api/whats-new") {
+      return await handleWhatsNew(ctx);
+    }
+
     // GET /api/voice/status - Voice subsystem status
     if (method === "GET" && path === "/api/voice/status") {
       return handleGetVoiceStatus(ctx);
@@ -3741,6 +4047,429 @@ export class Server {
     // GET /api/voice/ws - WebSocket endpoint for voice chat
     if (method === "GET" && path.match(/^\/api\/voice\/ws/)) {
       return handleVoiceWebSocket(ctx, request);
+    }
+
+    // ===== Flux nervous-system API =====
+    // Returns 403 on every flux route when flux is disabled (opt-in).
+
+    // GET /api/flux/eyes — browser-eyes WebSocket. The
+    // connected app streams JPEG frames from its camera. LAST-connected
+    // wins: a new connection closes the previous one (the freshest
+    // intent is the single active source). Frames route to the
+    // motion-vision Sensory Organ via the manager seam; a stopped Flux
+    // makes pushBrowserVideoFrame a no-op the organ never sees.
+    if (method === "GET" && path === "/api/flux/eyes") {
+      const { response, socket } = Deno.upgradeWebSocket(request);
+      if (
+        this.eyesSocket && this.eyesSocket !== socket &&
+        this.eyesSocket.readyState === WebSocket.OPEN
+      ) {
+        try {
+          this.eyesSocket.close();
+        } catch {
+          // Already closing.
+        }
+      }
+      this.eyesSocket = socket;
+      let eyesFrames = 0;
+      console.log("[flux-eyes] browser camera connected (source active)");
+      socket.onmessage = (ev) => {
+        if (typeof ev.data === "string") return; // pings/hellos
+        if (socket !== this.eyesSocket) return; // stale connection
+        if (!(ev.data instanceof ArrayBuffer) || ev.data.byteLength === 0) {
+          return;
+        }
+        this.fluxManager?.pushBrowserVideoFrame(new Uint8Array(ev.data));
+        // Heartbeat: one line per 250 frames (~100s at cadence) so a
+        // starved organ is diagnosable from the log.
+        if (++eyesFrames % 250 === 0) {
+          console.log(`[flux-eyes] ${eyesFrames} frames received`);
+        }
+      };
+      socket.onclose = () => {
+        console.log(
+          `[flux-eyes] browser camera disconnected (${eyesFrames} frames)`,
+        );
+        if (this.eyesSocket === socket) this.eyesSocket = null;
+      };
+      return response;
+    }
+
+    if (method === "GET" && path === "/api/flux/status") {
+      // The manager's own tick state is authoritative — end_flux_state
+      // stops it without nulling the server's reference or setting
+      // fluxPaused, and that must report as stopped, not running.
+      const state = !this.fluxManager || !this.fluxManager.isRunning
+        ? "stopped"
+        : this.fluxPaused
+        ? "paused"
+        : "running";
+      return jsonResponse({
+        enabled: this.fluxSettings.enabled,
+        active: state === "running",
+        state,
+        spaceId: this.fluxManager?.fluxSpaceConversationId ?? null,
+        mood: this.fluxManager?.renderMood() ?? null,
+        moodState: this.fluxManager?.getMoodState() ?? null,
+        // Familiarity (self-regulation observability): pool size + the
+        // most recently damped candidate — tuning needs to see the
+        // damping, not just trust it.
+        familiarity: this.fluxManager?.getFamiliarityStatus() ?? null,
+        // Sensory Organ health (check-engine strip under the PAD meters).
+        organHealth: this.fluxManager?.getOrganHealth() ?? null,
+        // The effective mode (posture first) — at-a-glance.
+        sensoryMode: this.fluxManager?.getSensoryMode() ?? null,
+        // The conversation hosting the Ego this run (null = legacy Flux
+        // Space). Consumed by the FAB active state + future migration UX.
+        // Browser eyes: true when a connected app should
+        // open its camera — Flux running, motion-vision enabled, and the
+        // organ's source set to "browser".
+        eyesWanted: state === "running" &&
+          this.fluxSettings.enabledOrgans.includes("motion-vision") &&
+          this.fluxSettings.sensoryOrganSettings?.["motion-vision"]
+              ?.visionSource === "browser",
+        hostConversationId: this.fluxHostConversationId,
+        hostTitle: this.fluxHostConversationId
+          ? this.db.getConversation(this.fluxHostConversationId)?.title ?? null
+          : null,
+      });
+    }
+
+    if (method === "GET" && path === "/api/flux/settings") {
+      return jsonResponse(this.fluxSettings);
+    }
+
+    // Mood-model provisioning: status,
+    // variant/repo configuration, and background download for the
+    // HuggingFace-hosted vad-bert variants. Product surface — for any
+    // user's companion, not any one install.
+    if (method === "GET" && path === "/api/flux/mood-model") {
+      const variants = await Promise.all(
+        (["int8", "fp32"] as const).map(async (v) => ({
+          variant: v,
+          onDisk: await moodModelOnDisk(this.config.dataRoot, v),
+          bytes: await moodModelBytes(this.config.dataRoot, v),
+          download: moodModelDownloadState(v),
+        })),
+      );
+      return jsonResponse({
+        variant: this.fluxSettings.moodClassifierVariant ?? "int8",
+        repoId: this.fluxSettings.moodClassifierRepoId ?? "",
+        variants,
+      });
+    }
+
+    if (method === "POST" && path === "/api/flux/mood-model") {
+      const body = (await request.json()) as {
+        variant?: "int8" | "fp32";
+        repoId?: string;
+        download?: boolean;
+      };
+      const current = this.fluxSettings;
+      const variant = body.variant ?? current.moodClassifierVariant ?? "int8";
+      const repoId = typeof body.repoId === "string"
+        ? body.repoId.trim()
+        : current.moodClassifierRepoId ?? "";
+      if (body.download) {
+        const refusal = await startMoodModelDownload(
+          this.config.dataRoot,
+          variant,
+          repoId,
+        );
+        if (refusal) return jsonResponse({ ok: false, message: refusal });
+        return jsonResponse({ ok: true, message: `downloading ${variant}` });
+      }
+      // Config-only write (overlay; no flux restart needed — the
+      // classifier cache resets when the variant actually changed).
+      const variantChanged = variant !== current.moodClassifierVariant;
+      const merged = {
+        ...current,
+        moodClassifierVariant: variant,
+        moodClassifierRepoId: repoId,
+      };
+      this.fluxSettings = await saveFluxSettings(
+        this.config.dataRoot,
+        merged,
+      );
+      if (variantChanged) resetMoodClassifierCache();
+      return jsonResponse({
+        ok: true,
+        message: variantChanged
+          ? `variant set to ${variant} (applies to the next classification)`
+          : "saved",
+      });
+    }
+
+    // POST /api/flux/test-hookup — smoke-test what's TYPED in a hookup
+    // card (not what's saved): one tiny chat completion against the
+    // entered endpoint. A masked API key substitutes the stored real key
+    // for that job, so testing after reload works without re-entering.
+    if (method === "POST" && path === "/api/flux/test-hookup") {
+      const body = (await request.json()) as {
+        job?: string;
+        url?: string;
+        model?: string;
+        apiKey?: string;
+        thinkingEnabled?: boolean;
+        params?: Record<string, unknown>;
+      };
+      const MASK = "••••";
+      let apiKey = body.apiKey?.trim() || "";
+      if (!apiKey || apiKey.includes(MASK)) {
+        const job = body.job as
+          | keyof NonNullable<FluxSettings["modelHookups"]>
+          | undefined;
+        const saved = job ? this.fluxSettings.modelHookups?.[job] : undefined;
+        apiKey = saved?.apiKey ?? "";
+      }
+      if (!body.url || !body.model) {
+        return jsonResponse({
+          ok: false,
+          error: "Endpoint URL and model are required.",
+        });
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10_000);
+      const started = Date.now();
+      try {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+        const res = await fetch(body.url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: body.model,
+            messages: [
+              { role: "user", content: "Reply with the single word: ready" },
+            ],
+            stream: false,
+            max_tokens: 16,
+            ...(body.thinkingEnabled !== true
+              ? { chat_template_kwargs: { enable_thinking: false } }
+              : {}),
+            ...(body.params ?? {}),
+          }),
+          signal: controller.signal,
+        });
+        const latencyMs = Date.now() - started;
+        if (!res.ok) {
+          const text = (await res.text()).slice(0, 300);
+          return jsonResponse({
+            ok: false,
+            latencyMs,
+            error: `HTTP ${res.status}: ${text}`,
+          });
+        }
+        const data = await res.json().catch(() => null) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        } | null;
+        const reply = data?.choices?.[0]?.message?.content?.trim() ?? "";
+        return jsonResponse({ ok: true, latencyMs, reply });
+      } catch (err) {
+        return jsonResponse({
+          ok: false,
+          latencyMs: Date.now() - started,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    // GET /api/flux/camera-devices — enumerate /dev/video* for the
+    // Sensory tab's camera datalist. Best-effort: an empty list just
+    // leaves the text input as a free-text field.
+    if (method === "GET" && path === "/api/flux/camera-devices") {
+      const devices: string[] = [];
+      try {
+        for (const entry of Deno.readDirSync("/dev")) {
+          // NOTE: no isFile check — /dev/video* are character devices
+          // (isFile reads false for them); the name pattern is the gate.
+          if (/^video\d+$/.test(entry.name)) {
+            devices.push(`/dev/${entry.name}`);
+          }
+        }
+      } catch {
+        // Non-Linux or unreadable /dev — empty list, free-text falls back.
+      }
+      devices.sort();
+      return jsonResponse({ devices });
+    }
+
+    if (method === "POST" && path === "/api/flux/settings") {
+      const body = (await request.json()) as Partial<FluxSettings>;
+      // OVERLAY onto current settings — never replace. The settings
+      // fragment renders a subset of fields (per-tab, per-descriptor);
+      // a save from it must not wipe everything it didn't show. The
+      // Sensory Organ bag merges per organ (a card's rendered fields
+      // update that organ's entry; organs without a card pass through).
+      // Without the overlay, a save silently resets file-edited values.
+      // Model-hookup API keys: the fragment renders them MASKED — a
+      // masked (or untouched-empty) incoming key preserves the stored
+      // real one (the voice-settings preserve pattern).
+      if (body.modelHookups) {
+        const current = this.fluxSettings.modelHookups ?? {};
+        const MASK = "••••";
+        for (const job of Object.keys(body.modelHookups)) {
+          const incoming = body.modelHookups[
+            job as keyof typeof body.modelHookups
+          ];
+          const existing = current[
+            job as keyof typeof current
+          ];
+          if (!incoming) continue;
+          if (
+            existing?.apiKey &&
+            (!incoming.apiKey || incoming.apiKey.includes(MASK))
+          ) {
+            incoming.apiKey = existing.apiKey;
+          }
+        }
+      }
+      const merged = {
+        ...this.fluxSettings,
+        ...body,
+        sensoryOrganSettings: {
+          ...(this.fluxSettings.sensoryOrganSettings ?? {}),
+          ...(body.sensoryOrganSettings ?? {}),
+        },
+      };
+      this.fluxSettings = await saveFluxSettings(
+        this.config.dataRoot,
+        merged,
+      );
+      // Apply at runtime: RESTART a currently-running Flux to pick up
+      // small-model, cadence, and threshold changes without a bounce.
+      // A settings save NEVER cold-starts Flux — starting on save would
+      // silently start Flux Space from a fresh boot, with no host
+      // conversation and no indication. The drawer's Flux
+      // row is the only door Flux starts through; a stopped (or paused)
+      // Flux picks new settings up at its next start. `?apply=false`
+      // skips even the restart (scripted/API config-only writes).
+      const skipApply =
+        new URL(request.url).searchParams.get("apply") === "false";
+      const fluxLive = this.fluxManager !== null &&
+        this.fluxManager.isRunning && !this.fluxPaused;
+      const apply = skipApply || !fluxLive
+        ? {
+          ok: false,
+          message: "not running — settings apply at the next start",
+        }
+        : await this.restartFlux();
+      return jsonResponse({ settings: this.fluxSettings, applied: apply });
+    }
+
+    if (method === "POST" && path === "/api/flux/start") {
+      // Conversation-hosted consciousness: an optional { conversationId }
+      // binds the Ego's dialogue to that conversation for this run.
+      // Absent/empty body → legacy mode (Flux Space).
+      let conversationId: string | undefined;
+      try {
+        const body = await request.json() as { conversationId?: string };
+        if (body?.conversationId?.trim()) {
+          conversationId = body.conversationId.trim();
+        }
+      } catch {
+        // No body / not JSON — legacy start.
+      }
+      return jsonResponse(await this.startFlux(conversationId ?? null));
+    }
+
+    if (method === "POST" && path === "/api/flux/pause") {
+      return jsonResponse(this.pauseFlux());
+    }
+
+    if (method === "POST" && path === "/api/flux/stop") {
+      return jsonResponse(this.stopFlux());
+    }
+
+    if (method === "POST" && path === "/api/flux/restart") {
+      return jsonResponse(await this.restartFlux());
+    }
+
+    if (method === "GET" && path === "/api/flux/entries") {
+      if (!this.fluxManager) return fluxDisabled();
+      const url = new URL(request.url);
+      const since = url.searchParams.get("since");
+      const limit = parseInt(url.searchParams.get("limit") ?? "50", 10);
+      const entries = since
+        ? this.fluxManager.getEntriesSince(since)
+        : this.fluxManager.getRecentEntries(limit);
+      return jsonResponse(entries);
+    }
+
+    // POST /api/flux/debug-promote — DEBUG: artificially promote a
+    // noticing/musing/reverie line to test where
+    // Ego wakes land. Routes a synthetic line through the REAL promotion
+    // path: timeline entry with the module's tint + the universal wake
+    // door (interior, satiation applies). Remove when the tuning
+    // conversation lands.
+    if (method === "POST" && path === "/api/flux/debug-promote") {
+      if (!this.fluxManager) return fluxDisabled();
+      const body = await request.json() as {
+        source?: "musing" | "reverie" | "noticing";
+        content?: string;
+      };
+      const source = body.source ?? "musing";
+      const content = body.content?.trim() ||
+        "A quiet line for testing: something brushed against my attention and I want to say it out loud.";
+      const result = await this.fluxManager.debugPromote(source, content);
+      return jsonResponse(result);
+    }
+
+    if (method === "POST" && path === "/api/flux/message") {
+      if (!this.fluxManager) return fluxDisabled();
+      const body = (await request.json()) as { content: string };
+      if (!body.content?.trim()) {
+        return new Response("Empty content", { status: 400 });
+      }
+      this.fluxManager.postUserMessage(body.content);
+      return jsonResponse({ ok: true });
+    }
+
+    // POST /api/flux/session/edit — edit one session entry's content.
+    // The malformed-timestamp cleanup path: pause flux, fix the words,
+    // resume. Only content changes; id/kind/timestamp are immutable.
+    if (method === "POST" && path === "/api/flux/session/edit") {
+      const session = getFluxSession();
+      if (!session) return fluxDisabled();
+      const body = (await request.json()) as { id: string; content: string };
+      if (!body.id || typeof body.content !== "string") {
+        return new Response("id and content required", { status: 400 });
+      }
+      const updated = session.editEntry(body.id, body.content);
+      if (!updated) return new Response("Entry not found", { status: 404 });
+      return jsonResponse(updated);
+    }
+
+    // GET /api/flux/session — the Ego session log (for the edit UI).
+    if (method === "GET" && path === "/api/flux/session") {
+      const session = getFluxSession();
+      if (!session) return fluxDisabled();
+      // The session lazy-loads on first generate; the API must not read
+      // an unloaded log (returned only this-process entries — compaction
+      // briefings went missing from the timeline exactly this way).
+      await session.load();
+      // Storage alignment: DIALOGUE comes from the messages table (the
+      // record); ambient from durable. Merge by timestamp; the disjoint
+      // sets make de-dup unnecessary. The dialogue conversation is the
+      // live HOST (conversation-hosted consciousness) — the resolved
+      // Flux Space in legacy mode.
+      const dialogue = getHostDialogueRows(this.db, 60);
+      return jsonResponse([...dialogue, ...session.getEntries()]);
+    }
+
+    // POST /api/flux/clear — clear the Flux Space workspace for a fresh
+    // start. Wipes: tier-1 observations, tier-2 durable entries +
+    // promoted observations, texture summaries. The Ego model's
+    // dialogue history and Mood Organ state are preserved — only the
+    // sensory/ambient layer resets.
+    if (method === "POST" && path === "/api/flux/clear") {
+      if (!this.fluxManager) return fluxDisabled();
+      this.fluxManager.clearWorkspace();
+      return jsonResponse({ ok: true, message: "workspace cleared" });
     }
 
     // ===================================================================
@@ -3870,8 +4599,8 @@ export class Server {
       return await handleWearableData(ctx, request);
     }
 
-    // /api/ingest routes — same handlers, aliased for Authelia bearer-auth gating
-    // Authelia is configured to only allow client_credentials tokens on /api/ingest
+    // /api/ingest routes — same handlers, aliased for reverse-proxy bearer-auth gating
+    // The auth proxy is configured to only allow client_credentials tokens on /api/ingest
     if (method === "POST" && path === "/api/ingest") {
       return await handleWearableData(ctx, request);
     }
@@ -5098,6 +5827,35 @@ export class Server {
       return handleIndex(ctx);
     }
 
+    // GET /flux — the Flux Space continuous-presence surface (served as a
+    // standalone page when flux is enabled; 403 otherwise).
+    if (path === "/flux") {
+      if (!this.fluxManager) return fluxDisabled();
+      const { renderFluxSpacePage } = await import("./templates.ts");
+      // Labels use the user's and entity's chosen names (general
+      // settings), with neutral fallbacks when unset.
+      let fluxUserName = "the user";
+      const fluxEntityName = await this.readEntityName();
+      try {
+        const gsText = await Deno.readTextFile(
+          `${this.config.dataRoot}/.psycheros/general-settings.json`,
+        );
+        const gs = JSON.parse(gsText) as { userName?: string };
+        if (gs.userName?.trim()) fluxUserName = gs.userName.trim();
+      } catch {
+        // fall back to generic
+      }
+      return new Response(
+        renderFluxSpacePage({
+          entityName: fluxEntityName,
+          userName: fluxUserName,
+        }),
+        {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        },
+      );
+    }
+
     // GET /sw.js - Version-stamped service worker. Substitutes the running
     // VERSION into the cache-name so each release evicts stale offline assets.
     if (path === "/sw.js") {
@@ -5559,6 +6317,26 @@ export class Server {
       );
     }
 
+    // GET /fragments/settings/flux — Flux nervous-system settings card.
+    if (path === "/fragments/settings/flux") {
+      const { renderFluxSettings } = await import("./templates.ts");
+      const profiles = this.llmProfileSettings.profiles.map((p) => ({
+        id: p.id,
+        name: p.name,
+        model: p.model,
+        workerModel: p.workerModel,
+      }));
+      return new Response(
+        renderFluxSettings(
+          this.fluxSettings,
+          this.fluxManager !== null,
+          profiles,
+          this.llmProfileSettings.activeProfileId ?? null,
+        ),
+        { headers: { "Content-Type": "text/html; charset=utf-8" } },
+      );
+    }
+
     // GET /fragments/settings/plugins/<id> — plugin-owned settings page.
     // Reachable even when the plugin is disabled, so operators can configure
     // credentials before enabling. The plugin's settingsFragment callback
@@ -5679,6 +6457,45 @@ export class Server {
     const voiceCallMatch = path.match(/^\/fragments\/voice-call\/([^/]+)$/);
     if (voiceCallMatch) {
       return handleVoiceCallFragment(ctx, voiceCallMatch[1]);
+    }
+
+    // GET /fragments/flux/:conversationId - Flux overlay fragment
+    // (conversation-hosted consciousness; the app shell's flux.js mounts
+    // this — config tags only, no executable script in the fragment).
+    const fluxOverlayMatch = path.match(/^\/fragments\/flux\/([^/]+)$/);
+    if (fluxOverlayMatch) {
+      if (!this.fluxSettings.enabled) return fluxDisabled();
+      const conv = this.db.getConversation(fluxOverlayMatch[1]);
+      if (!conv) return new Response("Conversation not found", { status: 404 });
+      const { renderFluxOverlayView } = await import("./templates.ts");
+      let fluxUserName = "the user";
+      const fluxEntityName = await this.readEntityName();
+      try {
+        const gsText = await Deno.readTextFile(
+          `${this.config.dataRoot}/.psycheros/general-settings.json`,
+        );
+        const gs = JSON.parse(gsText) as { userName?: string };
+        if (gs.userName?.trim()) fluxUserName = gs.userName.trim();
+      } catch {
+        // fall back to generic
+      }
+      const health = this.fluxManager?.getOrganHealth() ?? null;
+      return new Response(
+        renderFluxOverlayView(
+          conv.id,
+          fluxEntityName,
+          fluxUserName,
+          conv.title ?? "a conversation",
+          {
+            state: this.fluxManager
+              ? (this.fluxPaused ? "paused" : "running")
+              : "stopped",
+            moodState: this.fluxManager?.getMoodState() ?? null,
+            organHealth: health,
+          },
+        ),
+        { headers: { "Content-Type": "text/html; charset=utf-8" } },
+      );
     }
 
     // GET /fragments/settings/voice - Voice profile hub

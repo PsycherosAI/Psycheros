@@ -42,6 +42,12 @@ const HANDBOOK_DOCS: { file: string; ref: string; description: string }[] = [
     description: "My durable scheduler — how scheduled and Pulse work runs",
   },
   {
+    file: "flux.md",
+    ref: "flux",
+    description:
+      "My persistent presence — my three layers, sleep and dreams, my mood, my modulation tools",
+  },
+  {
     file: "configuration.md",
     ref: "configuration",
     description: "Environment variables, config files, and migrations",

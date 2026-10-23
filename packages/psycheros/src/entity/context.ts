@@ -7,6 +7,7 @@
 
 import { join } from "@std/path";
 import type { IdentityContent, MCPClient } from "../mcp-client/mod.ts";
+import { buildDynamicBlock, buildStableCore } from "./turn-context.ts";
 
 /**
  * The directory name for the entity's self files.
@@ -17,6 +18,15 @@ const SELF_DIR = "identity/self";
  * The filename for the base instructions file.
  */
 const BASE_INSTRUCTIONS_FILE = "base_instructions.md";
+
+/**
+ * The flux standing-attention directive lives in identity/self/ for
+ * authoring convenience but is NOT identity — it's a flux-specific
+ * tuning file for the noticing layer only. Excluded from the Ego
+ * model's identity loading so it doesn't bias the conscious layer
+ * toward fixating on sensory data.
+ */
+const ATTENTION_DIRECTIVE_FILE = "attention.md";
 
 /**
  * The directory name for the user files.
@@ -157,6 +167,7 @@ async function loadFilesFromDirectory(
 export async function loadSelfMd(dataRoot: string): Promise<string> {
   return await loadFilesFromDirectory(dataRoot, SELF_DIR, SELF_FILE_ORDER, [
     BASE_INSTRUCTIONS_FILE,
+    ATTENTION_DIRECTIVE_FILE,
   ]);
 }
 
@@ -329,9 +340,11 @@ export async function loadSelfContent(
   if (mcpClient) {
     const identity = await mcpClient.loadIdentity();
     if (identity?.self) {
-      // Filter out base_instructions.md — loaded separately via loadBaseInstructions()
+      // Filter out base_instructions.md (loaded separately) and
+      // attention.md (flux-specific, not Ego identity).
       const filtered = identity.self.filter((f) =>
-        f.filename !== BASE_INSTRUCTIONS_FILE
+        f.filename !== BASE_INSTRUCTIONS_FILE &&
+        f.filename !== ATTENTION_DIRECTIVE_FILE
       );
       return identityFilesToString(filtered, SELF_FILE_ORDER);
     }
@@ -426,154 +439,27 @@ export async function buildIdentitySystemMessage(
   const customContent = await loadCustomContent(dataRoot);
 
   return buildSystemMessage(
-    baseInstructions,
-    selfContent,
-    userContent,
-    relationshipContent,
-    customContent,
+    {
+      baseInstructions,
+      selfContent,
+      userContent,
+      relationshipContent,
+      customContent,
+    },
+    {},
   );
 }
 
 /**
- * Build the system message from base instructions, self/, user/, relationship/,
- * custom/ directory content, optional RAG-retrieved memories, chat history,
- * lorebook content, and graph context.
- * This gets included at the start of every LLM request.
- *
- * @param baseInstructions - The processed base instructions content
- * @param selfContent - The concatenated contents of self/*.md files
- * @param userContent - The concatenated contents of user/*.md files
- * @param relationshipContent - The concatenated contents of relationship/*.md files
- * @param customContent - The concatenated contents of custom/*.md files
- * @param memoriesContent - Optional RAG-retrieved memories content
- * @param chatHistoryContent - Optional chat history content from Chat RAG
- * @param lorebookContent - Optional lorebook-triggered content
- * @param graphContent - Optional knowledge graph context
- * @param vaultContent - Optional vault document content from Data Vault RAG
- * @param heldSkillsContent - Optional "Skills I'm holding" block (XML-wrapped,
- * rendered in the dynamic region after situational awareness)
- * @returns The formatted system message
+ * The regular-placement renderer: stable core + dynamic block as one
+ * leading system message. The kit (turn-context.ts) owns the canonical
+ * order — this composes for the classic leading-message shape.
  */
 export function buildSystemMessage(
-  baseInstructions: string,
-  selfContent: string,
-  userContent: string,
-  relationshipContent: string,
-  customContent?: string,
-  memoriesContent?: string,
-  chatHistoryContent?: string,
-  lorebookContent?: string,
-  graphContent?: string,
-  vaultContent?: string,
-  imageGenContent?: string,
-  situationalAwarenessContent?: string,
-  discordChannelContent?: string,
-  pluginContent?: string,
-  heldSkillsContent?: string,
+  core: import("./turn-context.ts").StableCoreInputs,
+  dynamic: import("./turn-context.ts").DynamicBlockInputs,
 ): string {
-  // Build sections — base instructions always first
-  const sections: string[] = [];
-  if (baseInstructions.trim()) {
-    sections.push(baseInstructions);
-  }
-
-  if (selfContent.trim()) {
-    sections.push(`---
-
-My self files (from identity/self/ directory):
-
-${selfContent}`);
-  }
-
-  if (userContent.trim()) {
-    sections.push(`---
-
-User files (from identity/user/ directory):
-
-${userContent}`);
-  }
-
-  if (relationshipContent.trim()) {
-    sections.push(`---
-
-Relationship files (from identity/relationship/ directory):
-
-${relationshipContent}`);
-  }
-
-  if (customContent?.trim()) {
-    sections.push(`---
-
-Custom files (from identity/custom/ directory):
-
-${customContent}`);
-  }
-
-  // Add situational awareness content if present
-  if (situationalAwarenessContent?.trim()) {
-    sections.push(`---
-
-${situationalAwarenessContent}`);
-  }
-
-  // Add held skills if present — dynamic region after SA (keeps the static
-  // prefix intact for the day cross-turn caching is restructured)
-  if (heldSkillsContent?.trim()) {
-    sections.push(`---
-
-${heldSkillsContent}`);
-  }
-
-  // Add Discord channel context if present
-  if (discordChannelContent?.trim()) {
-    sections.push(`---
-
-${discordChannelContent}`);
-  }
-
-  if (pluginContent?.trim()) {
-    sections.push(`---
-
-My plugin context:
-
-${pluginContent}`);
-  }
-
-  // Add lorebook-triggered content if present
-  if (lorebookContent && lorebookContent.trim()) {
-    sections.push(lorebookContent);
-  }
-
-  // Add vault document content if present
-  if (vaultContent && vaultContent.trim()) {
-    sections.push(vaultContent);
-  }
-
-  // Add RAG-retrieved memories if present
-  if (memoriesContent && memoriesContent.trim()) {
-    sections.push(memoriesContent);
-  }
-
-  // Add chat history if present
-  if (chatHistoryContent && chatHistoryContent.trim()) {
-    sections.push(`---
-
-${chatHistoryContent}`);
-  }
-
-  // Add graph context if present
-  if (graphContent && graphContent.trim()) {
-    sections.push(graphContent);
-  }
-
-  // Add image generator descriptions if present
-  if (imageGenContent && imageGenContent.trim()) {
-    sections.push(`---
-
-My available image generators:
-
-${imageGenContent}`);
-  }
-
-  return sections.join("\n");
+  const stable = buildStableCore(core);
+  const dyn = buildDynamicBlock(dynamic);
+  return [stable, dyn].filter((b) => b.trim()).join("\n");
 }

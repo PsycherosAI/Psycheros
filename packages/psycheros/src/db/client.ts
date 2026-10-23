@@ -840,7 +840,7 @@ export class DBClient {
 
       // Update content (+ metadata stays untouched — priorVersions is no
       // longer written here, but we preserve existing metadata fields like
-      // image/fade/etc. on the row by only updating content + edited_at).
+      // image/etc. on the row by only updating content + edited_at).
       this.db.exec(
         `UPDATE messages SET content = ?, edited_at = ? WHERE id = ?`,
         [content, nowISO, id],
@@ -917,7 +917,7 @@ export class DBClient {
         return null;
       }
 
-      // Parse existing metadata so we don't clobber image/fade fields.
+      // Parse existing metadata so we don't clobber image fields.
       let metadata: Record<string, unknown> = {};
       if (row.metadata) {
         try {

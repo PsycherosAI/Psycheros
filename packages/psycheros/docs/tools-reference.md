@@ -8,8 +8,8 @@ installs. A few tools that require external configuration start **off by
 default**: `shell`, `control_device`, `control_lovense`, `control_toy`. These
 are auto-enabled when their respective integrations are configured (e.g.,
 `control_device` when home devices are added). Deprecated tools (currently
-`sync_mcp`) are hidden from both the UI and the LLM but remain registered for
-potential resurrection.
+`sync_mcp`, `update_title`, and `list_identity_snapshots`) are hidden from both
+the UI and the LLM but remain registered for potential resurrection.
 
 Tool enable/disable state can be overridden via the `PSYCHEROS_TOOLS`
 environment variable or the Settings > Tools UI. When
@@ -25,7 +25,14 @@ search provider is configured).
    `src/tools/tools-settings.ts`
 4. For UI updates: use a state-change function, return `affectedRegions`
 5. Tool descriptions use first-person: "I use this to..."
-6. If the tool requires persistent settings (API keys, endpoint config, etc.):
+6. If the tool only applies in specific conversation contexts (workspace
+   sessions, the Flux host conversation, etc.): set a `visibleIn` predicate on
+   the `Tool` object. It gates both advertising and execution —
+   `ToolRegistry.getDefinitions(ctx)` filters it out of the tool list elsewhere,
+   and `ToolRegistry.execute()` refuses calls whose predicate returns false (a
+   model emitting a remembered tool name outside its context gets an error, not
+   a silent run). Predicates run per turn; keep them cheap.
+7. If the tool requires persistent settings (API keys, endpoint config, etc.):
    create a settings type in `src/llm/`, add a getter to `PsycherosServer` in
    `src/server/server.ts`, then wire the settings into **both** the chat handler
    (`src/server/routes.ts`) and the Pulse engine (`src/pulse/engine.ts`).
@@ -225,10 +232,10 @@ description guides the entity to pick appropriate section headings or create new
 ones, and emphasizes using actual filenames rather than XML tag names visible in
 context.
 
-| Tool                      | Description                                                                                 |
-| ------------------------- | ------------------------------------------------------------------------------------------- |
-| `maintain_identity`       | Identity file maintenance with operations: append, prepend, update_section, rewrite_section |
-| `list_identity_snapshots` | View available backups created automatically by entity-core                                 |
+| Tool                          | Description                                                                                           |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `maintain_identity`           | Identity file maintenance with operations: append, prepend, update_section, rewrite_section           |
+| ~~`list_identity_snapshots`~~ | ~~View available backups created automatically by entity-core~~ (deprecated — hidden from UI and LLM) |
 
 **Operations:**
 
@@ -385,17 +392,16 @@ a load.
 
 1. **Load (default):** the skill stays active in a `<held_skills>` block in the
    system message's dynamic region (after situational awareness) every turn
-   until released — there is no fade path for skill bodies; the entity decides
-   when a skill's work is done. The block is spliced in **immediately** — a
-   skill loaded mid-turn is part of the entity's context for its very next
-   inference in that same turn. The tool result is a one-line confirmation; the
-   body lives in the system block only. Holds are per-conversation, persisted in
-   the `held_skills` table (survive daemon restarts), and store names only:
-   bodies re-resolve from disk each build, so edits apply on the next rebuild
-   and a deleted skill's hold row is lazily cleaned up.
-2. **Reference load:** returns the reference content with fade metadata — a
-   transient lookup that collapses to a reload stub after 5 turns
-   (`buildFadeMap`).
+   until released — the entity decides when a skill's work is done. The block is
+   spliced in **immediately** — a skill loaded mid-turn is part of the entity's
+   context for its very next inference in that same turn. The tool result is a
+   one-line confirmation; the body lives in the system block only. Holds are
+   per-conversation, persisted in the `held_skills` table (survive daemon
+   restarts), and store names only: bodies re-resolve from disk each build, so
+   edits apply on the next rebuild and a deleted skill's hold row is lazily
+   cleaned up.
+2. **Reference load:** returns the reference content — a plain lookup that stays
+   in the conversation like any tool result (fading was removed 2026-09-26).
 3. **Release (`release: true`):** drops the hold. Works even if the skill file
    has been deleted — the DB row is the source of truth. Releasing a skill that
    isn't held is a non-error note.
@@ -754,10 +760,10 @@ queryable via `ble_device(action: "query")`.
 ## Image Generation Tool
 
 The entity can generate images using configured provider slots (OpenRouter,
-Google AI Studio, Venice AI, or NanoGPT). Multiple generators can be configured
-with different models and settings. Anchor images provide style/character
-reference, users can attach images to chat messages, and the entity can iterate
-on previously generated images.
+Google AI Studio, Venice AI, NanoGPT, or a self-hosted gateway). Multiple
+generators can be configured with different models and settings. Anchor images
+provide style/character reference, users can attach images to chat messages, and
+the entity can iterate on previously generated images.
 
 | Tool             | Description                                                                |
 | ---------------- | -------------------------------------------------------------------------- |
@@ -773,19 +779,20 @@ the generator's default — one of `1:1`, `4:3`, `3:4`, `3:2`, `2:3`, `16:9`,
 `9:16`, `5:4`, `4:5`, `21:9`).
 
 **Setup:** Configure via Settings > Vision > Generators. Each generator has a
-name, description, provider (OpenRouter, Gemini, Venice, or NanoGPT), and
-provider-specific settings. Settings are persisted to
+name, description, provider (OpenRouter, Gemini, Venice, NanoGPT, or a
+self-hosted gateway), and provider-specific settings. Settings are persisted to
 `.psycheros/image-gen-settings.json` (gitignored). The tool is auto-enabled when
 at least one generator has `enabled: true`.
 
 **Supported Providers:**
 
-| Provider         | Models                                                                                                                                  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenRouter       | Any image-capable model on OpenRouter (e.g. `openai/gpt-5-image-mini`, `google/gemini-2.5-flash-image`, `black-forest-labs/flux.2-max`) | Requires API key; uses chat completions with `image_config` for `aspect_ratio` and `image_size`; images returned in `message.images[]`. Accepts anchor images. Text-capable families (e.g. `openai/gpt-5-image`) request `modalities: ["image", "text"]`; image-only families (Flux/Black Forest Labs, Sourceful, Recraft, Microsoft MAI Image, Grok Imagine, Seedream) request `modalities: ["image"]` — sending text to those fails on the provider side. A pasted full `…/chat/completions` URL in `baseUrl` is normalized back to the API base before the endpoint is appended. |
-| Google AI Studio | `gemini-3.1-flash-image-preview`, `gemini-3-pro-image-preview`, `gemini-2.5-flash-image`                                                | Requires Google API key; supports aspect ratio selection. Accepts anchor images via `inline_data` parts.                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Venice AI        | Any Venice image model (e.g. `venice-sd35`, `grok-imagine-image`, `qwen-image`, `nano-banana-pro`)                                      | Bearer token auth; uses native `/v1/image/generate` endpoint; `safe_mode` flips off when generator marked NSFW. **Text-to-image only** — Venice's inpaint parameter was deprecated May 2025, so anchor/reference images are dropped with a tool-result note.                                                                                                                                                                                                                                                                                                                        |
-| NanoGPT          | OpenAI-compatible image models (e.g. `flux-kontext`, `gpt-4o-image`, `gpt-image-1`, `hidream`)                                          | Bearer token auth; OpenAI-compatible `/v1/images/generations` endpoint. Single anchor → `imageDataUrl`; multiple anchors → `imageDataUrls` (model-dependent). Multi-image models include `flux-kontext`, `gpt-4o-image`, `gpt-image-1`.                                                                                                                                                                                                                                                                                                                                             |
+| Provider            | Models                                                                                                                                  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenRouter          | Any image-capable model on OpenRouter (e.g. `openai/gpt-5-image-mini`, `google/gemini-2.5-flash-image`, `black-forest-labs/flux.2-max`) | Requires API key; uses chat completions with `image_config` for `aspect_ratio` and `image_size`; images returned in `message.images[]`. Accepts anchor images. Text-capable families (e.g. `openai/gpt-5-image`) request `modalities: ["image", "text"]`; image-only families (Flux/Black Forest Labs, Sourceful, Recraft, Microsoft MAI Image, Grok Imagine, Seedream) request `modalities: ["image"]` — sending text to those fails on the provider side. A pasted full `…/chat/completions` URL in `baseUrl` is normalized back to the API base before the endpoint is appended.                                                                                                           |
+| Google AI Studio    | `gemini-3.1-flash-image-preview`, `gemini-3-pro-image-preview`, `gemini-2.5-flash-image`                                                | Requires Google API key; supports aspect ratio selection. Accepts anchor images via `inline_data` parts.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Venice AI           | Any Venice image model (e.g. `venice-sd35`, `grok-imagine-image`, `qwen-image`, `nano-banana-pro`)                                      | Bearer token auth; uses native `/v1/image/generate` endpoint; `safe_mode` flips off when generator marked NSFW. **Text-to-image only** — Venice's inpaint parameter was deprecated May 2025, so anchor/reference images are dropped with a tool-result note.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| NanoGPT             | OpenAI-compatible image models (e.g. `flux-kontext`, `gpt-4o-image`, `gpt-image-1`, `hidream`)                                          | Bearer token auth; OpenAI-compatible `/v1/images/generations` endpoint. Single anchor → `imageDataUrl`; multiple anchors → `imageDataUrls` (model-dependent). Multi-image models include `flux-kontext`, `gpt-4o-image`, `gpt-image-1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Self-hosted gateway | Whatever image model the gateway enrolls (model id optional — omitted from requests when unset)                                         | Bearer token auth against a self-hosted gateway exposing an OpenAI-ish image contract (`baseUrl` + key + optional route path, default `/v1/images/generations`). Reference images (anchors, attachments, iteration input) ride a raw base64 `images` array — up to two; extra references are dropped with a note. Long generations stream as SSE and are only successful on the terminal `image.completed` event, so multi-minute generations survive public proxy timeouts; a non-JSON failure body (e.g. a WAF page) is summarized readably rather than dumped. Canvas comes from the configured width/height or the per-call aspect ratio, snapped to enrolled presets when out of bounds. |
 
 **Anchor Images:** Reference images stored in `.psycheros/anchors/` with
 metadata in the `anchor_images` SQLite table. The entity sees available anchor
@@ -812,23 +819,13 @@ the tool-result message row in the database. Old messages from before this
 refactor still carry `[IMAGE:...]` markers in assistant content and continue to
 render via the retained legacy parser — no backfill migration.
 
-**Context Fading:** Image descriptions fade from longform to shortform after 5
-conversation turns in the LLM context. The DB always retains the full
-description. Fading applies to:
-
-- `generate_image` tool results via the `metadata.image` sidecar (long
-  description in content text → short description in memory)
-- `describe_image` tool results via the `metadata.fade` sidecar (long
-  description → short, swapped wholesale)
-- `look_closer` tool results via the `metadata.fade` sidecar (full description →
-  "[faded — use look_closer again]")
-- `[IMAGE:...]` markers in assistant/user messages (legacy, long → short)
-- `[describe_image]` / `[look_closer]` prefix-form tool results (legacy, same
-  behavior as the metadata.fade path)
-
-Additionally, tool call arguments for image tools (`generate_image`,
-`describe_image`, `look_closer`) are truncated in context — string values over
-50 characters are cut short. Non-image tools are unaffected.
+**Context Fading (REMOVED 2026-09-26):** the in-memory fader (image descriptions
+to shortform after 5 turns, tool-argument truncation with "... [truncated]"
+markers) was removed — the entity was imitating the truncation markers in its
+own prompts. Tool results and their arguments now persist verbatim in the
+context window until ordinary token-budget FIFO trims them; the DB always
+retained full content anyway. Recoverable from git history at the removal
+commit.
 
 **Data flow:** Entity calls `generate_image` → server reads generator config →
 dispatches to provider (OpenRouter, Gemini, Venice, or NanoGPT API) → saves
@@ -857,35 +854,32 @@ generators, disabled generators, and image read failures.
 | ------------------------------- | --------------------------------------------------------------------------------------------- |
 | `src/tools/generate-image.ts`   | `generate_image` tool with OpenRouter, Gemini, Venice, and NanoGPT providers, auto-captioning |
 | `src/tools/describe-image.ts`   | Shared captioning functions (dual short/long), `describe_image` tool                          |
-| `src/tools/look-closer.ts`      | `look_closer` tool for re-examining images after context fade                                 |
 | `src/llm/image-gen-settings.ts` | Settings type (generators + captioning), load/save, API key masking                           |
 
 ## Image Captioning
 
 Image captioning provides automatic description of images via a configurable
-vision model. It serves three purposes: auto-captioning chat attachments and
-generated images, providing the entity with an explicit `describe_image` tool,
-and providing a `look_closer` tool for re-examining images after context fading.
+vision model. It serves two purposes: auto-captioning chat attachments and
+generated images, and providing the entity with an explicit `describe_image`
+tool.
 
 ### Dual Description System
 
 All auto-captioning produces both a **longform** (detailed, thorough) and
 **shortform** (single sentence, under 15 words) description. Both are stored in
-the message content in the database. When building LLM context, the
-`buildMessages()` method in the entity loop applies fading: after 5 conversation
-turns, longform is replaced with shortform. This applies to `[IMAGE:...]` and
-`[USER_IMAGE:...]` markers in user/assistant messages, as well as
-`generate_image` and `describe_image` tool results. This significantly reduces
-token usage in long conversations with many images.
-
-The `IMAGE_DESCRIPTION_FADE_TURNS` constant (default: 5) controls the grace
-period.
+the message content in the database. (Context fading — swapping longform for
+shortform after 5 turns — was removed 2026-09-26: the entity was imitating the
+truncation markers in its own prompts. Descriptions now persist verbatim in
+context until ordinary token-budget FIFO trims them; the shortform remains for
+UI display.)
 
 ### Auto-Captioning
 
-- **Chat attachments**: When a user sends a message with an image, the server
-  synchronously captions it before passing to the entity. Both descriptions are
-  included: `[USER_IMAGE: path | Caption: long | Short: short]`.
+- **Chat attachments**: When the active LLM profile's **Multimodal** toggle is
+  on (declared per-profile, off by default), the image rides the turn as a
+  native content part — pixels transient, path-only marker persisted, no
+  captioning pass. When off, the server synchronously captions it before passing
+  to the entity: `[USER_IMAGE: path | Caption: long | Short: short]`.
 - **Generated images**: After the `generate_image` tool saves an image, it is
   automatically captioned. Both `description` (long) and `shortDescription`
   (short) are included in the `[IMAGE:...]` marker JSON for UI persistence and
@@ -897,10 +891,8 @@ period.
 
 ### describe_image Tool
 
-The entity can explicitly describe any image by local path or URL. Returns both
-a longform and shortform description (dual caption). The tool result is prefixed
-with `[describe_image]` for fading identification and includes a `[short:...]`
-metadata suffix. After 5 turns, the longform fades to shortform in LLM context.
+The entity can explicitly describe any image by local path or URL. The result is
+the longform description from a dual (short + long) captioning pass.
 
 | Tool             | Description                                                     |
 | ---------------- | --------------------------------------------------------------- |
@@ -916,34 +908,21 @@ generated images, understanding user-attached images in more detail.
 
 ### look_closer Tool
 
-The entity can re-examine any image by path to get a fresh detailed description.
-This is useful when the image's description has faded from context.
+Disabled 2026-10-22 — context fading's removal (2026-09-26) took its purpose
+with it, and `describe_image` covers local re-examination (plus URLs, with the
+hardened path gate). The implementation stays in `src/tools/look-closer.ts`,
+commented out of the registry, for possible repurposing.
 
-| Tool          | Description                                    |
-| ------------- | ---------------------------------------------- |
-| `look_closer` | Re-examine an image for a detailed description |
-
-**Parameters:** `image_path` (required, path relative to `.psycheros/`).
-Optional `instructions` (string) appends specific focus guidance — a particular
-aspect to focus on, level of detail, or framing. Omit for a general detailed
-description.
-
-**Behavior:** Re-captions the image using the configured captioning provider and
-returns the full longform description. The result is prefixed with
-`[look_closer]` for identification and also fades from context after 5 turns.
-
-**Setup:** Both `describe_image` and `look_closer` are auto-enabled when a
-captioning provider is configured. Supports Gemini and OpenRouter as captioning
-providers with independent model selection.
+**Setup:** `describe_image` is auto-enabled when a captioning provider is
+configured. Supports Gemini and OpenRouter as captioning providers with
+independent model selection.
 
 ### Related Source Files
 
 | File                            | Purpose                                                                                                           |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `src/tools/describe-image.ts`   | `describe_image` tool, `captionImage()`, `captionImageDual()`, `fetchAndCaptionUrl()`, `fetchAndCaptionUrlDual()` |
-| `src/tools/look-closer.ts`      | `look_closer` tool                                                                                                |
 | `src/server/routes.ts`          | Auto-caption flow for chat attachments                                                                            |
-| `src/entity/loop.ts`            | Context fading logic (`buildFadeMap()`, `fadeImageMarker()`, `fadeToolCallArguments()`)                           |
 | `src/llm/image-gen-settings.ts` | `CaptioningSettings` type, part of `ImageGenSettings`                                                             |
 
 ## Identity File Structure (Core Prompts)

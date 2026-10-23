@@ -64,14 +64,15 @@ export interface WorkspaceSupervisorConfig {
   >;
   /**
    * Optional callback fired when an async workspace completes. The server
-   * wires this to fire a Pulse so the entity picks up the summary on its
-   * next turn. Sync sessions don't fire this — they return directly.
+   * wires this to distill the run into a summary and fire a Pulse so the
+   * entity picks it up on its next turn. Sync sessions don't fire this —
+   * they return directly. Null run = the run promise threw before producing
+   * a result.
    */
   onAsyncComplete?: (
     sessionId: string,
     conversationId: string,
-    ok: boolean,
-    summary?: string,
+    run: OpenCodeRunResult | null,
   ) => void;
   /**
    * Run an entity turn in a given conversation. Used by engaged mode to
@@ -670,19 +671,14 @@ export class WorkspaceSupervisor {
           }
 
           // Stash the full finalText as summary — no truncation at storage
-          // time. The entity-facing context budget is enforced downstream
-          // (handleWorkspaceAsyncComplete) via smart paragraph-boundary
-          // truncation. Storing full preserves the canonical record for the
-          // history view and future reference.
+          // time. Downstream (handleWorkspaceAsyncComplete) distills it via
+          // the worker LLM before the completion Pulse; the stored full text
+          // preserves the canonical record for the history view and future
+          // reference.
           if (run.finalText) {
             db.setWorkspaceSessionSummary(sessionId, run.finalText);
           }
-          onAsyncComplete?.(
-            sessionId,
-            originConversationId,
-            run.ok,
-            run.finalText,
-          );
+          onAsyncComplete?.(sessionId, originConversationId, run);
           // Cancel orphaned queries/approvals — workspace ended.
           this.activeChildren.delete(sessionId);
           cleanupSessionPending(sessionId);
@@ -690,7 +686,7 @@ export class WorkspaceSupervisor {
         .catch((err) => {
           const error = err instanceof Error ? err.message : String(err);
           db.updateWorkspaceSessionStatus(sessionId, "failed", { error });
-          onAsyncComplete?.(sessionId, originConversationId, false, undefined);
+          onAsyncComplete?.(sessionId, originConversationId, null);
           this.activeChildren.delete(sessionId);
           cleanupSessionPending(sessionId);
         })
@@ -1057,8 +1053,7 @@ export class WorkspaceSupervisor {
       this.config.onAsyncComplete?.(
         sessionId,
         session.originConversationId ?? session.conversationId,
-        run.ok,
-        run.finalText,
+        run,
       );
 
       return {
@@ -1173,8 +1168,7 @@ export class WorkspaceSupervisor {
     this.config.onAsyncComplete?.(
       sessionId,
       session.originConversationId ?? session.conversationId,
-      run.ok,
-      run.finalText,
+      run,
     );
 
     return {
@@ -1506,6 +1500,29 @@ export async function invokeOpenCode(
   let error = lastError;
   if (!ok && !error && stderrText.trim()) {
     error = stderrText.trim().slice(0, 1000);
+  }
+  // Silent deaths used to fall through as undefined → "unknown error" in
+  // the UI. Seatbelt kills in particular emit no stderr at all. Name the
+  // exit code so the failure says what the OS observed.
+  if (!ok && !error) {
+    error = `OpenCode exited with code ${status.code} (no stderr output)`;
+  }
+  // macOS sandbox failures: point at the profile and the two commands that
+  // reveal the denied operation. Denials are tagged "psycheros-sbx" by the
+  // profile's deny-default, so they're greppable in the unified log.
+  if (!ok && sandboxWrap?.binary === "sandbox-exec") {
+    const profilePath = sandboxWrap.args[0] === "-f"
+      ? sandboxWrap.args[1]
+      : undefined;
+    const hints = [
+      "macOS sandbox diagnostics:",
+      profilePath ? `profile at ${profilePath};` : "",
+      `reproduce: sandbox-exec -f ${
+        profilePath ?? "<profile.sb>"
+      } ${opencodePath} --version;`,
+      `denied operations: log stream --predicate 'eventMessage CONTAINS "psycheros-sbx"'`,
+    ].filter(Boolean).join(" ");
+    error = `${error ?? "failed"}\n${hints}`;
   }
   return {
     sessionId: firstSessionId ?? "",

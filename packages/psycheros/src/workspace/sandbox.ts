@@ -231,8 +231,7 @@ export function buildBwrapArgv(input: {
   // Config and data dirs are read-WRITE: OpenCode treats both as its own
   // bookkeeping and writes to them at startup (config dir: a .gitignore and
   // cached state; data dir: sessions DB + logs). A read-only mount here
-  // kills every session with `Unknown: FileSystem.writeFile` — found live
-  // 2026-09-03 after the existence guard landed.
+  // kills every session with `Unknown: FileSystem.writeFile`.
   const opencodeHomeArgs = [
     ...(dirExistsSync(opencodeInstall)
       ? ["--ro-bind", opencodeInstall, opencodeInstall]
@@ -335,14 +334,31 @@ export function buildBwrapArgv(input: {
  * but practically still the standard in 2026 — Apple has not provided a
  * replacement, current AI tools (Goose, etc.) still use it.
  *
+ * Two Seatbelt semantics are load-bearing here:
+ *
+ * - Path filters match RESOLVED paths. /tmp is really /private/tmp, /etc is
+ *   /private/etc, $TMPDIR is under /private/var/folders. Rules on the symlink
+ *   forms are dead letters — every filter below uses the realpath form.
+ * - Within an operation class, the LAST matching rule wins. The Tier 5 deny
+ *   on <dataRoot>/.psycheros must therefore come BEFORE the sandbox/workdir/
+ *   shared-runtime allows (all of which live under that subtree), or it
+ *   silently denies OpenCode its own work area.
+ *
  * The profile:
- *   - Denies everything by default (deny default)
+ *   - Denies everything by default, tagged "psycheros-sbx" so denials are
+ *     greppable in the unified log (see docs/workspace.md)
+ *   - Grants the birth rights a modern runtime (Bun, node, python) needs:
+ *     fork, signal, sysctl-read, posix shm/sem, named mach services,
+ *     /dev/{null,zero,random,urandom}, directory metadata for realpath()
  *   - Allows network (LLM provider + MCP HTTP)
- *   - Allows reads from system paths (/usr, /System, /Library, /bin, /opt)
- *   - Allows reads from projectRoot (codebase, read-only)
- *   - Allows writes to sandboxPath + /tmp + /var/tmp
- *   - Allows process execution for shell + node + opencode binary
+ *   - Allows reads from system paths + projectRoot (codebase, read-only)
+ *   - Allows writes to sandboxPath + $TMPDIR + /tmp + /var/tmp
  *   - Explicitly denies reads/writes under <dataRoot>/.psycheros (Tier 5)
+ *     except the workspace carve-outs that follow it
+ *
+ * The birth-right grant set is cribbed from Claude Code's macOS sandbox
+ * (anthropic-experimental/sandbox-runtime, macos-sandbox-utils.ts) — a
+ * production-verified profile for the same use case.
  *
  * Profile is written to a temp file and passed via -f. Returns the binary
  * (sandbox-exec) and argv to invoke.
@@ -358,11 +374,18 @@ export async function buildSandboxExecArgv(input: {
   binary: string;
   args: string[];
 }): Promise<{ binary: string; args: string[] }> {
-  // Resolve symlinks for clean path matching inside the profile.
+  // Resolve symlinks for clean path matching inside the profile. Seatbelt
+  // path filters match RESOLVED paths — every rule below must target the
+  // realpath form or it never fires.
   const sandbox = await realpathOrFallback(input.sandboxPath);
   const project = await realpathOrFallback(input.projectRoot);
   const data = await realpathOrFallback(input.dataRoot);
-  const opencodeBin = await realpathOrFallback(input.binary);
+  const workdir = input.workdir
+    ? await realpathOrFallback(input.workdir)
+    : undefined;
+  const sharedRuntime = input.sharedRuntimeDir
+    ? await realpathOrFallback(input.sharedRuntimeDir)
+    : undefined;
 
   // OpenCode per-user dirs under $HOME (mirror of the Linux bind set).
   const home = Deno.env.get("HOME") ?? "/root";
@@ -370,29 +393,99 @@ export async function buildSandboxExecArgv(input: {
   const opencodeConfig = `${home}/.config/opencode`;
   const opencodeData = `${home}/.local/share/opencode`;
 
-  // Seatbelt profile — minimal viable sandbox for OpenCode to function
-  // while blocking Tier 5 paths. Generated fresh per session.
+  // Per-user temp tree ($TMPDIR → /private/var/folders/…/T). Runtimes write
+  // here at birth; without this grant OpenCode dies before its first event.
+  // Fall back to the whole /private/var/folders tree when TMPDIR is unset.
+  const tmpDir = await realpathOrFallback(
+    Deno.env.get("TMPDIR")?.trim() || "/var/folders",
+  );
+
+  // Seatbelt profile — deny-by-default sandbox that still grants a modern
+  // runtime its birth rights. Generated fresh per session. Rule order is
+  // load-bearing: last matching rule wins, so the Tier 5 deny precedes the
+  // workspace carve-outs (see the function docstring).
   const profile = `
 (version 1)
-(deny default)
+(deny default (with message "psycheros-sbx"))
+
+;; --- Birth rights (grant set from Claude Code's sandbox-runtime profile) ---
+;; Without these, modern runtimes (Bun/OpenCode, node, python) die at spawn:
+;; no fork, no signals, no sysctl, no shared memory, no bootstrap services.
+;; process-exec is unfiltered by design — the read policy below is the
+;; fence: what can't be read can't be executed either.
+(allow process-exec)
+(allow process-fork)
+(allow process-info* (target same-sandbox))
+(allow signal (target same-sandbox))
+(allow mach-priv-task-port (target same-sandbox))
+(allow user-preference-read)
+(allow ipc-posix-shm)
+(allow ipc-posix-sem)
+(allow iokit-get-properties)
+(allow distributed-notification-post)
+(allow system-socket (require-all (socket-domain AF_SYSTEM) (socket-protocol 2)))
+(allow sysctl-read)
+(allow sysctl-write (sysctl-name "kern.tcsm_enable"))
+
+;; --- Mach bootstrap services (named only — no wildcards) ---
+(allow mach-lookup
+  (global-name "com.apple.audio.systemsoundserver")
+  (global-name "com.apple.distributed_notifications@Uv3")
+  (global-name "com.apple.FontObjectsServer")
+  (global-name "com.apple.fonts")
+  (global-name "com.apple.logd")
+  (global-name "com.apple.lsd.mapdb")
+  (global-name "com.apple.PowerManagement.control")
+  (global-name "com.apple.system.logger")
+  (global-name "com.apple.system.notification_center")
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  (global-name "com.apple.system.opendirectoryd.membership")
+  (global-name "com.apple.bsd.dirhelper")
+  (global-name "com.apple.securityd.xpc")
+  (global-name "com.apple.SecurityServer")
+  (global-name "com.apple.trustd.agent")
+  (global-name "com.apple.coreservices.launchservicesd")
+)
+
+;; --- Device files ---
+(allow file-ioctl (literal "/dev/null"))
+(allow file-ioctl (literal "/dev/zero"))
+(allow file-ioctl (literal "/dev/random"))
+(allow file-ioctl (literal "/dev/urandom"))
+(allow file-ioctl (literal "/dev/dtracehelper"))
+(allow file-ioctl (literal "/dev/tty"))
+(allow file-ioctl file-read-data file-write-data
+  (require-all (literal "/dev/null") (vnode-type CHARACTER-DEVICE)))
+(allow file-read-data (literal "/dev/zero"))
+(allow file-read-data (literal "/dev/random"))
+(allow file-read-data (literal "/dev/urandom"))
+
+;; --- Network (LLM provider + MCP HTTP) ---
 (allow network*)
 
-;; System reads — needed for libc, system calls, etc.
+;; --- System reads ---
+;; /private/* forms are the real paths — /tmp, /etc and /var are symlinks
+;; and Seatbelt matches resolved paths, so rules on the symlink forms alone
+;; never fire. Both forms kept; the /private one is the one that works.
 (allow file-read* (subpath "/usr"))
 (allow file-read* (subpath "/System"))
 (allow file-read* (subpath "/Library"))
 (allow file-read* (subpath "/bin"))
 (allow file-read* (subpath "/sbin"))
 (allow file-read* (subpath "/opt/homebrew"))
+(allow file-read* (subpath "/private/etc"))
+(allow file-read* (subpath "/private/var/db"))
 (allow file-read* (subpath "/tmp"))
 (allow file-read* (subpath "/var/tmp"))
+(allow file-read* (subpath "/private/tmp"))
+(allow file-read* (subpath "/private/var/tmp"))
+;; realpath()/path resolution must lstat every ancestor directory — e.g.
+;; /Users/<name> for a ~/.opencode install. Metadata only: no readdir,
+;; no file contents.
+(allow file-read-metadata (vnode-type DIRECTORY))
 
 ;; Codebase (read-only)
 (allow file-read* (subpath "${project}"))
-
-;; Sandbox (read-write — entity's work area)
-(allow file-write* (subpath "${sandbox}"))
-(allow file-read* (subpath "${sandbox}"))
 
 ;; OpenCode per-user dirs — same treatment as the bwrap binds on Linux:
 ;; install assets read-only, config + session data read-write (OpenCode
@@ -403,44 +496,50 @@ export async function buildSandboxExecArgv(input: {
 (allow file-write* (subpath "${opencodeConfig}"))
 (allow file-read* (subpath "${opencodeData}"))
 (allow file-write* (subpath "${opencodeData}"))
-${
-    input.workdir
-      ? `
-;; Workdir — an existing host folder the session works on in place (rw).
-(allow file-write* (subpath "${input.workdir}"))
-(allow file-read* (subpath "${input.workdir}"))
-`
-      : ""
-  }
-
-;; Temp dirs (read-write)
-(allow file-write* (subpath "/tmp"))
-(allow file-write* (subpath "/var/tmp"))
-
-;; Process execution — opencode itself + common shells it might spawn.
-;; OpenCode may spawn node/python for its own tools; allow the binaries
-;; under standard install locations.
-(allow process-exec (literal "${opencodeBin}"))
-(allow process-exec (subpath "/usr/bin"))
-(allow process-exec (subpath "/bin"))
-(allow process-exec (subpath "/opt/homebrew/bin"))
-(allow process-exec (subpath "/usr/local/bin"))
 
 ;; Tier 5 hard block — daemon files, always denied regardless of mode.
 ;; Belt-and-suspenders with classifyPath() gating in coordination-layer.ts.
+;; MUST precede the workspace carve-outs below: Seatbelt is last-match-wins
+;; and the sandbox lives inside this subtree
+;; (<dataRoot>/.psycheros/workspace/<id>). When this deny came after the
+;; sandbox allow it overrode it — OpenCode could not read or write its own
+;; sandbox and every macOS session died at birth (v0.11.3 bug).
 (deny file-read* (subpath "${data}/.psycheros"))
 (deny file-write* (subpath "${data}/.psycheros"))
+
+;; Sandbox (read-write — the entity's work area; carves out of Tier 5)
+(allow file-write* (subpath "${sandbox}"))
+(allow file-read* (subpath "${sandbox}"))
 ${
-    input.sharedRuntimeDir
+    workdir
+      ? `
+;; Workdir — an existing host folder the session works on in place (rw).
+;; Placed after the Tier 5 deny so a workdir under dataRoot still works.
+(allow file-write* (subpath "${workdir}"))
+(allow file-read* (subpath "${workdir}"))
+`
+      : ""
+  }${
+    sharedRuntime
       ? `
 ;; Shared OpenCode runtime (node_modules symlink target) — rw, so OpenCode
-;; can install plugin updates into the one shared copy. More specific than
-;; the Tier 5 deny above and later in the profile, so it takes precedence.
-(allow file-read* (subpath "${input.sharedRuntimeDir}"))
-(allow file-write* (subpath "${input.sharedRuntimeDir}"))
+;; can install plugin updates into the one shared copy. Lives under the
+;; Tier 5 subtree, hence after the deny (last-match-wins).
+(allow file-read* (subpath "${sharedRuntime}"))
+(allow file-write* (subpath "${sharedRuntime}"))
 `
       : ""
   }
+
+;; --- Temp (read-write) ---
+;; $TMPDIR resolves into /private/var/folders/…/T — the real per-user temp
+;; tree. This is where runtimes actually write temp files.
+(allow file-read* (subpath "${tmpDir}"))
+(allow file-write* (subpath "${tmpDir}"))
+(allow file-write* (subpath "/tmp"))
+(allow file-write* (subpath "/var/tmp"))
+(allow file-write* (subpath "/private/tmp"))
+(allow file-write* (subpath "/private/var/tmp"))
 `;
 
   // Write profile to a temp file. sandbox-exec reads via -f.

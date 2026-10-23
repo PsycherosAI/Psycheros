@@ -1,0 +1,11 @@
+{
+  "name": "@psycheros/flux",
+  "version": "0.1.0",
+  "exports": "./src/mod.ts",
+  "tasks": {
+    "check": "deno check src/mod.ts"
+  },
+  "imports": {
+    "jpeg-js": "npm:jpeg-js@0.4.4"
+  }
+}

@@ -5,6 +5,13 @@ format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/). It is pre-1.0 until
 cross-platform supervisors ship.
 
+## [0.2.47] - 2026-10-23
+
+### Changed
+
+- Frontend design tokens and index markup refreshed alongside the Psycheros
+  palette system. No behavioral changes.
+
 ## [0.2.46] - 2026-08-16
 
 ### Changed

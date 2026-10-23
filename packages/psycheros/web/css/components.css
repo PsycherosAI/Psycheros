@@ -250,7 +250,6 @@
 }
 
 .msg-header .msg-edit-btn,
-.msg-header .msg-action-btn,
 .msg-header .msg-timestamp,
 .msg-header .pulse-header-icon {
   flex-shrink: 0;
@@ -563,7 +562,8 @@ body[data-decor="stamp"] .msg--user .msg-content,
   margin: var(--sp-2) 0 var(--sp-1);
   font-weight: var(--font-weight-medium);
 }
-.assistant-text ul, .assistant-text ol {
+.assistant-text ul,
+.assistant-text ol {
   margin: var(--sp-2) 0;
   padding-left: var(--sp-6);
   list-style-position: outside;
@@ -609,7 +609,8 @@ body[data-decor="stamp"] .msg--user .msg-content,
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
-.assistant-text th, .assistant-text td {
+.assistant-text th,
+.assistant-text td {
   border: 1px solid var(--c-border);
   padding: var(--sp-2);
   text-align: left;
@@ -1198,7 +1199,9 @@ body[data-decor="stamp"] .msg--user .msg-content,
 }
 
 @keyframes phosphor-pulse {
-  0%, 80%, 100% {
+  0%,
+  80%,
+  100% {
     opacity: 0.3;
     transform: scale(0.8);
     box-shadow: 0 0 4px var(--c-accent-glow);
@@ -1224,7 +1227,8 @@ body[data-decor="stamp"] .msg--user .msg-content,
 }
 
 @keyframes cursor-blink {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -1316,7 +1320,8 @@ body[data-decor="stamp"] .msg--user .msg-content,
 }
 
 @keyframes badge-pulse {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 6px var(--c-accent-glow);
   }
   50% {
@@ -1407,7 +1412,8 @@ body[data-decor="stamp"] .msg--user .msg-content,
 }
 
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -2329,39 +2335,6 @@ body[data-decor="stamp"] .msg--user .msg-content,
   color: var(--c-accent);
 }
 
-/* Message action buttons (delete + flag-glitched, plan §9f).
- * Same dimensions + hover pattern as .msg-edit-btn for visual consistency. */
-.msg-action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  color: var(--c-fg-muted);
-  cursor: pointer;
-  transition: all var(--transition);
-  margin-left: 2px;
-}
-
-.msg-action-btn:hover {
-  background-color: var(--c-bg-hover);
-  color: var(--c-accent);
-}
-
-/* Delete button hover — red to signal destructive intent */
-.msg-action-btn[onclick*="confirmDeleteMessage"]:hover {
-  color: var(--c-error);
-}
-
-/* Flag-glitched hover — amber to match the glitched message placeholder */
-.msg-action-btn[onclick*="confirmFlagGlitched"]:hover {
-  color: var(--c-warning);
-}
-
 /* Restore / clear-flag buttons inside the tombstone / glitched notices */
 .tombstone-restore-btn,
 .glitched-clear-btn {
@@ -2632,40 +2605,9 @@ body[data-decor="stamp"] .msg--user .msg-content,
    skills the entity is holding active. Transparent floating bubble strip,
    absolutely positioned like the top-right FABs so it never displaces the
    conversation; stacks vertically, truncates before the FAB column. */
-.held-skills-strip {
-  position: absolute;
-  top: calc(12px + env(safe-area-inset-top));
-  left: calc(12px + env(safe-area-inset-left));
-  z-index: 40;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--sp-1);
-  /* Reserve the top-right FAB column (voice + workspace) */
-  max-width: calc(100% - 76px);
-  pointer-events: none;
-}
-
-.held-skills-strip:empty {
-  display: none;
-}
 
 /* The flex rule above overrides the hidden attribute's UA display:none —
    without this, [hidden] gating (settings views) does nothing. */
 .held-skills-strip[hidden] {
   display: none;
-}
-
-.held-skill-chip {
-  font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
-  color: var(--c-fg-muted);
-  background: var(--c-bg-raised);
-  border: 1px solid var(--c-accent-muted);
-  border-radius: var(--radius-sm);
-  padding: 2px var(--sp-2);
-  max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }

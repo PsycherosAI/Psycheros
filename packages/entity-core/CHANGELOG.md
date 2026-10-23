@@ -6,6 +6,20 @@ All notable changes to entity-core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-23
+
+### Added
+
+- Instance registry and embedding sweep: multiple connected harnesses can
+  register, discover each other, and keep embeddings coherent across instances.
+  Includes a harness connection guide for operators.
+- Embedding rebuild notifications with watchdog grace and a visible re-index, so
+  rebuilds announce themselves instead of running invisibly.
+
+### Fixed
+
+- Closed a persist race between queued Ego generations.
+
 ## [0.6.1] - 2026-08-16
 
 ### Added
@@ -355,6 +369,7 @@ capability APIs, and security model may change between releases before 1.0._
 - Knowledge graph (people, places, relationships) backed by SQLite + sqlite-vec.
 - Snapshot system: pre-destructive-operation snapshots for recovery.
 
+[0.7.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.7.0
 [0.6.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.6.0
 [0.5.0]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.5.0
 [0.4.5]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-core-v0.4.5

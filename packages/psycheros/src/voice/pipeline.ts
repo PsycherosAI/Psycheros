@@ -50,6 +50,7 @@ export type WalkieTalkieEvent =
   | { type: "transcript"; role: "user" | "assistant"; text: string }
   | { type: "audio"; data: Uint8Array }
   | { type: "pulse_start"; name: string }
+  | { type: "spontaneous_start" }
   | { type: "tool_start"; toolName: string; toolCallId: string }
   | { type: "tool_end"; toolCallId: string }
   | { type: "error"; message: string };
@@ -63,6 +64,20 @@ export interface WalkieTalkieSessionOptions {
   profile: VoiceProfile;
   entityTurn: EntityTurn;
   conversationId: string;
+  /**
+   * Flux-session routing: when the conversation is the live
+   * Flux host, voice turns run through the Flux session (continuous
+   * context, briefings, mood) instead of the classic episodic
+   * EntityTurn — same rule as Pulse routing. The trigger is
+   * AWAITABLE (resolves with the Ego's reply text for TTS). Null when
+   * flux is off/stopped or the conversation isn't hosted — the classic
+   * path runs untouched.
+   */
+  fluxTurn?: (
+    prompt: string,
+    sourceDescription: string,
+    opts?: { systemSuffix?: string },
+  ) => Promise<string | null>;
   /** Appended to EntityTurn's system message (VOICE CHAT MODE note + customInstructions) */
   systemPromptSuffix: string;
 }
@@ -70,6 +85,13 @@ export interface WalkieTalkieSessionOptions {
 export class WalkieTalkieSession {
   private profile: VoiceProfile;
   private entityTurn: EntityTurn;
+  private fluxTurn:
+    | ((
+      prompt: string,
+      sourceDescription: string,
+      opts?: { systemSuffix?: string },
+    ) => Promise<string | null>)
+    | undefined;
   private conversationId: string;
   private systemPromptSuffix: string;
   private _state: WalkieTalkieState = "idle";
@@ -86,11 +108,20 @@ export class WalkieTalkieSession {
    * entity response are still dropped — see isEntityMidResponse guard.)
    */
   private _isPulseTurn = false;
+  /**
+   * True while a spontaneous reply (ONE MOUTH) is being spoken. Like a
+   * Pulse turn, it's system-initiated — a user transcript arriving
+   * during it is QUEUED, not dropped (the press was intentional; they
+   * hear him out, then their turn runs). Verbal blips during a normal
+   * entity response are still dropped.
+   */
+  private _isSpontaneousTurn = false;
   private queuedUserTranscript: string | null = null;
 
   constructor(opts: WalkieTalkieSessionOptions) {
     this.profile = opts.profile;
     this.entityTurn = opts.entityTurn;
+    this.fluxTurn = opts.fluxTurn;
     this.conversationId = opts.conversationId;
     this.systemPromptSuffix = opts.systemPromptSuffix;
   }
@@ -135,6 +166,11 @@ export class WalkieTalkieSession {
       return;
     }
     if (this.audioBuffer.length === 0) {
+      // A VAD cross that produced no buffered frames must not leave the
+      // pipeline latched in "recording" — the call-state seam would read
+      // perpetual user-speaking and the wake door would never open.
+      // Back to idle; listening resumes cleanly.
+      if (this._state === "recording") this.setState("idle");
       return;
     }
     const totalBytes = this.audioBuffer.reduce((n, a) => n + a.length, 0);
@@ -198,7 +234,7 @@ export class WalkieTalkieSession {
     // instead. The Pulse is system-initiated; the user's intentional
     // turn should still go through once the Pulse finishes.
     if (this.isEntityMidResponse()) {
-      if (this._isPulseTurn) {
+      if (this._isPulseTurn || this._isSpontaneousTurn) {
         this.queuedUserTranscript = rawText;
       }
       return;
@@ -282,6 +318,120 @@ export class WalkieTalkieSession {
     }
   }
 
+  /**
+   * Speak an ALREADY-GENERATED Ego reply into the call (spontaneous
+   * speech, ONE MOUTH): the wake door passed during quiet,
+   * so his mouth opens unprompted. No LLM call, no persistence — the
+   * Flux session's record hooks already wrote the rows; this is purely
+   * the voice channel. The spontaneous_start cue fires first so the
+   * browser plays the pre-speech earcon (his "opening his mouth"
+   * signal, which also covers TTS first-frame latency). The call is
+   * busy from entry to idle — he wins races; a PTT press defers until
+   * he's done.
+   */
+  async speakSpontaneous(text: string): Promise<void> {
+    if (this._stopped) return;
+    // Belt-and-braces: the door checked quiet before generating, but
+    // the user may have started talking since. If we're not idle, the
+    // reply stays text (it lives in the session record) — never speak
+    // over an in-flight exchange.
+    if (this._state !== "idle") {
+      console.log(
+        "[Voice:pipeline] spontaneous reply skipped — call not idle; reply stays text",
+      );
+      return;
+    }
+    const cleanedFull = normalizePunctuationForSpeech(stripTTag(text)).trim();
+    if (!cleanedFull) return;
+
+    this.currentTurnAbort = new AbortController();
+    const signal = this.currentTurnAbort.signal;
+    this.setState("processing");
+    this.emit({ type: "spontaneous_start" });
+    this._isSpontaneousTurn = true;
+    let ttsFailed = false;
+
+    // Sentence-flush over a complete text (the reply arrives whole —
+    // the session generates full turns): same streaming shape as
+    // runEntityTurn's flush so audio behavior is identical.
+    let sentenceBuffer = "";
+    const flushSentence = async () => {
+      const chunk = sentenceBuffer;
+      sentenceBuffer = "";
+      if (!chunk.trim() || ttsFailed || signal.aborted) return;
+      const spoken = applyTTSPronunciation(chunk, this.profile);
+      // Same double-speak guard as the reply path: retry only before
+      // any audio has been emitted.
+      let emittedChunks = 0;
+      const speakOnce = async () => {
+        let firstFrame = true;
+        for await (const frame of streamTTS(spoken, this.profile)) {
+          if (signal.aborted) return;
+          if (firstFrame) {
+            firstFrame = false;
+            this.setState("speaking");
+          }
+          emittedChunks++;
+          this.emit({ type: "audio", data: frame });
+        }
+      };
+      try {
+        try {
+          await speakOnce();
+        } catch (first) {
+          if (
+            signal.aborted || ttsFailed || emittedChunks > 0
+          ) {
+            throw first;
+          }
+          console.warn(
+            "[Voice:pipeline] spontaneous TTS failed before any audio, retrying once:",
+            first instanceof Error ? first.message : String(first),
+          );
+          await speakOnce();
+        }
+      } catch (ttsErr) {
+        console.error(
+          "[Voice:pipeline] spontaneous TTS failed:",
+          ttsErr instanceof Error ? ttsErr.message : String(ttsErr),
+        );
+        ttsFailed = true;
+        this.emit({
+          type: "error",
+          message:
+            "He had something to say, but the voice failed — it's in the chat as text.",
+        });
+      }
+    };
+
+    try {
+      for (const piece of cleanedFull) {
+        if (signal.aborted) break;
+        sentenceBuffer += piece;
+        if (SENTENCE_BOUNDARY.test(piece)) {
+          await flushSentence();
+        } else if (sentenceBuffer.length >= MAX_SENTENCE_CHARS) {
+          await flushSentence();
+        }
+      }
+      if (!signal.aborted && sentenceBuffer.trim()) await flushSentence();
+    } finally {
+      this.currentTurnAbort = null;
+      this._isSpontaneousTurn = false;
+      this.finishVoiceTurn(cleanedFull, signal);
+      // A transcript that arrived while he spoke spontaneously (the
+      // user pressed during his reply) runs now — same drain pattern as
+      // the Pulse turn's finally.
+      const queued = this.queuedUserTranscript;
+      this.queuedUserTranscript = null;
+      if (queued && !this._stopped) {
+        setTimeout(() => {
+          void this.processTextTurn(queued);
+        }, 0);
+      }
+    }
+  }
+
   /** Cancel any in-flight turn and reset state to idle. */
   async cancel(): Promise<void> {
     if (this.currentTurnAbort) {
@@ -358,25 +508,63 @@ export class WalkieTalkieSession {
     let fullResponse = "";
     let sentenceBuffer = "";
     let firstFrameSent = false;
+    // Set when TTS synthesis fails mid-turn. The turn stays alive: the
+    // EntityTurn stream keeps draining so the reply still persists, and
+    // the user gets an error event explaining the silence. Losing the
+    // voice must never cost the message — a dropped reply reads as the
+    // entity going dark mid-sentence, and the text is unrecoverable
+    // (it only ever existed inside this pipeline).
+    let ttsFailed = false;
+    let ttsNotified = false;
 
     const flushSentence = async () => {
       const text = sentenceBuffer;
       sentenceBuffer = "";
       if (!text.trim()) return;
+      // First TTS failure already logged — don't hammer a broken TTS
+      // endpoint with the rest of the reply. Keep draining so the
+      // EntityTurn stream runs to completion and persists the message.
+      if (ttsFailed) return;
       // Order matters: strip <t> tags first (they wrap content we want to
       // preserve), then normalize punctuation (em/en dashes → commas, etc.),
       // then apply user pronunciation substitutions.
       const cleaned = normalizePunctuationForSpeech(stripTTag(text));
       if (!cleaned.trim()) return;
       const spokenText = applyTTSPronunciation(cleaned, this.profile);
-      try {
+      // One retry per sentence: transient provider drops ("error
+      // reading a body from connection" — MiniMax) recover with a
+      // fresh fetch.
+      // Chunks already emitted by THIS flush — a retry after partial
+      // audio would re-speak the sentence from the start and the user
+      // hears it twice. Retry only when the drop happened before
+      // anything played; a mid-stream drop after audio degrades to
+      // text.
+      let emittedChunks = 0;
+      const speakOnce = async () => {
         for await (const chunk of streamTTS(spokenText, this.profile)) {
           if (signal?.aborted) return;
           if (!firstFrameSent) {
             firstFrameSent = true;
             this.setState("speaking");
           }
+          emittedChunks++;
           this.emit({ type: "audio", data: chunk });
+        }
+      };
+      try {
+        try {
+          await speakOnce();
+        } catch (first) {
+          if (
+            signal?.aborted || ttsFailed || emittedChunks > 0
+          ) {
+            throw first;
+          }
+          console.warn(
+            "[Voice:pipeline] TTS failed before any audio, retrying once:",
+            first instanceof Error ? first.message : String(first),
+          );
+          await speakOnce();
         }
       } catch (ttsErr) {
         console.error(
@@ -387,11 +575,56 @@ export class WalkieTalkieSession {
           "[Voice:pipeline] TTS error:",
           ttsErr instanceof Error ? ttsErr.message : String(ttsErr),
         );
-        throw ttsErr;
+        // Degrade gracefully: keep the turn alive so the EntityTurn stream
+        // drains to completion and the reply persists to the DB. Throwing
+        // here kills the generator mid-tool-chain, orphaning the final
+        // message (the text exists only inside this pipeline, so it is
+        // unrecoverable). The user hears silence for the rest of the turn
+        // and gets one error event explaining why; the message still lands
+        // in the chat transcript.
+        ttsFailed = true;
+        if (!ttsNotified) {
+          ttsNotified = true;
+          this.emit({
+            type: "error",
+            message:
+              "Voice output failed mid-reply — the rest of this response will be text-only in the chat, but it was saved.",
+          });
+        }
       }
     };
 
     try {
+      // Flux-host routing: hosted conversation → the
+      // continuous session. The reply arrives as one text (the session
+      // generates complete turns); it flows through the identical
+      // sentence-flush → TTS path below, so audio behavior is
+      // unchanged. The session's record hooks persist both rows (the
+      // user row via the trigger's appendUserMessage).
+      if (!pulseOptions && this.fluxTurn) {
+        // The trigger returns null when the session can't take the turn
+        // (stopped mid-call, no manager) — fall through to the classic
+        // path rather than dropping the user's words.
+        // The voice-mode framing rides the Flux path too: without it,
+        // hosted voice calls lose their keep-it-brief instructions and
+        // run verbose.
+        const fluxReply = await this.fluxTurn(userText, "voice message", {
+          systemSuffix: this.systemPromptSuffix,
+        });
+        if (signal?.aborted) {
+          this.setState("idle");
+          return;
+        }
+        if (typeof fluxReply === "string") {
+          if (fluxReply.trim()) {
+            sentenceBuffer = fluxReply;
+            await flushSentence();
+            fullResponse = fluxReply;
+          }
+          return this.finishVoiceTurn(fullResponse, signal);
+        }
+      }
+
       const stream = this.entityTurn.process(this.conversationId, userText, {
         voiceMode: true,
         systemPromptSuffix: this.systemPromptSuffix,
@@ -459,14 +692,21 @@ export class WalkieTalkieSession {
       throw err;
     }
 
+    this.finishVoiceTurn(fullResponse, signal);
+  }
+
+  /** Shared turn tail: assistant transcript event + return to idle. */
+  private finishVoiceTurn(
+    fullResponse: string,
+    signal: AbortSignal | undefined,
+  ): void {
     if (signal?.aborted) {
       this.setState("idle");
       return;
     }
-
-    // Emit the assistant-side transcript (raw response, no TTS substitutions).
-    // EntityTurn already persisted this with the [Voice Chat] prefix and
-    // stripped any parrot-emitted prefix from the LLM output.
+    // Emit the assistant-side transcript (raw response, no TTS
+    // substitutions). Persisted by EntityTurn (classic) or the session's
+    // record hooks (flux) — the pipeline never writes.
     const cleanedResponse = normalizePunctuationForSpeech(
       stripTTag(fullResponse),
     ).trim();
@@ -477,7 +717,6 @@ export class WalkieTalkieSession {
         text: cleanedResponse,
       });
     }
-
     this.setState("idle");
   }
 

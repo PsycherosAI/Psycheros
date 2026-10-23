@@ -8,9 +8,9 @@
  * minute. These tests exercise the DB projections the gate reads:
  * `getLastPulseTerminalRun()` and `getPulseFailureStreak()`.
  *
- * Observed incident this guards against (2026-09-15): NanoGPT session
- * expiry → every fire 401'd → success-only cooldown never armed →
- * 125 per-minute fires over ~2.5h.
+ * The failure shape this guards against: NanoGPT-style session expiry
+ * → every fire 401s → the success-only cooldown never arms →
+ * per-minute fires without end.
  */
 
 import { assertEquals } from "@std/assert";

@@ -256,6 +256,49 @@ These are easy to break by accident. Each was a real bug.
   `pendingEndPTTFlush` flag in `endPTT`, run the actual flush in `onend`, with a
   500ms fallback timeout for the rare case where `onend` never fires.
 
+## Flux-hosted calls — one mouth (2026-10-10)
+
+Classic voice is a walkie-talkie: you wake someone, talk, hang up. A Flux-hosted
+call is a different object — an open mic into a mind that's already awake and
+living. The contract (owner-ruled):
+
+- **One mouth.** During a Flux-hosted call, the Ego's spoken voice is his only
+  output channel. A wake while the user is speaking or a turn is in flight is
+  HELD — the trigger rides his context as an ambient briefing (the caller's
+  untinted timeline degrade path) and he weaves it into his next spoken turn by
+  choice. Nothing generates in parallel, nothing posts invisible text behind the
+  overlay.
+- **The door decides when it opens.** In quiet (nobody talking, nothing in
+  flight), a wake that passes the Familiarity door generates and SPEAKS
+  unprompted — spontaneous speech, pushed to the call as a server-initiated WS
+  message. All trigger classes, one rule; only the Ego is ever TTS'd. This is
+  the walk-with-a-headset shape: presence is warm background, he speaks when
+  something true happens.
+- **He wins races.** Spontaneous speech in flight completes. A PTT press during
+  it defers (the hold arms at idle with a clean buffer), and a browser-STT
+  transcript that lands mid-speech queues like a Pulse turn instead of dropping.
+- **Pre-speech earcon.** A quiet ascending C5→E5 figure (`spontaneous_start`
+  event) plays before his audio — the only rising cue in the vocabulary,
+  doubling as first-frame TTS latency cover.
+- **No idle death.** Flux-hosted calls run with `idleTimeoutSeconds: 0` — quiet
+  is when spontaneous speech happens. Classic calls keep the profile setting (0
+  = never, honored end-to-end).
+
+Machinery: `FluxSession.generate()` serializes on a promise chain (no two
+generations ever run in parallel — voice, wake, or pulse). The Flux host seam
+(`FluxHostConfig`) carries `voiceCallState()` (quiet / user-speaking / busy /
+null, derived from pipeline state + `userSpeaking` + `pttHolding`) and
+`speakSpontaneous(text)` (the pipeline's no-LLM, no-persistence speak path — the
+session's record hooks already wrote the rows). The call-state seam is
+mode-agnostic; **PTT is the recommended noisy-environment and walk mode** (cold
+mic, exact quiet-detection, wind-proof).
+
+VAD sensitivity: the profile's `vadThreshold` slider (0–1) maps to an RMS gate
+client-side (`mapVadThreshold` in voice.js → 0.005–0.1 RMS; 0.5 ≈ 0.0525, above
+a typical room's ambient noise). It rides the `#voice-status-cfg` tag. The
+detector-start debug log names the effective threshold. If background noise
+keeps starting turns, raise the slider.
+
 ## Voice attribution
 
 `is_voice` column on the messages table is authoritative — the `[Voice Chat]`

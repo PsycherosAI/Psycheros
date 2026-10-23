@@ -26,6 +26,13 @@ export interface ChatSearchOptions {
   limit: number;
   /** Minimum similarity score (0-1) */
   minScore: number;
+  /**
+   * Pre-computed embedding for the query. When provided, skips the
+   * internal embedding step and uses this vector directly. Same model
+   * (all-MiniLM-L6-v2, 384-dim) so externally-computed vectors are
+   * directly compatible.
+   */
+  queryEmbedding?: number[];
 }
 
 /**
@@ -143,9 +150,12 @@ export class ConversationRAG {
    * @returns Array of retrieved messages sorted by relevance
    */
   async search(options: ChatSearchOptions): Promise<RetrievedMessage[]> {
-    const embedder = getEmbedder();
-    await embedder.initialize();
-    const queryEmbedding = await embedder.embed(options.query);
+    // Use pre-computed embedding when provided; otherwise embed the query.
+    const queryEmbedding = options.queryEmbedding ?? await (async () => {
+      const embedder = getEmbedder();
+      await embedder.initialize();
+      return embedder.embed(options.query);
+    })();
 
     // Use sqlite-vec if available, otherwise fall back to in-memory
     if (this.useVectorExt) {
@@ -623,8 +633,8 @@ export function formatChatHistoryForContext(
   // Simple token estimation: ~4 chars per token
   const estimateTokens = (text: string) => Math.ceil(text.length / 4);
 
-  const lines: string[] = ["Relevant Chat History via RAG:"];
-  let totalTokens = estimateTokens(lines[0]);
+  const lines: string[] = [];
+  let totalTokens = 0;
 
   for (const msg of messages) {
     const timestamp = formatMessageTimestamp(msg.createdAt);

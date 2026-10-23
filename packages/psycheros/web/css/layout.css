@@ -63,6 +63,188 @@ body.glass-enabled .header {
   border-color: var(--glass-border);
 }
 
+/* =============================================================================
+   Action drawer + state sub-bar (owner's redesign, 2026-09-28 —
+   docs/design/action-drawer.md). Theme tokens only.
+   ============================================================================= */
+
+/* The state sub-bar: one line centered under the header, subprocess+state
+   segments (Flux ON | Workspace (2) | Voice ON), hidden when nothing is
+   active. Absolute — never disturbs the chat layout; sits ABOVE the drawer
+   sheet so it reads as attached to it when the drawer is open. */
+.state-sub-bar {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 2px 12px;
+  font-size: 0.72rem;
+  color: var(--c-fg-muted);
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  background: var(--c-bg-raised);
+  z-index: 70;
+  user-select: none;
+}
+
+.state-sub-bar.on {
+  display: flex;
+}
+
+.state-seg {
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.state-seg:hover {
+  color: var(--c-accent);
+}
+
+.state-flux {
+  color: var(--c-accent);
+}
+
+.state-sep {
+  color: var(--c-border);
+}
+
+/* The action drawer: a full-width sheet dropping from the top-bar —
+   spans the window like the top-bar does (owner's ruling, 2026-09-29).
+   Mobile-first rows — big full-width tap targets. Class-toggled (the
+   `hidden` attribute loses to explicit display). */
+.action-drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: none;
+  flex-direction: column;
+  background: var(--c-bg-raised);
+  border-bottom: 1px solid var(--c-border);
+  border-radius: 0 0 10px 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 60;
+  padding: 4px 0 8px;
+}
+
+.action-drawer.open {
+  display: flex;
+}
+
+.action-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 20px;
+  border: none;
+  background: transparent;
+  color: var(--c-fg);
+  font-size: 1rem;
+  text-align: center;
+  cursor: pointer;
+  width: 100%;
+}
+
+.action-row:hover,
+.action-row:focus-visible {
+  background: var(--c-bg-hover, var(--c-bg-raised));
+  color: var(--c-accent);
+  outline: none;
+}
+
+/* Held-skill viewer: tapping the skill chip shows the skill. */
+.skill-viewer {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.skill-viewer-card {
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  max-width: 520px;
+  width: 100%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 10px;
+}
+
+.skill-viewer-title {
+  font-weight: 600;
+  color: var(--c-fg);
+}
+
+.skill-viewer-desc {
+  font-size: 0.85rem;
+  color: var(--c-fg-muted);
+}
+
+.skill-viewer-body {
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: var(--c-fg);
+  margin: 0;
+  flex: 1;
+}
+
+.skill-viewer-row {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  color: var(--c-fg);
+  font-size: 0.95rem;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  width: 100%;
+}
+
+.skill-viewer-row:hover {
+  background: var(--c-bg-hover, var(--c-bg-raised));
+  color: var(--c-accent);
+}
+
+.skill-viewer-close {
+  align-self: flex-end;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--c-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--c-fg);
+  cursor: pointer;
+}
+
+.skill-viewer-close:hover {
+  color: var(--c-accent);
+  border-color: var(--c-accent-muted);
+}
+
+#action-menu-btn.header-icon--open {
+  color: var(--c-accent);
+}
+
 body.glass-enabled .sidebar {
   border-color: var(--glass-border);
 }

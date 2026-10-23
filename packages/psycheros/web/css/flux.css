@@ -1,0 +1,549 @@
+/**
+ * Flux overlay styles — the conversation-hosted Flux interface (Voice-Chat
+ * overlay pattern, integration Phase 3 2026-09-14). Colors via --c-* tokens
+ * (design system; briefing tints are the additive --c-flux-* set).
+ */
+
+.flux-overlay {
+  /* Scoped to the CONVERSATION region (2026-09-16): absolute within
+     .main, so the Psycheros top bar stays visible and the sidebar
+     (fixed, higher z) stays openable while Flux is up. */
+  position: absolute;
+  inset: 0;
+  z-index: 60; /* above the chat + FABs (z-50); below sidebar (z-99/100) */
+  display: flex;
+  flex-direction: column;
+  background: var(--c-bg);
+  color: var(--c-fg);
+}
+
+.flux-overlay-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.flux-overlay-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 6px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.flux-badge {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.flux-badge.running {
+  background: color-mix(in srgb, var(--c-success) 18%, transparent);
+  color: var(--c-success);
+}
+.flux-badge.paused {
+  background: color-mix(in srgb, var(--c-warning) 18%, transparent);
+  color: var(--c-warning);
+}
+.flux-badge.stopped {
+  background: color-mix(in srgb, var(--c-error) 16%, transparent);
+  color: var(--c-error);
+}
+
+.flux-overlay-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.flux-overlay-controls button {
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+  color: var(--c-fg);
+  border-radius: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.flux-overlay-controls button:hover:not(:disabled) {
+  border-color: var(--c-accent);
+}
+.flux-overlay-controls button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.flux-overlay-controls button.primary {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  color: var(--c-bg);
+}
+/* Double-tap stop arm state — safety color per the design system. */
+.flux-overlay-controls button.stop-armed {
+  background: var(--c-warning);
+  border-color: var(--c-warning);
+  color: var(--c-bg);
+}
+
+#flux-mood-strip {
+  display: flex;
+  gap: 10px;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--c-border);
+  flex-wrap: wrap;
+}
+
+#flux-organ-health {
+  display: flex;
+  gap: 14px;
+  padding: 6px 20px 8px;
+  border-bottom: 1px solid var(--c-border);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.organ-health-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--c-fg-muted);
+}
+.organ-health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.organ-health-dot.green {
+  background: var(--c-success);
+}
+.organ-health-dot.yellow {
+  background: var(--c-warning);
+}
+.organ-health-dot.red {
+  background: var(--c-error);
+}
+
+#flux-timeline {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.flux-entry {
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 92%;
+}
+.flux-entry .meta {
+  font-size: 11px;
+  opacity: 0.6;
+  margin-top: 4px;
+}
+.flux-entry.user {
+  align-self: flex-end;
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+}
+.flux-entry.entity {
+  align-self: flex-start;
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border-strong);
+}
+.flux-entry.ambient {
+  align-self: center;
+  font-style: italic;
+  text-align: center;
+}
+.flux-entry.ambient.reverie {
+  border: 1px dashed var(--c-flux-reverie);
+  color: var(--c-flux-reverie-fg);
+}
+.flux-entry.ambient.reverie.escalated {
+  border: 1px solid var(--c-flux-reverie);
+  background: color-mix(in srgb, var(--c-flux-reverie) 12%, transparent);
+}
+.flux-entry.ambient.dream {
+  border: 1px dashed var(--c-flux-dream);
+  color: var(--c-flux-dream-fg);
+  font-style: italic;
+}
+.flux-entry.ambient.musing {
+  border: 1px dashed var(--c-flux-musing);
+  color: var(--c-flux-musing-fg);
+  font-style: normal;
+}
+.flux-entry.ambient.musing.escalated {
+  border: 1px solid var(--c-flux-musing);
+  background: color-mix(in srgb, var(--c-flux-musing) 12%, transparent);
+}
+.flux-entry.ambient.compaction {
+  border: 1px dashed var(--c-flux-compaction);
+  color: var(--c-flux-compaction-fg);
+  font-style: normal;
+}
+.flux-entry.ambient.noticing {
+  border: 1px dashed var(--c-flux-noticing);
+  color: var(--c-flux-noticing-fg);
+}
+.flux-entry.ambient.noticing.escalated {
+  border: 1px solid var(--c-flux-noticing);
+  background: color-mix(in srgb, var(--c-flux-noticing) 14%, transparent);
+}
+
+.flux-entry.thinking-wrap .thinking-card {
+  border: 1px dashed var(--c-border-strong);
+  border-radius: 8px;
+}
+.flux-entry.thinking-wrap .thinking-header {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--c-fg-muted);
+  display: flex;
+  justify-content: space-between;
+}
+.flux-entry.thinking-wrap .thinking-body {
+  display: none;
+  padding: 8px 12px;
+  color: var(--c-fg-muted);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+.flux-entry.thinking-wrap .thinking-card.open .thinking-body {
+  display: block;
+}
+
+.flux-entry.tool-wrap .tool {
+  background: var(--c-bg-sunken);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+}
+.flux-entry.tool-wrap .tool-header {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--c-fg-label);
+}
+.flux-entry.tool-wrap .tool-args {
+  padding: 0 10px 8px;
+  font-size: 12px;
+  color: var(--c-fg-muted);
+  white-space: pre-wrap;
+}
+
+.flux-generating {
+  align-self: center;
+  color: var(--c-fg-subtle);
+  padding: 6px;
+}
+/* The ONE live Ego bubble (2026-09-30, #22): classic-chat structure —
+   header, collapsible thinking, content — inside a flux entity entry.
+   Replaces the old thinking-card + generating-pill pair. */
+.flux-entry.entity.live-ego .msg-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+.flux-entry.entity.live-ego .live-thinking {
+  margin-bottom: 6px;
+}
+.flux-entry.entity.live-ego .live-thinking .thinking-header {
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.6;
+  user-select: none;
+}
+.flux-entry.entity.live-ego .live-thinking .thinking-content {
+  font-size: 13px;
+  opacity: 0.75;
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow-y: auto;
+  border-left: 2px solid var(--c-border);
+  padding-left: 8px;
+  margin-top: 4px;
+}
+.flux-entry.entity.live-ego .live-thinking:not(.expanded) .thinking-content {
+  display: none;
+}
+.flux-entry.entity.live-ego .msg-content {
+  font-size: 14px;
+  line-height: 1.5;
+  /* No pre-wrap: this bubble renders MARKDOWN live (renderMd per
+     fragment) — pre-wrap on top of markdown paragraphs doubled the
+     line spacing until the durable entry settled it (owner's report,
+     2026-10-03). Classic's live bubble has the same no-pre-wrap rule. */
+  word-wrap: break-word;
+}
+
+/* Markdown lists (2026-10-02): the universal reset zeroes ul/ol padding,
+   so bullets rendered flush against the bubble's edge — classic
+   compensates under .assistant-text; the timeline surfaces need their
+   own. Scope: the whole timeline column (entry text + live bubble). */
+#flux-timeline ul,
+#flux-timeline ol {
+  margin: var(--sp-2) 0;
+  padding-left: var(--sp-6);
+  list-style-position: outside;
+}
+#flux-timeline ul {
+  list-style-type: disc;
+}
+#flux-timeline ol {
+  list-style-type: decimal;
+}
+#flux-timeline li {
+  margin: var(--sp-1) 0;
+  display: list-item;
+}
+.flux-entry.entity.live-ego .msg-content:empty {
+  display: none;
+}
+
+/* Live-streaming Ego speech (2026-09-22): once words arrive, the bubble
+   takes entity-message styling; the final durable entry replaces it. */
+.flux-generating.streaming {
+  align-self: flex-start;
+  color: var(--c-fg);
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border-strong);
+  white-space: pre-wrap;
+}
+
+.flux-input-bar {
+  display: flex;
+  gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--c-border);
+}
+#flux-input {
+  flex: 1;
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border);
+  color: var(--c-fg);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 15px;
+  resize: none;
+  font-family: inherit;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+#flux-send {
+  background: var(--c-accent);
+  color: var(--c-bg);
+  border: none;
+  border-radius: 10px;
+  padding: 10px 18px;
+  cursor: pointer;
+  font-size: 15px;
+}
+#flux-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#flux-toast {
+  position: fixed;
+  bottom: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--c-bg-raised);
+  border: 1px solid var(--c-border-strong);
+  color: var(--c-fg);
+  padding: 10px 18px;
+  border-radius: 10px;
+  display: none;
+  z-index: 320;
+  max-width: 80vw;
+}
+
+/* Mood axis meters (same shapes as the standalone page). */
+.mood-axis {
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+}
+.mood-axis-label {
+  font-size: 11px;
+  color: var(--c-fg-label);
+}
+.mood-axis-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mood-axis-bar {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  background: var(--c-bg-sunken);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.mood-axis-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+}
+.mood-axis-value {
+  font-size: 11px;
+  color: var(--c-fg-muted);
+  min-width: 38px;
+  text-align: right;
+}
+.mood-axis-label-q {
+  font-size: 11px;
+  color: var(--c-fg-subtle);
+}
+
+/* Active-flux indicators (2026-09-16, accent-colored): a live
+   undercurrent must be visible at a glance from anywhere in the app —
+   FAB, the top-bar brand heart, and the hosting conversation's
+   sidebar entry all share one pulse so they read as one signal. */
+@keyframes flux-live-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-accent) 55%, white 15%);
+  }
+  50% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--c-accent) 0%, transparent);
+  }
+}
+
+.flux-fab.flux-active {
+  border-color: color-mix(in srgb, var(--c-accent) 60%, white 40%);
+  color: color-mix(in srgb, var(--c-accent) 70%, white 30%);
+  animation: flux-live-pulse 2.4s ease-in-out infinite;
+}
+
+/* The brand heart glows while any Flux State runs — drop-shadow
+   follows the SVG's alpha shape, so the glow IS heart-shaped (a
+   box-shadow can only ever be the container's rectangle; that's why
+   the first cut read as a rounded square). */
+@keyframes flux-heart-glow {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(
+      0 0 2px color-mix(in srgb, var(--c-highlight) 55%, white 25%)
+    );
+  }
+  50% {
+    transform: scale(1.12);
+    filter: drop-shadow(
+      0 0 11px color-mix(in srgb, var(--c-highlight) 70%, white 30%)
+    );
+  }
+}
+.logo-btn.flux-live .logo-icon svg {
+  animation: flux-heart-glow 2.4s ease-in-out infinite;
+  transform-origin: center;
+}
+
+/* The sidebar entry of the conversation HOSTING flux — tint + accent
+   border + a stronger pulse (the subtle ring alone was invisible at
+   sidebar scale). */
+/* The WHOLE ENTRY BLOCK breathes — glowing INWARD. Outer glows are
+ * clipped by the sidebar chain's overflow:hidden ancestors (why the
+ * last two attempts were invisible); an inset shadow renders inside
+ * the row's own box and can't be clipped. The block fills with light
+ * at the pulse, empty at the rest. */
+@keyframes flux-host-glow {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 0 transparent;
+    background-color: transparent;
+  }
+  50% {
+    box-shadow: inset 0 0 18px 2px
+      color-mix(in srgb, var(--c-accent) 60%, white 25%);
+    background-color: color-mix(in srgb, var(--c-accent) 18%, transparent);
+  }
+}
+.conv-item.flux-host {
+  animation: flux-host-glow 2.4s ease-in-out infinite;
+}
+/* Keep hover/active readable over the pulse. */
+.conv-item.flux-host:hover,
+.conv-item.flux-host.active {
+  background-color: var(--c-bg-hover);
+}
+
+/* Edit affordance on dialogue rows — classic's .msg-edit-btn visual
+   (components.css) with hover reveal in the overlay's entry layout. */
+.flux-entry .msg-edit-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+.flux-entry:hover .msg-edit-btn,
+.flux-entry .msg-edit-btn:focus {
+  opacity: 0.7;
+}
+.flux-entry .msg-edit-container {
+  margin: 6px 0;
+}
+
+/* Mobile (owner's ruling, 2026-10-19): the meters collapsed into a
+   double-tall chunk (two axes per row at min-width 140px); the header
+   and chrome carried desktop-scale vertical padding. One row of
+   three, tighter chrome, everywhere below 640px. */
+@media (max-width: 640px) {
+  #flux-mood-strip {
+    gap: 6px;
+    padding: 6px 10px;
+  }
+  #flux-mood-strip .mood-axis {
+    min-width: 0;
+    flex: 1 1 0;
+  }
+  .mood-axis-row {
+    gap: 4px;
+  }
+  .mood-axis-value {
+    min-width: 30px;
+    font-size: 10px;
+  }
+  .flux-overlay-header {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+  .flux-overlay-controls {
+    gap: 6px;
+  }
+  .flux-overlay-controls button {
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+  #flux-mode-row {
+    padding: 3px 10px;
+  }
+  #flux-organ-health {
+    padding: 1px 10px;
+    gap: 12px;
+  }
+  #flux-organ-health .organ-health-item {
+    font-size: 11px;
+    gap: 4px;
+  }
+  .flux-entry {
+    padding: 8px 12px;
+  }
+  .flux-input-bar {
+    padding: 8px 10px;
+  }
+}

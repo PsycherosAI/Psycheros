@@ -164,29 +164,30 @@ Deno.test("buildSkillsIndexBlock: bare list for the tool description", () => {
   assertEquals(block, "My skills:\n- crisis-support: support playbook");
 });
 
-Deno.test("buildSystemMessage: held skills render after situational awareness", () => {
+Deno.test("buildSystemMessage: canonical order — RAG < SA < held < mode", () => {
   const systemMessage = buildSystemMessage(
-    "base",
-    "self",
-    "user",
-    "relationship",
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    "<situational_awareness>now</situational_awareness>",
-    undefined,
-    undefined,
-    "<held_skills>held block</held_skills>",
+    {
+      baseInstructions: "base",
+      selfContent: "self",
+      userContent: "user",
+      relationshipContent: "relationship",
+    },
+    {
+      lorebookContent: "<lorebook>entries</lorebook>",
+      situationalAwarenessContent:
+        "<situational_awareness>now</situational_awareness>",
+      heldSkillsContent: "<held_skills>held block</held_skills>",
+      modeContent: "MODE FRAME",
+    },
   );
 
-  const saIndex = systemMessage.indexOf("<situational_awareness>");
-  const heldIndex = systemMessage.indexOf("<held_skills>");
-  assertEquals(saIndex > -1, true);
-  assertEquals(heldIndex > saIndex, true);
+  const rag = systemMessage.indexOf("<lorebook>");
+  const sa = systemMessage.indexOf("<situational_awareness>");
+  const held = systemMessage.indexOf("<held_skills>");
+  const mode = systemMessage.indexOf("MODE FRAME");
+  assertEquals(rag > -1 && sa > rag && held > sa && mode > held, true);
+  // The stable core leads.
+  assertEquals(systemMessage.startsWith("base"), true);
 });
 
 Deno.test("skill tool: loading a skill holds it — confirmation, no fade, with region", async () => {
@@ -204,7 +205,7 @@ Deno.test("skill tool: loading a skill holds it — confirmation, no fade, with 
 
   assertEquals(result.isError, undefined);
   assertEquals(result.content.includes("Holding 'crisis-support'"), true);
-  assertEquals(result.metadata?.fade, undefined);
+  assertEquals("fade" in (result.metadata ?? {}), false);
   assertEquals(result.affectedRegions, ["held-skills"]);
   assertEquals(client.getHeldSkills(conv.id), ["crisis-support"]);
 
@@ -499,7 +500,7 @@ Deno.test("skill tool: batches cannot author or fetch references", async () => {
   cleanupRoot();
 });
 
-Deno.test("skill tool: reference load is transient — fades, does not hold", async () => {
+Deno.test("skill tool: reference load is a plain lookup — does not hold", async () => {
   const { client, cleanup } = makeDb();
   const { dataRoot, cleanup: cleanupRoot } = makeDataRoot();
   const conv = client.createConversation("test");
@@ -522,7 +523,7 @@ Deno.test("skill tool: reference load is transient — fades, does not hold", as
   );
 
   assertEquals(result.isError, undefined);
-  assertEquals(result.metadata?.fade?.replacementContent !== undefined, true);
+  assertEquals(result.metadata, undefined); // plain result — fading is gone
   assertEquals(result.affectedRegions, undefined);
   assertEquals(client.getHeldSkills(conv.id), []);
 

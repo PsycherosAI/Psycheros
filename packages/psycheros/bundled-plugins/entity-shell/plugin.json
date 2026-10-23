@@ -1,0 +1,10 @@
+{
+  "id": "entity-shell",
+  "name": "Entity Shell",
+  "version": "0.1.0",
+  "apiVersion": 2,
+  "enabled": false,
+  "entrypoints": {
+    "psycheros": "./psycheros.ts"
+  }
+}

@@ -19,6 +19,15 @@
  *   - Run history is the same `job_runs` table the admin UI reads, so
  *     "OK/Err" counts and "last fired at" are derived from one source.
  *
+ * ASSEMBLY NOTE: this engine hand-assembles its own EntityTurn
+ * config for classic pulse turns — the chat route assembles its own, and no
+ * shared, route-independent "a message entered this conversation, answer it"
+ * entry point exists yet (the "every-door problem").
+ * Until it does, every turn-config capability must be wired here AND at
+ * every other door, and this engine's config must use live getters (the
+ * pattern most fields below already follow) — never construction-time
+ * captures, which freeze before anything exists to capture.
+ *
  * @module
  */
 
@@ -48,6 +57,7 @@ import { generateUIUpdates } from "../server/ui-updates.ts";
 import { renderMessage } from "../server/templates.ts";
 import { VoiceSessionManager } from "../voice/mod.ts";
 import type { Message, PulseRow } from "../types.ts";
+import { firePulseIntoFluxHost } from "../flux/mod.ts";
 
 // =============================================================================
 // Constants
@@ -73,7 +83,7 @@ const INACTIVITY_TICK_CRON = "* * * * *";
  * dies with nothing to show for it. The success-only cooldown gate
  * never arms during such an outage, so without this cap the per-minute
  * tick re-fires the pulse until the provider recovers or the user
- * messages (observed 2026-09-15: 125 fires / ~2.5h).
+ * messages (observed: 125 fires / ~2.5h).
  */
 const INACTIVITY_MAX_CONSECUTIVE_FAILURES = 3;
 
@@ -143,6 +153,7 @@ export interface PulseEngineConfig {
     | import("../server/device-cache.ts").DeviceStatusCache
     | undefined;
   contextLength?: () => number | undefined;
+  contextStyle?: () => "regular" | "cache-friendly" | undefined;
   maxTokens?: () => number | undefined;
   /**
    * Getter for the active profile's inter-turn persistent reasoning
@@ -152,6 +163,18 @@ export interface PulseEngineConfig {
    */
   persistentReasoningInterTurns?: () => number | undefined;
   pluginManager?: import("../plugins/mod.ts").PluginManager;
+  /** Live getter for the current flux manager — the modulation tools
+   * (`pay_attention` / `mindfulness` / `tune_attention`) on classic pulse
+   * turns read it through EntityConfig. MUST be a fire-time getter: the
+   * engine is constructed before any flux start can exist, so a
+   * construction-time capture is undefined forever. */
+  fluxManager?: () =>
+    | import("../../../entity-flux/src/mod.ts").FluxManager
+    | undefined;
+  /** The flux MODE line for pulse turns (see computeFluxModeNote,
+   * routes.ts) — keeps autonomous turns from hallucinating an active
+   * subconscious while the State is off. */
+  fluxModeNote?: () => string | undefined;
 }
 
 // =============================================================================
@@ -734,6 +757,26 @@ export class PulseEngine {
       // Broadcaster may have no connected clients
     }
 
+    // If this conversation is the live FLUX HOST, route the Pulse into
+    // the hosted session instead of the classic episodic path:
+    // the conversation "becomes" the Flux State while hosted — a classic
+    // EntityTurn there would fork a second, context-less Ego turn into the
+    // same record. firePulseIntoFluxHost enters it as a user-class session
+    // turn with classic pulse rendering on the persisted row; ONE
+    // assistant turn, through his continuous consciousness. Returns false
+    // for non-host conversations AND when flux is stopped/paused, so an
+    // unhosted conversation's pulses take the classic path untouched.
+    if (
+      conversationId &&
+      firePulseIntoFluxHost(conversationId, {
+        id: pulse.id,
+        name: pulse.name,
+        promptText: pulse.promptText,
+      })
+    ) {
+      return { status: "success", result: "routed to flux session" };
+    }
+
     // If this conversation is in an active voice call, hand the Pulse off
     // to the voice pipeline instead of running it through the text chat
     // path. The voice session queues it, drains at the next idle transition
@@ -784,11 +827,14 @@ export class PulseEngine {
       bleSettings: this.config.bleSettings?.(),
       deviceStatusCache: this.config.deviceStatusCache?.(),
       contextLength: this.config.contextLength?.(),
+      contextStyle: this.config.contextStyle?.(),
       maxTokens: this.config.maxTokens?.(),
       persistentReasoningIntraTurn: this.getLlm().persistentReasoningIntraTurn,
       persistentReasoningInterTurns: this.config
         .persistentReasoningInterTurns?.(),
       pluginManager: this.config.pluginManager,
+      fluxManager: this.config.fluxManager?.(),
+      fluxModeNote: this.config.fluxModeNote?.(),
     };
 
     const turn = new EntityTurn(

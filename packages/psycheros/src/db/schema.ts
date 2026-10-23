@@ -869,11 +869,10 @@ function runMigrations(db: Database, dataRoot?: string): void {
   // Migration: Migrate entity_backup_snapshots table data to JSONL files
   // outside psycheros.db, then drop the table.
   //
-  // The original 2026-08-12 implementation put backups INSIDE psycheros.db.
-  // That was a design flaw — same-DB-as-data means DB corruption takes the
-  // backups with it. Migrated 2026-08-13 to filesystem JSONL under
-  // `<dataRoot>/.psycheros/backups/<surface>/<target_id>.jsonl`. Different
-  // file format, can't be hit by SQLite bugs.
+  // Backups live as filesystem JSONL under
+  // `<dataRoot>/.psycheros/backups/<surface>/<target_id>.jsonl`, never
+  // inside psycheros.db — same-DB-as-data means DB corruption takes the
+  // backups with it. A different file format can't be hit by SQLite bugs.
   //
   // Migration is safe to run multiple times — table existence check guards
   // the whole thing. Existing JSONL files aren't touched if the table is

@@ -37,10 +37,12 @@ export async function distillSummary(
   // Build the transcript excerpt we'll ask the LLM to summarize.
   const transcript = buildTranscriptExcerpt(run);
 
-  // Fallback path: no LLM available, use finalText or a generic placeholder.
+  // Fallback path: no LLM available, use finalText (whole) or a generic
+  // placeholder. Never truncated — a cut-off fallback is worse than a long
+  // one.
   if (!llm) {
     if (run.finalText) {
-      return run.finalText.slice(0, 1500);
+      return run.finalText;
     }
     return run.ok
       ? "Workspace session completed. (Summary distillation unavailable — no worker LLM configured.)"

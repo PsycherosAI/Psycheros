@@ -7,7 +7,10 @@
  * for the previous real-time Pipecat implementation.
  */
 
-export { VoiceSessionManager } from "./session-manager.ts";
+export {
+  getVoiceSessionManager,
+  VoiceSessionManager,
+} from "./session-manager.ts";
 export type {
   VoiceSession,
   VoiceSessionState,

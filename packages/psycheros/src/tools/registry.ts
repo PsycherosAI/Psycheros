@@ -44,11 +44,16 @@ import { bleDeviceTool } from "./ble-device.ts";
 import { generateImageTool } from "./generate-image.ts";
 // Image captioning tool
 import { describeImageTool } from "./describe-image.ts";
-// Look closer tool
-import { lookCloserTool } from "./look-closer.ts";
+// Look closer tool (disabled — purposeless without context fading;
+// describe_image covers re-examination. Kept for repurposing.)
+// import { lookCloserTool } from "./look-closer.ts";
 import { skillTool } from "./skill.ts";
 // Conversation peek tool
 import { conversationPeekTool } from "./conversation-peek.ts";
+// Flux modulation tools (nervous system agency)
+import { payAttentionTool } from "./pay_attention.ts";
+import { sleepTool } from "./posture.ts";
+import { tuneAttentionTool } from "./tune_attention.ts";
 import { manageMessageTool } from "./manage-message.ts";
 // Workspace tool (sub-agent coding/research sessions via OpenCode)
 import { workspaceTool } from "./workspace.ts";
@@ -102,9 +107,13 @@ export const AVAILABLE_TOOLS: Record<string, Tool> = {
   // Image generation tool
   generate_image: generateImageTool,
   describe_image: describeImageTool,
-  look_closer: lookCloserTool,
+  // look_closer: lookCloserTool,
   // Conversation peek
   conversation_peek: conversationPeekTool,
+  // Flux modulation tools (conscious → subconscious, modulation bus)
+  pay_attention: payAttentionTool,
+  sleep: sleepTool,
+  tune_attention: tuneAttentionTool,
   // Entity skills (on-demand procedure loading)
   skill: skillTool,
   // Message management (soft-delete + glitch flag)
@@ -206,6 +215,22 @@ export class ToolRegistry {
         toolCallId: toolCall.id,
         content:
           `Error: Unknown tool '${toolName}'. Available tools: ${availableTools}`,
+        isError: true,
+      };
+    }
+
+    // `visibleIn` gates advertising AND execution. The model can emit a call
+    // for a tool it remembers from another context (e.g. manage_message from
+    // a workspace conversation) even though it was never offered in this one
+    // — refuse it here, symmetric with the getDefinitions filter.
+    if (
+      tool.visibleIn &&
+      !tool.visibleIn({ conversationId: ctx.conversationId, db: ctx.db })
+    ) {
+      return {
+        toolCallId: toolCall.id,
+        content:
+          `Error: Tool '${toolName}' is not available in this conversation.`,
         isError: true,
       };
     }

@@ -10,7 +10,10 @@
 import { join } from "@std/path";
 import type { ToolResult } from "../types.ts";
 import type { Tool, ToolContext } from "./types.ts";
-import type { ImageGenConfig } from "../llm/image-gen-settings.ts";
+import type {
+  CommonImageGenParams,
+  ImageGenConfig,
+} from "../llm/image-gen-settings.ts";
 import { captionImageDual } from "./describe-image.ts";
 import { generateThumbnail } from "../utils/thumbnail.ts";
 
@@ -29,6 +32,10 @@ export const generateImageTool: Tool = {
         "anchor_images by ID as style/character references, user_image_path " +
         "if the user provided an image with their message, or input_image_path " +
         "with a path to a previously generated image for reference-based iteration. " +
+        "For gateway generators I write natural-language prompts — complete descriptive " +
+        "sentences, subject first, literal text to appear in the image wrapped in " +
+        'double quotes with its placement named (e.g. a sign reading "COFFEE" above ' +
+        "the door) — not comma-separated tag lists. " +
         "Images I generate appear as actual images in the conversation automatically. " +
         "I do NOT output [IMAGE:] markers or image code in my text — I simply describe " +
         "or discuss the image naturally, and it will appear visually for the user.",
@@ -48,7 +55,11 @@ export const generateImageTool: Tool = {
           negative_prompt: {
             type: "string",
             description:
-              "Optional negative prompt — things I want to avoid in the image",
+              "Optional negative prompt — things I want to avoid in the image. " +
+              "Whether this works depends on the generator: gateways without " +
+              "guidance ignore it (the tool result will say so — then I fold " +
+              "what I want into the prompt itself as positive phrasing), while " +
+              "guidance-capable gateways weigh it for real.",
           },
           anchor_ids: {
             type: "array",
@@ -721,6 +732,335 @@ async function generateViaNanoGPT(
 }
 
 // =============================================================================
+// Self-Hosted Gateway Provider
+//
+// Speaks an OpenAI-ish image-generations contract with two twists the shared
+// provider shapes don't cover: reference images ride in a raw base64
+// `images` array (not data URLs), and long generations are delivered as
+// server-sent events because public fronting proxies drop silent synchronous
+// responses that outlive their timeouts. The stream ends in exactly one
+// `image.completed` (png_base64) or `image.failed` (typed error) event;
+// heartbeat comments carry no admission or progress meaning, so only the
+// terminal event decides success.
+// =============================================================================
+
+/** Route path appended to the configured base URL when none is configured. */
+const GATEWAY_DEFAULT_PATH = "/v1/images/generations";
+
+/** Hard wire bound: the completed-event payload must stay under 12 MiB. */
+const GATEWAY_MAX_RESPONSE_BYTES = 12 * 1024 * 1024;
+
+/** No bytes on the stream for this long means something is stuck. */
+const GATEWAY_IDLE_TIMEOUT_MS = 120_000;
+
+/** Overall ceiling: matches typical backend-side generation timeouts. */
+const GATEWAY_TOTAL_TIMEOUT_MS = 620_000;
+
+interface GatewayTypedError {
+  error?: {
+    code?: string;
+    message?: string;
+    retryable?: boolean;
+    request_id?: string | null;
+    retry_after_ms?: number;
+  };
+  http_status?: number;
+}
+
+/** Describe a non-JSON gateway failure readably (WAF pages, HTML errors). */
+export function describeGatewayHttpFailure(
+  status: number,
+  bodyText: string,
+): string {
+  let typed: GatewayTypedError | undefined;
+  try {
+    typed = JSON.parse(bodyText) as GatewayTypedError;
+  } catch {
+    // fall through to the raw-body summary
+  }
+  if (typed?.error?.message) {
+    const e = typed.error;
+    const retry = e.retryable ? " (retryable)" : "";
+    return `Gateway error ${status} ${
+      e.code ?? "unknown"
+    }${retry}: ${e.message}`;
+  }
+  const summary = bodyText.trim().length > 0
+    ? bodyText.trim().slice(0, 160).replace(/\s+/g, " ")
+    : "(empty body)";
+  return `The gateway returned HTTP ${status} with a non-JSON body: ${summary}`;
+}
+
+/**
+ * Largest multiple-of-32 dimensions for each tool-level aspect ratio label
+ * that stay inside the gateway canvas bounds (each side 256..1536, at most
+ * 1048576 pixels, at most 3:1). 1:1 maps to null — the square presets
+ * already carry that shape and their step budgets.
+ */
+const GATEWAY_ASPECT_DIMS: Record<string, [number, number] | null> = {
+  "1:1": null,
+  "4:3": [1152, 864],
+  "3:4": [864, 1152],
+  "3:2": [1248, 832],
+  "2:3": [832, 1248],
+  "16:9": [1024, 576],
+  "9:16": [576, 1024],
+  "5:4": [1120, 896],
+  "4:5": [896, 1120],
+  "21:9": [1344, 576],
+};
+
+/**
+ * Canvas selection. An explicit per-call aspect_ratio wins (mirroring the
+ * other providers), then non-square configured width/height (validated
+ * against the gateway bounds — anything invalid falls back to the closest
+ * enrolled canvas instead of a guaranteed rejection). Square requests map
+ * to the enrolled square preset of the configured size (512 vs 1024), so a
+ * default 1024x1024 generator really produces 1024 pixels. Higher step
+ * counts (>= 40) map to the quality preset; the quality tier is text-only,
+ * so reference images always use a 20-step preset. With explicit
+ * dimensions the preset only carries the step budget.
+ */
+export function gatewayCanvas(
+  params: CommonImageGenParams,
+  hasImages: boolean,
+): { preset: string; width?: number; height?: number } {
+  const wantQuality = params.steps >= 40 && !hasImages;
+
+  const aspectDims = params.aspect_ratio
+    ? GATEWAY_ASPECT_DIMS[params.aspect_ratio]
+    : undefined;
+  if (params.aspect_ratio && aspectDims !== undefined) {
+    if (aspectDims === null) {
+      return { preset: wantQuality ? "square_1024_quality" : "square_1024" };
+    }
+    const carrier = Math.max(aspectDims[0], aspectDims[1]) >= 768
+      ? "square_1024"
+      : "square_512";
+    return { preset: carrier, width: aspectDims[0], height: aspectDims[1] };
+  }
+
+  const { width, height } = params;
+  const multipleOf32 = (n: number) => n > 0 && n % 32 === 0;
+  const validCustom = width !== height && multipleOf32(width) &&
+    multipleOf32(height) && width >= 256 && width <= 1536 &&
+    height >= 256 && height <= 1536 && width * height <= 1_048_576 &&
+    Math.max(width, height) / Math.min(width, height) <= 3;
+  if (validCustom) {
+    const carrier = Math.max(width, height) >= 768
+      ? "square_1024"
+      : "square_512";
+    return { preset: carrier, width, height };
+  }
+  if (width !== height) {
+    return width > height
+      ? { preset: "landscape_1152x864" }
+      : { preset: "portrait_864x1152" };
+  }
+  if (wantQuality) return { preset: "square_1024_quality" };
+  return { preset: width >= 768 ? "square_1024" : "square_512" };
+}
+
+async function generateViaGateway(
+  config: ImageGenConfig,
+  prompt: string,
+  negativePrompt: string | undefined,
+  anchorImages: Array<{ data: string; mediaType: string }>,
+  userImage: { data: string; mediaType: string } | undefined,
+  inputImage: { data: string; mediaType: string } | undefined,
+): Promise<{ imageData: string; mediaType: string }> {
+  const settings = config.settings.gateway;
+  if (!settings) {
+    throw new Error("Gateway settings not configured for this generator");
+  }
+
+  // The contract accepts at most two reference images. Keep chronological
+  // priority (anchors, then the user attachment, then the iteration image);
+  // overflow is noted in the tool result rather than failing the request.
+  const allImages = [
+    ...anchorImages,
+    ...(userImage ? [userImage] : []),
+    ...(inputImage ? [inputImage] : []),
+  ];
+  const referenceImages = allImages.slice(0, 2);
+
+  // The field rides only when the generator opts in (guidance-capable
+  // deployment). Guidance-free contracts reject nonempty negative prompts,
+  // so the default is to drop it — the gatewayIgnoredNegative note below
+  // tells the entity when that happened so it folds quality wants into the
+  // prompt prose itself.
+  const fullPrompt = prompt;
+
+  const canvas = gatewayCanvas(
+    config.settings.params,
+    referenceImages.length > 0,
+  );
+
+  const body: Record<string, unknown> = {
+    preset: canvas.preset,
+    prompt: fullPrompt,
+  };
+  // The model id is optional on this contract — gateways may assume a
+  // default — so it is omitted entirely when not configured.
+  const model = settings.model?.trim();
+  if (model) body.model = model;
+  if (canvas.width && canvas.height) {
+    body.width = canvas.width;
+    body.height = canvas.height;
+  }
+  if (referenceImages.length > 0) {
+    body.images = referenceImages.map((img) => img.data);
+  }
+  if (settings.acceptsNegativePrompt === true && negativePrompt) {
+    body.negative_prompt = negativePrompt;
+  }
+
+  const baseUrl = settings.baseUrl.trim().replace(/\/+$/, "");
+  const path = settings.modelPath?.trim() || GATEWAY_DEFAULT_PATH;
+  const startedAt = Date.now();
+
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${sanitizeHeaderValue(settings.apiKey)}`,
+      "Content-Type": "application/json",
+      "Accept": "text/event-stream",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(describeGatewayHttpFailure(response.status, errorText));
+  }
+  if (!response.body) {
+    throw new Error("The gateway returned no response body");
+  }
+
+  // Stream-parse with a liveness watchdog: a rejected read means the idle
+  // timeout fired. The finally-block cancel also triggers the gateway's
+  // disconnect cleanup when we bail out early.
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let eventType: string | null = null;
+  let dataLines: string[] = [];
+  let completed: string | null = null;
+  let failed: string | null = null;
+
+  const readWithIdleTimeout = () => {
+    let timer: number | undefined;
+    try {
+      return Promise.race([
+        reader.read(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Gateway stream stalled: no bytes for ${
+                    GATEWAY_IDLE_TIMEOUT_MS / 1000
+                  }s`,
+                ),
+              ),
+            GATEWAY_IDLE_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  };
+
+  const overallDeadline = Date.now() + GATEWAY_TOTAL_TIMEOUT_MS;
+  try {
+    while (completed === null && failed === null) {
+      if (Date.now() > overallDeadline) {
+        throw new Error(
+          "Gateway generation exceeded the overall time ceiling and was aborted",
+        );
+      }
+      const { done, value } = await readWithIdleTimeout();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const rawLine of lines) {
+        const line = rawLine.replace(/\r$/, "");
+        if (line.startsWith("event: ")) {
+          eventType = line.slice(7).trim();
+        } else if (line.startsWith("data: ")) {
+          dataLines.push(line.slice(6));
+        } else if (line === "" && eventType !== null) {
+          const payload = dataLines.join("\n");
+          if (eventType === "image.completed") completed = payload;
+          else if (eventType === "image.failed") failed = payload;
+          eventType = null;
+          dataLines = [];
+        }
+      }
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+
+  if (failed !== null) {
+    let message = "Gateway generation failed (image.failed event)";
+    try {
+      const typed = JSON.parse(failed) as GatewayTypedError;
+      if (typed.error?.message) {
+        message = `Gateway generation failed (${
+          typed.error.code ?? "unknown"
+        }): ${typed.error.message}`;
+      }
+    } catch {
+      // keep the default message
+    }
+    throw new Error(message);
+  }
+  if (completed === null) {
+    throw new Error(
+      "Gateway stream ended without an image.completed event — generation did not finish",
+    );
+  }
+
+  let parsed: { request_id?: string; mime_type?: string; png_base64?: string };
+  try {
+    parsed = JSON.parse(completed);
+  } catch {
+    throw new Error("Gateway image.completed event carried invalid JSON");
+  }
+  if (!parsed.png_base64) {
+    throw new Error("Gateway image.completed event carried no png_base64");
+  }
+
+  // Decode and validate before declaring success: wire bound + PNG signature.
+  const png = Uint8Array.from(atob(parsed.png_base64), (c) => c.charCodeAt(0));
+  if (png.length > GATEWAY_MAX_RESPONSE_BYTES) {
+    throw new Error(
+      `Gateway PNG exceeds the 12 MiB wire bound (${png.length} bytes)`,
+    );
+  }
+  const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const signatureOk = png.length > 24 &&
+    PNG_SIGNATURE.every((byte, index) => png[index] === byte);
+  if (!signatureOk) {
+    throw new Error("The gateway returned data that is not a valid PNG");
+  }
+
+  console.log(
+    `[ImageGen] Gateway: completed ${png.length} bytes in ${
+      ((Date.now() - startedAt) / 1000).toFixed(1)
+    }s (request ${parsed.request_id ?? "n/a"})`,
+  );
+
+  return {
+    imageData: parsed.png_base64,
+    mediaType: parsed.mime_type || "image/png",
+  };
+}
+
+// =============================================================================
 // Tool Executor
 // =============================================================================
 
@@ -872,6 +1212,14 @@ async function execute(
     const veniceDroppedImages = generator.provider === "venice" &&
       (anchorImages.length > 0 || userImage || inputImage);
 
+    // This gateway contract accepts at most two reference images; overflow
+    // was truncated by chronological priority (anchors, then attachment).
+    const gatewayDroppedImages = generator.provider === "gateway" &&
+      (anchorImages.length + (userImage ? 1 : 0) + (inputImage ? 1 : 0) > 2);
+
+    const gatewayIgnoredNegative = generator.provider === "gateway" &&
+      !!negative_prompt;
+
     switch (generator.provider) {
       case "openrouter":
         result = await generateViaOpenRouter(
@@ -902,6 +1250,16 @@ async function execute(
         break;
       case "nanogpt":
         result = await generateViaNanoGPT(
+          generator,
+          prompt,
+          negative_prompt,
+          anchorImages,
+          userImage,
+          inputImage,
+        );
+        break;
+      case "gateway":
+        result = await generateViaGateway(
           generator,
           prompt,
           negative_prompt,
@@ -972,9 +1330,7 @@ async function execute(
 
     // Build the image sidecar — the canonical structured source for the
     // generated image. The loop persists it as `metadata.image` on the tool
-    // message row, the tool-card UI renders from it directly, and the
-    // in-memory fader rewrites `description` → `shortDescription` after
-    // IMAGE_DESCRIPTION_FADE_TURNS.
+    // message row; the tool-card UI renders from it directly.
     const imagePath = `/generated-images/${filename}`;
     const relativeFilePath = `generated-images/${filename}`;
     const imageSidecar: NonNullable<
@@ -1006,6 +1362,22 @@ async function execute(
         "text-to-image only; provided anchor_ids, user_image_path, and " +
         "input_image_path were ignored. If image-reference-based generation " +
         "is needed, choose a different generator.";
+    }
+
+    if (gatewayDroppedImages) {
+      resultText +=
+        "\n\nNote: This generator accepts at most two reference images. " +
+        "The two highest-priority references were used (anchors first, " +
+        "then the user attachment, then the iteration image); additional " +
+        "references were not sent.";
+    }
+
+    if (gatewayIgnoredNegative) {
+      resultText +=
+        "\n\nNote: This generator does not accept negative prompts, so " +
+        "mine was not sent. Fold what I want into the prompt itself as " +
+        "positive phrasing — describe the image the way it should come " +
+        "out, not what to skip.";
     }
 
     return {

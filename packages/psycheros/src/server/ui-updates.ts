@@ -115,16 +115,11 @@ function renderRegion(
       return renderHeaderTitle(conversation?.title);
     }
     case "held-skills": {
-      // Held-skill chips are per-conversation — skip without a conversationId
-      if (!conversationId) {
-        return null;
-      }
-      const held = db.getHeldSkills(conversationId);
-      return held
-        .map((name) =>
-          `<div class="held-skill-chip" title="Skill: ${name}">Skill: ${name}</div>`
-        )
-        .join("");
+      // Held skills render in the client-side state sub-bar
+      // (refreshActionState in psycheros.js — the sub-bar is the catch-all
+      // "this is happening" chip space). No server-rendered chips anymore;
+      // null keeps the region known (no warn) while sending no update.
+      return null;
     }
     default:
       return null;

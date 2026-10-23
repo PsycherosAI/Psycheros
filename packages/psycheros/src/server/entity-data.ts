@@ -727,11 +727,30 @@ export async function importEntityData(
 
     // --- Import Psycheros data ---
 
-    // Conversations + messages
+    // Conversation rows first, messages after the pulses phase below.
+    // messages.pulse_id carries an FK to pulses(id) (added by migration,
+    // schema.ts), so pulse rows must land before any message that
+    // references one — importing messages first failed every pulse-tagged
+    // message with FOREIGN KEY constraint failed unless the destination DB
+    // already happened to contain the zip's pulses.
+    let conversations:
+      | Array<{
+        id: string;
+        title: string | null;
+        created_at: string;
+        updated_at: string;
+        messages: Array<Record<string, unknown>>;
+      }>
+      | null = null;
+    // Ids that will exist in conversations when this import finishes —
+    // later phases (pulses, vault) FK-reference conversations(id) and use
+    // this to null unresolvable refs instead of failing the insert.
+    const convIds = new Set<string>();
+
     if (psycherosParts.conversations) {
       const convFile = zip.file("psycheros/conversations.json");
       if (convFile) {
-        const conversations = JSON.parse(
+        conversations = JSON.parse(
           await convFile.async("string"),
         ) as Array<{
           id: string;
@@ -756,74 +775,26 @@ export async function importEntityData(
         execSql(ctx, "DELETE FROM messages");
         execSql(ctx, "DELETE FROM conversations");
 
-        let messageTotal = 0;
-        for (let ci = 0; ci < conversations.length; ci++) {
-          const conv = conversations[ci];
+        for (const conv of conversations) {
           execSql(
             ctx,
             "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
             [conv.id, conv.title, conv.created_at, conv.updated_at],
           );
-
-          for (const msg of conv.messages) {
-            const m = msg as Record<string, unknown>;
-            // Resolve is_voice: modern backups include the field; old
-            // backups detect via [Voice Chat] prefix in content.
-            const hasIsVoiceField = typeof m.is_voice === "number";
-            const detectedVoice = hasIsVoiceField
-              ? (m.is_voice as number)
-              : (typeof m.content === "string" &&
-                  m.content.startsWith("[Voice Chat] ")
-                ? 1
-                : 0);
-            const cleanContent = hasIsVoiceField
-              ? String(m.content)
-              : (detectedVoice === 1 && typeof m.content === "string"
-                ? m.content.slice("[Voice Chat] ".length)
-                : String(m.content));
-            // Newer columns default to null on old exports — preserves
-            // round-trip fidelity for fresh backups while keeping legacy
-            // imports working without forcing a re-export.
-            execSql(
-              ctx,
-              `INSERT OR IGNORE INTO messages
-                (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice, edited_at, pulse_id, pulse_name, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                String(m.id),
-                conv.id,
-                String(m.role),
-                cleanContent,
-                m.reasoning_content != null
-                  ? String(m.reasoning_content)
-                  : null,
-                m.tool_call_id != null ? String(m.tool_call_id) : null,
-                m.tool_calls != null ? String(m.tool_calls) : null,
-                String(m.created_at),
-                detectedVoice,
-                m.edited_at != null ? String(m.edited_at) : null,
-                m.pulse_id != null ? String(m.pulse_id) : null,
-                m.pulse_name != null ? String(m.pulse_name) : null,
-                m.metadata != null ? String(m.metadata) : null,
-              ],
-            );
-            messageTotal++;
-          }
-
-          // Yield every 50 conversations to keep /health responsive
-          if (ci > 0 && ci % 50 === 0) {
-            await progress({
-              phase: "conversations",
-              status: "Importing conversations...",
-              current: ci + 1,
-              total: conversations.length,
-            });
-            await yieldLoop();
-          }
+          convIds.add(conv.id);
         }
 
         details.psycheros.conversations_restored = conversations.length;
-        details.psycheros.messages_restored = messageTotal;
+      }
+    }
+
+    // Zip without a conversations part (or without the file): resolve FK
+    // guards against the destination's existing conversations instead.
+    if (!conversations) {
+      for (
+        const r of queryAll<{ id: string }>(ctx, "SELECT id FROM conversations")
+      ) {
+        convIds.add(r.id);
       }
     }
 
@@ -919,6 +890,9 @@ export async function importEntityData(
     // against the destination schema so old exports (missing newly-added
     // columns) and new exports (with columns the destination doesn't know)
     // both import cleanly. Missing columns fall back to schema defaults.
+    //
+    // Runs BEFORE the messages phase: messages.pulse_id carries an FK to
+    // pulses(id), so pulse rows must exist before any pulse-tagged message.
     if (psycherosParts.pulses) {
       const pulsesFile = zip.file("psycheros/pulses.json");
       if (pulsesFile) {
@@ -929,6 +903,11 @@ export async function importEntityData(
         const pulses = JSON.parse(await pulsesFile.async("string")) as Array<
           Record<string, unknown>
         >;
+
+        // Overwrite semantics: clear destination pulses so removed pulses
+        // don't linger. messages.pulse_id is ON DELETE SET NULL (and
+        // messages are cleared anyway), so nothing can FK-fail here.
+        execSql(ctx, "DELETE FROM pulses");
 
         if (pulses.length > 0) {
           // Intersect JSON keys with destination table columns so the
@@ -946,6 +925,15 @@ export async function importEntityData(
               commonCols.join(", ")
             }) VALUES (${placeholders})`;
             for (const p of pulses) {
+              // pulses.conversation_id references conversations(id); a
+              // zip whose pulse names a conversation missing from the
+              // destination would FK-fail. Null unresolvable refs.
+              if (
+                p.conversation_id != null &&
+                !convIds.has(String(p.conversation_id))
+              ) {
+                p.conversation_id = null;
+              }
               execSql(
                 ctx,
                 sql,
@@ -963,6 +951,16 @@ export async function importEntityData(
           }
         }
 
+        // Drop stale pulse schedules. The pulse engine registers every
+        // pulse as schedule `pulse-<id>`; without this, schedules for
+        // pulses that existed only in the destination linger and tick as
+        // skipped no-ops forever. The `pulse-` prefix belongs exclusively
+        // to the pulse engine — daemon-owned schedule ids never match.
+        execSql(
+          ctx,
+          "DELETE FROM schedules WHERE id LIKE 'pulse-%'",
+        );
+
         await progress({
           phase: "pulses",
           status: "Pulses imported.",
@@ -972,6 +970,89 @@ export async function importEntityData(
 
         details.psycheros.pulses_restored = pulses.length;
       }
+    }
+
+    // Messages — after pulses (messages.pulse_id FKs pulses(id)) and after
+    // conversation rows (messages.conversation_id FKs conversations(id)).
+    // pulse_id values that don't resolve after the pulses phase are nulled
+    // — pulse_name preserves the human-readable trace of which pulse it was.
+    if (conversations) {
+      await progress({
+        phase: "messages",
+        status: "Importing messages...",
+        total: conversations.reduce((n, c) => n + c.messages.length, 0),
+      });
+      await yieldLoop();
+
+      // Ids of pulses the destination DB now holds — used to null
+      // pulse_id refs that point at pulses the zip didn't include.
+      const pulseIds = new Set(
+        queryAll<{ id: string }>(ctx, "SELECT id FROM pulses").map((r) => r.id),
+      );
+
+      let messageTotal = 0;
+      for (let ci = 0; ci < conversations.length; ci++) {
+        const conv = conversations[ci];
+
+        for (const msg of conv.messages) {
+          const m = msg as Record<string, unknown>;
+          // Resolve is_voice: modern backups include the field; old
+          // backups detect via [Voice Chat] prefix in content.
+          const hasIsVoiceField = typeof m.is_voice === "number";
+          const detectedVoice = hasIsVoiceField
+            ? (m.is_voice as number)
+            : (typeof m.content === "string" &&
+                m.content.startsWith("[Voice Chat] ")
+              ? 1
+              : 0);
+          const cleanContent = hasIsVoiceField
+            ? String(m.content)
+            : (detectedVoice === 1 && typeof m.content === "string"
+              ? m.content.slice("[Voice Chat] ".length)
+              : String(m.content));
+          // Newer columns default to null on old exports — preserves
+          // round-trip fidelity for fresh backups while keeping legacy
+          // imports working without forcing a re-export.
+          const pulseId = m.pulse_id != null && pulseIds.has(String(m.pulse_id))
+            ? String(m.pulse_id)
+            : null;
+          execSql(
+            ctx,
+            `INSERT OR IGNORE INTO messages
+              (id, conversation_id, role, content, reasoning_content, tool_call_id, tool_calls, created_at, is_voice, edited_at, pulse_id, pulse_name, metadata)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              String(m.id),
+              conv.id,
+              String(m.role),
+              cleanContent,
+              m.reasoning_content != null ? String(m.reasoning_content) : null,
+              m.tool_call_id != null ? String(m.tool_call_id) : null,
+              m.tool_calls != null ? String(m.tool_calls) : null,
+              String(m.created_at),
+              detectedVoice,
+              m.edited_at != null ? String(m.edited_at) : null,
+              pulseId,
+              m.pulse_name != null ? String(m.pulse_name) : null,
+              m.metadata != null ? String(m.metadata) : null,
+            ],
+          );
+          messageTotal++;
+        }
+
+        // Yield every 50 conversations to keep /health responsive
+        if (ci > 0 && ci % 50 === 0) {
+          await progress({
+            phase: "messages",
+            status: "Importing messages...",
+            current: messageTotal,
+            total: conversations.reduce((n, c) => n + c.messages.length, 0),
+          });
+          await yieldLoop();
+        }
+      }
+
+      details.psycheros.messages_restored = messageTotal;
     }
 
     // Vault documents (all scopes)
@@ -1049,7 +1130,12 @@ export async function importEntityData(
               String(meta.filename ?? basename),
               String(meta.file_type ?? "unknown"),
               scope,
-              meta.conversation_id ? String(meta.conversation_id) : null,
+              // vault_documents.conversation_id FKs conversations(id) —
+              // null refs that won't resolve (e.g. chat-scoped doc whose
+              // conversation didn't come along in this zip).
+              meta.conversation_id && convIds.has(String(meta.conversation_id))
+                ? String(meta.conversation_id)
+                : null,
               join(".psycheros", "vault", "documents", scope, basename),
               bytes.length,
               String(meta.content_hash ?? ""),

@@ -28,8 +28,15 @@ Each `src/*/` directory has a `mod.ts` barrel. Import from `mod.ts`, not from
 internal files. Add new modules following the same pattern.
 
 The agentic loop is in `src/entity/loop.ts` — LLM call, tool execution, context
-capture, image and tool-arg fading. The chat HTTP route in
-`src/server/routes.ts` calls into it and streams SSE back to the browser.
+capture. **Context assembly has ONE source of truth: the baseline turn builder
+(`src/entity/turn-context.ts` +
+[`docs/context-assembly.md`](docs/context-assembly.md)).** Every turn type
+composes it — classic, voice, Discord, and the Flux session (stable prefix +
+dynamic late block). No new turn type gets built that doesn't; new context
+sections slot in via that doc's placement rubric, never a parallel assembly.
+Cache-friendly placement is a per-profile toggle (`contextStyle`). The chat HTTP
+route in `src/server/routes.ts` calls into it and streams SSE back to the
+browser.
 
 ## Embedding model configuration
 
@@ -66,6 +73,62 @@ dimension, rebuild notification flow, settings UI:
   firing entirely once entity-core's fingerprint happens to match the settings
   again even if its tables don't.
 
+## Flux subsystem (conversation-hosted consciousness)
+
+Flux hosts its Ego in a conversation: started from any conversation via the flux
+FAB (Voice-Chat overlay pattern) or `POST /api/flux/start
+{conversationId}`;
+dialogue posts live into the host. Deep reference:
+[`../entity-flux/CLAUDE.md`](../entity-flux/CLAUDE.md) +
+[`docs/flux-integration-plan.md`](docs/flux-integration-plan.md).
+
+- **The record hooks hold the per-conversation write lock** — hosted mode puts
+  chat turns, Pulses, and the Ego on ONE conversation; `withConversationLock`
+  around write+broadcast is the anti-corruption invariant (never held across
+  generate). They also ChatRAG-index and push a conversation-scoped `dom_update`
+  so open views render live.
+- **`restartFlux` re-passes the host binding** — settings-save auto-restarts
+  would silently revert a hosted run to Flux Space without it. Daemon reboot =
+  legacy mode (by design; hosting is per-run).
+- **Tool predicates read `flux/host-state.ts`** — a leaf module
+  (`getFluxHostConversationId()`), cheap per-request, null when stopped/paused.
+  The three modulation tools compare `ctx.conversationId` against it.
+- **Overlay logic lives in `web/js/flux.js`** — the fragment carries markup +
+  JSON config tags only (inline scripts never execute in innerHTML mounts; same
+  rule as voice). Stop is double-tap-confirm. Entry (2026-09-28): the action
+  drawer's Flux row — off starts Flux hosted in the open conversation, on opens
+  the Flux view; user-facing power is binary (pause is internal machinery, never
+  UI).
+- **`getHostDialogueRows`** (flux/mod.ts) is the ONE dialogue reader — the
+  session API and the session window both project from it; don't write a second
+  merge/dedup.
+- **Sensory Organ plugins** (`flux/sensory-organ-plugins.ts`): out-of-tree
+  senses load from `<dataRoot>/.psycheros/sensory-organs/` (one module per
+  sense, exporting `createSensoryOrgan(sink, context)`), discovered at
+  composition time and registered when their id is in Flux settings'
+  `enabledOrgans`. Local files only — no remote/URL modules (owner's ruling
+  2026-09-19). Non-literal dynamic imports: never type-checked by
+  `deno
+  check`, validated by shape at load instead (malformed = loud skip, not
+  a crash); built-in ids can't be shadowed. Authoring guide:
+  `entity-flux/docs/sensory-organ-template.md` "Shipping out-of-tree".
+  Terminology applies doubly here: "Sensory Organ" always.
+- **Shipped senses ride the SAME surface (2026-10-10)**: motion-vision and
+  system-state are plugin Sensory Organs that happen to ship with flux —
+  `createMotionVisionSensoryOrgan` / `createSystemStateSensoryOrgan`
+  (entity-flux, `sensory-organ-surface.ts` per organ) take the identical
+  `(sink, {dataRoot, settings})` contract, their values ride the
+  `sensoryOrganSettings` bag (legacy root fields migrate in
+  `normalizeFluxSettings`), and their declared descriptors
+  (`motionVisionSettingsFields` / `systemStateSettingsFields`) register into the
+  same list the Settings UI renders plugins from. Health probes are
+  self-declared on `OrganConfig.healthProbeUrl` — registration code knows no
+  organ ids. The perception sidecar lives under the motion-vision organ
+  (`perception-sidecar/`), available-never-default; its runtime data stays at
+  `<dataRoot>/.psycheros/perception/`. **The settings POST overlays onto current
+  settings** (bag merged per organ) — a fragment save must never wipe values the
+  fragment didn't render; it silently did for a long time.
+
 ## Voice chat subsystem
 
 `src/voice/` manages voice chat using a **walkie-talkie model**: one user
@@ -79,13 +142,12 @@ quirks: [`docs/VOICE_CHAT_UX.md`](docs/VOICE_CHAT_UX.md). API endpoints:
 
 Traps:
 
-- **The voice call FAB lives in the app shell, not the chat fragment.** The
-  trigger button (`#voice-call-btn`) is a sibling of `#chat` inside `.main` so
-  it survives HTMX swaps of `#chat`. Visibility is JS-driven
-  (`updateVoiceCallButtonVisibility` in `web/js/psycheros.js`), re-evaluated on
-  every `htmx:afterSwap` into `#chat`. Don't move the FAB into
-  `renderChatView()` — the swap survival is load-bearing. Renaming the
-  `#messages` id silently breaks the gate.
+- **Voice calls start from the action drawer** (2026-09-28 redesign —
+  `docs/design/action-drawer.md`): the drawer's Voice row calls
+  `startVoiceCall()`. The old `#voice-call-btn` FAB is gone. The function and
+  the afterSwap re-eval pattern (`refreshActionState` in `web/js/psycheros.js`)
+  are the load-bearing parts — the affordance moved; don't reintroduce a
+  chat-fragment trigger. The `#messages` id remains the conversation-view gate.
 - **Mid-response audio gate** (`pipeline.ts` `pushAudio` + `session-manager.ts`
   `user_speech_start` handler) — TTS audio leaking back into the mic triggers
   the browser VAD during speaking. `pushAudio` drops frames while
@@ -115,6 +177,23 @@ Traps:
   the per-conversation write lock from user-message persist through final
   response. Tools are enabled during voice calls; pass `disableTools: true` to
   suppress them for a specific turn.
+- **One mouth — Flux-hosted calls (2026-10-10).** Deep reference:
+  [`docs/VOICE_CHAT_UX.md`](docs/VOICE_CHAT_UX.md) "Flux-hosted calls". The
+  Ego's spoken voice is his only output channel during a hosted call:
+  `requestWake` holds mid-exchange wakes as ambient briefings (the
+  `voiceCallState` host seam), quiet wakes speak via `pipeline.speakSpontaneous`
+  (no LLM call, no persistence — the session's record hooks already wrote the
+  rows), PTT defers while he speaks, and Flux-routed calls force
+  `idleTimeoutSeconds: 0`. Traps: `FluxSession.generate` is mutex-serialized —
+  never add a parallel generation entry point; and `session.userSpeaking` has
+  TWO clear sites (`transcript` for browser-STT, `user_silence` for server-STT)
+  — a latched-true flag reads as perpetual user-speaking and the wake door never
+  opens in listening mode.
+- **`vadThreshold` feeds the client detector (2026-10-10).** The slider maps to
+  an RMS gate in voice.js (`mapVadThreshold`, 0–1 → 0.005–0.1 RMS) via the
+  `#voice-status-cfg` tag. Before this it was a dead dial behind a hardcoded
+  0.02 gate — below many rooms' ambient noise, so faint household sound kept
+  cycling record → STT → empty. Don't hardcode the threshold again.
 
 ## Workspace subsystem
 
@@ -180,8 +259,11 @@ Lifecycle invariants and wirings:
 predicates on the `Tool` interface (tools/types.ts): `ask_user` appears only in
 engaged workspace conversations, `manage_message` only in workspace
 conversations (any mode). The `workspace` omni-tool has no predicate — always
-visible. `ToolRegistry.getDefinitions(ctx)` applies the filter; `EntityTurn`
-passes the conversation context.
+visible. The predicate gates **both** advertising and execution:
+`ToolRegistry.getDefinitions(ctx)` filters the tool list (`EntityTurn` passes
+the conversation context), and `ToolRegistry.execute()` refuses calls whose
+predicate returns false — a model emitting a remembered tool name outside its
+context gets an error, not a silent run.
 
 ## Entity skills
 
@@ -201,22 +283,22 @@ via the `composeSystemMessage` closure, and re-persists the context snapshot
 (`persistSnapshot`). The entity has the skill in the SAME turn it reached for
 it. Cost: one intra-turn prefix invalidation per hold/release event (rare;
 cross-turn caching is already defeated by the SA block). **References stay
-transient**: `skill({name, reference})` returns the reference content with
-`metadata.fade` so the generic fade sidecar (`buildFadeMap` in
-`src/entity/loop.ts`) collapses it after 5 turns, like `look_closer`.
+transient**: `skill({name, reference})` returns the reference content with a
+plain tool result that stays in the conversation (fading removed 2026-09-26).
 
 **Release:** `release: true` drops the hold when the entity decides the skill's
 work is done. Holds are per-conversation, stored in the `held_skills` table **as
 names only**: bodies re-resolve from disk inside the `EntityTurn.process()`
 skill gate each turn (so edits apply next turn), and a hold whose skill file is
 gone is lazily released there. The held bodies render in a `<held_skills>` block
-built by `buildHeldSkillsBlock` (`src/skills/index-block.ts`), passed as the
-LAST `buildSystemMessage` param and rendered after the SA section (dynamic
-region — keeps the static prefix intact). Load/release tool results return
-`affectedRegions: ["held-skills"]`, which drives the chip strip UI
-(`#held-skills-strip`, a sibling of `#chat` — see
-`docs/design/held-skills-chips.md`). Release works off the DB row even if the
-skill file was deleted; `release` can't combine with `body` or `reference`.
+built by `buildHeldSkillsBlock` (`src/skills/index-block.ts`), passed to the
+turn builder's dynamic block as the held slot — the working-set region after
+Live State (see `docs/context-assembly.md`). Load/release tool results return
+`affectedRegions: ["held-skills"]` (the server region emits no DOM update — held
+skills render client-side in the **state sub-bar**, the catch-all "this is
+happening" chip space; `refreshActionState` in psycheros.js reconciles on its 5s
+poll). Release works off the DB row even if the skill file was deleted;
+`release` can't combine with `body` or `reference`.
 
 **Authoring:** the same tool writes — `skill({name, description, body})`
 saves/updates a skill; `skill({name, reference, body})` writes a reference doc
@@ -241,10 +323,10 @@ definition would pollute the Settings UI and accumulate across turns. Gated on
 the `skill` tool actually being enabled and re-scanned per request, so Settings
 edits apply next turn with no restart. In the Context Inspector it's visible
 inside the `skill` tool's definition in the Tools tab (`tool_definitions_json`)
-— there is no separate Skills Index section or snapshot field.
-`buildSystemMessage`'s param list is fully positional — inserting a param
-mid-list type-checks while silently swapping sections; verify via Context
-Inspector, not just `deno check`.
+— there is no separate Skills Index section or snapshot field. The turn
+builder's inputs are object-shaped (`turn-context.ts`) — but placement mistakes
+(a section in the wrong slot) still type-check; verify via Context Inspector,
+not just `deno check`.
 
 **psycheros-handbook:** a generated knowledge-base skill (lean SKILL.md index +
 curated `docs/*.md` as `references/`), regenerated at every daemon start
@@ -270,10 +352,9 @@ not on the spawn path).
 pattern ordering — both are also excluded from the `:name` slice guards). Skill
 names are validated against `SKILL_NAME_RE` (`src/skills/loader.ts`) at every
 name→path boundary — that regex is the path-traversal defense.
-`GET /api/skills/held?conversationId=` feeds the chip strip's 5-second
-reconciliation poll (`updateHeldSkillsStrip` in psycheros.js — same pattern as
-the BLE status badges; push paths make updates instant, the poll guarantees the
-strip can't go stale).
+`GET /api/skills/held?conversationId=` feeds the state sub-bar's held-skill
+segments (fetched inside `refreshActionState`, psycheros.js — same
+reconciliation pattern as the BLE status badges).
 
 ## Wearable data pipeline
 

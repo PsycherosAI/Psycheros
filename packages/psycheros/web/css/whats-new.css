@@ -1,0 +1,215 @@
+/**
+ * What's New splash — full-screen on mobile, centered card on desktop.
+ * All colors via --c-* tokens (see docs/design/design-system.md).
+ */
+
+.whats-new-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  background-color: var(--c-scrim-heavy);
+  animation: whats-new-fade-in 200ms ease-out;
+}
+
+/* Mobile: full-screen takeover. */
+.whats-new-sheet {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--c-bg);
+  color: var(--c-fg);
+  padding: calc(var(--sp-8) + env(safe-area-inset-top)) var(--sp-5)
+    calc(var(--sp-6) + env(safe-area-inset-bottom));
+  max-width: 100%;
+}
+
+/* Desktop: centered card over the scrim. */
+@media (min-width: 768px) {
+  .whats-new-overlay {
+    align-items: center;
+    justify-content: center;
+    background-color: var(--c-scrim-strong);
+    padding: var(--sp-6);
+  }
+
+  .whats-new-sheet {
+    flex: 0 1 auto;
+    width: 640px;
+    max-width: 100%;
+    max-height: min(85vh, 720px);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 var(--sp-4) var(--sp-8) var(--c-scrim-strong);
+    padding: var(--sp-8);
+  }
+}
+
+.whats-new-head {
+  flex-shrink: 0;
+  margin-bottom: var(--sp-4);
+}
+
+.whats-new-kicker {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-accent);
+  margin-bottom: var(--sp-1);
+}
+
+.whats-new-title {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--c-fg);
+  margin: 0;
+}
+
+.whats-new-scroll {
+  flex: 1;
+  overflow-y: auto;
+  border-top: 1px solid var(--c-border);
+  padding-top: var(--sp-4);
+}
+
+.whats-new-release + .whats-new-release {
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-6);
+  border-top: 1px solid var(--c-border);
+}
+
+.whats-new-release-head {
+  display: flex;
+  flex-basis: auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.whats-new-release-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--c-fg);
+  margin: 0;
+}
+
+.whats-new-release-date {
+  font-size: 0.8rem;
+  color: var(--c-fg-muted);
+}
+
+/* Release body markdown — modest scoping so the owner's GitHub-flavored
+   markdown looks native without fighting the theme. */
+.whats-new-body {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--c-fg);
+  overflow-wrap: break-word;
+}
+
+.whats-new-body h1,
+.whats-new-body h2,
+.whats-new-body h3 {
+  color: var(--c-fg);
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.whats-new-body h1:first-child,
+.whats-new-body h2:first-child,
+.whats-new-body h3:first-child {
+  margin-top: 0;
+}
+
+.whats-new-body p {
+  margin: 0 0 var(--sp-3);
+}
+
+.whats-new-body ul,
+.whats-new-body ol {
+  margin: 0 0 var(--sp-3);
+  padding-left: var(--sp-5);
+}
+
+.whats-new-body li {
+  margin-bottom: var(--sp-1);
+}
+
+.whats-new-body code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background-color: var(--c-wash);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.35em;
+}
+
+.whats-new-body pre {
+  background-color: var(--c-wash-strong);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3);
+  overflow-x: auto;
+  margin: 0 0 var(--sp-3);
+}
+
+.whats-new-body pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+.whats-new-body img {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+}
+
+.whats-new-body a {
+  color: var(--c-accent);
+}
+
+.whats-new-body blockquote {
+  border-left: 3px solid var(--c-accent-line);
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-1) 0 var(--sp-1) var(--sp-4);
+  color: var(--c-fg-muted);
+}
+
+.whats-new-body hr {
+  border: none;
+  border-top: 1px solid var(--c-border);
+  margin: var(--sp-4) 0;
+}
+
+.whats-new-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-border);
+}
+
+.whats-new-actions .btn {
+  flex: 1;
+  justify-content: center;
+}
+
+.whats-new-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+@keyframes whats-new-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}

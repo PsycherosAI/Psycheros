@@ -58,6 +58,12 @@ export interface LLMConnectionProfile {
   maxTokens: number;
   /** Context window size in tokens (used for context budget management) */
   contextLength: number;
+  /** Context placement: "regular" (default — dynamic context inside the
+   * leading system message) or "cache-friendly" (stable core leads; the
+   * dynamic block trails as a system message after the user message —
+   * maximum provider prompt-cache reuse; only for models/providers that
+   * accept trailing system messages). Absent = regular. */
+  contextStyle?: "regular" | "cache-friendly";
   /** Whether chain-of-thought reasoning is enabled */
   thinkingEnabled: boolean;
   /**
@@ -76,6 +82,15 @@ export interface LLMConnectionProfile {
    * count is in user-visible turns, not DB rows.
    */
   persistentReasoningInterTurns: number;
+  /**
+   * MULTIMODAL: the profile's DECLARATION that its model is natively
+   * multimodal — off by default, never assumed from the model string.
+   * When on, uploaded images ride the turn as native content parts
+   * (transient pixels, persisted markers); when off, the
+   * captioner/marker fallback. AUTHORITATIVE everywhere, including
+   * Discord. Currently IMAGES ONLY — audio and video are not routed.
+   */
+  multimodal: boolean;
 }
 
 /**
@@ -242,6 +257,7 @@ export function createDefaultProfile(): LLMConnectionProfile {
         provider === "nanogpt" || provider === "custom",
       persistentReasoningIntraTurn: "auto",
       persistentReasoningInterTurns: 0,
+      multimodal: false,
     };
   }
 
@@ -264,5 +280,6 @@ export function createDefaultProfile(): LLMConnectionProfile {
     thinkingEnabled: true,
     persistentReasoningIntraTurn: "auto",
     persistentReasoningInterTurns: 0,
+    multimodal: false,
   };
 }

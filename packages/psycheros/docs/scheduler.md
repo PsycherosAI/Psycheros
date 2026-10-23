@@ -40,6 +40,11 @@ schedule decides what happens on next boot:
 - **`skip_missed`** — drop missed fires and resume on the next scheduled time.
   The default for user-created Pulses. A user pulse "every hour: remind me to
   stretch" doesn't want fifty reminders after a week of downtime.
+
+Both policies honor exactly one missed fire per catch-up (the oldest due slot),
+then realign `next_fire_at` past `now` — the rest of the backlog is dropped,
+never replayed one slot per tick.
+
 - **`fire_all_missed`** — materialize one job per missed fire. Available but not
   currently used by any schedule in this codebase — would only matter for fires
   that processed discrete units of work where missing one means missing data.
@@ -107,8 +112,13 @@ entity-facing `pulse` tool, and chain execution) enqueue the same way.
   - Skipped runs older than 24 hours are removed, but the most-recent 50 skipped
     runs are always kept regardless of age — so an inactivity pulse's audit
     trail doesn't disappear after a quiet period.
-  - Terminal runs of any status are capped at 200 per cohort. This bounds
-    storage even for inactivity pulses that fire every minute.
+  - Terminal runs of any status are capped at 200 per cohort, except that the
+    most-recent 20 non-skipped runs (real fires and failures) always survive the
+    cap. Those rows are durable evidence — the inactivity-pulse cooldown reads
+    the latest success and the circuit breaker walks its failure streak from
+    them — and without the carve-out an every-minute pulse's skipped ticks would
+    evict them and re-arm the cooldown while the user is still inactive. This
+    bounds storage even for inactivity pulses that fire every minute.
 
 ## Pulse stats are derived, not denormalized
 

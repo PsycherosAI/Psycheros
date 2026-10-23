@@ -431,8 +431,11 @@
       var buffer = "";
       var finalData = null;
 
-      // Phase order for progress bar estimation
-      var phaseOrder = ["validate", "conversations", "lorebooks", "vault", "images", "anchors", "entity-core", "restart", "sync", "cleanup"];
+      // Phase order for progress bar estimation. Must match the importer's
+      // actual emit order (entity-data.ts): conversations → lorebooks →
+      // pulses → messages → vault → ... — pulses land before messages
+      // because messages.pulse_id FKs pulses(id).
+      var phaseOrder = ["validate", "conversations", "lorebooks", "pulses", "messages", "vault", "images", "anchors", "entity-core", "restart", "sync", "cleanup"];
       var currentPhaseIndex = 0;
 
       while (true) {

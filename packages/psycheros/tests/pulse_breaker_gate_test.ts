@@ -2,8 +2,8 @@
  * Inactivity-pulse circuit breaker — gate-level end-to-end tests.
  *
  * Drives the REAL `PulseEngine.checkInactivityEligibility()` against a
- * real DB seeded with run history, replaying the failure shape of the
- * 2026-09-15 incident: provider dies mid-night, every fire goes
+ * real DB seeded with run history, replaying the failure shape:
+ * provider dies mid-night, every fire goes
  * error/dead, the success-only cooldown never arms, and the per-minute
  * tick would re-fire indefinitely without the breaker.
  *
@@ -191,7 +191,7 @@ Deno.test("breaker gate: blocked during backoff window, eligible after threshold
   const { client, engine, rawDb, cleanup } = makeEngine();
   seedInactiveUserMessage(client, 30); // far past the inactivity floor
   const pulse = makePulse(client, 200);
-  // Simulate the incident window: 4 consecutive failures ending 1 min ago.
+  // Simulate the failure window: 4 consecutive failures ending 1 min ago.
   for (const m of [5, 4, 3, 1]) {
     insertRun(rawDb, { pulseId: pulse.id, status: "dead", minutesAgo: m });
   }

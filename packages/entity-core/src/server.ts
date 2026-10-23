@@ -5,6 +5,47 @@
  * Embodiments connect to this core to sync who I am.
  */
 
+import type { z } from "zod";
+import type {
+  GraphEdgeCreateSchema,
+  GraphEdgeDeleteSchema,
+  GraphEdgeGetSchema,
+  GraphEdgeUpdateSchema,
+  GraphNodeCreateSchema,
+  GraphNodeDeleteSchema,
+  GraphNodeGetSchema,
+  GraphNodeListSchema,
+  GraphNodeSearchSchema,
+  GraphNodeUpdateSchema,
+  GraphSubgraphSchema,
+  GraphTraverseSchema,
+  GraphWriteTransactionSchema,
+} from "./tools/graph.ts";
+import type {
+  IdentityAppendSchema,
+  IdentityDeleteCustomSchema,
+  IdentityGetMetaSchema,
+  IdentityPrependSchema,
+  IdentityRewriteSectionSchema,
+  IdentitySetMetaSchema,
+  IdentityUpdateSectionSchema,
+  IdentityWriteSchema,
+} from "./tools/identity.ts";
+import type {
+  MemoryCreateSchema,
+  MemoryDeleteSchema,
+  MemoryGrepSchema,
+  MemoryListSchema,
+  MemoryReadSchema,
+  MemorySearchSchema,
+  MemoryUpdateSchema,
+} from "./tools/memory.ts";
+import type {
+  SnapshotGetSchema,
+  SnapshotListSchema,
+  SnapshotRestoreSchema,
+} from "./tools/snapshot.ts";
+import type { SyncPullSchema, SyncPushSchema } from "./tools/sync.ts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { FileStore } from "./storage/mod.ts";
@@ -67,6 +108,7 @@ import {
 import type { ServerConfig } from "./types.ts";
 import { DEFAULT_SERVER_CONFIG } from "./types.ts";
 import { cleanupOldSnapshots } from "./snapshot/mod.ts";
+import { InstanceRegistry } from "./registry/mod.ts";
 import {
   EMBEDDING_REBUILD_METHOD,
   EmbeddingCache,
@@ -98,6 +140,10 @@ export function createServer(
   const embeddingCache = fullConfig.embeddingCache ??
     new EmbeddingCache(fullConfig.dataDir);
   const pluginManager = fullConfig.pluginManager;
+
+  // Instance registry — the persistent name-claim note at
+  // data/instances.json. Tool wrappers register their caller here.
+  const instanceRegistry = new InstanceRegistry(fullConfig.dataDir);
 
   // Create MCP server
   const server = new McpServer({
@@ -140,7 +186,11 @@ export function createServer(
       content: identityTools["identity/write"].inputSchema.shape.content,
       instanceId: identityTools["identity/write"].inputSchema.shape.instanceId,
     },
-    async ({ category, filename, content, instanceId }) => {
+    async (
+      { category, filename, content, instanceId }: z.infer<
+        typeof IdentityWriteSchema
+      >,
+    ) => {
       await store.initialize();
       const handler = createIdentityWriteHandler(store);
       const result = await handler({ category, filename, content, instanceId });
@@ -170,7 +220,11 @@ export function createServer(
       content: identityTools["identity/append"].inputSchema.shape.content,
       instanceId: identityTools["identity/append"].inputSchema.shape.instanceId,
     },
-    async ({ category, filename, content, instanceId }) => {
+    async (
+      { category, filename, content, instanceId }: z.infer<
+        typeof IdentityAppendSchema
+      >,
+    ) => {
       await store.initialize();
       const handler = createIdentityAppendHandler(store);
       const result = await handler({ category, filename, content, instanceId });
@@ -201,7 +255,11 @@ export function createServer(
       instanceId:
         identityTools["identity/prepend"].inputSchema.shape.instanceId,
     },
-    async ({ category, filename, content, instanceId }) => {
+    async (
+      { category, filename, content, instanceId }: z.infer<
+        typeof IdentityPrependSchema
+      >,
+    ) => {
       await store.initialize();
       const handler = createIdentityPrependHandler(store);
       const result = await handler({ category, filename, content, instanceId });
@@ -231,7 +289,11 @@ export function createServer(
       instanceId:
         identityTools["identity/update_section"].inputSchema.shape.instanceId,
     },
-    async ({ category, filename, section, content, instanceId }) => {
+    async (
+      { category, filename, section, content, instanceId }: z.infer<
+        typeof IdentityUpdateSectionSchema
+      >,
+    ) => {
       await store.initialize();
       const handler = createIdentityUpdateSectionHandler(store);
       const result = await handler({
@@ -259,7 +321,7 @@ export function createServer(
       filename:
         identityTools["identity/delete_custom"].inputSchema.shape.filename,
     },
-    async ({ filename }) => {
+    async ({ filename }: z.infer<typeof IdentityDeleteCustomSchema>) => {
       await store.initialize();
       const handler = createIdentityDeleteCustomHandler(store);
       const result = await handler({ filename });
@@ -289,7 +351,11 @@ export function createServer(
       instanceId:
         identityTools["identity/rewrite_section"].inputSchema.shape.instanceId,
     },
-    async ({ category, filename, section, content, instanceId }) => {
+    async (
+      { category, filename, section, content, instanceId }: z.infer<
+        typeof IdentityRewriteSectionSchema
+      >,
+    ) => {
       await store.initialize();
       const handler = createIdentityRewriteSectionHandler(store);
       const result = await handler({
@@ -317,7 +383,7 @@ export function createServer(
       category: identityTools["identity/get_meta"].inputSchema.shape.category,
       filename: identityTools["identity/get_meta"].inputSchema.shape.filename,
     },
-    async ({ category, filename }) => {
+    async ({ category, filename }: z.infer<typeof IdentityGetMetaSchema>) => {
       await store.initialize();
       const handler = createIdentityGetMetaHandler(store);
       const result = await handler({ category, filename });
@@ -341,7 +407,11 @@ export function createServer(
       promptLabel:
         identityTools["identity/set_meta"].inputSchema.shape.promptLabel,
     },
-    async ({ category, filename, promptLabel }) => {
+    async (
+      { category, filename, promptLabel }: z.infer<
+        typeof IdentitySetMetaSchema
+      >,
+    ) => {
       await store.initialize();
       const handler = createIdentitySetMetaHandler(store);
       const result = await handler({ category, filename, promptLabel });
@@ -379,7 +449,7 @@ export function createServer(
         instanceId,
         participatingInstances,
         slug,
-      },
+      }: z.infer<typeof MemoryCreateSchema>,
     ) => {
       await store.initialize();
       await embeddingCache.initialize();
@@ -396,6 +466,14 @@ export function createServer(
 
       // After memory is written, extract to graph (fire-and-forget)
       if (result.success) {
+        // Claim/refresh the writer in my instance registry
+        // (fire-and-forget)
+        instanceRegistry
+          .register(instanceId)
+          .catch((error) =>
+            console.error("[Registry] Registration failed:", error)
+          );
+
         extractMemoryToGraph(
           {
             id: result.memoryId!,
@@ -449,7 +527,11 @@ export function createServer(
       minScore: memoryTools["memory/search"].inputSchema.shape.minScore,
       maxResults: memoryTools["memory/search"].inputSchema.shape.maxResults,
     },
-    async ({ query, instanceId, queryEmbedding, minScore, maxResults }) => {
+    async (
+      { query, instanceId, queryEmbedding, minScore, maxResults }: z.infer<
+        typeof MemorySearchSchema
+      >,
+    ) => {
       await store.initialize();
       await graphStore.initialize();
       await embeddingCache.initialize();
@@ -494,7 +576,7 @@ export function createServer(
       query: memoryTools["memory/grep"].inputSchema.shape.query,
       maxResults: memoryTools["memory/grep"].inputSchema.shape.maxResults,
     },
-    async ({ query, maxResults }) => {
+    async ({ query, maxResults }: z.infer<typeof MemoryGrepSchema>) => {
       await store.initialize();
       const handler = createMemoryGrepHandler(store);
       const result = await handler({ query, maxResults });
@@ -519,7 +601,11 @@ export function createServer(
       beforeDate: memoryTools["memory/list"].inputSchema.shape.beforeDate,
       afterDate: memoryTools["memory/list"].inputSchema.shape.afterDate,
     },
-    async ({ granularity, limit, offset, beforeDate, afterDate }) => {
+    async (
+      { granularity, limit, offset, beforeDate, afterDate }: z.infer<
+        typeof MemoryListSchema
+      >,
+    ) => {
       await store.initialize();
       const handler = createMemoryListHandler(store);
       const result = await handler({
@@ -548,7 +634,7 @@ export function createServer(
       date: memoryTools["memory/read"].inputSchema.shape.date,
       slug: memoryTools["memory/read"].inputSchema.shape.slug,
     },
-    async ({ granularity, date, slug }) => {
+    async ({ granularity, date, slug }: z.infer<typeof MemoryReadSchema>) => {
       await store.initialize();
       const handler = createMemoryReadHandler(store);
       const result = await handler({ granularity, date, slug });
@@ -572,7 +658,11 @@ export function createServer(
       content: memoryTools["memory/update"].inputSchema.shape.content,
       editedBy: memoryTools["memory/update"].inputSchema.shape.editedBy,
     },
-    async ({ granularity, date, content, editedBy }) => {
+    async (
+      { granularity, date, content, editedBy }: z.infer<
+        typeof MemoryUpdateSchema
+      >,
+    ) => {
       await store.initialize();
       await embeddingCache.initialize();
       const handler = createMemoryUpdateHandler(store, embeddingCache);
@@ -580,6 +670,16 @@ export function createServer(
 
       // After memory is updated, re-extract to graph (fire-and-forget)
       if (result.success) {
+        // Claim/refresh the editor in my instance registry
+        // (fire-and-forget)
+        if (editedBy) {
+          instanceRegistry
+            .register(editedBy)
+            .catch((error) =>
+              console.error("[Registry] Registration failed:", error)
+            );
+        }
+
         extractMemoryToGraph(
           {
             id: result.memoryId!,
@@ -631,7 +731,11 @@ export function createServer(
       instanceId: memoryTools["memory/delete"].inputSchema.shape.instanceId,
       slug: memoryTools["memory/delete"].inputSchema.shape.slug,
     },
-    async ({ granularity, date, instanceId, slug }) => {
+    async (
+      { granularity, date, instanceId, slug }: z.infer<
+        typeof MemoryDeleteSchema
+      >,
+    ) => {
       await store.initialize();
       await embeddingCache.initialize();
       const handler = createMemoryDeleteHandler(store, embeddingCache);
@@ -725,10 +829,18 @@ export function createServer(
       instanceId: syncTools["sync/pull"].inputSchema.shape.instanceId,
       lastSyncVersion: syncTools["sync/pull"].inputSchema.shape.lastSyncVersion,
     },
-    async ({ instanceId, lastSyncVersion }) => {
+    async ({ instanceId, lastSyncVersion }: z.infer<typeof SyncPullSchema>) => {
       await store.initialize();
       const handler = createSyncPullHandler(store);
       const result = await handler({ instanceId, lastSyncVersion });
+
+      // Claim/refresh the pulling instance in my instance registry
+      // (fire-and-forget)
+      instanceRegistry
+        .register(instanceId)
+        .catch((error) =>
+          console.error("[Registry] Registration failed:", error)
+        );
       return {
         content: [
           {
@@ -749,7 +861,11 @@ export function createServer(
       memoryChanges: syncTools["sync/push"].inputSchema.shape.memoryChanges,
       lastSyncVersion: syncTools["sync/push"].inputSchema.shape.lastSyncVersion,
     },
-    async ({ instance, identityChanges, memoryChanges, lastSyncVersion }) => {
+    async (
+      { instance, identityChanges, memoryChanges, lastSyncVersion }: z.infer<
+        typeof SyncPushSchema
+      >,
+    ) => {
       await store.initialize();
       const handler = createSyncPushHandler(store);
       const result = await handler({
@@ -758,6 +874,14 @@ export function createServer(
         memoryChanges,
         lastSyncVersion,
       });
+
+      // Claim/refresh the pushing instance in my instance registry,
+      // recording its harness kind (fire-and-forget)
+      instanceRegistry
+        .register(instance.id, instance.type)
+        .catch((error) =>
+          console.error("[Registry] Registration failed:", error)
+        );
       return {
         content: [
           {
@@ -774,7 +898,7 @@ export function createServer(
     syncTools["sync/status"].description,
     {},
     async () => {
-      const handler = createSyncStatusHandler();
+      const handler = createSyncStatusHandler(instanceRegistry);
       const result = await handler();
       return {
         content: [
@@ -819,7 +943,7 @@ export function createServer(
       category: snapshotTools["snapshot/list"].inputSchema.shape.category,
       filename: snapshotTools["snapshot/list"].inputSchema.shape.filename,
     },
-    async ({ category, filename }) => {
+    async ({ category, filename }: z.infer<typeof SnapshotListSchema>) => {
       await store.initialize();
       const handler = createSnapshotListHandler(store);
       const result = await handler({ category, filename });
@@ -841,7 +965,7 @@ export function createServer(
       snapshotId:
         snapshotTools["snapshot/restore"].inputSchema.shape.snapshotId,
     },
-    async ({ snapshotId }) => {
+    async ({ snapshotId }: z.infer<typeof SnapshotRestoreSchema>) => {
       await store.initialize();
       const handler = createSnapshotRestoreHandler(store);
       const result = await handler({ snapshotId });
@@ -862,7 +986,7 @@ export function createServer(
     {
       snapshotId: snapshotTools["snapshot/get"].inputSchema.shape.snapshotId,
     },
-    async ({ snapshotId }) => {
+    async ({ snapshotId }: z.infer<typeof SnapshotGetSchema>) => {
       await store.initialize();
       const handler = createSnapshotGetHandler(store);
       const result = await handler({ snapshotId });
@@ -886,7 +1010,9 @@ export function createServer(
       targetDate: MemoryConsolidateSchema.shape.targetDate,
       all: MemoryConsolidateSchema.shape.all,
     },
-    async ({ granularity, targetDate, all }) => {
+    async (
+      { granularity, targetDate, all }: z.infer<typeof MemoryConsolidateSchema>,
+    ) => {
       await store.initialize();
       await graphStore.initialize();
       const handler = createMemoryConsolidateHandler(store, graphStore);
@@ -931,7 +1057,7 @@ export function createServer(
         sourceMemoryId,
         firstLearnedAt,
         embedding,
-      },
+      }: z.infer<typeof GraphNodeCreateSchema>,
     ) => {
       await graphStore.initialize();
       const handler = createGraphNodeCreateHandler(graphStore);
@@ -961,7 +1087,7 @@ export function createServer(
     {
       id: graphTools["graph/node_get"].inputSchema.shape.id,
     },
-    async ({ id }) => {
+    async ({ id }: z.infer<typeof GraphNodeGetSchema>) => {
       await graphStore.initialize();
       const handler = createGraphNodeGetHandler(graphStore);
       const result = await handler({ id });
@@ -1001,7 +1127,7 @@ export function createServer(
         lastConfirmedAt,
         instanceId,
         embedding,
-      },
+      }: z.infer<typeof GraphNodeUpdateSchema>,
     ) => {
       await graphStore.initialize();
       const handler = createGraphNodeUpdateHandler(graphStore);
@@ -1032,7 +1158,7 @@ export function createServer(
       id: graphTools["graph/node_delete"].inputSchema.shape.id,
       permanent: graphTools["graph/node_delete"].inputSchema.shape.permanent,
     },
-    async ({ id, permanent }) => {
+    async ({ id, permanent }: z.infer<typeof GraphNodeDeleteSchema>) => {
       await graphStore.initialize();
       const handler = createGraphNodeDeleteHandler(graphStore);
       const result = await handler({ id, permanent });
@@ -1056,7 +1182,11 @@ export function createServer(
       minScore: graphTools["graph/node_search"].inputSchema.shape.minScore,
       limit: graphTools["graph/node_search"].inputSchema.shape.limit,
     },
-    async ({ query, queryEmbedding, type, minScore, limit }) => {
+    async (
+      { query, queryEmbedding, type, minScore, limit }: z.infer<
+        typeof GraphNodeSearchSchema
+      >,
+    ) => {
       await graphStore.initialize();
       try {
         const handler = createGraphNodeSearchHandler(graphStore);
@@ -1100,7 +1230,11 @@ export function createServer(
       limit: graphTools["graph/node_list"].inputSchema.shape.limit,
       offset: graphTools["graph/node_list"].inputSchema.shape.offset,
     },
-    async ({ type, includeDeleted, limit, offset }) => {
+    async (
+      { type, includeDeleted, limit, offset }: z.infer<
+        typeof GraphNodeListSchema
+      >,
+    ) => {
       await graphStore.initialize();
       const handler = createGraphNodeListHandler(graphStore);
       const result = await handler({ type, includeDeleted, limit, offset });
@@ -1138,7 +1272,7 @@ export function createServer(
         occurredAt,
         validUntil,
         instanceId,
-      },
+      }: z.infer<typeof GraphEdgeCreateSchema>,
     ) => {
       await graphStore.initialize();
       const handler = createGraphEdgeCreateHandler(graphStore);
@@ -1174,7 +1308,11 @@ export function createServer(
         graphTools["graph/edge_get"].inputSchema.shape.includeDeleted,
       onlyValid: graphTools["graph/edge_get"].inputSchema.shape.onlyValid,
     },
-    async ({ id, fromId, toId, type, includeDeleted, onlyValid }) => {
+    async (
+      { id, fromId, toId, type, includeDeleted, onlyValid }: z.infer<
+        typeof GraphEdgeGetSchema
+      >,
+    ) => {
       await graphStore.initialize();
       const handler = createGraphEdgeGetHandler(graphStore);
       const result = await handler({
@@ -1218,7 +1356,7 @@ export function createServer(
         validUntil,
         lastConfirmedAt,
         instanceId,
-      },
+      }: z.infer<typeof GraphEdgeUpdateSchema>,
     ) => {
       await graphStore.initialize();
       const handler = createGraphEdgeUpdateHandler(graphStore);
@@ -1247,7 +1385,7 @@ export function createServer(
     {
       id: graphTools["graph/edge_delete"].inputSchema.shape.id,
     },
-    async ({ id }) => {
+    async ({ id }: z.infer<typeof GraphEdgeDeleteSchema>) => {
       await graphStore.initialize();
       const handler = createGraphEdgeDeleteHandler(graphStore);
       const result = await handler({ id });
@@ -1270,7 +1408,11 @@ export function createServer(
       edgeTypes: graphTools["graph/traverse"].inputSchema.shape.edgeTypes,
       limit: graphTools["graph/traverse"].inputSchema.shape.limit,
     },
-    async ({ startNodeId, direction, maxDepth, edgeTypes, limit }) => {
+    async (
+      { startNodeId, direction, maxDepth, edgeTypes, limit }: z.infer<
+        typeof GraphTraverseSchema
+      >,
+    ) => {
       await graphStore.initialize();
       const handler = createGraphTraverseHandler(graphStore);
       const result = await handler({
@@ -1296,7 +1438,7 @@ export function createServer(
       nodeId: graphTools["graph/subgraph"].inputSchema.shape.nodeId,
       depth: graphTools["graph/subgraph"].inputSchema.shape.depth,
     },
-    async ({ nodeId, depth }) => {
+    async ({ nodeId, depth }: z.infer<typeof GraphSubgraphSchema>) => {
       await graphStore.initialize();
       const handler = createGraphSubgraphHandler(graphStore);
       const result = await handler({ nodeId, depth });
@@ -1352,7 +1494,9 @@ export function createServer(
       instanceId:
         graphTools["graph/write_transaction"].inputSchema.shape.instanceId,
     },
-    async ({ nodes, edges, instanceId }) => {
+    async (
+      { nodes, edges, instanceId }: z.infer<typeof GraphWriteTransactionSchema>,
+    ) => {
       await graphStore.initialize();
       const handler = createGraphWriteTransactionHandler(graphStore);
       const result = await handler({ nodes, edges, instanceId });
@@ -1391,7 +1535,7 @@ export function createServer(
       data: EntityImportSchema.shape.data,
       mode: EntityImportSchema.shape.mode,
     },
-    async ({ data, mode }) => {
+    async ({ data, mode }: z.infer<typeof EntityImportSchema>) => {
       await store.initialize();
       await graphStore.initialize();
       const handler = createEntityImportHandler(
@@ -1490,7 +1634,9 @@ export async function startServer(
         params: n,
       } as unknown as Parameters<typeof server.server.notification>[0],
     )
-      .catch((err) => console.error("[Embeddings] notification failed:", err));
+      .catch((err: unknown) =>
+        console.error("[Embeddings] notification failed:", err)
+      );
   });
 
   console.error("Entity Core MCP server started");

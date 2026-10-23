@@ -18,8 +18,11 @@ const DISCORD_MAX_MESSAGE_LENGTH = 2000;
 import emojiData from "emojilib" with { type: "json" };
 
 const EMOJI_BY_NAME: Record<string, string> = {};
+// emojilib's JSON infers a nested-record value type while the runtime
+// shape is char -> string[] of names; the double cast is the honest
+// bridge (the previous single cast was an illegal direct conversion).
 for (const [char, names] of Object.entries(emojiData)) {
-  for (const name of names as string[]) {
+  for (const name of names as unknown as string[]) {
     EMOJI_BY_NAME[name.toLowerCase()] = char;
   }
 }

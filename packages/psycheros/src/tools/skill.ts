@@ -6,7 +6,7 @@
  * available are listed alongside this tool's description. Loading a skill holds
  * it active under "Skills I'm holding" in my context until I release it —
  * there is no fading; I decide when a skill's work is done. Reference docs
- * are transient lookups that fade after a few turns.
+ * are plain lookups — they land in the conversation like any tool result.
  *
  * Passing body makes this an authoring call: I write the skill (or one of its
  * reference docs) to disk, where it becomes part of my procedural memory.
@@ -34,8 +34,8 @@ export const skillTool: Tool = {
         "decide when its work is done, and since held skills are never-trimmed " +
         "standing context, I don't hold them casually. I can pass a list of " +
         "names to load or release several skills in one call. The reference " +
-        "parameter loads one of a skill's deep-dive docs instead — a transient " +
-        "lookup that fades after a few turns. With body (and optionally " +
+        "parameter loads one of a skill's deep-dive docs instead — a lookup " +
+        "that lands in the conversation like any tool result. With body (and optionally " +
         "description or reference) this becomes an authoring call that saves " +
         "the skill or reference doc to disk as my procedural memory. When " +
         "practical, I mention new or changed skills to the user.",
@@ -150,7 +150,7 @@ async function executeSkill(
       toolCallId: ctx.toolCallId,
       content:
         "Error: releasing applies to the skill itself, not its references — " +
-        "references are transient and fade on their own.",
+        "references are plain tool results; there is nothing to release.",
       isError: true,
     };
   }
@@ -290,7 +290,7 @@ async function executeSkill(
     };
   }
 
-  // Reference loads are transient lookups — fade machinery applies.
+  // Reference loads are plain lookups — the result stays in context.
   if (reference) {
     const ref = existing.references.find((r) => r.name === reference);
     if (!ref) {
@@ -307,16 +307,10 @@ async function executeSkill(
     return {
       toolCallId: ctx.toolCallId,
       content: `Skill '${name}' — reference '${reference}':\n\n${ref.content}`,
-      metadata: {
-        fade: {
-          replacementContent:
-            `Skill '${name}' reference '${reference}' faded — call skill({name:"${name}", reference:"${reference}"}) to reload it.`,
-        },
-      },
     };
   }
 
-  // Skill loads hold — no fade metadata: the body renders in the system
+  // Skill loads hold: the body renders in the system
   // message's "Skills I'm holding" block each turn, not in this tool result.
   ctx.db.holdSkill(ctx.conversationId, name);
   return {

@@ -472,7 +472,16 @@ export const controlLovenseTool: Tool = {
       }
 
       case "set_speed": {
-        const speed = typeof args.speed === "number" ? args.speed : undefined;
+        // Coerce numeric strings: the
+        // model can send speed as a string and retry the identical failing
+        // call — meet the model where it is, keep the range gate.
+        const speedArg = typeof args.speed === "string"
+          ? Number(args.speed)
+          : args.speed;
+        const speed = typeof speedArg === "number" &&
+            Number.isFinite(speedArg)
+          ? speedArg
+          : undefined;
         if (speed === undefined || speed < 0 || speed > 20) {
           return {
             toolCallId: ctx.toolCallId,

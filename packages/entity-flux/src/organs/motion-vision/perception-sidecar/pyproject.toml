@@ -1,0 +1,18 @@
+[project]
+name = "psycheros-perception"
+version = "0.1.0"
+description = "Perception sidecar (custom per-install hookup) — classical models (person detection, face identity) on the Coral USB TPU for the Psycheros sensory stack. Requires Python 3.9 (Google's pycoral wheels stop at cp39)."
+requires-python = ">=3.9,<3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pydantic>=2.0",
+    "numpy>=1.20,<2",
+    "Pillow>=10.0",
+]
+
+# pycoral + tflite-runtime come from Google's index (not PyPI — the PyPI
+# "pycoral" is an unrelated package):
+#   .venv/bin/pip install --index-url https://google-coral.github.io/py-repo/ \
+#     --extra-index-url https://pypi.org/simple pycoral tflite-runtime
+# libedgetpu1-std (the TPU runtime) comes from the coral-edgetpu-stable apt pool.

@@ -1,5 +1,10 @@
 # Feature Design Doc: Held-skill chips
 
+> **SUPERSEDED (2026-09-29):** the `#held-skills-strip` element is gone — held
+> skills now render as segments of the **state sub-bar** (the catch-all "this is
+> happening" chip space; `docs/design/action-drawer.md`). This doc remains for
+> the chip design history.
+
 Status: implemented Date: 2026-08-16
 
 ## Problem / Motivation

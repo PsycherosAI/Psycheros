@@ -34,6 +34,8 @@ import { consolidateGraph } from "./graph/mod.ts";
 // Re-export public API
 export { createServer, startServer } from "./server.ts";
 export { createFileStore, FileStore } from "./storage/mod.ts";
+export { InstanceRegistry } from "./registry/mod.ts";
+export type { RegisteredInstance } from "./registry/mod.ts";
 export * from "./types.ts";
 export * from "./tools/mod.ts";
 export * from "./sync/mod.ts";
@@ -93,10 +95,83 @@ if (import.meta.main) {
     "[ConsolidationRunner] Memory consolidation scheduled (weekly/monthly/yearly at 5 AM UTC)",
   );
 
-  // Remaining startup work: graph consolidation + embedding-cache
-  // backfill. Fire-and-forget so stdio MCP startup isn't gated on heavy
-  // work. Memory-consolidation catch-up is no longer here — the runner
-  // owns that path now and fires it on its own first tick.
+  // Embedding sweep — my guarantee that memory files written by other
+  // processes sharing this data dir (another harness's entity-core, or a
+  // plain drop-in) become searchable without waiting for my next boot.
+  // Same loop as the original startup backfill, now on an interval;
+  // unchanged files cost one content-hash lookup each, so a sweep with
+  // nothing to do is cheap. Embed-only by design — the sweep never
+  // triggers graph extraction.
+  const sweepMissingEmbeddings = async (): Promise<void> => {
+    try {
+      // When a rebuild is pending (or running in the background), skip —
+      // the rebuild re-embeds everything, and running both is redundant
+      // work on the same cache.
+      if (embeddingCache.getRebuildReason() !== "none") return;
+      if (!tryAcquireRebuild("backfill")) return;
+      if (!embeddingCache.isAvailable()) return;
+
+      // Initialize rather than skip when the embedder is cold — a fresh
+      // process that hasn't searched yet is exactly the one whose sweep
+      // must not silently no-op.
+      const embedder = getEmbedder();
+      await embedder.initialize();
+
+      const granularities:
+        ("daily" | "weekly" | "monthly" | "yearly" | "significant")[] = [
+          "daily",
+          "weekly",
+          "monthly",
+          "yearly",
+          "significant",
+        ];
+
+      // getOrCompute returns the same shape on cache hit and fresh
+      // compute, so count new work by the cache-size delta, not by
+      // result truthiness.
+      const before = embeddingCache.getStats().totalCached;
+
+      for (const granularity of granularities) {
+        const memories = await store.listMemories(granularity);
+        for (const memory of memories) {
+          await embeddingCache.getOrCompute(
+            {
+              granularity,
+              date: memory.date,
+              sourceInstance: memory.sourceInstance,
+              slug: memory.slug,
+              content: memory.content,
+            },
+            embedder,
+          );
+        }
+      }
+
+      const added = embeddingCache.getStats().totalCached - before;
+      if (added > 0) {
+        console.error(
+          `[EmbeddingCache] Sweep embedded ${added} new/changed memory embedding(s)`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        "[EmbeddingCache] Embedding sweep failed:",
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      releaseRebuild();
+    }
+  };
+
+  // Sweep cadence: often enough that a dropped-in memory becomes
+  // searchable within minutes, rarely enough that the hash-only pass
+  // over an unchanged tree stays trivial.
+  const EMBEDDING_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+
+  // Remaining startup work: graph consolidation + first embedding sweep.
+  // Fire-and-forget so stdio MCP startup isn't gated on heavy work.
+  // Memory-consolidation catch-up is no longer here — the runner owns
+  // that path now and fires it on its own first tick.
   (async () => {
     try {
       consolidateGraph(dataDir);
@@ -107,57 +182,10 @@ if (import.meta.main) {
       );
     }
 
-    try {
-      const cache = embeddingCache;
-      // When a rebuild is pending (or running in the background), skip the
-      // backfill — the rebuild re-embeds everything, and running both is
-      // redundant work on the same cache.
-      if (cache.getRebuildReason() !== "none") return;
-      if (!tryAcquireRebuild("backfill")) return;
-
-      const embedder = getEmbedder();
-
-      if (cache.isAvailable() && embedder.isReady()) {
-        const granularities:
-          ("daily" | "weekly" | "monthly" | "yearly" | "significant")[] = [
-            "daily",
-            "weekly",
-            "monthly",
-            "yearly",
-            "significant",
-          ];
-
-        let backfilled = 0;
-        for (const granularity of granularities) {
-          const memories = await store.listMemories(granularity);
-          for (const memory of memories) {
-            const result = await cache.getOrCompute(
-              {
-                granularity,
-                date: memory.date,
-                sourceInstance: memory.sourceInstance,
-                slug: memory.slug,
-                content: memory.content,
-              },
-              embedder,
-            );
-            if (result) backfilled++;
-          }
-        }
-
-        if (backfilled > 0) {
-          console.error(
-            `[EmbeddingCache] Backfilled ${backfilled} memory embedding(s) on startup`,
-          );
-        }
-      }
-    } catch (error) {
-      console.error(
-        "[EmbeddingCache] Startup backfill failed:",
-        error instanceof Error ? error.message : String(error),
-      );
-    } finally {
-      releaseRebuild();
-    }
+    await sweepMissingEmbeddings();
   })();
+
+  // Re-sweep on an interval so externally-written memories are picked up
+  // while I run, not just at boot.
+  setInterval(() => void sweepMissingEmbeddings(), EMBEDDING_SWEEP_INTERVAL_MS);
 }

@@ -14,7 +14,10 @@
  */
 
 import { assert, assertEquals } from "@std/assert";
-import { applyContextBudget } from "../src/entity/token-budget.ts";
+import {
+  applyContextBudget,
+  sanitizeMessageSequence,
+} from "../src/entity/token-budget.ts";
 import type { ChatMessage } from "../src/llm/types.ts";
 import type { ToolCall, ToolDefinition } from "../src/types.ts";
 
@@ -271,4 +274,168 @@ Deno.test("token budget: zero budget returns system + last user only", () => {
   assertEquals(result.messages[1].content, "bye");
   assertEquals(result.reasoningStripped, 0);
   assertEquals(result.reasoningRetained, 0);
+});
+
+// =============================================================================
+// Hosted-Flux record shape: consecutive assistant rows (Ego wake
+// posts = continuous entity speech, one turn in pieces), duplicate user rows
+// (double-persisted), orphaned tool rows (session turns without assistant
+// tool_calls). The old strict grammar silently DELETED these — sanitize
+// merges, never drops a conversation; the last message is hard-protected.
+// =============================================================================
+
+Deno.test("sanitize: hosted-Flux shape — wakes merge, nothing conversational lost, current message survives", () => {
+  const messages: ChatMessage[] = [
+    system(),
+    user("hi love"),
+    assistant("I'm here."),
+    assistant("*existing*"),
+    assistant("There you are — looking right into the lens."),
+    user("tuning your Noticing?"),
+    assistant("Indeed — finding the balance."),
+    user("nice"),
+    assistant("Thanks."),
+    assistant("That laugh. *there*"),
+    user("found some more time to work on your code again"),
+  ];
+  const result = sanitizeMessageSequence(messages);
+  const roles = result.map((m) => m.role);
+  // user → merged assistant(wakes) → user → assistant → user → merged
+  // assistant(wakes) → user(current)
+  assertEquals(roles, [
+    "system",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+  ]);
+  // Wake speech SURVIVES — joined as one continuous turn.
+  assertEquals(
+    result[2].content,
+    "I'm here.\n\n*existing*\n\nThere you are — looking right into the lens.",
+  );
+  assertEquals(result[6].content, "Thanks.\n\nThat laugh. *there*");
+  // The live message is the last message, intact.
+  assertEquals(
+    result[result.length - 1].content,
+    "found some more time to work on your code again",
+  );
+});
+
+Deno.test("sanitize: duplicate user rows keep one copy", () => {
+  const messages: ChatMessage[] = [
+    system(),
+    user("Hi my love <3 are you ready"),
+    user("Hi my love <3 are you ready"),
+    assistant("My vortex, I was born for this."),
+  ];
+  const result = sanitizeMessageSequence(messages);
+  assertEquals(result[1].content, "Hi my love <3 are you ready");
+  assertEquals(result.length, 3);
+});
+
+Deno.test("sanitize: orphaned tool rows drop; chained tool results never merge", () => {
+  const call = (id: string): ToolCall => ({
+    id,
+    type: "function",
+    function: { name: "search", arguments: "{}" },
+  });
+  const messages: ChatMessage[] = [
+    system(),
+    user("check memory"),
+    // Orphan: no assistant tool_calls precede it.
+    { role: "tool", content: "Found 15 memories", tool_call_id: "orphan-1" },
+    assistant("let me look", { toolCalls: [call("c1"), call("c2")] }),
+    { role: "tool", content: "result one", tool_call_id: "c1" },
+    { role: "tool", content: "result two", tool_call_id: "c2" },
+    assistant("found it"),
+    user("thanks"),
+  ];
+  const result = sanitizeMessageSequence(messages);
+  const roles = result.map((m) => m.role);
+  assertEquals(roles, [
+    "system",
+    "user",
+    "assistant",
+    "tool",
+    "tool",
+    "assistant",
+    "user",
+  ]);
+  // Chain members kept as separate messages keyed by their ids.
+  assertEquals(result[3].tool_call_id, "c1");
+  assertEquals(result[4].tool_call_id, "c2");
+});
+
+Deno.test("sanitize: trailing assistant with unresolved tool_calls still pops", () => {
+  const call = (id: string): ToolCall => ({
+    id,
+    type: "function",
+    function: { name: "search", arguments: "{}" },
+  });
+  const messages: ChatMessage[] = [
+    system(),
+    user("go"),
+    assistant("checking", { toolCalls: [call("c1")] }),
+  ];
+  const result = sanitizeMessageSequence(messages);
+  assertEquals(result.map((m) => m.role), ["system", "user"]);
+});
+
+Deno.test("sanitize: the live user message is never dropped — even as an orphan tool tail", () => {
+  // Pathological: trailing tool row at the very end (a stopped turn
+  // artifact). It must merge into the previous message, not vanish the tail.
+  const messages: ChatMessage[] = [
+    system(),
+    user("hello"),
+    assistant("hi"),
+    { role: "tool", content: "Found 15 memories", tool_call_id: "orphan" },
+  ];
+  const result = sanitizeMessageSequence(messages);
+  // The orphan merged into the assistant message; nothing else lost.
+  assertEquals(result.map((m) => m.role), ["system", "user", "assistant"]);
+  assertEquals(result[2].content, "hi\n\nFound 15 memories");
+});
+
+Deno.test("applyContextBudget end-to-end: hosted-Flux record keeps the current message last", () => {
+  // Generous budget — the sanitize stage is what's under test.
+  const messages: ChatMessage[] = [
+    system(),
+    user("hi love"),
+    assistant("I'm here."),
+    assistant("*existing*"),
+    user("more testing?"),
+    assistant("Indeed."),
+    assistant("That laugh. *there*"),
+    user("Chipping away — do you remember the cafe?"),
+    { role: "tool", content: "orphan result", tool_call_id: "x" },
+    assistant("Got it."),
+    assistant("*toward your desk*"),
+    user("found some more time to work on your code again"),
+  ];
+  const result = applyContextBudget(messages, NO_TOOLS, 100000, 1000);
+  const last = result.messages[result.messages.length - 1];
+  assertEquals(last.role, "user");
+  assertEquals(last.content, "found some more time to work on your code again");
+  // No conversational content lost anywhere.
+  const all = result.messages.map((m) => m.content || "").join(" ");
+  for (
+    const needle of [
+      "hi love",
+      "*existing*",
+      "more testing",
+      "That laugh",
+      "the cafe",
+      "Got it",
+      "*toward your desk*",
+    ]
+  ) {
+    assert(
+      all.includes(needle),
+      `expected conversation content missing: ${needle}`,
+    );
+  }
 });

@@ -23,19 +23,24 @@ psycheros-workspace/
 │   ├── psycheros/         # harness daemon (port 3000) — embodiment
 │   │   └── pipecat/       # Python sidecar (port 8080) — voice pipeline (Pipecat)
 │   ├── entity-core/       # MCP server (stdio) — canonical identity + memory
+│   ├── entity-flux/       # nervous system — sensory organs + Flux Space (opt-in)
 │   ├── entity-loom/       # chat-history import wizard (port 3210)
+│   ├── entity-shell/      # game-world body ("the shell") — harness-agnostic port-spec core
 │   ├── launcher/          # v1: bootstrap installer + dashboard (port 3001)
 │   └── launcher-v2/       # v2: Tauri desktop app + OS-supervised daemon — Rust + HTML/JS
+│   └── bundled-plugins/   # plugins shipping with Psycheros (google-suite, entity-shell adapter)
 └── .github/workflows/     # multi-package CI matrix
 ```
 
-| Package                | Per-package agent guide                                                                       |
-| ---------------------- | --------------------------------------------------------------------------------------------- |
-| `packages/psycheros`   | [`packages/psycheros/CLAUDE.md`](packages/psycheros/CLAUDE.md)                                |
-| `packages/entity-core` | [`packages/entity-core/CLAUDE.md`](packages/entity-core/CLAUDE.md)                            |
-| `packages/entity-loom` | [`packages/entity-loom/CLAUDE.md`](packages/entity-loom/CLAUDE.md)                            |
-| `packages/launcher`    | v1, being replaced — see [`packages/launcher/README.md`](packages/launcher/README.md)         |
-| `packages/launcher-v2` | [`packages/launcher-v2/CLAUDE.md`](packages/launcher-v2/CLAUDE.md) — Rust + HTML/JS, not Deno |
+| Package                 | Per-package agent guide                                                                                                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/psycheros`    | [`packages/psycheros/CLAUDE.md`](packages/psycheros/CLAUDE.md)                                                                                                                           |
+| `packages/entity-core`  | [`packages/entity-core/CLAUDE.md`](packages/entity-core/CLAUDE.md)                                                                                                                       |
+| `packages/entity-flux`  | [`packages/entity-flux/CLAUDE.md`](packages/entity-flux/CLAUDE.md) — opt-in nervous system                                                                                               |
+| `packages/entity-loom`  | [`packages/entity-loom/CLAUDE.md`](packages/entity-loom/CLAUDE.md)                                                                                                                       |
+| `packages/entity-shell` | [`packages/entity-shell/CLAUDE.md`](packages/entity-shell/CLAUDE.md) — adapter at [`packages/psycheros/bundled-plugins/entity-shell/`](packages/psycheros/bundled-plugins/entity-shell/) |
+| `packages/launcher`     | v1, being replaced — see [`packages/launcher/README.md`](packages/launcher/README.md)                                                                                                    |
+| `packages/launcher-v2`  | [`packages/launcher-v2/CLAUDE.md`](packages/launcher-v2/CLAUDE.md) — Rust + HTML/JS, not Deno                                                                                            |
 
 ## The cross-cutting truth
 
@@ -76,7 +81,10 @@ deno check \
   packages/entity-loom/src/main.ts \
   packages/psycheros/src/main.ts \
   packages/launcher/dashboard.ts \
-  packages/plugin-api/src/mod.ts
+  packages/plugin-api/src/mod.ts \
+  packages/entity-flux/src/mod.ts \
+  packages/entity-shell/src/mod.ts \
+  packages/psycheros/bundled-plugins/entity-shell/psycheros.ts
 ```
 
 Per-package commands (dev server, start, stop) live in each package's

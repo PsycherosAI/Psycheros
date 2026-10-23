@@ -86,3 +86,20 @@ desktop.ini
 .playwright-mcp/
 TODO.md
 PLAN.md
+
+# ============================================
+# Perception sidecar — model weights and enrolled faces never commit
+# ============================================
+/packages/psycheros/perception/models/
+/packages/psycheros/perception/faces/
+packages/psycheros/lib/models/vad-bert/
+
+# ============================================
+# Local dev ledgers — arc notes, decision ledgers, A/B records.
+# Kept on the dev machine for future build sessions; never committed
+# (they reference the owner's entity and private infra).
+# ============================================
+NOTES.md
+
+# entity-flux dev ledger — install-specific ops journal, stays local-only
+packages/entity-flux/NOTES.md

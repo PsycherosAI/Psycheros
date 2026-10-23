@@ -4,6 +4,13 @@ All notable changes to entity-loom are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and this package follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-10-23
+
+### Changed
+
+- Loom web UI (graph + wizard pages) markup refreshed onto the current
+  formatting baseline. No behavioral changes.
+
 ## [0.4.0] - 2026-07-16
 
 ### Added
@@ -223,6 +230,7 @@ All notable changes to entity-loom are documented here. The format follows
   - **Kindroid / KinLog** — JSON
 - Five-stage wizard served at `http://localhost:3210`.
 
+[0.4.1]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.4.1
 [0.3.9]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.9
 [0.3.8]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.8
 [0.3.7]: https://github.com/PsycherosAI/Psycheros/releases/tag/entity-loom-v0.3.7
