@@ -2,9 +2,11 @@
  * Plugin update checker + applier.
  *
  * The update surface piggybacks on PluginInstaller's existing inspectGit →
- * installDraft pipeline. This module is just the GitHub tag-API glue:
+ * installDraft pipeline. This module is the GitHub tag-API glue and
+ * compatibility gate:
  *   - parse owner/repo from a plugin's `update.repoUrl`
- *   - fetch that repo's tags, filter by `update.tagPrefix`, pick the highest semver
+ *   - fetch matching semver tags and inspect each tagged plugin manifest
+ *   - select the newest release compatible with this Psycheros installation
  *   - compare against the installed version
  *   - when applying, hand off to inspectGit + installDraft (which already
  *     handle backup, validation, atomic replace, restartRequired surfacing)
@@ -17,7 +19,21 @@
 
 import * as semver from "@std/semver";
 import { join } from "@std/path";
-import type { PluginInstaller } from "./installer.ts";
+import {
+  type PluginManifest,
+  type PluginUpdateMetadata,
+  validatePluginManifest,
+} from "../../../plugin-api/src/mod.ts";
+import {
+  type PluginInstaller,
+  pluginUpdateCompatibilityBlockers,
+} from "./installer.ts";
+
+export interface SkippedPluginUpdate {
+  tag: string;
+  version: string;
+  reasons: string[];
+}
 
 /** Whether an update is available, with the details needed to apply it. */
 export interface PluginUpdateCheckResult {
@@ -27,7 +43,13 @@ export interface PluginUpdateCheckResult {
   /** Present only when an update is available. */
   latestVersion?: string;
   latestTag?: string;
+  /** Highest published semver tag, even when it is incompatible or invalid. */
+  latestPublishedVersion?: string;
   repoUrl: string;
+  packagePath?: string;
+  skippedUpdateCount?: number;
+  /** At most five newest skipped releases, for concise UI diagnostics. */
+  skippedUpdates?: SkippedPluginUpdate[];
   /** ISO timestamp of the check — for the UI to show freshness. */
   checkedAt: string;
 }
@@ -40,7 +62,9 @@ export interface PluginUpdateCheckFailure {
     | "unsupported-host" // not a GitHub URL
     | "network" // fetch failed
     | "rate-limited" // GitHub returned 403/429
-    | "no-valid-tags"; // repo has tags but none match prefix + parse as semver
+    | "no-valid-tags" // repo has tags but none match prefix + parse as semver
+    | "invalid-release" // selected tag/package is internally inconsistent
+    | "incompatible"; // selected tag does not support this installation
   message: string;
   checkedAt: string;
 }
@@ -48,10 +72,11 @@ export interface PluginUpdateCheckFailure {
 export interface InstalledPluginSummary {
   id: string;
   version: string;
-  update?: {
-    repoUrl?: string;
-    tagPrefix?: string;
-  };
+  update?: PluginUpdateMetadata;
+}
+
+export interface PluginUpdateCheckOptions {
+  fetch?: typeof fetch;
 }
 
 /**
@@ -65,10 +90,11 @@ export async function readInstalledPluginSummary(
 ): Promise<InstalledPluginSummary> {
   const manifestPath = join(pluginRoot, pluginId, "plugin.json");
   const raw = JSON.parse(await Deno.readTextFile(manifestPath));
+  const manifest = validatePluginManifest(raw, pluginId);
   return {
-    id: raw.id,
-    version: raw.version,
-    update: raw.update,
+    id: manifest.id,
+    version: manifest.version,
+    update: manifest.update,
   };
 }
 
@@ -98,16 +124,17 @@ export function parseGitHubOwnerRepo(
   return undefined;
 }
 
-interface GitHubTag {
+export interface GitHubTag {
   name: string;
 }
 
 async function fetchGitHubTags(
   owner: string,
   repo: string,
+  fetchImpl: typeof fetch,
 ): Promise<GitHubTag[]> {
   const url = `https://api.github.com/repos/${owner}/${repo}/tags?per_page=100`;
-  const response = await fetch(url, {
+  const response = await fetchImpl(url, {
     headers: {
       "Accept": "application/vnd.github+json",
       "User-Agent": "psycheros-plugin-updater",
@@ -141,6 +168,70 @@ async function fetchGitHubTags(
   return await response.json() as GitHubTag[];
 }
 
+function githubContentPath(packagePath?: string): string {
+  return [...(packagePath?.split("/") ?? []), "plugin.json"]
+    .map(encodeURIComponent)
+    .join("/");
+}
+
+function decodeBase64Utf8(content: string): string {
+  const binary = atob(content.replace(/\s/g, ""));
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+async function fetchGitHubPluginManifest(
+  owner: string,
+  repo: string,
+  tag: string,
+  packagePath: string | undefined,
+  fetchImpl: typeof fetch,
+): Promise<PluginManifest> {
+  const manifestPath = githubContentPath(packagePath);
+  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${
+    encodeURIComponent(repo)
+  }/contents/${manifestPath}?ref=${encodeURIComponent(tag)}`;
+  const response = await fetchImpl(url, {
+    headers: {
+      "Accept": "application/vnd.github+json",
+      "User-Agent": "psycheros-plugin-updater",
+    },
+  });
+  if (response.status === 403 || response.status === 429) {
+    throw new UpdateCheckError(
+      "rate-limited",
+      "GitHub API rate limit hit while checking tagged plugin manifests. Try again later.",
+    );
+  }
+  if (response.status === 404) {
+    throw new Error(`${manifestPath} was not found at tag ${tag}.`);
+  }
+  if (!response.ok) {
+    throw new UpdateCheckError(
+      "network",
+      `GitHub returned ${response.status} ${response.statusText} while reading ${manifestPath} at ${tag}.`,
+    );
+  }
+
+  const body = await response.json() as {
+    type?: string;
+    encoding?: string;
+    content?: string;
+  };
+  if (
+    body.type !== "file" || body.encoding !== "base64" ||
+    typeof body.content !== "string"
+  ) {
+    throw new Error(`${manifestPath} at tag ${tag} was not a readable file.`);
+  }
+  const raw = JSON.parse(decodeBase64Utf8(body.content)) as unknown;
+  const candidateId = raw && typeof raw === "object" && !Array.isArray(raw) &&
+      typeof (raw as Record<string, unknown>).id === "string"
+    ? (raw as Record<string, unknown>).id as string
+    : "";
+  return validatePluginManifest(raw, candidateId);
+}
+
 /** Custom error class so the caller can branch on `reason` without string-matching. */
 export class UpdateCheckError extends Error {
   constructor(
@@ -160,7 +251,15 @@ export function findLatestTag(
   tags: GitHubTag[],
   tagPrefix?: string,
 ): { tag: string; version: semver.SemVer } | undefined {
-  let best: { tag: string; version: semver.SemVer } | undefined;
+  return findVersionTags(tags, tagPrefix)[0];
+}
+
+/** Matching semver tags sorted newest first. */
+export function findVersionTags(
+  tags: GitHubTag[],
+  tagPrefix?: string,
+): Array<{ tag: string; version: semver.SemVer }> {
+  const versions: Array<{ tag: string; version: semver.SemVer }> = [];
   for (const { name } of tags) {
     if (tagPrefix && !name.startsWith(tagPrefix)) continue;
     const versionPart = tagPrefix ? name.slice(tagPrefix.length) : name;
@@ -170,11 +269,65 @@ export function findLatestTag(
     } catch {
       continue; // tag isn't a version tag, skip silently
     }
-    if (!best || semver.greaterThan(parsed, best.version)) {
-      best = { tag: name, version: parsed };
+    versions.push({ tag: name, version: parsed });
+  }
+  return versions.sort((left, right) =>
+    semver.greaterThan(left.version, right.version)
+      ? -1
+      : semver.greaterThan(right.version, left.version)
+      ? 1
+      : 0
+  );
+}
+
+function parseTagVersion(
+  tag: string,
+  tagPrefix?: string,
+): semver.SemVer | undefined {
+  if (tagPrefix && !tag.startsWith(tagPrefix)) return undefined;
+  try {
+    return semver.parse(tagPrefix ? tag.slice(tagPrefix.length) : tag);
+  } catch {
+    return undefined;
+  }
+}
+
+function parsedVersion(version: string): semver.SemVer | undefined {
+  try {
+    return semver.parse(version);
+  } catch {
+    return undefined;
+  }
+}
+
+function sameVersion(left: semver.SemVer, right: semver.SemVer): boolean {
+  return semver.format(left) === semver.format(right);
+}
+
+function updateChannelBlockers(
+  manifest: PluginManifest,
+  installed: PluginUpdateMetadata,
+): string[] {
+  const candidate = manifest.update;
+  if (!candidate?.repoUrl) {
+    return [
+      "The tagged manifest removes update.repoUrl, which would disable future one-click updates.",
+    ];
+  }
+  const blockers: string[] = [];
+  const fields: Array<keyof PluginUpdateMetadata> = [
+    "repoUrl",
+    "tagPrefix",
+    "packagePath",
+  ];
+  for (const field of fields) {
+    if ((candidate[field] ?? "") !== (installed[field] ?? "")) {
+      blockers.push(
+        `The tagged manifest changes update.${field}; update channels can only be changed by a reviewed manual reinstall.`,
+      );
     }
   }
-  return best;
+  return blockers;
 }
 
 /**
@@ -186,8 +339,10 @@ export function findLatestTag(
 export async function checkPluginUpdate(
   pluginRoot: string,
   pluginId: string,
+  options: PluginUpdateCheckOptions = {},
 ): Promise<PluginUpdateCheckResult | PluginUpdateCheckFailure> {
   const checkedAt = new Date().toISOString();
+  const fetchImpl = options.fetch ?? fetch;
   let summary: InstalledPluginSummary;
   try {
     summary = await readInstalledPluginSummary(pluginRoot, pluginId);
@@ -224,7 +379,7 @@ export async function checkPluginUpdate(
 
   let tags: GitHubTag[];
   try {
-    tags = await fetchGitHubTags(ownerRepo.owner, ownerRepo.repo);
+    tags = await fetchGitHubTags(ownerRepo.owner, ownerRepo.repo, fetchImpl);
   } catch (error) {
     if (error instanceof UpdateCheckError) {
       return {
@@ -242,8 +397,8 @@ export async function checkPluginUpdate(
     };
   }
 
-  const latest = findLatestTag(tags, summary.update?.tagPrefix);
-  if (!latest) {
+  const versions = findVersionTags(tags, summary.update?.tagPrefix);
+  if (versions.length === 0) {
     return {
       pluginId,
       reason: "no-valid-tags",
@@ -255,32 +410,104 @@ export async function checkPluginUpdate(
     };
   }
 
-  let currentVersion: semver.SemVer;
-  try {
-    currentVersion = semver.parse(summary.version);
-  } catch {
-    // Installed version isn't semver-parsable (e.g., "unknown"). Treat any
-    // remote tag as an update so the operator can re-install to a known
-    // good version.
+  const currentVersion = parsedVersion(summary.version);
+  const candidates = currentVersion
+    ? versions.filter((candidate) =>
+      semver.greaterThan(candidate.version, currentVersion)
+    )
+    : versions;
+  const skippedUpdates: SkippedPluginUpdate[] = [];
+  let skippedUpdateCount = 0;
+  const recordSkipped = (
+    candidate: { tag: string; version: semver.SemVer },
+    reasons: string[],
+  ) => {
+    skippedUpdateCount += 1;
+    if (skippedUpdates.length < 5) {
+      skippedUpdates.push({
+        tag: candidate.tag,
+        version: semver.format(candidate.version),
+        reasons,
+      });
+    }
+  };
+
+  for (const candidate of candidates) {
+    let manifest: PluginManifest;
+    try {
+      manifest = await fetchGitHubPluginManifest(
+        ownerRepo.owner,
+        ownerRepo.repo,
+        candidate.tag,
+        summary.update?.packagePath,
+        fetchImpl,
+      );
+    } catch (error) {
+      if (error instanceof UpdateCheckError) {
+        return {
+          pluginId,
+          reason: error.reason,
+          message: error.message,
+          checkedAt,
+        };
+      }
+      recordSkipped(candidate, [
+        `Could not validate the tagged plugin manifest: ${
+          (error as Error).message
+        }`,
+      ]);
+      continue;
+    }
+
+    const reasons: string[] = [];
+    if (manifest.id !== pluginId) {
+      reasons.push(
+        `The tagged manifest id "${manifest.id}" does not match installed plugin id "${pluginId}".`,
+      );
+    }
+    const manifestVersion = parsedVersion(manifest.version);
+    if (!manifestVersion || !sameVersion(manifestVersion, candidate.version)) {
+      reasons.push(
+        `The tagged manifest version "${manifest.version}" does not match tag version ${
+          semver.format(candidate.version)
+        }.`,
+      );
+    }
+    reasons.push(...updateChannelBlockers(manifest, summary.update!));
+    reasons.push(...pluginUpdateCompatibilityBlockers(manifest));
+    if (reasons.length > 0) {
+      recordSkipped(candidate, reasons);
+      continue;
+    }
+
     return {
       pluginId,
       currentVersion: summary.version,
       updateAvailable: true,
-      latestVersion: semver.format(latest.version),
-      latestTag: latest.tag,
+      latestVersion: semver.format(candidate.version),
+      latestTag: candidate.tag,
+      latestPublishedVersion: semver.format(versions[0].version),
       repoUrl,
+      packagePath: summary.update?.packagePath,
+      skippedUpdateCount: skippedUpdateCount || undefined,
+      skippedUpdates: skippedUpdates.length > 0 ? skippedUpdates : undefined,
       checkedAt,
     };
   }
 
-  const isUpdate = semver.greaterThan(latest.version, currentVersion);
   return {
     pluginId,
     currentVersion: summary.version,
-    updateAvailable: isUpdate,
-    latestVersion: semver.format(latest.version),
-    latestTag: latest.tag,
+    updateAvailable: false,
+    latestVersion: skippedUpdateCount === 0
+      ? semver.format(versions[0].version)
+      : undefined,
+    latestTag: skippedUpdateCount === 0 ? versions[0].tag : undefined,
+    latestPublishedVersion: semver.format(versions[0].version),
     repoUrl,
+    packagePath: summary.update?.packagePath,
+    skippedUpdateCount: skippedUpdateCount || undefined,
+    skippedUpdates: skippedUpdates.length > 0 ? skippedUpdates : undefined,
     checkedAt,
   };
 }
@@ -295,15 +522,72 @@ export async function applyPluginUpdate(
   installer: PluginInstaller,
   pluginId: string,
   latestTag: string,
-  repoUrl: string,
 ): Promise<{ backupPath?: string }> {
-  const preview = await installer.inspectGit(repoUrl, latestTag);
-  if (preview.manifest.id !== pluginId) {
+  const summary = await readInstalledPluginSummary(
+    installer.pluginRoot,
+    pluginId,
+  );
+  const repoUrl = summary.update?.repoUrl;
+  if (!repoUrl) {
     throw new UpdateCheckError(
-      "network",
-      `Update target's id "${preview.manifest.id}" does not match installed plugin id "${pluginId}". Aborting before replace.`,
+      "invalid-release",
+      "The installed plugin does not declare update.repoUrl.",
     );
   }
-  const result = await installer.installDraft(preview.draftId);
-  return { backupPath: result.backupPath };
+  const tagVersion = parseTagVersion(latestTag, summary.update?.tagPrefix);
+  if (!tagVersion) {
+    throw new UpdateCheckError(
+      "invalid-release",
+      `Update tag "${latestTag}" does not match this plugin's tagPrefix or semver format.`,
+    );
+  }
+  const currentVersion = parsedVersion(summary.version);
+  if (currentVersion && !semver.greaterThan(tagVersion, currentVersion)) {
+    throw new UpdateCheckError(
+      "invalid-release",
+      `Update version ${
+        semver.format(tagVersion)
+      } is not newer than installed version ${summary.version}.`,
+    );
+  }
+
+  const preview = await installer.inspectGit(
+    repoUrl,
+    latestTag,
+    summary.update?.packagePath,
+  );
+  try {
+    if (preview.manifest.id !== pluginId) {
+      throw new UpdateCheckError(
+        "invalid-release",
+        `Update target's id "${preview.manifest.id}" does not match installed plugin id "${pluginId}". Aborting before replace.`,
+      );
+    }
+    const manifestVersion = parsedVersion(preview.manifest.version);
+    if (!manifestVersion || !sameVersion(manifestVersion, tagVersion)) {
+      throw new UpdateCheckError(
+        "invalid-release",
+        `Update target's manifest version "${preview.manifest.version}" does not match tag version ${
+          semver.format(tagVersion)
+        }. Aborting before replace.`,
+      );
+    }
+    const blockers = [
+      ...updateChannelBlockers(preview.manifest, summary.update!),
+      ...pluginUpdateCompatibilityBlockers(preview.manifest),
+    ];
+    if (blockers.length > 0) {
+      throw new UpdateCheckError(
+        "incompatible",
+        `Update ${
+          semver.format(tagVersion)
+        } is not compatible with this installation: ${blockers.join(" ")}`,
+      );
+    }
+    const result = await installer.installDraft(preview.draftId);
+    return { backupPath: result.backupPath };
+  } catch (error) {
+    await installer.discardDraft(preview.draftId);
+    throw error;
+  }
 }
