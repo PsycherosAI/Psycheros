@@ -98,11 +98,16 @@ COPY packages/entity-core/deno.json /app/packages/entity-core/deno.json
 COPY packages/entity-loom/deno.json /app/packages/entity-loom/deno.json
 COPY packages/launcher/deno.json /app/packages/launcher/deno.json
 COPY packages/plugin-api/deno.json /app/packages/plugin-api/deno.json
+COPY packages/entity-shell/deno.json /app/packages/entity-shell/deno.json
+COPY packages/entity-flux/deno.json /app/packages/entity-flux/deno.json
 
 # Source for the packages that run in (or are imported by) this image
 COPY packages/psycheros /app/packages/psycheros/
 COPY packages/entity-core /app/packages/entity-core/
 COPY packages/plugin-api /app/packages/plugin-api/
+# entity-flux is a runtime import of the harness (Flux integration) —
+# the full source rides along, not just the workspace config.
+COPY packages/entity-flux /app/packages/entity-flux/
 
 # Entrypoint script — co-located with the psycheros package
 RUN chmod +x /app/packages/psycheros/entrypoint.sh
