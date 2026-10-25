@@ -97,6 +97,16 @@ the flux profile's main model, thinking preserved per profile settings.
   Wondering is licensed in the prompt contract (questions murmur; asking is a
   propose energy); the question store / gate machinery is parked — NOTES has the
   direction if closure-detection pain ever shows up.
+- **Briefings name the source MODULE, not the organ (owner's ruling
+  2026-10-23).** Observation-carried ambient briefings label `from="noticing"` —
+  the module that shaped the thought. The organ stays in the row's metadata
+  (timeline label + detail), never in the briefing source. The one exception: a
+  promotion DIRECTLY from a sensory organ names the organ — the
+  direct-engagement wire reads `direct engagement (<organ>, signaling)`, and the
+  promotion filter's escalations read `noticing escalation (salience N)`. Trap:
+  `appendAmbient` discriminates on `meta.sourceObservationId` — posting an
+  observation-carried entry WITHOUT that id makes the briefing fall back to the
+  organ label and Noticing goes nameless again.
 - **Flux NEVER touches the SA block.** Flux state reaches conversations only
   through the Flux session's briefings — classic conversations' SA stays
   baseline-psycheros-only (session architecture decision, 2026-09-01). The old
@@ -151,11 +161,17 @@ the flux profile's main model, thinking preserved per profile settings.
   sleep-held, or voice-held bid posts untinted. Promotion later reaching the
   same observation skips the duplicate, or flips the row's tint if its own wake
   fires (`hasDurableEntryForObservation` / `escalateDurableEntryForObservation`
-  on `source_observation_id`). `eventTag` is now exclusively for mechanical
-  reflexes (amplitude, occupancy — novel by definition). Trap: the sleep posture
-  gate still passes engagement because the wire's salience floor (0.90) exactly
-  meets `SLEEP_ESCALATION_THRESHOLD` — change either number alone and engagement
-  stops reaching a sleeping entity.
+  on `source_observation_id`). DB-BACKED since 2026-10-23: that guard is
+  check-then-insert and the engagement wire + a promotion batch are CONCURRENT
+  paths, so a partial unique index on `source_observation_id` (schema.ts, with a
+  startup sweep of historical doubles) makes the insertion the arbiter —
+  `insertDurableEntry` returns null when the other writer's row exists, and
+  `appendAmbient` then drops the loser's broadcast AND ambient briefing (one
+  observation, one row, one thought in the Ego's window). `eventTag` is now
+  exclusively for mechanical reflexes (amplitude, occupancy — novel by
+  definition). Trap: the sleep posture gate still passes engagement because the
+  wire's salience floor (0.90) exactly meets `SLEEP_ESCALATION_THRESHOLD` —
+  change either number alone and engagement stops reaching a sleeping entity.
 - **One mouth (2026-10-10, ledger #29).** During a voice call on the host
   conversation, the Ego's spoken voice is his only output channel: `requestWake`
   consults the host seam's `voiceCallState` AFTER pool bookkeeping —

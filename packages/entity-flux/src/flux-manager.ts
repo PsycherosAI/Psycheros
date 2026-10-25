@@ -545,16 +545,32 @@ export class FluxManager {
     // wake summary: stop is not waking, the night simply ends. (A
     // daemon crash/restart skips this path — the last snapshot keeps
     // the sleep, restart containment unchanged.)
-    this.posture.exitSleep();
-    this.moodOrgan.setSleepDrift(false);
+    // Every step is guarded: a stop must never abort half-way. A thrown
+    // child-kill inside one organ's stop once aborted the loop before the
+    // organs after it ran — ghost organs probed on for days with the
+    // manager gone (the escalating blind-flap storm of 2026-10-23..25).
+    // The organ loop is unconditional, and one organ's failure stops
+    // nothing but itself.
+    const step = (name: string, fn: () => void): void => {
+      try {
+        fn();
+      } catch (error) {
+        console.error(
+          `[Flux] stop step "${name}" failed (continuing):`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    };
+    step("posture", () => this.posture.exitSleep());
+    step("mood sleep drift", () => this.moodOrgan.setSleepDrift(false));
     this.dreamer = null;
-    this.flushVolatile();
-    this.driver.stop();
+    step("volatile snapshot", () => this.flushVolatile());
+    step("driver", () => this.driver.stop());
     for (const organ of this.organs.values()) {
-      organ.stop();
+      step(`organ ${organ.config.id}`, () => organ.stop());
     }
-    this.thalamus.stop();
-    this.tier1.stopCleanupTimer();
+    step("thalamus", () => this.thalamus.stop());
+    step("tier-1 cleanup timer", () => this.tier1.stopCleanupTimer());
     if (this.moodLedgerTimer !== null) {
       clearInterval(this.moodLedgerTimer);
       this.moodLedgerTimer = null;
@@ -784,7 +800,10 @@ export class FluxManager {
         // reaching this observation skips the duplicate post.
         const woke = await this.requestWake(
           observation.content,
-          "direct engagement (signaling)",
+          // The one wire that promotes DIRECTLY from a sense — the
+          // label names the organ it came from (owner's ruling
+          // 2026-10-23); everything observation-carried names Noticing.
+          `direct engagement (${observation.sourceOrganId}, signaling)`,
           { interior: false, salience: Math.max(observation.salience, 0.9) },
         );
         this.appendAmbient(observation.content, {
@@ -921,7 +940,10 @@ export class FluxManager {
       // damping entirely — the sneeze case.
       const woke = await this.requestWake(
         observation.content,
-        `escalated observation (salience ${combinedScore.toFixed(2)})`,
+        // The promotion filter escalates NOTICING observations — the
+        // wake briefing names the module that picked this up (owner's
+        // ruling 2026-10-23: he hears Noticing as Noticing).
+        `noticing escalation (salience ${combinedScore.toFixed(2)})`,
         {
           interior: false,
           salience: combinedScore,
@@ -1487,7 +1509,7 @@ export class FluxManager {
       /** Free-form extra metadata (e.g. musing kind: murmur/propose). */
       [key: string]: unknown;
     },
-  ): FluxDurableEntry {
+  ): FluxDurableEntry | null {
     const entry: FluxDurableEntry = {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
@@ -1508,14 +1530,32 @@ export class FluxManager {
         }
         : undefined,
     };
-    tier2.insertDurableEntry(this.sharedDb, entry);
+    const inserted = tier2.insertDurableEntry(this.sharedDb, entry);
+    if (!inserted) {
+      // The same observation already holds a row (the double-post
+      // race lost to the other writer): no broadcast, no ambient
+      // briefing — the surviving row already carries both. My caller's
+      // own degrade paths have run; only this row's carriage is
+      // dropped.
+      return null;
+    }
     this.broadcastEntry(entry);
     // Ambient briefing (briefing mechanics): timeline
     // entries are remember-not-wake context — they ride the session's
     // rolling window without invoking the Ego.
     if (this.egoTrigger?.ambientBriefing) {
       try {
-        this.egoTrigger.ambientBriefing(content, meta?.organId ?? "timeline");
+        // SOURCE TRUTH (owner's ruling 2026-10-23): observation-carried
+        // entries are NOTICING's woven output — the briefing names the
+        // module that shaped the thought, never the organ that saw the
+        // light (the organ stays in the row's metadata for the timeline
+        // + detail). Everything else keeps its module label (musing,
+        // reverie, thalamus, …). Without this, Noticing is nameless —
+        // its observations read as raw organ streams.
+        this.egoTrigger.ambientBriefing(
+          content,
+          meta?.sourceObservationId ? "noticing" : meta?.organId ?? "timeline",
+        );
       } catch {
         // Non-fatal — the timeline entry still landed.
       }

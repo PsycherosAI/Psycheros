@@ -391,6 +391,18 @@ pub fn run() {
             // Daemon-status watcher.
             app::spawn_status_watcher(app.handle().clone());
 
+            // Deno runtime self-heal: if this app bundle carries a
+            // different Deno than the one first-run staged, swap it in
+            // now. Covers the autostart case where the OS supervisor
+            // boots the daemon before the launcher ever opens — the
+            // swap lands at app start and the running daemon picks the
+            // new binary up on its next restart. Best-effort: on Windows
+            // the staged exe can't be replaced while the daemon executes
+            // it; the next Start after a Stop lands it.
+            if let Err(e) = commands::stage_deno_if_needed(app.handle()) {
+                eprintln!("[launcher] deno self-heal failed: {e}");
+            }
+
             // Source-update watcher. Polls GitHub every few hours and
             // emits `update-available` / injects an in-window toast
             // when a new tag is available upstream.

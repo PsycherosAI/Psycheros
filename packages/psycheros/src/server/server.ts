@@ -5136,7 +5136,7 @@ export class Server {
 
     // GET /api/graph - Get full graph data
     if (method === "GET" && path === "/api/graph") {
-      return await handleGetGraphData(ctx);
+      return await handleGetGraphData(ctx, request);
     }
 
     // POST /api/graph/nodes - Create node

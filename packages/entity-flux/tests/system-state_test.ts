@@ -11,7 +11,12 @@ import {
   type SystemStateSample,
 } from "../src/organs/system-state/types.ts";
 import { stepSystemGate } from "../src/organs/system-state/system-gate.ts";
-import { parseInputCount } from "../src/organs/system-state/capture.ts";
+import {
+  type CommandRunner,
+  parseInputCount,
+  runCommand,
+} from "../src/organs/system-state/capture.ts";
+import { createSystemStateOrgan } from "../src/organs/system-state/system-state-organ.ts";
 
 const config = defaultSystemStateConfig(); // idleAfterProbes: 120
 
@@ -139,4 +144,59 @@ CPU0
   const total = parseInputCount(proc, "i8042|keyboard|mouse|xhci_hcd");
   assertEquals(total, 157); // 100+50+3+4, nvke excluded
   assertEquals(parseInputCount("no matches", "i8042"), null);
+});
+
+Deno.test("runCommand: stdout passes through, failure is null", async () => {
+  assertEquals(await runCommand(["/bin/sh", "-c", "printf ' hi  \\n'"]), "hi");
+  assertEquals(await runCommand(["/bin/sh", "-c", "exit 3"]), null);
+});
+
+Deno.test("runCommand: the wall clock kills a stalled exec", async () => {
+  const at = Date.now();
+  const out = await runCommand(["/bin/sh", "-c", "sleep 30"], 200);
+  assertEquals(out, null);
+  assertEquals(Date.now() - at < 5_000, true);
+});
+
+Deno.test("system-state organ: one probe in flight, ever", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    let calls = 0;
+    let release!: () => void;
+    const blocks = new Promise<void>((r) => {
+      release = r;
+    });
+    // Poll shape: interrupts + loadavg + loginctl list fire together;
+    // an empty session list keeps probeSessions at one call. The first
+    // call parks until released — poll 1 stays in flight.
+    const runner: CommandRunner = (command) => {
+      calls++;
+      if (command.includes("loginctl")) return Promise.resolve("");
+      if (command.includes("loadavg")) {
+        return Promise.resolve("0.50 0.40 0.30 1/100 1234");
+      }
+      if (calls === 1) return blocks.then(() => "42: 100 xhci_hcd\nCPU0\n");
+      return Promise.resolve("42: 100 xhci_hcd\nCPU0\n");
+    };
+    const organ = createSystemStateOrgan(
+      defaultSystemStateConfig(),
+      () => {},
+      { dataRoot: dir },
+      runner,
+    );
+    organ.start();
+    while (calls < 3) await new Promise((r) => setTimeout(r, 5));
+    // Poll 1 is parked on its first command; another tick must not start
+    // a second poll — no new runner calls.
+    await organ.tick();
+    assertEquals(calls, 3);
+    release();
+    await new Promise((r) => setTimeout(r, 50));
+    assertEquals(calls, 3); // poll 1 finished; nothing else leaked in
+    await organ.tick(); // slot free: poll 2 runs to completion
+    assertEquals(calls, 6);
+    organ.stop();
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });

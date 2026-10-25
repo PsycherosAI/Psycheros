@@ -17,47 +17,85 @@ import type { SystemStateOrganConfig, SystemStateSample } from "./types.ts";
 /** Executes a command string, returning trimmed stdout or null on any failure. */
 export type CommandRunner = (command: string) => Promise<string | null>;
 
-/** Local execution. */
-export function localRunner(): CommandRunner {
-  return async (command) => {
+/** Wall-clock cap for one exec. ConnectTimeout covers TCP connect only;
+ * auth, session setup and the command itself can stall forever without
+ * this — a stalled probe must die, not stack. */
+const EXEC_TIMEOUT_MS = 10_000;
+
+/** Run argv, resolve trimmed stdout, or null on failure or timeout. The
+ * timeout SIGKILLs the child — and resolves the wait at the wall clock
+ * even so, because pipe EOF is not the child's death: a grandchild can
+ * hold the stdout pipe open past the corpse, and a stalled probe must
+ * not wait on it. */
+export async function runCommand(
+  argv: string[],
+  timeoutMs = EXEC_TIMEOUT_MS,
+): Promise<string | null> {
+  try {
+    const child = new Deno.Command(argv[0], {
+      args: argv.slice(1),
+      stdin: "null",
+      stdout: "piped",
+      stderr: "null",
+    }).spawn();
+    let fire: ReturnType<typeof setTimeout> | undefined;
+    const wallClock = new Promise<null>((resolve) => {
+      fire = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // already exited
+        }
+        resolve(null);
+      }, timeoutMs);
+    });
+    const waited: Promise<string | null> = child.output().then(
+      (out) => out.success ? new TextDecoder().decode(out.stdout).trim() : null,
+      () => null,
+    );
     try {
-      const cmd = new Deno.Command("/bin/sh", {
-        args: ["-c", command],
-        stdout: "piped",
-        stderr: "null",
-      });
-      const out = await cmd.output();
-      if (!out.success) return null;
-      return new TextDecoder().decode(out.stdout).trim();
-    } catch {
-      return null;
+      return await Promise.race([waited, wallClock]);
+    } finally {
+      clearTimeout(fire);
     }
-  };
+  } catch {
+    return null;
+  }
 }
 
-/** SSH execution — BatchMode so a missing key fails fast, not hangs. */
+/** Local execution. */
+export function localRunner(): CommandRunner {
+  return (command) => runCommand(["/bin/sh", "-c", command]);
+}
+
+/** SSH execution — BatchMode so a missing key fails fast, not hangs, and
+ * one multiplexed master carries every exec: ControlMaster=auto opens a
+ * single authenticated connection and later probes ride it in
+ * milliseconds, so a multi-command poll fits inside the poll interval
+ * instead of stacking fresh handshakes into the target's sshd (which
+ * MaxStartups then drops — the flap loop). ControlPersist retires the
+ * master after ten idle minutes and ServerAlive buries a dead peer in
+ * ~30s; a per-process socket keeps restarts and sibling processes off
+ * each other's masters. */
 export function sshRunner(target: string): CommandRunner {
-  return async (command) => {
-    try {
-      const cmd = new Deno.Command("ssh", {
-        args: [
-          "-o",
-          "BatchMode=yes",
-          "-o",
-          "ConnectTimeout=5",
-          target,
-          command,
-        ],
-        stdout: "piped",
-        stderr: "null",
-      });
-      const out = await cmd.output();
-      if (!out.success) return null;
-      return new TextDecoder().decode(out.stdout).trim();
-    } catch {
-      return null;
-    }
-  };
+  const controlPath = `/tmp/psycheros-ssh-${crypto.randomUUID()}`;
+  const baseArgs = [
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=5",
+    "-o",
+    "ControlMaster=auto",
+    "-o",
+    `ControlPath=${controlPath}`,
+    "-o",
+    "ControlPersist=10m",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=2",
+  ];
+  return (command) => runCommand(["ssh", ...baseArgs, target, command]);
 }
 
 export function makeRunner(config: SystemStateOrganConfig): CommandRunner {

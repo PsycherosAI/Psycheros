@@ -1227,9 +1227,11 @@ Situational Awareness in the sidebar.
   `DeviceStatusCache` probes Lovense Connect and Intiface Central every 30
   seconds in the background; home devices are read from settings (static
   config); BLE devices are read from the DeviceBridge singleton (live WebSocket
-  connections). The entity sees connected devices without needing to call a
-  discover tool. The section is omitted from the SA block entirely when no
-  devices are connected or configured.
+  connections). Each Lovense toy entry also carries its supported `functions`
+  (e.g. `vibrate, thrusting`) when the Connect app reports them, so the entity
+  knows what it can drive. The entity sees connected devices without needing to
+  call a discover tool. The section is omitted from the SA block entirely when
+  no devices are connected or configured.
 
 - **Device Preferences** — Custom instructions configured per integration
   (Lovense or Intiface) in External Connections → Intimacy. Each section has a

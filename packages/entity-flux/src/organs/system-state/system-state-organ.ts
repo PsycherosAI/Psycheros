@@ -4,7 +4,9 @@
  * Self-drives via the sink on its own probe cadence (the template's
  * contract: FluxManager calls start/stop, never polls tick()). One poll
  * → one gate step → transitions speak through the sink, presence writes
- * to the state file. Blindness holds everything.
+ * to the state file. Blindness holds everything. One probe in flight,
+ * ever — a slow target must never stack polls (stacked polls are stacked
+ * connections, and stacked connections are blindness).
  */
 
 import type { Organ, OrganEnvelope } from "../../types.ts";
@@ -30,14 +32,16 @@ export class SystemStateOrgan implements Organ {
   private timer: ReturnType<typeof setInterval> | null = null;
   private blind = false;
   private running = false;
+  private probing = false;
 
   constructor(
     config: Partial<SystemStateOrganConfig>,
     private sink: (envelope: OrganEnvelope) => void | Promise<void>,
     private context: { dataRoot: string },
+    runner?: CommandRunner,
   ) {
     this.config = { ...defaultSystemStateConfig(), ...config };
-    this.runner = makeRunner(this.config);
+    this.runner = runner ?? makeRunner(this.config);
   }
 
   async tick(): Promise<null> {
@@ -63,7 +67,16 @@ export class SystemStateOrgan implements Organ {
   }
 
   private async probe(): Promise<void> {
-    if (!this.running) return;
+    if (!this.running || this.probing) return;
+    this.probing = true;
+    try {
+      await this.runProbes();
+    } finally {
+      this.probing = false;
+    }
+  }
+
+  private async runProbes(): Promise<void> {
     const sample: SystemStateSample = await pollSystemState(
       this.runner,
       this.config,
@@ -104,6 +117,7 @@ export function createSystemStateOrgan(
   config: Partial<SystemStateOrganConfig>,
   sink: (envelope: OrganEnvelope) => void | Promise<void>,
   context: { dataRoot: string },
+  runner?: CommandRunner,
 ): SystemStateOrgan {
-  return new SystemStateOrgan(config, sink, context);
+  return new SystemStateOrgan(config, sink, context, runner);
 }

@@ -949,7 +949,7 @@ async function generateViaGateway(
   let failed: string | null = null;
 
   const readWithIdleTimeout = () => {
-    let timer: number | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return Promise.race([
         reader.read(),

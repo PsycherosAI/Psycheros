@@ -177,6 +177,33 @@ pub fn stage_bundled_deno(sidecar_path: &Path, dest: &Path) -> Result<(), Bundle
     stage_bundled_binary(sidecar_path, dest)
 }
 
+/// Parse the version token out of the first line of `deno --version`
+/// output (`deno 2.9.8 (stable, release, x86_64-unknown-linux-gnu)` →
+/// `Some("2.9.8")`). Pure so the parser is unit-testable without
+/// executing a binary. Any line that doesn't carry a second
+/// whitespace-separated token parses as `None` — callers treat that as
+/// "unknown" and leave the install alone rather than guessing.
+pub fn parse_deno_version_output(stdout: &str) -> Option<String> {
+    stdout
+        .lines()
+        .next()?
+        .split_whitespace()
+        .nth(1)
+        .map(str::to_string)
+}
+
+/// Probe a Deno binary's version by executing `deno --version`. `None`
+/// when the binary can't be executed, exits non-zero, or its output
+/// doesn't parse — the "unknown, don't touch anything" signal for
+/// [`crate::commands::stage_deno_if_needed`].
+pub fn deno_version_of(binary: &Path) -> Option<String> {
+    let out = hidden_command(binary).arg("--version").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_deno_version_output(&String::from_utf8_lossy(&out.stdout))
+}
+
 /// Run `deno cache src/main.ts` against the extracted psycheros package
 /// to populate Deno's dep cache.
 ///
@@ -491,6 +518,31 @@ mod tests {
     use super::*;
     #[cfg(unix)]
     use std::process::Command;
+
+    // --- parse_deno_version_output -------------------------------------------
+
+    #[test]
+    fn parses_stable_release_line() {
+        assert_eq!(
+            parse_deno_version_output(
+                "deno 2.9.8 (stable, release, x86_64-unknown-linux-gnu)\nv8 15.0.245.2-rusty\ntypescript 6.0.3"
+            ),
+            Some("2.9.8".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_version_only_line() {
+        assert_eq!(parse_deno_version_output("deno 2.7.14"), Some("2.7.14".to_string()));
+    }
+
+    #[test]
+    fn version_parse_rejects_non_version_output() {
+        // No second token on the first line.
+        assert_eq!(parse_deno_version_output("deno"), None);
+        // Empty output.
+        assert_eq!(parse_deno_version_output(""), None);
+    }
 
     // --- stage_bundled_deno --------------------------------------------------
 

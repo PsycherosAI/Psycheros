@@ -332,7 +332,9 @@ When MCP is enabled, Psycheros:
 - Dynamically restarts entity-core when the active profile changes
 - Entity-core-specific `ENTITY_CORE_LLM_*` vars take priority if set
 - Pulls identity files (self, user, relationship, custom) from entity-core
-- Queues identity changes and syncs back periodically (every 5 minutes)
+- Queues identity changes and syncs back periodically (every 5 minutes,
+  diff-first — a file is rewritten only when its local copy is missing or
+  differs from canonical, so an unchanged cycle costs reads, not writes)
 - All memory operations (read, write, search, delete) go through entity-core via
   MCP
 - Falls back to local identity files if MCP is unavailable (memory operations

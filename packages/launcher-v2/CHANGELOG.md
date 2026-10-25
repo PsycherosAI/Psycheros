@@ -125,7 +125,15 @@ cross-platform supervisors ship.
   counter since the tap closure must be `Fn` (not `FnMut`) and is called from
   AVAudioEngine's render thread.
 
-## [Unreleased]
+## [0.2.48] - 2026-10-25
+
+### Fixed
+
+- The staged Deno runtime the launcher provisions stays in sync with the app
+  bundle's required version — the 2.9.8 security release (CVE-2026-111943,
+  compromised eMudhra CAs) ships with the app, so launcher users are covered by
+  updating the app alone; no manual `deno upgrade` needed.
+- Frontend assets aligned with the 2.9.8 formatter.
 
 ## [0.2.37] - 2026-06-23
 

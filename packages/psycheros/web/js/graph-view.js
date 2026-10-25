@@ -86,6 +86,39 @@ let eventListenersAbort = null;
 const CARD_HEIGHT_EST = 56;
 const VISIBLE_BUFFER = 10;
 
+const NODE_LIMIT_STORAGE_KEY = 'psycheros:graphNodeLimit';
+const DEFAULT_NODE_LIMIT = 500;
+
+// ─── Node Limit ──────────────────────────────────────────────────────────────
+
+function getNodeLimit() {
+  const el = document.getElementById('graph-node-limit');
+  const v = el ? parseInt(el.value, 10) : NaN;
+  return Number.isInteger(v) && v >= 1 ? v : DEFAULT_NODE_LIMIT;
+}
+
+function applyStoredNodeLimit() {
+  const el = document.getElementById('graph-node-limit');
+  if (!el) return;
+  const saved = parseInt(localStorage.getItem(NODE_LIMIT_STORAGE_KEY) || '', 10);
+  if (Number.isInteger(saved) && saved >= 1) el.value = String(saved);
+}
+
+function updateShownHint() {
+  const countEl = document.getElementById('gv-shown-count');
+  if (!countEl) return;
+  const total = graphData.stats?.totalNodes ?? 0;
+  const shown = graphData.nodes?.length ?? 0;
+  const truncated = total > shown && shown > 0;
+  countEl.textContent = truncated ? `showing ${shown}` : '';
+  countEl.title = truncated
+    ? `Showing ${shown} of ${total} nodes — raise "Max" to load more`
+    : '';
+  document.querySelectorAll('.gv-shown-row').forEach((el) => {
+    el.classList.toggle('gv-hidden', !truncated);
+  });
+}
+
 // ─── Initialization ──────────────────────────────────────────────────────────
 
 async function initGraph() {
@@ -95,6 +128,7 @@ async function initGraph() {
   }
   initialized = true;
   currentView = 'list';
+  applyStoredNodeLimit();
   await loadGraphData();
   setupEventListeners();
 }
@@ -106,13 +140,14 @@ async function loadGraphData() {
   const graphView = document.getElementById('gv-graph-view');
 
   try {
-    const response = await fetch('/api/graph');
+    const response = await fetch(`/api/graph?limit=${getNodeLimit()}`);
     if (!response.ok) throw new Error('Failed to load graph data');
     graphData = await response.json();
 
     buildConnectionCounts();
     populateTypeFilter();
     getFilteredNodes();
+    updateShownHint();
 
     if (!graphData.nodes || graphData.nodes.length === 0) {
       const emptyHtml = `
@@ -843,6 +878,15 @@ function setupEventListeners() {
       network.selectNodes(ids);
       if (ids.length > 0) network.focus(ids[0], { animation: true });
     }
+  }, opts);
+
+  // Node limit — persist and reload with the new bound
+  document.getElementById('graph-node-limit')?.addEventListener('change', () => {
+    const limit = getNodeLimit();
+    const el = document.getElementById('graph-node-limit');
+    if (el) el.value = String(limit);
+    localStorage.setItem(NODE_LIMIT_STORAGE_KEY, String(limit));
+    loadGraphData();
   }, opts);
 
   // Refresh

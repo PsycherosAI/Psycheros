@@ -40,6 +40,7 @@ export default defineConfig({
           label: "Psycheros",
           items: [
             "psycheros/user-guide",
+            "psycheros/flux-user-guide",
             "psycheros/install-from-source",
             "psycheros/configuration",
             "psycheros/ui-features",

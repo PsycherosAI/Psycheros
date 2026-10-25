@@ -15,6 +15,10 @@ import type { ButtplugSettings } from "../llm/buttplug-settings.ts";
 import { getDeviceBridge } from "./device-bridge.ts";
 import type { DeviceSensorState } from "../wearable/types.ts";
 import { getWearableDataCache } from "../wearable/cache.ts";
+import {
+  type LovenseToyWire,
+  normalizeToyFunctions,
+} from "../tools/control-lovense.ts";
 
 // =============================================================================
 // Types
@@ -25,6 +29,8 @@ export interface LovenseToyInfo {
   name: string;
   battery: number;
   nickname: string;
+  /** Function keys the toy supports (e.g. ["vibrate", "thrusting"]), when reported */
+  functions?: string[];
 }
 
 /** Snapshot of connected Lovense toys. */
@@ -194,14 +200,7 @@ export class DeviceStatusCache {
 
       const toysMap = JSON.parse(data.data.toys) as Record<
         string,
-        {
-          id: string;
-          // iOS Lovense Connect returns a number; Android/desktop return a string.
-          status: string | number;
-          name: string;
-          battery: number;
-          nickName: string;
-        }
+        LovenseToyWire
       >;
 
       // Collect ALL connected toys (not just the first)
@@ -211,6 +210,10 @@ export class DeviceStatusCache {
           name: t.name,
           battery: t.battery,
           nickname: t.nickName || "",
+          functions: normalizeToyFunctions(
+            t.fullFunctionNames,
+            t.shortFunctionNames,
+          ),
         }));
 
       this.lovenseStatus = {

@@ -270,9 +270,12 @@ function formatConnectedDevices(
     const devices = snapshot.lovense.toys
       .map((t) => {
         const label = t.nickname || t.name;
+        const functions = t.functions?.length
+          ? ` functions="${escapeXml(t.functions.join(", "))}"`
+          : "";
         return `      <device name="${
           escapeXml(label)
-        }" battery="${t.battery}" />`;
+        }" battery="${t.battery}"${functions} />`;
       })
       .join("\n");
     intimacyParts.push(`    <lovense count="${snapshot.lovense.toys.length}">`);

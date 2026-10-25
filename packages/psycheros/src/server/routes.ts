@@ -30,6 +30,10 @@ import type {
 } from "../llm/mod.ts";
 import { dispatchDeviceControl } from "../tools/control-device.ts";
 import {
+  type LovenseToyWire,
+  normalizeToyFunctions,
+} from "../tools/control-lovense.ts";
+import {
   type ChunkParams,
   type DownloadStatus,
   EMBEDDING_PRESETS,
@@ -5594,12 +5598,18 @@ export function handleLorebookEntryEditFragment(
 // =============================================================================
 
 /**
- * Handle GET /api/graph/data - Get full graph data for visualization
+ * Handle GET /api/graph?limit=N - Get full graph data for visualization.
+ * `limit` bounds how many nodes are loaded (default 500, uncapped above it —
+ * the graph UI exposes this to the user).
  *
  * @param ctx - Route context
+ * @param request - HTTP request (query: limit)
  * @returns HTTP Response with JSON graph data
  */
-export async function handleGetGraphData(ctx: RouteContext): Promise<Response> {
+export async function handleGetGraphData(
+  ctx: RouteContext,
+  request: Request,
+): Promise<Response> {
   if (!ctx.mcpClient) {
     return new Response(
       JSON.stringify({
@@ -5615,9 +5625,17 @@ export async function handleGetGraphData(ctx: RouteContext): Promise<Response> {
     );
   }
 
+  const parsedLimit = parseInt(
+    new URL(request.url).searchParams.get("limit") ?? "",
+    10,
+  );
+  const nodeLimit = Number.isInteger(parsedLimit) && parsedLimit >= 1
+    ? parsedLimit
+    : 500;
+
   try {
     const [nodes, edges, stats] = await Promise.all([
-      ctx.mcpClient.getGraphNodes({ limit: 500 }),
+      ctx.mcpClient.getGraphNodes({ limit: nodeLimit }),
       ctx.mcpClient.getGraphEdges(),
       ctx.mcpClient.getGraphStats(),
     ]);
@@ -7197,14 +7215,7 @@ export async function handleTestLovenseConnection(
 
     const toysMap = JSON.parse(data.data.toys) as Record<
       string,
-      {
-        id: string;
-        // iOS Lovense Connect returns a number; Android/desktop return a string.
-        status: string | number;
-        name: string;
-        battery: number;
-        nickName: string;
-      }
+      LovenseToyWire
     >;
 
     const toys = Object.values(toysMap).map((t) => ({
@@ -7213,6 +7224,10 @@ export async function handleTestLovenseConnection(
       nickname: t.nickName || "",
       battery: t.battery,
       connected: String(t.status) === "1",
+      functions: normalizeToyFunctions(
+        t.fullFunctionNames,
+        t.shortFunctionNames,
+      ),
     }));
 
     return new Response(
@@ -7309,14 +7324,7 @@ export async function handleLovenseStatus(
 
     const toysMap = JSON.parse(data.data.toys) as Record<
       string,
-      {
-        id: string;
-        // iOS Lovense Connect returns a number; Android/desktop return a string.
-        status: string | number;
-        name: string;
-        battery: number;
-        nickName: string;
-      }
+      LovenseToyWire
     >;
 
     const connected = Object.values(toysMap).find((t) =>
@@ -7341,6 +7349,10 @@ export async function handleLovenseStatus(
           name: connected.name,
           battery: connected.battery,
           nickname: connected.nickName || "",
+          functions: normalizeToyFunctions(
+            connected.fullFunctionNames,
+            connected.shortFunctionNames,
+          ),
         },
       }),
       {

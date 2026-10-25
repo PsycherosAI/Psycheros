@@ -6,743 +6,743 @@
     <title>Psycheros</title>
     <link rel="stylesheet" href="./styles/tokens.css" />
     <style>
-      body {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: var(--sp-8);
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: var(--sp-8);
+    }
+    .card {
+      width: 100%;
+      max-width: 560px;
+      background: var(--c-bg-raised);
+      border: 1px solid var(--c-border);
+      border-radius: 14px;
+      padding: var(--sp-8) calc(var(--sp-8) + var(--sp-1))
+        calc(var(--sp-8) + var(--sp-2));
+      box-shadow:
+        0 24px 60px -20px rgba(0, 0, 0, 0.7),
+        0 0 0 1px var(--c-accent-subtle);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--sp-6);
+    }
+    .brand {
+      font-size: var(--font-size-sm);
+      font-weight: var(--font-weight-semibold);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--c-fg-muted);
+      margin: 0;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sp-2);
+      padding: 4px 10px;
+      background: var(--c-bg-sunken);
+      border: 1px solid var(--c-border);
+      border-radius: 999px;
+      font-size: var(--font-size-xs);
+      color: var(--c-fg-muted);
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--c-state-not-installed);
+      transition: background-color 200ms ease, box-shadow 200ms ease;
+    }
+    body[data-state="running"] .dot {
+      background: var(--c-state-running);
+      box-shadow: 0 0 10px var(--c-accent-glow);
+    }
+    body[data-state="installed"] .dot {
+      background: var(--c-state-installed);
+    }
+    body[data-state="not-installed"] .dot {
+      background: var(--c-state-not-installed);
+    }
+    h1 {
+      font-size: var(--font-size-xl);
+      font-weight: var(--font-weight-medium);
+      margin: 0 0 var(--sp-2) 0;
+      color: var(--c-fg-strong);
+      letter-spacing: -0.01em;
+    }
+    .detail {
+      font-size: var(--font-size-sm);
+      line-height: 1.55;
+      color: var(--c-fg-muted);
+      margin: 0 0 var(--sp-6) 0;
+    }
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-2);
+      margin-bottom: var(--sp-6);
+    }
+    button {
+      font: inherit;
+      cursor: pointer;
+      padding: 11px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--c-border-strong);
+      background: var(--c-bg-hover);
+      color: var(--c-fg);
+      font-size: var(--font-size-sm);
+      font-weight: var(--font-weight-medium);
+      text-align: left;
+      transition:
+        background 120ms ease,
+        border-color 120ms ease,
+        transform 60ms ease;
+    }
+    button:hover {
+      background: var(--c-bg-raised);
+      border-color: var(--c-fg-subtle);
+    }
+    button:active {
+      transform: translateY(1px);
+    }
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    /* Busy state — applied while an async click handler is running.
+       Solid bright accent fill makes the active button stand out
+       clearly against the now-disabled siblings. The card-level
+       action-progress banner (below) carries the louder "something's
+       happening" signal so this can stay tight. */
+    button.is-busy,
+    button.is-busy:disabled {
+      opacity: 1;
+      cursor: progress;
+      background: var(--c-accent) !important;
+      border-color: var(--c-accent-hover) !important;
+      color: var(--c-fg-strong) !important;
+    }
+    button.is-busy::after {
+      content: "";
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      margin-left: 10px;
+      vertical-align: -3px;
+      border: 2.5px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: psy-spin 0.6s linear infinite;
+    }
+    @keyframes psy-spin {
+      from {
+        transform: rotate(0deg);
       }
-      .card {
-        width: 100%;
-        max-width: 560px;
-        background: var(--c-bg-raised);
-        border: 1px solid var(--c-border);
-        border-radius: 14px;
-        padding: var(--sp-8) calc(var(--sp-8) + var(--sp-1))
-          calc(var(--sp-8) + var(--sp-2));
-        box-shadow:
-          0 24px 60px -20px rgba(0, 0, 0, 0.7),
-          0 0 0 1px var(--c-accent-subtle);
+      to {
+        transform: rotate(360deg);
       }
-      header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: var(--sp-6);
-      }
-      .brand {
-        font-size: var(--font-size-sm);
-        font-weight: var(--font-weight-semibold);
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: var(--c-fg-muted);
-        margin: 0;
-      }
-      .status-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--sp-2);
-        padding: 4px 10px;
-        background: var(--c-bg-sunken);
-        border: 1px solid var(--c-border);
-        border-radius: 999px;
-        font-size: var(--font-size-xs);
-        color: var(--c-fg-muted);
-      }
-      .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--c-state-not-installed);
-        transition: background-color 200ms ease, box-shadow 200ms ease;
-      }
-      body[data-state="running"] .dot {
-        background: var(--c-state-running);
-        box-shadow: 0 0 10px var(--c-accent-glow);
-      }
-      body[data-state="installed"] .dot {
-        background: var(--c-state-installed);
-      }
-      body[data-state="not-installed"] .dot {
-        background: var(--c-state-not-installed);
-      }
-      h1 {
-        font-size: var(--font-size-xl);
-        font-weight: var(--font-weight-medium);
-        margin: 0 0 var(--sp-2) 0;
-        color: var(--c-fg-strong);
-        letter-spacing: -0.01em;
-      }
-      .detail {
-        font-size: var(--font-size-sm);
-        line-height: 1.55;
-        color: var(--c-fg-muted);
-        margin: 0 0 var(--sp-6) 0;
-      }
-      .actions {
-        display: flex;
-        flex-direction: column;
-        gap: var(--sp-2);
-        margin-bottom: var(--sp-6);
-      }
-      button {
-        font: inherit;
-        cursor: pointer;
-        padding: 11px 16px;
-        border-radius: 8px;
-        border: 1px solid var(--c-border-strong);
-        background: var(--c-bg-hover);
-        color: var(--c-fg);
-        font-size: var(--font-size-sm);
-        font-weight: var(--font-weight-medium);
-        text-align: left;
-        transition:
-          background 120ms ease,
-          border-color 120ms ease,
-          transform 60ms ease;
-      }
-      button:hover {
-        background: var(--c-bg-raised);
-        border-color: var(--c-fg-subtle);
-      }
-      button:active {
-        transform: translateY(1px);
-      }
-      button:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-      }
-      /* Busy state — applied while an async click handler is running.
-         Solid bright accent fill makes the active button stand out
-         clearly against the now-disabled siblings. The card-level
-         action-progress banner (below) carries the louder "something's
-         happening" signal so this can stay tight. */
-      button.is-busy,
-      button.is-busy:disabled {
-        opacity: 1;
-        cursor: progress;
-        background: var(--c-accent) !important;
-        border-color: var(--c-accent-hover) !important;
-        color: var(--c-fg-strong) !important;
-      }
-      button.is-busy::after {
-        content: "";
-        display: inline-block;
-        width: 14px;
-        height: 14px;
-        margin-left: 10px;
-        vertical-align: -3px;
-        border: 2.5px solid currentColor;
-        border-right-color: transparent;
-        border-radius: 50%;
-        animation: psy-spin 0.6s linear infinite;
-      }
-      @keyframes psy-spin {
-        from {
-          transform: rotate(0deg);
-        }
-        to {
-          transform: rotate(360deg);
-        }
-      }
-      /* Action progress banner — shown at the top of the manager card
-         while any button's click handler is in flight. Loud, central,
-         and impossible to miss even in peripheral vision: animated
-         accent-glow border + leading spinner + busy text. Hidden by
-         default; manager.js toggles it on/off around each action. */
-      .action-progress {
-        display: flex;
-        align-items: center;
-        gap: var(--sp-3);
-        padding: var(--sp-3) var(--sp-4);
-        margin-bottom: var(--sp-4);
-        background: var(--c-accent-subtle);
-        border: 1px solid var(--c-accent);
-        border-radius: 8px;
-        color: var(--c-fg-strong);
-        font-size: var(--font-size-sm);
-        font-weight: var(--font-weight-medium);
+    }
+    /* Action progress banner — shown at the top of the manager card
+       while any button's click handler is in flight. Loud, central,
+       and impossible to miss even in peripheral vision: animated
+       accent-glow border + leading spinner + busy text. Hidden by
+       default; manager.js toggles it on/off around each action. */
+    .action-progress {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      padding: var(--sp-3) var(--sp-4);
+      margin-bottom: var(--sp-4);
+      background: var(--c-accent-subtle);
+      border: 1px solid var(--c-accent);
+      border-radius: 8px;
+      color: var(--c-fg-strong);
+      font-size: var(--font-size-sm);
+      font-weight: var(--font-weight-medium);
+      box-shadow: 0 0 0 0 var(--c-accent-glow);
+      animation: psy-glow-pulse 1.6s ease-in-out infinite;
+    }
+    .action-progress[hidden] {
+      display: none;
+    }
+    .action-progress::before {
+      content: "";
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2.5px solid var(--c-accent);
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: psy-spin 0.6s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes psy-glow-pulse {
+      0%,
+      100% {
         box-shadow: 0 0 0 0 var(--c-accent-glow);
-        animation: psy-glow-pulse 1.6s ease-in-out infinite;
       }
-      .action-progress[hidden] {
-        display: none;
+      50% {
+        box-shadow: 0 0 0 4px var(--c-accent-glow);
       }
-      .action-progress::before {
-        content: "";
-        display: inline-block;
-        width: 16px;
-        height: 16px;
-        border: 2.5px solid var(--c-accent);
-        border-right-color: transparent;
-        border-radius: 50%;
-        animation: psy-spin 0.6s linear infinite;
-        flex-shrink: 0;
-      }
-      @keyframes psy-glow-pulse {
-        0%,
-        100% {
-          box-shadow: 0 0 0 0 var(--c-accent-glow);
-        }
-        50% {
-          box-shadow: 0 0 0 4px var(--c-accent-glow);
-        }
-      }
-      /* Confirm modal — replaces native window.confirm (blocked in Tauri
-         webviews). Full-viewport backdrop + centered card. */
-      .modal-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 2147483646;
-        background: rgba(0, 0, 0, 0.6);
-        backdrop-filter: blur(4px);
-        -webkit-backdrop-filter: blur(4px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: var(--sp-6);
-      }
-      .modal-backdrop[hidden] {
-        display: none;
-      }
-      .modal-card {
-        max-width: 480px;
-        width: 100%;
-        background: var(--c-bg-raised);
-        border: 1px solid var(--c-border-strong);
-        border-radius: 12px;
-        padding: var(--sp-6);
-        box-shadow: 0 32px 80px -16px rgba(0, 0, 0, 0.8);
-      }
-      .modal-card h2 {
-        font-size: var(--font-size-lg);
-        font-weight: var(--font-weight-medium);
-        margin: 0 0 var(--sp-3) 0;
-        color: var(--c-fg-strong);
-      }
-      .modal-card p {
-        font-size: var(--font-size-sm);
-        line-height: 1.55;
-        color: var(--c-fg);
-        margin: 0 0 var(--sp-6) 0;
-        white-space: pre-wrap;
-      }
-      .modal-actions {
-        display: flex;
-        gap: var(--sp-2);
-        justify-content: flex-end;
-      }
-      button.primary {
-        background: var(--c-accent-muted);
-        border-color: var(--c-accent);
-        color: var(--c-fg-strong);
-      }
-      button.primary:hover {
-        background: var(--c-accent);
-        border-color: var(--c-accent-hover);
-      }
-      button.danger {
-        background: transparent;
-        border-color: rgba(255, 68, 68, 0.35);
-        color: var(--c-error);
-      }
-      button.danger:hover {
-        background: rgba(255, 68, 68, 0.08);
-        border-color: var(--c-error);
-      }
-      .meta {
-        font-size: var(--font-size-xs);
-        color: var(--c-fg-subtle);
-        line-height: 1.6;
-        border-top: 1px solid var(--c-border);
-        padding-top: var(--sp-4);
-        text-align: center;
-      }
-      .error {
-        background: rgba(255, 68, 68, 0.08);
-        border: 1px solid rgba(255, 68, 68, 0.35);
-        color: var(--c-error);
-        padding: var(--sp-3);
-        border-radius: 8px;
-        font-size: var(--font-size-sm);
-        margin-bottom: var(--sp-4);
-        white-space: pre-wrap;
-        display: none;
-      }
-      .error.visible {
-        display: block;
-      }
-      /* Wizard form layout */
-      .form-stack {
-        display: flex;
-        flex-direction: column;
-        gap: var(--sp-4);
-        margin-bottom: var(--sp-6);
-      }
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: var(--sp-2);
-      }
-      .field label {
-        font-size: var(--font-size-sm);
-        color: var(--c-fg-muted);
-      }
-      .field input,
-      .field select {
-        font: inherit;
-        font-size: var(--font-size-base);
-        padding: 10px 12px;
-        border-radius: 8px;
-        border: 1px solid var(--c-border-strong);
-        background: var(--c-bg-sunken);
-        color: var(--c-fg);
-        appearance: none;
-        -webkit-appearance: none;
-      }
-      .field select {
-        /* Custom chevron, since we strip the native one with appearance:none */
-        background-image:
-          linear-gradient(45deg, transparent 50%, var(--c-fg-muted) 50%),
-          linear-gradient(135deg, var(--c-fg-muted) 50%, transparent 50%);
-        background-position:
-          calc(100% - 18px) 50%,
-          calc(100% - 13px) 50%;
-        background-size: 5px 5px, 5px 5px;
-        background-repeat: no-repeat;
-        padding-right: 32px;
-      }
-      .field input:focus,
-      .field select:focus {
-        outline: none;
-        border-color: var(--c-accent);
-        box-shadow: 0 0 0 3px var(--c-accent-subtle);
-      }
-      /* Update-available banner — lives in the manager card, hidden by
-         default, revealed by manager.js when the Rust update watcher
-         emits an `update-available` event with update_available=true. */
-      .update-banner {
-        display: flex;
-        align-items: center;
-        gap: var(--sp-4);
-        padding: var(--sp-3) var(--sp-4);
-        margin-bottom: var(--sp-4);
-        background: var(--c-accent-subtle);
-        border: 1px solid var(--c-accent);
-        border-radius: 8px;
-      }
-      /* Higher-specificity override so `el.hidden = true` actually hides
-         the banner — without this, the `display: flex` above wins over
-         the browser-default `[hidden] { display: none }`. */
-      .update-banner[hidden] {
-        display: none;
-      }
-      .update-banner__text {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        font-size: var(--font-size-sm);
-      }
-      .update-banner__text strong {
-        color: var(--c-fg-strong);
-      }
-      .update-banner__text .version {
-        color: var(--c-fg-muted);
-        font-family: var(--font-mono);
-        font-size: var(--font-size-xs);
-      }
-      .update-banner__actions {
-        display: flex;
-        gap: var(--sp-2);
-        flex-shrink: 0;
-      }
-      .update-banner__actions button {
-        padding: 7px 12px;
-        font-size: var(--font-size-xs);
-      }
-      /* Bootstrap live ticker */
-      .ticker {
-        margin: 0 0 var(--sp-6) 0;
-        padding: var(--sp-3);
-        height: 140px;
-        overflow-y: auto;
-        background: var(--c-bg-sunken);
-        border: 1px solid var(--c-border);
-        border-radius: 8px;
-        font-family: var(--font-mono);
-        font-size: var(--font-size-xs);
-        color: var(--c-fg-muted);
-        line-height: 1.6;
-        white-space: nowrap;
-      }
-      .ticker .line {
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      /* Daemon log panel — persistent in the manager card after install,
-         showing live tail of the daemon's stderr. Hidden when daemon is
-         NotInstalled (no log file yet). */
-      .log-panel {
-        margin-top: var(--sp-4);
-        border-top: 1px solid var(--c-border);
-        padding-top: var(--sp-4);
-      }
-      .log-panel[hidden] {
-        display: none;
-      }
-      .log-panel__header {
-        display: flex;
-        align-items: center;
-        gap: var(--sp-3);
-        flex-wrap: wrap;
-        margin-bottom: var(--sp-2);
-      }
-      .log-panel__title {
-        font-size: var(--font-size-xs);
-        font-weight: var(--font-weight-semibold);
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--c-fg-muted);
-        margin: 0;
-        margin-right: auto;
-      }
-      .log-panel__filters {
-        display: flex;
-        align-items: center;
-        gap: var(--sp-2);
-        font-size: var(--font-size-xs);
-        color: var(--c-fg-subtle);
-      }
-      .log-panel__filter {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        cursor: pointer;
-        user-select: none;
-      }
-      .log-panel__filter input {
-        margin: 0;
-        cursor: pointer;
-      }
-      .log-panel__search {
-        font: inherit;
-        font-size: var(--font-size-xs);
-        padding: 4px 8px;
-        border-radius: 6px;
-        border: 1px solid var(--c-border-strong);
-        background: var(--c-bg-sunken);
-        color: var(--c-fg);
-        width: 180px;
-      }
-      .log-panel__search:focus {
-        outline: none;
-        border-color: var(--c-accent);
-        box-shadow: 0 0 0 2px var(--c-accent-subtle);
-      }
-      .log-panel__actions {
-        display: flex;
-        gap: 4px;
-      }
-      .log-panel__btn {
-        font-size: var(--font-size-xs);
-        background: none;
-        border: 1px solid var(--c-border);
-        color: var(--c-fg-subtle);
-        padding: 3px 8px;
-        cursor: pointer;
-        border-radius: 6px;
-      }
-      .log-panel__btn:hover:not(:disabled) {
-        color: var(--c-fg);
-        border-color: var(--c-border-strong);
-      }
-      .log-panel__btn:disabled {
-        opacity: 0.4;
-        cursor: progress;
-      }
-      .log-panel__body {
-        margin: 0;
-        padding: var(--sp-3);
-        height: 180px;
-        overflow-y: auto;
-        background: var(--c-bg-sunken);
-        border: 1px solid var(--c-border);
-        border-radius: 8px;
-        font-family: var(--font-mono);
-        font-size: var(--font-size-xs);
-        color: var(--c-fg-muted);
-        line-height: 1.6;
-        white-space: nowrap;
-      }
-      .log-panel__body .line {
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      /* Subtle level color hints based on prefix. Psycheros logger emits
-         lines like `2026-05-19T20:13:17.490Z [INFO ] [General] ...`;
-         the substring match here is a heuristic, good enough to draw the
-         eye to ERRORs and WARNs without parsing structure. */
-      .log-panel__body .line.is-error {
-        color: var(--c-error);
-      }
-      .log-panel__body .line.is-warn {
-        color: var(--c-warning);
-      }
-      /* Filter-driven hiding. The panel body carries data-hide-info /
-         data-hide-warn / data-hide-error attributes; lines with the
-         matching class get display:none. INFO is the implicit default
-         level (no class on the .line element), so we match it by
-         negating .is-warn and .is-error. */
-      .log-panel__body[data-hide-info] .line:not(.is-warn):not(.is-error) {
-        display: none;
-      }
-      .log-panel__body[data-hide-warn] .line.is-warn {
-        display: none;
-      }
-      .log-panel__body[data-hide-error] .line.is-error {
-        display: none;
-      }
-      /* Search hides via inline `style="display:none"` set in JS, so
-         search and filter compose: a line is visible only when both
-         filter rules and the search filter allow it. */
+    }
+    /* Confirm modal — replaces native window.confirm (blocked in Tauri
+       webviews). Full-viewport backdrop + centered card. */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483646;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: var(--sp-6);
+    }
+    .modal-backdrop[hidden] {
+      display: none;
+    }
+    .modal-card {
+      max-width: 480px;
+      width: 100%;
+      background: var(--c-bg-raised);
+      border: 1px solid var(--c-border-strong);
+      border-radius: 12px;
+      padding: var(--sp-6);
+      box-shadow: 0 32px 80px -16px rgba(0, 0, 0, 0.8);
+    }
+    .modal-card h2 {
+      font-size: var(--font-size-lg);
+      font-weight: var(--font-weight-medium);
+      margin: 0 0 var(--sp-3) 0;
+      color: var(--c-fg-strong);
+    }
+    .modal-card p {
+      font-size: var(--font-size-sm);
+      line-height: 1.55;
+      color: var(--c-fg);
+      margin: 0 0 var(--sp-6) 0;
+      white-space: pre-wrap;
+    }
+    .modal-actions {
+      display: flex;
+      gap: var(--sp-2);
+      justify-content: flex-end;
+    }
+    button.primary {
+      background: var(--c-accent-muted);
+      border-color: var(--c-accent);
+      color: var(--c-fg-strong);
+    }
+    button.primary:hover {
+      background: var(--c-accent);
+      border-color: var(--c-accent-hover);
+    }
+    button.danger {
+      background: transparent;
+      border-color: rgba(255, 68, 68, 0.35);
+      color: var(--c-error);
+    }
+    button.danger:hover {
+      background: rgba(255, 68, 68, 0.08);
+      border-color: var(--c-error);
+    }
+    .meta {
+      font-size: var(--font-size-xs);
+      color: var(--c-fg-subtle);
+      line-height: 1.6;
+      border-top: 1px solid var(--c-border);
+      padding-top: var(--sp-4);
+      text-align: center;
+    }
+    .error {
+      background: rgba(255, 68, 68, 0.08);
+      border: 1px solid rgba(255, 68, 68, 0.35);
+      color: var(--c-error);
+      padding: var(--sp-3);
+      border-radius: 8px;
+      font-size: var(--font-size-sm);
+      margin-bottom: var(--sp-4);
+      white-space: pre-wrap;
+      display: none;
+    }
+    .error.visible {
+      display: block;
+    }
+    /* Wizard form layout */
+    .form-stack {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-4);
+      margin-bottom: var(--sp-6);
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-2);
+    }
+    .field label {
+      font-size: var(--font-size-sm);
+      color: var(--c-fg-muted);
+    }
+    .field input,
+    .field select {
+      font: inherit;
+      font-size: var(--font-size-base);
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--c-border-strong);
+      background: var(--c-bg-sunken);
+      color: var(--c-fg);
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .field select {
+      /* Custom chevron, since we strip the native one with appearance:none */
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--c-fg-muted) 50%),
+        linear-gradient(135deg, var(--c-fg-muted) 50%, transparent 50%);
+      background-position:
+        calc(100% - 18px) 50%,
+        calc(100% - 13px) 50%;
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+      padding-right: 32px;
+    }
+    .field input:focus,
+    .field select:focus {
+      outline: none;
+      border-color: var(--c-accent);
+      box-shadow: 0 0 0 3px var(--c-accent-subtle);
+    }
+    /* Update-available banner — lives in the manager card, hidden by
+       default, revealed by manager.js when the Rust update watcher
+       emits an `update-available` event with update_available=true. */
+    .update-banner {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-4);
+      padding: var(--sp-3) var(--sp-4);
+      margin-bottom: var(--sp-4);
+      background: var(--c-accent-subtle);
+      border: 1px solid var(--c-accent);
+      border-radius: 8px;
+    }
+    /* Higher-specificity override so `el.hidden = true` actually hides
+       the banner — without this, the `display: flex` above wins over
+       the browser-default `[hidden] { display: none }`. */
+    .update-banner[hidden] {
+      display: none;
+    }
+    .update-banner__text {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: var(--font-size-sm);
+    }
+    .update-banner__text strong {
+      color: var(--c-fg-strong);
+    }
+    .update-banner__text .version {
+      color: var(--c-fg-muted);
+      font-family: var(--font-mono);
+      font-size: var(--font-size-xs);
+    }
+    .update-banner__actions {
+      display: flex;
+      gap: var(--sp-2);
+      flex-shrink: 0;
+    }
+    .update-banner__actions button {
+      padding: 7px 12px;
+      font-size: var(--font-size-xs);
+    }
+    /* Bootstrap live ticker */
+    .ticker {
+      margin: 0 0 var(--sp-6) 0;
+      padding: var(--sp-3);
+      height: 140px;
+      overflow-y: auto;
+      background: var(--c-bg-sunken);
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: var(--font-size-xs);
+      color: var(--c-fg-muted);
+      line-height: 1.6;
+      white-space: nowrap;
+    }
+    .ticker .line {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    /* Daemon log panel — persistent in the manager card after install,
+       showing live tail of the daemon's stderr. Hidden when daemon is
+       NotInstalled (no log file yet). */
+    .log-panel {
+      margin-top: var(--sp-4);
+      border-top: 1px solid var(--c-border);
+      padding-top: var(--sp-4);
+    }
+    .log-panel[hidden] {
+      display: none;
+    }
+    .log-panel__header {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      flex-wrap: wrap;
+      margin-bottom: var(--sp-2);
+    }
+    .log-panel__title {
+      font-size: var(--font-size-xs);
+      font-weight: var(--font-weight-semibold);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--c-fg-muted);
+      margin: 0;
+      margin-right: auto;
+    }
+    .log-panel__filters {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      font-size: var(--font-size-xs);
+      color: var(--c-fg-subtle);
+    }
+    .log-panel__filter {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .log-panel__filter input {
+      margin: 0;
+      cursor: pointer;
+    }
+    .log-panel__search {
+      font: inherit;
+      font-size: var(--font-size-xs);
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--c-border-strong);
+      background: var(--c-bg-sunken);
+      color: var(--c-fg);
+      width: 180px;
+    }
+    .log-panel__search:focus {
+      outline: none;
+      border-color: var(--c-accent);
+      box-shadow: 0 0 0 2px var(--c-accent-subtle);
+    }
+    .log-panel__actions {
+      display: flex;
+      gap: 4px;
+    }
+    .log-panel__btn {
+      font-size: var(--font-size-xs);
+      background: none;
+      border: 1px solid var(--c-border);
+      color: var(--c-fg-subtle);
+      padding: 3px 8px;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    .log-panel__btn:hover:not(:disabled) {
+      color: var(--c-fg);
+      border-color: var(--c-border-strong);
+    }
+    .log-panel__btn:disabled {
+      opacity: 0.4;
+      cursor: progress;
+    }
+    .log-panel__body {
+      margin: 0;
+      padding: var(--sp-3);
+      height: 180px;
+      overflow-y: auto;
+      background: var(--c-bg-sunken);
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: var(--font-size-xs);
+      color: var(--c-fg-muted);
+      line-height: 1.6;
+      white-space: nowrap;
+    }
+    .log-panel__body .line {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    /* Subtle level color hints based on prefix. Psycheros logger emits
+       lines like `2026-05-19T20:13:17.490Z [INFO ] [General] ...`;
+       the substring match here is a heuristic, good enough to draw the
+       eye to ERRORs and WARNs without parsing structure. */
+    .log-panel__body .line.is-error {
+      color: var(--c-error);
+    }
+    .log-panel__body .line.is-warn {
+      color: var(--c-warning);
+    }
+    /* Filter-driven hiding. The panel body carries data-hide-info /
+       data-hide-warn / data-hide-error attributes; lines with the
+       matching class get display:none. INFO is the implicit default
+       level (no class on the .line element), so we match it by
+       negating .is-warn and .is-error. */
+    .log-panel__body[data-hide-info] .line:not(.is-warn):not(.is-error) {
+      display: none;
+    }
+    .log-panel__body[data-hide-warn] .line.is-warn {
+      display: none;
+    }
+    .log-panel__body[data-hide-error] .line.is-error {
+      display: none;
+    }
+    /* Search hides via inline `style="display:none"` set in JS, so
+       search and filter compose: a line is visible only when both
+       filter rules and the search filter allow it. */
 
-      /* Manager-card footer "tools" row — sits below the keyboard hint
-         and currently hosts the Diagnostics affordance. Subtle text
-         button (not an action button) so it doesn't compete visually
-         with the lifecycle actions above. */
-      .meta__tools {
-        display: flex;
-        justify-content: center;
-        gap: var(--sp-3);
-        margin-top: var(--sp-3);
-      }
-      .meta__tool {
-        background: transparent;
-        border: 1px solid var(--c-border);
-        color: var(--c-fg-muted);
-        font-size: var(--font-size-xs);
-        padding: 4px 10px;
-        border-radius: 6px;
-        cursor: pointer;
-      }
-      .meta__tool:hover {
-        color: var(--c-fg);
-        border-color: var(--c-border-strong);
-      }
+    /* Manager-card footer "tools" row — sits below the keyboard hint
+       and currently hosts the Diagnostics affordance. Subtle text
+       button (not an action button) so it doesn't compete visually
+       with the lifecycle actions above. */
+    .meta__tools {
+      display: flex;
+      justify-content: center;
+      gap: var(--sp-3);
+      margin-top: var(--sp-3);
+    }
+    .meta__tool {
+      background: transparent;
+      border: 1px solid var(--c-border);
+      color: var(--c-fg-muted);
+      font-size: var(--font-size-xs);
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .meta__tool:hover {
+      color: var(--c-fg);
+      border-color: var(--c-border-strong);
+    }
 
-      /* Info-card grid — shared between diagnostics and settings cards.
-         Labeled key/value rows organized into sections; sections divided
-         by uppercase-tracking headings. Row uses a 3-column grid so
-         labels + trailing buttons align across sections regardless of
-         value length. */
-      .info-grid {
-        display: flex;
-        flex-direction: column;
-        gap: var(--sp-2);
-        margin-bottom: var(--sp-4);
-      }
-      .info-grid__heading {
-        font-size: var(--font-size-xs);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--c-fg-subtle);
-        margin: var(--sp-3) 0 var(--sp-1);
-        font-weight: 600;
-      }
-      .info-row {
-        display: grid;
-        grid-template-columns: 180px 1fr auto;
-        gap: var(--sp-3);
-        align-items: start;
-        padding: var(--sp-2) 0;
-        border-top: 1px solid var(--c-border);
-        font-size: var(--font-size-sm);
-      }
-      .info-row__label {
-        color: var(--c-fg-muted);
-      }
-      .info-row__valuewrap {
-        min-width: 0;
-      }
-      .info-row__value {
-        color: var(--c-fg);
-        word-break: break-all;
-        font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
-        font-size: var(--font-size-xs);
-        line-height: 1.5;
-      }
-      .info-row__value--plain {
-        font-family: inherit;
-        font-size: var(--font-size-sm);
-      }
-      .info-row__sub {
-        color: var(--c-fg-subtle);
-        font-size: var(--font-size-xs);
-        margin-top: 2px;
-      }
-      .info-row__action {
-        background: transparent;
-        border: 1px solid var(--c-border);
-        color: var(--c-fg-muted);
-        font-size: var(--font-size-xs);
-        padding: 4px 10px;
-        border-radius: 6px;
-        cursor: pointer;
-        align-self: center;
-      }
-      .info-row__select {
-        font: inherit;
-        font-size: var(--font-size-xs);
-        padding: 4px 6px;
-        border-radius: 6px;
-        border: 1px solid var(--c-border-strong);
-        background: var(--c-bg-sunken);
-        color: var(--c-fg);
-        max-width: 100%;
-      }
-      .info-row__action:hover:not(:disabled) {
-        color: var(--c-fg);
-        border-color: var(--c-border-strong);
-      }
-      .info-row__action:disabled {
-        opacity: 0.4;
-        cursor: progress;
-      }
-      .info-grid__loading {
-        color: var(--c-fg-subtle);
-        text-align: center;
-        padding: var(--sp-6) 0;
-      }
-      .info-grid__error {
-        background: rgba(255, 68, 68, 0.08);
-        border: 1px solid rgba(255, 68, 68, 0.35);
-        color: var(--c-error);
-        padding: var(--sp-3);
-        border-radius: 8px;
-        font-size: var(--font-size-sm);
-      }
+    /* Info-card grid — shared between diagnostics and settings cards.
+       Labeled key/value rows organized into sections; sections divided
+       by uppercase-tracking headings. Row uses a 3-column grid so
+       labels + trailing buttons align across sections regardless of
+       value length. */
+    .info-grid {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-2);
+      margin-bottom: var(--sp-4);
+    }
+    .info-grid__heading {
+      font-size: var(--font-size-xs);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--c-fg-subtle);
+      margin: var(--sp-3) 0 var(--sp-1);
+      font-weight: 600;
+    }
+    .info-row {
+      display: grid;
+      grid-template-columns: 180px 1fr auto;
+      gap: var(--sp-3);
+      align-items: start;
+      padding: var(--sp-2) 0;
+      border-top: 1px solid var(--c-border);
+      font-size: var(--font-size-sm);
+    }
+    .info-row__label {
+      color: var(--c-fg-muted);
+    }
+    .info-row__valuewrap {
+      min-width: 0;
+    }
+    .info-row__value {
+      color: var(--c-fg);
+      word-break: break-all;
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+      font-size: var(--font-size-xs);
+      line-height: 1.5;
+    }
+    .info-row__value--plain {
+      font-family: inherit;
+      font-size: var(--font-size-sm);
+    }
+    .info-row__sub {
+      color: var(--c-fg-subtle);
+      font-size: var(--font-size-xs);
+      margin-top: 2px;
+    }
+    .info-row__action {
+      background: transparent;
+      border: 1px solid var(--c-border);
+      color: var(--c-fg-muted);
+      font-size: var(--font-size-xs);
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      align-self: center;
+    }
+    .info-row__select {
+      font: inherit;
+      font-size: var(--font-size-xs);
+      padding: 4px 6px;
+      border-radius: 6px;
+      border: 1px solid var(--c-border-strong);
+      background: var(--c-bg-sunken);
+      color: var(--c-fg);
+      max-width: 100%;
+    }
+    .info-row__action:hover:not(:disabled) {
+      color: var(--c-fg);
+      border-color: var(--c-border-strong);
+    }
+    .info-row__action:disabled {
+      opacity: 0.4;
+      cursor: progress;
+    }
+    .info-grid__loading {
+      color: var(--c-fg-subtle);
+      text-align: center;
+      padding: var(--sp-6) 0;
+    }
+    .info-grid__error {
+      background: rgba(255, 68, 68, 0.08);
+      border: 1px solid rgba(255, 68, 68, 0.35);
+      color: var(--c-error);
+      padding: var(--sp-3);
+      border-radius: 8px;
+      font-size: var(--font-size-sm);
+    }
 
-      /* Data management card — vertical list of self-contained
-         action rows. Each row pairs a short description with its
-         single action button; destructive rows get a left-edge accent
-         so the eye groups them together. */
-      .data-actions {
-        display: flex;
-        flex-direction: column;
-        gap: var(--sp-3);
-        margin-bottom: var(--sp-4);
-      }
-      .data-action {
-        display: flex;
-        align-items: center;
-        gap: var(--sp-4);
-        padding: var(--sp-3);
-        border: 1px solid var(--c-border);
-        border-radius: 8px;
-        background: var(--c-bg-sunken);
-      }
-      .data-action--danger {
-        border-color: rgba(255, 68, 68, 0.35);
-        background: rgba(255, 68, 68, 0.04);
-      }
-      .data-action__head {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        flex: 1 1 auto;
-        min-width: 0;
-      }
-      .data-action__head strong {
-        font-size: var(--font-size-base);
-        color: var(--c-fg);
-      }
-      .data-action__detail {
-        font-size: var(--font-size-xs);
-        color: var(--c-fg-muted);
-        line-height: 1.5;
-      }
-      .data-action button {
-        flex: 0 0 auto;
-        white-space: nowrap;
-      }
+    /* Data management card — vertical list of self-contained
+       action rows. Each row pairs a short description with its
+       single action button; destructive rows get a left-edge accent
+       so the eye groups them together. */
+    .data-actions {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-3);
+      margin-bottom: var(--sp-4);
+    }
+    .data-action {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-4);
+      padding: var(--sp-3);
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      background: var(--c-bg-sunken);
+    }
+    .data-action--danger {
+      border-color: rgba(255, 68, 68, 0.35);
+      background: rgba(255, 68, 68, 0.04);
+    }
+    .data-action__head {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .data-action__head strong {
+      font-size: var(--font-size-base);
+      color: var(--c-fg);
+    }
+    .data-action__detail {
+      font-size: var(--font-size-xs);
+      color: var(--c-fg-muted);
+      line-height: 1.5;
+    }
+    .data-action button {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
 
-      /* Typed-confirm modal — same backdrop shape as the regular
-         confirm modal, plus an input that the user must fill with a
-         specific phrase before the destructive button activates. */
-      .modal-card--wide {
-        max-width: 480px;
-      }
-      .typed-confirm__input {
-        font: inherit;
-        font-size: var(--font-size-base);
-        padding: 8px 10px;
-        margin: var(--sp-2) 0 var(--sp-3);
-        width: 100%;
-        border-radius: 6px;
-        border: 1px solid var(--c-border-strong);
-        background: var(--c-bg-sunken);
-        color: var(--c-fg);
-        font-family: var(--font-mono, monospace);
-        letter-spacing: 0.04em;
-      }
-      .typed-confirm__input:focus {
-        outline: none;
-        border-color: var(--c-accent);
-        box-shadow: 0 0 0 2px var(--c-accent-subtle);
-      }
-      .typed-confirm__phrase {
-        font-family: var(--font-mono, monospace);
-        font-weight: var(--font-weight-semibold);
-        color: var(--c-fg);
-      }
+    /* Typed-confirm modal — same backdrop shape as the regular
+       confirm modal, plus an input that the user must fill with a
+       specific phrase before the destructive button activates. */
+    .modal-card--wide {
+      max-width: 480px;
+    }
+    .typed-confirm__input {
+      font: inherit;
+      font-size: var(--font-size-base);
+      padding: 8px 10px;
+      margin: var(--sp-2) 0 var(--sp-3);
+      width: 100%;
+      border-radius: 6px;
+      border: 1px solid var(--c-border-strong);
+      background: var(--c-bg-sunken);
+      color: var(--c-fg);
+      font-family: var(--font-mono, monospace);
+      letter-spacing: 0.04em;
+    }
+    .typed-confirm__input:focus {
+      outline: none;
+      border-color: var(--c-accent);
+      box-shadow: 0 0 0 2px var(--c-accent-subtle);
+    }
+    .typed-confirm__phrase {
+      font-family: var(--font-mono, monospace);
+      font-weight: var(--font-weight-semibold);
+      color: var(--c-fg);
+    }
 
-      /* Warnings panel — sits above the update banner in the manager
-         card, hidden until self-repair logic decides there's something
-         to surface. Each warning is its own `.warning-entry` card with
-         a short title, body, and one or more remediation buttons. */
-      .warnings-panel {
-        display: flex;
-        flex-direction: column;
-        gap: var(--sp-2);
-        margin-bottom: var(--sp-4);
-      }
-      .warnings-panel[hidden] {
-        display: none;
-      }
-      .warning-entry {
-        display: flex;
-        flex-direction: column;
-        gap: var(--sp-2);
-        padding: var(--sp-3);
-        border-radius: 8px;
-        background: rgba(255, 153, 51, 0.08);
-        border: 1px solid rgba(255, 153, 51, 0.35);
-      }
-      .warning-entry--danger {
-        background: rgba(255, 68, 68, 0.08);
-        border-color: rgba(255, 68, 68, 0.35);
-      }
-      .warning-entry__title {
-        font-weight: var(--font-weight-semibold);
-        color: var(--c-fg);
-        font-size: var(--font-size-sm);
-      }
-      .warning-entry__body {
-        font-size: var(--font-size-xs);
-        color: var(--c-fg-muted);
-        line-height: 1.5;
-      }
-      .warning-entry__actions {
-        display: flex;
-        gap: var(--sp-2);
-        flex-wrap: wrap;
-      }
-      .warning-entry__actions button {
-        font-size: var(--font-size-xs);
-        padding: 4px 10px;
-        border-radius: 6px;
-      }
+    /* Warnings panel — sits above the update banner in the manager
+       card, hidden until self-repair logic decides there's something
+       to surface. Each warning is its own `.warning-entry` card with
+       a short title, body, and one or more remediation buttons. */
+    .warnings-panel {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-2);
+      margin-bottom: var(--sp-4);
+    }
+    .warnings-panel[hidden] {
+      display: none;
+    }
+    .warning-entry {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-2);
+      padding: var(--sp-3);
+      border-radius: 8px;
+      background: rgba(255, 153, 51, 0.08);
+      border: 1px solid rgba(255, 153, 51, 0.35);
+    }
+    .warning-entry--danger {
+      background: rgba(255, 68, 68, 0.08);
+      border-color: rgba(255, 68, 68, 0.35);
+    }
+    .warning-entry__title {
+      font-weight: var(--font-weight-semibold);
+      color: var(--c-fg);
+      font-size: var(--font-size-sm);
+    }
+    .warning-entry__body {
+      font-size: var(--font-size-xs);
+      color: var(--c-fg-muted);
+      line-height: 1.5;
+    }
+    .warning-entry__actions {
+      display: flex;
+      gap: var(--sp-2);
+      flex-wrap: wrap;
+    }
+    .warning-entry__actions button {
+      font-size: var(--font-size-xs);
+      padding: 4px 10px;
+      border-radius: 6px;
+    }
     </style>
   </head>
   <body data-state="unknown">

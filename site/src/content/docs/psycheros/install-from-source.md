@@ -13,7 +13,7 @@ and an LLM API key — nothing else.
 
 Psycheros requires **Deno 2.x** (the exact version CI uses is pinned in
 [`.deno-version`](https://github.com/PsycherosAI/Psycheros/blob/main/.deno-version)
-— currently `2.7.14`). Any recent 2.x release will work, but matching the pinned
+— currently `2.9.8`). Any recent 2.x release will work, but matching the pinned
 version avoids formatting drift if you plan to contribute.
 
 **macOS / Linux:**

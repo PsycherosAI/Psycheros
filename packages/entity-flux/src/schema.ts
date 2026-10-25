@@ -61,4 +61,28 @@ const FLUX_SHARED_SCHEMA = `
  */
 export function initializeFluxSchema(db: Database): void {
   db.exec(FLUX_SHARED_SCHEMA);
+  // ONE observation, ONE timeline row (the double-post repair). Two
+  // writers can race the same observation onto the timeline — the
+  // engagement wire posts at wake-verdict time while a promotion batch
+  // that already passed its "already posted?" check inserts behind it
+  // (check-then-insert across concurrent paths; the guard in
+  // tier2-store consults only one side). The unique index below makes
+  // the insertion itself the arbiter. First, sweep the race's
+  // historical rows — the index cannot be created over duplicates.
+  // The earliest row of each pair survives; the tint-flip path can
+  // still promote it later if its own wake fires.
+  db.exec(
+    `DELETE FROM flux_durable_entries
+     WHERE source_observation_id IS NOT NULL
+       AND rowid NOT IN (
+         SELECT MIN(rowid) FROM flux_durable_entries
+         WHERE source_observation_id IS NOT NULL
+         GROUP BY source_observation_id
+       )`,
+  );
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_flux_durable_one_row_per_obs
+     ON flux_durable_entries(source_observation_id)
+     WHERE source_observation_id IS NOT NULL`,
+  );
 }

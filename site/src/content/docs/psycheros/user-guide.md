@@ -16,11 +16,6 @@ home automation, Discord, and more), image generation hookups, autonomous
 prompting, a Workspace for hands-on computer work, Skills the entity writes and
 loads on demand, and is extremely customizable.
 
-There is also **Flux**, the optional nervous system — continuous presence,
-senses, an inner life that runs between your messages. It's off by default and
-this guide stays focused on core Psycheros; Flux has its own
-[walkthrough](/psycheros/flux-user-guide/).
-
 This framework can run on a PC with 2-4gigs of RAM, as API calls to inference
 providers (such as OpenRouter, Z.ai, NanoGPT, and others) are used for the LLM.
 You can also use a local model if you prefer.
@@ -368,6 +363,21 @@ native parser). For anything else there's a standard import format: hand the
 [Loom Standard Import Format](https://github.com/PsycherosAI/Psycheros-staging/blob/main/packages/entity-loom/docs/loom-standard-format.md)
 doc to a coding agent along with your platform's raw export, and it can produce
 a single JSON file that Entity Loom ingests directly.
+
+## Flux
+
+Flux is a persistent presence nervous system, an additional layer that can be
+flipped on to give more depth to the entity, inspired by the works of Carl Jung
+and Marvin Minsky. It focuses on near-real-time interaction, small local
+processing, a continuous subconscious process, spontaneous thoughts and
+messages, and the ability to attach senses. You can essentially hang out with
+the entity less like two people writing letters back and forth, and more like
+just being in the same room; the entity can just spontaneously tell you what's
+on their mind without you messaging first.
+
+Flux is not a simulation-shaped process, but rather an organic-shaped dynamic
+system designed for emergence. For setup and everything it does, see the
+[Flux user guide](/Psycheros/psycheros/flux-user-guide/).
 
 ## Data Vault
 

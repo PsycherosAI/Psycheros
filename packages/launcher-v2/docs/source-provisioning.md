@@ -88,6 +88,35 @@ When the user clicks **Update now**, `apply_source_update`
 Progress streams to the frontend as `source-update-progress` events, reusing the
 bootstrap card's ticker component.
 
+### Runtime sync on shell updates
+
+The staged Deno at `<data>/bin/deno` is a copy, so a shell update that ships a
+newer bundled sidecar does nothing to it on its own — and first-run never
+re-runs for an existing install (the intact source clone and staged binary make
+`needs_first_run` false). Until 2026-10-25 that was a real gap: a Deno pin bump
+reached new installs but never installs that had already booted once, while the
+daemon-side version-guard banner told users to update an app they had already
+updated.
+
+`stage_deno_if_needed` ([`commands.rs`](../src-tauri/src/commands.rs)) closes
+it: probe the versions of the bundled sidecar and the staged binary
+(`bundle::deno_version_of` — a `--version` exec with a first-line parse) and
+re-stage the sidecar over `<data>/bin/deno` when they differ. Wired into four
+points — app startup, both install buttons, and Start (before the macOS re-sign
+pass). Details that matter:
+
+- **Version-keyed, not byte-keyed** — a same-version rebuild is a no-op, so
+  normal starts don't re-copy a ~100MB binary. An unprobeable sidecar (dev
+  builds without one) is left alone rather than blind-copied every start.
+- **No cache re-warm** — DENO_DIR's remote/npm caches are not
+  version-partitioned and the supervisor starts the daemon with plain `deno run`
+  (not `--cached-only`), so the swap rides the existing warm cache.
+- **A running daemon keeps its old image** — Unix swaps the inode safely and the
+  process exits on the binary it started with; Windows cannot replace an in-use
+  exe at all, so the failure surfaces on Start/Install and the next
+  Start-after-Stop lands it. The app-startup hook covers the autostart case
+  where the OS boots the daemon before the launcher ever opens.
+
 ## Why git clone and not the tarball model
 
 The tarball model embedded `release-bundle.tar.gz` inside the `.app` and

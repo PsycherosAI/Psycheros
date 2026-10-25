@@ -22,7 +22,12 @@ All notable changes to entity-loom are documented here. The format follows
 
 - macOS `__dirname` resolution via `fromFileUrl`
 
-## [Unreleased]
+## [0.4.2] - 2026-10-25
+
+### Changed
+
+- Web assets (graph, wizard) reformatted onto the Deno 2.9.8 formatter. No
+  functional change.
 
 ## [0.3.9] - 2026-07-15
 

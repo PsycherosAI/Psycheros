@@ -479,10 +479,10 @@ body[data-decor="stamp"] .msg--user .msg-content,
   border-color: transparent;
   -webkit-mask:
     radial-gradient(
-      circle var(--stamp-notch) at 50% 0,
-      transparent calc(var(--stamp-notch) - 1px),
-      #000 var(--stamp-notch)
-    ) top / var(--stamp-tile) var(--stamp-band) repeat-x,
+    circle var(--stamp-notch) at 50% 0,
+    transparent calc(var(--stamp-notch) - 1px),
+    #000 var(--stamp-notch)
+  ) top / var(--stamp-tile) var(--stamp-band) repeat-x,
     radial-gradient(
     circle var(--stamp-notch) at 50% 100%,
     transparent calc(var(--stamp-notch) - 1px),
@@ -502,10 +502,10 @@ body[data-decor="stamp"] .msg--user .msg-content,
     calc(100% - 2 * var(--stamp-band)) no-repeat;
   mask:
     radial-gradient(
-      circle var(--stamp-notch) at 50% 0,
-      transparent calc(var(--stamp-notch) - 1px),
-      #000 var(--stamp-notch)
-    ) top / var(--stamp-tile) var(--stamp-band) repeat-x,
+    circle var(--stamp-notch) at 50% 0,
+    transparent calc(var(--stamp-notch) - 1px),
+    #000 var(--stamp-notch)
+  ) top / var(--stamp-tile) var(--stamp-band) repeat-x,
     radial-gradient(
     circle var(--stamp-notch) at 50% 100%,
     transparent calc(var(--stamp-notch) - 1px),

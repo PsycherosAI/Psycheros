@@ -87,6 +87,18 @@ dialogue posts live into the host. Deep reference:
   around write+broadcast is the anti-corruption invariant (never held across
   generate). They also ChatRAG-index and push a conversation-scoped `dom_update`
   so open views render live.
+- **One generation, one rendering owner (2026-10-23)** — a live-streamed
+  (routed) turn's thinking/content fragments go ONLY to its posting client's
+  per-request stream; the session skips the `flux_ego_thinking/stream` broadcast
+  hooks when a live sink owns the turn. Before this, both channels delivered the
+  same generation to the posting tab and the Ego-wake temp bubble (its
+  `isStreaming` guard only blocks bubble CREATION — late fragments on the
+  persistent SSE grew ghost bubbles from the reply's tail). Other surfaces see
+  the generating indicator, then converge on the finished row via `flux_entry`
+  - `flux_turn_done`. Consequence: the Flux overlay does not live-stream routed
+    turns' words — a turn-id protocol on the events is the richer path if
+    multi-surface live rendering is ever wanted. The overlay's live bubble grows
+    only from real fragments, never pre-created on the indicator.
 - **`restartFlux` re-passes the host binding** — settings-save auto-restarts
   would silently revert a hosted run to Flux Space without it. Daemon reboot =
   legacy mode (by design; hosting is per-run).
@@ -664,7 +676,13 @@ are `ServerConfig`, `EntityConfig`, `PulseEngineConfig`, and `RouteContext`.
 The data tree (rooted at `dataRoot`):
 
 - `identity/` and `.snapshots/` — **runtime-only**, gitignored, never committed.
-  User-specific entity data. Never `git add` files from them.
+  User-specific entity data. Never `git add` files from them. `identity/` is a
+  cache: the 5-minute MCP pull syncs it **diff-first** (`syncIdentityToLocal`
+  writes a file only when its local copy is missing or differs — mtime-proof
+  regression test in `tests/mcp_identity_sync_test.ts`). Don't revert to
+  unconditional writes: the pull almost always returns identical content, and
+  rewriting it all churned mtimes, watchers, and the snapshot system for nothing
+  while burying real diagnostics.
 - `.psycheros/` — DB (`psycheros.db`), settings JSON files, vault documents
   (`.psycheros/vault/documents/`), generated images, chat attachments,
   background images, anchor images, custom tool JS files

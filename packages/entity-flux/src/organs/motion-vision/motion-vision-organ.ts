@@ -294,10 +294,21 @@ export class MotionVisionOrgan implements SensoryOrgan {
    * instead of re-announcing. */
   stop(): void {
     this.captureRunning = false;
-    this.frameStream?.stop();
+    // The stream teardowns kill ffmpeg children, and killing an
+    // already-terminated child throws — swallowed so this organ's own
+    // timers always clear and the manager's organ loop always advances.
+    try {
+      this.frameStream?.stop();
+    } catch {
+      // already gone
+    }
     this.frameStream = null;
     this.browserSource = null;
-    this.audioStream?.stop();
+    try {
+      this.audioStream?.stop();
+    } catch {
+      // already gone
+    }
     this.audioStream = null;
     if (this.quietTimer !== null) {
       clearInterval(this.quietTimer);

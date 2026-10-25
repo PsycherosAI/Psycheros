@@ -97,12 +97,18 @@ app/
 
 bundle/                   Source provisioning — clone_or_fetch_source,
                           query_latest_tag (semver), stage_bundled_deno,
-                          warm_deno_cache. See docs/source-provisioning.md.
+                          warm_deno_cache, deno_version_of (version probe
+                          for the staged-runtime self-heal). See
+                          docs/source-provisioning.md.
 config/                   LauncherConfig + DaemonMode + load/save
 http.rs                   Minimal hand-rolled HTTP/1.1 client for the localhost
                           backup/restore endpoints (no reqwest/tokio overhead)
 
-commands.rs               #[tauri::command] surface — JS RPC entry points
+commands.rs               #[tauri::command] surface — JS RPC entry points;
+                          stage_deno_if_needed — the staged-runtime self-heal
+                          (shell update with a newer Deno → re-stage on next
+                          app open / install / start; existing installs never
+                          re-run first-run, so nothing else would catch it)
 ```
 
 The frontend (`frontend/`) is plain HTML/CSS/JS — no bundler. Tauri's

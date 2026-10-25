@@ -42,13 +42,19 @@ interface FluxPromotedObservationRow {
 // Durable entries
 // =============================================================================
 
-/** Insert a durable-stream entry (a row on the Flux Space timeline). */
+/** Insert a durable-stream entry (a row on the Flux Space timeline).
+ * Entries that carry an observation id are one-per-observation by the
+ * partial unique index (schema.ts): when another writer already posted
+ * the same observation, the insert is skipped and null returns — the
+ * caller drops the row's downstream carriage (broadcast, briefing) so
+ * the same observation never reaches the Ego twice. Entries without an
+ * observation id (musing, reverie, markers) always insert. */
 export function insertDurableEntry(
   db: Database,
   entry: FluxDurableEntry,
-): void {
+): FluxDurableEntry | null {
   db.exec(
-    `INSERT INTO flux_durable_entries
+    `INSERT OR IGNORE INTO flux_durable_entries
        (id, timestamp, role, content, source_observation_id, source_conversation_id, metadata)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [
@@ -61,6 +67,14 @@ export function insertDurableEntry(
       entry.metadata ? JSON.stringify(entry.metadata) : null,
     ],
   );
+  // OR IGNORE swallows the index hit silently — read our own row back
+  // to tell "inserted" from "another writer's row already exists".
+  const check = db.prepare(
+    `SELECT 1 FROM flux_durable_entries WHERE id = ?`,
+  );
+  const inserted = check.get(entry.id) !== undefined;
+  check.finalize();
+  return inserted ? entry : null;
 }
 
 /** Whether an ambient entry already exists for an observation. The

@@ -58,6 +58,7 @@ pub fn daemon_status() -> DaemonStatus {
 #[tauri::command]
 pub fn install_autostart(app: AppHandle) -> Result<DaemonStatus, String> {
     stage_windows_runner_if_needed(&app)?;
+    stage_deno_if_needed(&app)?;
     let cfg = build_daemon_config()?;
     default_supervisor()
         .install_autostart(&cfg)
@@ -76,6 +77,7 @@ pub fn install_autostart(app: AppHandle) -> Result<DaemonStatus, String> {
 #[tauri::command]
 pub fn install_manual(app: AppHandle) -> Result<DaemonStatus, String> {
     stage_windows_runner_if_needed(&app)?;
+    stage_deno_if_needed(&app)?;
     let cfg = build_daemon_config()?;
     default_supervisor()
         .install_manual(&cfg)
@@ -104,6 +106,73 @@ fn stage_windows_runner_if_needed(_app: &AppHandle) -> Result<(), String> {
         bundle::stage_bundled_binary(&sidecar_runner, &dest)
             .map_err(|e| format!("stage daemon runner: {e}"))?;
     }
+    Ok(())
+}
+
+/// Self-heal the staged Deno runtime: when the launcher app bundle
+/// carries a different Deno than the one staged at first-run, re-stage
+/// the bundled one over `<data>/bin/deno`.
+///
+/// Why this exists: existing installations whose launcher binary updated
+/// skip first-run entirely ([`needs_first_run`] is false while the
+/// source clone and staged binary are intact), so a runtime pin bump
+/// would otherwise never reach installs that already booted once — the
+/// daemon keeps executing the original binary while the daemon-side
+/// version guard tells users to update an app they already updated.
+/// Same self-heal rationale as [`stage_windows_runner_if_needed`], for
+/// the binary that actually runs the daemon.
+///
+/// Version-keyed, not byte-keyed: a rebuild of the same version is a
+/// no-op, so normal starts don't re-copy a ~100 MB binary. No-ops when
+/// the versions match or when the bundle's sidecar can't be probed
+/// (dev builds without a staged sidecar are the normal case there —
+/// logged and skipped, not an error). Re-stages when the staged binary
+/// is missing or unprobeable and the sidecar's version is known.
+///
+/// The dep cache is deliberately NOT re-warmed: DENO_DIR's remote/npm
+/// caches are not version-partitioned, and the supervisor starts the
+/// daemon with plain `deno run` (not `--cached-only`), so a runtime
+/// swap rides the existing warm cache and lazily fetches anything the
+/// new runtime wants beyond it.
+pub(crate) fn stage_deno_if_needed(app: &AppHandle) -> Result<(), String> {
+    let sidecar = match resolve_sidecar_deno(app) {
+        Ok(p) => p,
+        Err(e) => {
+            // Dev builds without a staged sidecar (setup.sh is only
+            // required for distribution builds) — the normal skip case.
+            eprintln!("[launcher] deno self-heal skipped, no bundled sidecar: {e}");
+            return Ok(());
+        }
+    };
+    let dest = paths::bundled_deno_path();
+    let sidecar_ver = bundle::deno_version_of(&sidecar);
+    let staged_ver = if dest.exists() {
+        bundle::deno_version_of(&dest)
+    } else {
+        None
+    };
+    // Only act on positive knowledge. If the sidecar's version is
+    // unknown, re-staging would be a blind copy on every start — worse
+    // than the drift it's meant to fix.
+    let needs_restage = match (&sidecar_ver, &staged_ver) {
+        (Some(sidecar_v), Some(staged_v)) => sidecar_v != staged_v,
+        (Some(_), None) => true, // staged missing or unprobeable
+        (None, _) => false,      // bundle unprobeable — leave it alone
+    };
+    if !needs_restage {
+        return Ok(());
+    }
+    // Windows can't replace an exe the running daemon is executing; on
+    // Unix the inode swap is safe for a live process (it keeps the old
+    // image until exit). A locked-file failure surfaces as an error the
+    // start/install path reports; the next Start after a Stop lands it.
+    bundle::stage_bundled_deno(&sidecar, &dest)
+        .map_err(|e| format!("restage bundled deno: {e}"))?;
+    eprintln!(
+        "[launcher] deno runtime updated: {} -> {}",
+        staged_ver.as_deref().unwrap_or("<missing>"),
+        sidecar_ver.as_deref().unwrap_or("<unknown>")
+    );
     Ok(())
 }
 
@@ -174,7 +243,12 @@ fn uninstall_launcher_agent_best_effort() {}
 /// (restarts a user-stopped session) and manual (kicks off a stopped
 /// daemon). Bound to the "Start daemon" button on the Stopped card.
 #[tauri::command]
-pub fn start_daemon() -> Result<DaemonStatus, String> {
+pub fn start_daemon(app: AppHandle) -> Result<DaemonStatus, String> {
+    // Re-stage the bundled Deno when the app carries a newer runtime
+    // than first-run staged. Runs before the re-sign pass below so a
+    // freshly staged binary is covered by both signing paths.
+    stage_deno_if_needed(&app)?;
+
     // Re-sign native plugins + Deno binary for macOS Tahoe compatibility
     // on every start, not just first-run. Existing installations whose
     // launcher binary updated skip first-run entirely, so this is the

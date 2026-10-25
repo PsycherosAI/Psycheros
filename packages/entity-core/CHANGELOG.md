@@ -4,7 +4,12 @@ All notable changes to entity-core are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and this package follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.1] - 2026-10-25
+
+### Changed
+
+- `graph_node_list` no longer caps `limit` at 500 — embodiments with large
+  graphs may list every node they hold.
 
 ## [0.7.0] - 2026-10-23
 

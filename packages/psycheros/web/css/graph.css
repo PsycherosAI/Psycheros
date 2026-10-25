@@ -61,6 +61,9 @@
 .gv-stats-sep {
   opacity: 0.3;
 }
+.gv-stats-shown {
+  color: var(--c-warning);
+}
 .gv-header-actions {
   flex-shrink: 0;
   display: flex;
@@ -137,6 +140,32 @@
   max-width: 120px;
 }
 .gv-filter:focus {
+  border-color: var(--c-accent);
+}
+.gv-limit-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+.gv-limit-label {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+  font-family: var(--font-mono);
+}
+.gv-limit {
+  width: 72px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-bg-sunken);
+  color: var(--c-fg);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color var(--transition);
+}
+.gv-limit:focus {
   border-color: var(--c-accent);
 }
 #gv-add-node {
@@ -703,6 +732,9 @@
     order: 2;
     flex: 1;
     max-width: none;
+  }
+  .gv-limit-wrap {
+    order: 2;
   }
   #gv-add-node {
     order: 1;

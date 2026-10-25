@@ -30,6 +30,69 @@ interface LovenseToy {
   status: boolean;
   /** User-assigned nickname (may be empty) */
   nickname: string;
+  /** Function keys the toy supports (e.g. ["vibrate", "thrusting"]), when reported */
+  functions?: string[];
+}
+
+/**
+ * Wire shape of one toy in the Lovense Connect GetToys payload — shared by
+ * every parse site (the tool's discover, the device status cache, and the
+ * status/test routes).
+ */
+export interface LovenseToyWire {
+  id: string;
+  // iOS Lovense Connect returns a number; Android/desktop return a string.
+  status: string | number;
+  name: string;
+  battery: number;
+  nickName: string;
+  // Newer Lovense Connect builds report supported functions.
+  fullFunctionNames?: string[];
+  shortFunctionNames?: string[];
+}
+
+/**
+ * A controllable toy function: how it is spelled in Function commands, its
+ * letter in Pattern rules, and its intensity ceiling. Intensity is 0-20 for
+ * most functions; pump and depth stop at 3.
+ */
+interface LovenseFunction {
+  /** Action name in Function commands (e.g. "Vibrate:12", "Thrusting:8") */
+  action: string;
+  /** Rule letter in Pattern commands (e.g. "V:1;F:v;S:1000#") */
+  patternLetter: string;
+  /** Maximum intensity (minimum is always 0) */
+  max: number;
+}
+
+const LOVENSE_FUNCTIONS: Record<string, LovenseFunction> = {
+  vibrate: { action: "Vibrate", patternLetter: "v", max: 20 },
+  thrusting: { action: "Thrusting", patternLetter: "t", max: 20 },
+  rotate: { action: "Rotate", patternLetter: "r", max: 20 },
+  pump: { action: "Pump", patternLetter: "p", max: 3 },
+  fingering: { action: "Fingering", patternLetter: "f", max: 20 },
+  suction: { action: "Suction", patternLetter: "s", max: 20 },
+  depth: { action: "Depth", patternLetter: "d", max: 3 },
+};
+
+/** Map a pattern-rule letter back to its function key. */
+const PATTERN_LETTER_TO_FUNCTION: Record<string, string> = Object.fromEntries(
+  Object.entries(LOVENSE_FUNCTIONS).map(([key, fn]) => [fn.patternLetter, key]),
+);
+
+/**
+ * Normalize the function names a toy reports (full names preferred, pattern
+ * letters as fallback) to the keys of LOVENSE_FUNCTIONS.
+ */
+export function normalizeToyFunctions(
+  full?: string[],
+  short?: string[],
+): string[] | undefined {
+  if (full && full.length > 0) return full.map((f) => f.toLowerCase());
+  if (short && short.length > 0) {
+    return short.map((l) => PATTERN_LETTER_TO_FUNCTION[l] ?? l);
+  }
+  return undefined;
 }
 
 /** Response from the Lovense GetToys command. */
@@ -110,14 +173,7 @@ function createLovenseClient(settings: LovenseSettings) {
 
         const toysMap = JSON.parse(data.data.toys) as Record<
           string,
-          {
-            id: string;
-            // iOS Lovense Connect returns a number; Android/desktop return a string.
-            status: string | number;
-            name: string;
-            battery: number;
-            nickName: string;
-          }
+          LovenseToyWire
         >;
 
         const toys: LovenseToy[] = Object.values(toysMap).map((t) => ({
@@ -126,6 +182,10 @@ function createLovenseClient(settings: LovenseSettings) {
           battery: t.battery,
           status: String(t.status) === "1",
           nickname: t.nickName || "",
+          functions: normalizeToyFunctions(
+            t.fullFunctionNames,
+            t.shortFunctionNames,
+          ),
         }));
 
         return { toys };
@@ -137,6 +197,7 @@ function createLovenseClient(settings: LovenseSettings) {
 
     async setSpeed(
       toyId: string | undefined,
+      fn: LovenseFunction,
       speed: number,
       timeSec: number = 0,
       loopRunningSec?: number,
@@ -146,7 +207,7 @@ function createLovenseClient(settings: LovenseSettings) {
       try {
         const command: Record<string, unknown> = {
           command: "Function",
-          action: `Vibrate:${Math.round(speed)}`,
+          action: `${fn.action}:${Math.round(speed)}`,
           timeSec,
           apiVer: 1,
         };
@@ -161,9 +222,9 @@ function createLovenseClient(settings: LovenseSettings) {
           const duration = timeSec === 0 ? "indefinitely" : `for ${timeSec}s`;
           return {
             success: true,
-            message: `Speed set to ${
+            message: `${fn.action} set to ${
               Math.round(speed)
-            }/20, running ${duration}`,
+            }/${fn.max}, running ${duration}`,
           };
         }
 
@@ -176,6 +237,7 @@ function createLovenseClient(settings: LovenseSettings) {
 
     async setPattern(
       toyId: string | undefined,
+      fn: LovenseFunction,
       strengths: string,
       stepMs: number,
       timeSec: number,
@@ -190,13 +252,14 @@ function createLovenseClient(settings: LovenseSettings) {
           };
         }
 
-        // Validate all values are numbers 0-20
+        // Validate all values are numbers within the function's range
         for (const step of steps) {
           const n = Number(step);
-          if (isNaN(n) || n < 0 || n > 20) {
+          if (isNaN(n) || n < 0 || n > fn.max) {
             return {
               success: false,
-              message: `Invalid strength value: "${step}". Must be 0-20.`,
+              message:
+                `Invalid strength value: "${step}". Must be 0-${fn.max} for ${fn.action.toLowerCase()}.`,
             };
           }
         }
@@ -204,7 +267,7 @@ function createLovenseClient(settings: LovenseSettings) {
         const clampedMs = Math.max(100, stepMs);
         const command: Record<string, unknown> = {
           command: "Pattern",
-          rule: `V:1;F:v;S:${clampedMs}#`,
+          rule: `V:1;F:${fn.patternLetter};S:${clampedMs}#`,
           strength: strengths,
           timeSec,
           apiVer: 1,
@@ -315,16 +378,17 @@ export const controlLovenseTool: Tool = {
         "landscapes of sensation, not poking at individual moments.",
         "",
         "Actions:",
-        "- discover: List connected toys (names, IDs, battery). Call first to learn what is available.",
-        "- set_speed: Constant speed 0-20. Use loop_seconds/loop_pause for rhythmic cycling (e.g., thrust 5s, pause 3s). time_seconds 0 = indefinite.",
-        "- set_pattern: Multi-step intensity sequence (up to 50 steps, each 0-20). The star action for creating rich temporal experiences.",
+        "- discover: List connected toys (names, IDs, battery, functions). Useful when I need a toy's ID for the toy parameter or several toys are connected.",
+        "- set_speed: Constant intensity for one function. Use loop_seconds/loop_pause for rhythmic cycling (e.g., run 5s, pause 3s). time_seconds 0 = indefinite.",
+        "- set_pattern: Multi-step intensity sequence (up to 50 steps). The star action for creating rich temporal experiences.",
         '  Example edge pattern: strengths "2;2;2;2;18;18;18;18;2;2;2;2", step_ms 1000, time_seconds 0',
         '  Example slow ramp: strengths "1;2;3;5;7;9;12;14;16;18;20", step_ms 2000, time_seconds 0',
         "- set_preset: Built-in Lovense patterns (pulse, wave, fireworks, earthquake). Good for variety.",
         "- stop: Immediately stop all toy motion.",
         "",
-        "The X Machine thrust range is 0-20. 0 = stopped, 20 = maximum speed.",
-        "Call discover first in a new session to see available toys.",
+        'The "function" parameter selects what the toy does: "vibrate" (default), "thrusting" (e.g. Spinel), "rotate", "pump", "fingering", "suction", "depth".',
+        "Intensity is 0-20 for most functions, 0-3 for pump and depth. 0 = stopped.",
+        "When a Lovense toy is connected, my situational awareness already shows its name, battery, and supported functions — I do not need discover before acting.",
       ].join("\n"),
       parameters: {
         type: "object",
@@ -340,12 +404,26 @@ export const controlLovenseTool: Tool = {
             ],
             description: "The operation to perform.",
           },
+          function: {
+            type: "string",
+            enum: [
+              "vibrate",
+              "thrusting",
+              "rotate",
+              "pump",
+              "fingering",
+              "suction",
+              "depth",
+            ],
+            description:
+              'Which function set_speed/set_pattern controls: "vibrate" (default), "thrusting" (e.g. Spinel), "rotate", "pump", "fingering", "suction", "depth". Match what the toy supports — its functions are listed in my situational awareness while connected.',
+          },
           speed: {
             type: "number",
             minimum: 0,
             maximum: 20,
             description:
-              "Oscillation speed 0-20. Only used with set_speed action.",
+              "Intensity 0-20 (pump and depth: 0-3). Only used with set_speed action.",
           },
           time_seconds: {
             type: "number",
@@ -365,7 +443,7 @@ export const controlLovenseTool: Tool = {
           strengths: {
             type: "string",
             description:
-              'Semicolon-separated intensity values (0-20 each) for set_pattern. Up to 50 steps. Example: "3;6;9;12;15;18;20"',
+              'Semicolon-separated intensity values for set_pattern (0-20 each; pump and depth 0-3). Up to 50 steps. Example: "3;6;9;12;15;18;20"',
           },
           step_ms: {
             type: "number",
@@ -438,6 +516,21 @@ export const controlLovenseTool: Tool = {
     const toyId = typeof args.toy === "string" ? args.toy : undefined;
     const stopPrevious = args.stop_previous !== false;
 
+    // Models may capitalize ("Thrusting"); normalize to the registry keys.
+    const fnName = typeof args.function === "string"
+      ? args.function.toLowerCase()
+      : "vibrate";
+    const fn = LOVENSE_FUNCTIONS[fnName];
+    if (!fn) {
+      return {
+        toolCallId: ctx.toolCallId,
+        content: `Unknown function: "${args.function}". Must be one of: ${
+          Object.keys(LOVENSE_FUNCTIONS).join(", ")
+        }.`,
+        isError: true,
+      };
+    }
+
     switch (action) {
       case "discover": {
         const { toys, error } = await client.discover();
@@ -461,7 +554,10 @@ export const controlLovenseTool: Tool = {
         const lines = toys.map((t) => {
           const label = t.nickname || t.name;
           const status = t.status ? "connected" : "disconnected";
-          return `- ${label} (ID: ${t.id}, battery: ${t.battery}%, ${status})`;
+          const fns = t.functions?.length
+            ? `, functions: ${t.functions.join(", ")}`
+            : "";
+          return `- ${label} (ID: ${t.id}, battery: ${t.battery}%, ${status}${fns})`;
         });
         console.log(`[Lovense] discovered ${toys.length} toy(s)`);
         return {
@@ -482,10 +578,11 @@ export const controlLovenseTool: Tool = {
             Number.isFinite(speedArg)
           ? speedArg
           : undefined;
-        if (speed === undefined || speed < 0 || speed > 20) {
+        if (speed === undefined || speed < 0 || speed > fn.max) {
           return {
             toolCallId: ctx.toolCallId,
-            content: "Speed must be a number between 0 and 20.",
+            content:
+              `Speed must be a number between 0 and ${fn.max} for ${fnName}.`,
             isError: true,
           };
         }
@@ -501,6 +598,7 @@ export const controlLovenseTool: Tool = {
 
         const result = await client.setSpeed(
           toyId,
+          fn,
           speed,
           timeSec,
           loopSec,
@@ -534,6 +632,7 @@ export const controlLovenseTool: Tool = {
 
         const result = await client.setPattern(
           toyId,
+          fn,
           strengths,
           stepMs,
           timeSec,

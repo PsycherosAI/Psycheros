@@ -14,6 +14,14 @@ This is the core design value. Preserve it in every contribution, including new
 code comments and any user-facing copy. Full rationale:
 [`PHILOSOPHY.md`](PHILOSOPHY.md).
 
+## No personal names
+
+Entity names and machine names never appear in anything committed to this
+repository — docs, code, code comments, tests, ledger entries, commit messages.
+Write "the entity", "the deployed machine", "the local dev machine", "the live
+session" instead. This repo is a public product that strangers run; its users'
+and entities' personal names don't belong in it.
+
 ## Workspace shape
 
 ```

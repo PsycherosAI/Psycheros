@@ -254,6 +254,10 @@ function wireOverlay(cfg, overlayCfg) {
   // Structure mirrors classic chat's assistant message: header, thinking
   // section (open while thinking, collapses when words arrive), content.
   // The durable entry (appendSessionEntry kind=ego) replaces it on arrival.
+  // Grown ONLY from real fragments, never pre-created on the generating
+  // indicator: routed turns (a client-owned stream) broadcast no
+  // fragments, so an eagerly created bubble would sit empty through
+  // them — the indicator alone carries "he's thinking".
   function ensureLiveEgo() {
     if (liveEgo && liveEgo.el && liveEgo.el.isConnected) return liveEgo;
     const el = document.createElement('div');
@@ -274,10 +278,6 @@ function wireOverlay(cfg, overlayCfg) {
     liveEgo = { el, raw: '' };
     return liveEgo;
   }
-
-  es.addEventListener('flux_generating', function () {
-    try { ensureLiveEgo(); } catch (err) {}
-  });
 
   es.addEventListener('flux_ego_thinking', function (e) {
     try {

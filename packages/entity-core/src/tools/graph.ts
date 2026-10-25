@@ -56,7 +56,9 @@ export const GraphNodeSearchSchema = z.object({
 export const GraphNodeListSchema = z.object({
   type: z.string().optional(),
   includeDeleted: z.boolean().optional(),
-  limit: z.number().min(1).max(500).optional(),
+  // No upper bound: embodiments with large graphs may list every node they
+  // hold. The caller owns the size of what it asks for.
+  limit: z.number().min(1).optional(),
   offset: z.number().min(0).optional(),
 });
 

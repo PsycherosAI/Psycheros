@@ -997,6 +997,12 @@ export class MCPClient {
   /**
    * Sync cached identity files to local disk so the Core Prompts UI
    * (which reads from projectRoot/identity/) reflects MCP-canonical data.
+   * Diff-first: the pull fires every 5 minutes and almost always returns
+   * byte-identical content — each file is written only when the local
+   * copy is missing or differs, so an unchanged cycle costs reads, not
+   * writes (no mtime churn, no watcher noise, nothing for the snapshot
+   * system to react to). Drift correction is preserved: a hand-edited
+   * local file differs from canonical and is rewritten on the next pull.
    * Non-fatal — logs errors but never throws.
    */
   private async syncIdentityToLocal(): Promise<void> {
@@ -1013,8 +1019,16 @@ export class MCPClient {
       } catch { /* already exists */ }
 
       for (const file of files) {
+        const path = `${dir}/${file.filename}`;
         try {
-          await Deno.writeTextFile(`${dir}/${file.filename}`, file.content);
+          try {
+            const existing = await Deno.readTextFile(path);
+            if (existing === file.content) continue; // identical — no write
+          } catch {
+            // Missing or unreadable — fall through; the write creates
+            // or repairs it.
+          }
+          await Deno.writeTextFile(path, file.content);
           synced++;
         } catch (error) {
           console.error(

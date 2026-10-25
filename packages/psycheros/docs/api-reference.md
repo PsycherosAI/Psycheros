@@ -163,15 +163,15 @@ The `deviceType` field is used by the Situational Awareness system.
 
 ### Knowledge Graph
 
-| Method   | Path                   | Description                                    |
-| -------- | ---------------------- | ---------------------------------------------- |
-| `GET`    | `/api/graph`           | Get full knowledge graph (nodes, edges, stats) |
-| `POST`   | `/api/graph/nodes`     | Create graph node (auto-generates embedding)   |
-| `POST`   | `/api/graph/edges`     | Create graph edge                              |
-| `PUT`    | `/api/graph/nodes/:id` | Update graph node (re-generates embedding)     |
-| `PUT`    | `/api/graph/edges/:id` | Update graph edge                              |
-| `DELETE` | `/api/graph/nodes/:id` | Delete graph node (cascades to edges)          |
-| `DELETE` | `/api/graph/edges/:id` | Delete graph edge                              |
+| Method   | Path                   | Description                                                                      |
+| -------- | ---------------------- | -------------------------------------------------------------------------------- |
+| `GET`    | `/api/graph`           | Get knowledge graph (query: `limit`, nodes cap — default 500, uncapped above it) |
+| `POST`   | `/api/graph/nodes`     | Create graph node (auto-generates embedding)                                     |
+| `POST`   | `/api/graph/edges`     | Create graph edge                                                                |
+| `PUT`    | `/api/graph/nodes/:id` | Update graph node (re-generates embedding)                                       |
+| `PUT`    | `/api/graph/edges/:id` | Update graph edge                                                                |
+| `DELETE` | `/api/graph/nodes/:id` | Delete graph node (cascades to edges)                                            |
+| `DELETE` | `/api/graph/edges/:id` | Delete graph edge                                                                |
 
 ### Backgrounds
 
@@ -465,13 +465,17 @@ Settings stored in `.psycheros/lovense-settings.json`. Shape:
 Supports two modes: LAN Mode (port 20010, HTTP) and Game Mode (port 34568 mobile
 / 30010 PC, HTTPS). Domain format: `192-168-X-X.lovense.club` (dashes, not
 dots). The `control_lovense` tool is auto-enabled when `enabled: true` and
-domain is set. `customInstructions` is injected into the entity's context as a
-`<lovense_preferences>` block inside situational awareness, but only when a
-Lovense device is actually connected. Settings page auto-reloads after save. The
-`/test` response includes a `raw` field (alongside `toys`) carrying the unparsed
-Lovense Connect payload — `apiCode`, the raw toys JSON string, and the parsed
-object — surfaced in a collapsible panel under the toy cards. For diagnosing
-cross-platform status-field quirks where `status === "1"` doesn't hold.
+domain is set. Toys in the `/test` and `/api/lovense-status` responses carry a
+`functions` array (the function keys the toy supports, e.g.
+`["vibrate", "thrusting"]`), reported when the Lovense Connect app includes
+function names in its payload. `customInstructions` is injected into the
+entity's context as a `<lovense_preferences>` block inside situational
+awareness, but only when a Lovense device is actually connected. Settings page
+auto-reloads after save. The `/test` response includes a `raw` field (alongside
+`toys`) carrying the unparsed Lovense Connect payload — `apiCode`, the raw toys
+JSON string, and the parsed object — surfaced in a collapsible panel under the
+toy cards. For diagnosing cross-platform status-field quirks where
+`status === "1"` doesn't hold.
 
 ### Buttplug (Universal) Settings
 

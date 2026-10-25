@@ -5050,6 +5050,8 @@ export function renderEntityCoreGraph(
           <span><strong>${nodeCount}</strong> nodes</span>
           <span class="gv-stats-sep">&middot;</span>
           <span><strong>${edgeCount}</strong> edges</span>
+          <span class="gv-stats-sep gv-shown-row gv-hidden">&middot;</span>
+          <span id="gv-shown-count" class="gv-stats-shown gv-shown-row gv-hidden"></span>
         </div>
       </div>
     </div>
@@ -5072,6 +5074,10 @@ export function renderEntityCoreGraph(
     <select id="graph-filter-type" class="gv-filter">
       <option value="">All types</option>
     </select>
+    <label class="gv-limit-wrap" title="Maximum nodes to load">
+      <span class="gv-limit-label">Max</span>
+      <input type="number" id="graph-node-limit" class="gv-limit" min="1" step="100" value="500" inputmode="numeric" aria-label="Maximum nodes to load" />
+    </label>
     <button id="gv-add-node" class="btn btn--ghost btn--sm" title="Add Node">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -7394,6 +7400,7 @@ function renderLovenseTab(
       .lovense-toy-card { background: var(--c-bg); border: 1px solid var(--c-border); border-radius: var(--radius-md); padding: var(--sp-3); display: flex; justify-content: space-between; align-items: center; }
       .lovense-toy-name { font-weight: 500; }
       .lovense-toy-id { color: var(--c-fg-muted); font-size: 0.8rem; font-family: monospace; }
+      .lovense-toy-functions { color: var(--c-fg-muted); font-size: 0.8rem; margin-top: 2px; }
       .lovense-toy-battery { color: var(--c-fg-muted); font-size: 0.85rem; }
       .lovense-toy-status { font-size: 0.8rem; padding: 2px 8px; border-radius: var(--radius-sm); }
       .lovense-toy-status.connected { background: var(--c-success-subtle); color: var(--c-success); }
@@ -7520,9 +7527,12 @@ function renderLovenseTab(
             grid.innerHTML = toys.map(t => {
               const label = t.nickname || t.name;
               const connected = t.connected;
+              const fns = (Array.isArray(t.functions) && t.functions.length)
+                ? '<div class="lovense-toy-functions">' + t.functions.join(', ') + '</div>' : '';
               return '<div class="lovense-toy-card">' +
                 '<div><div class="lovense-toy-name">' + label + '</div>' +
-                '<div class="lovense-toy-id">' + t.id + '</div></div>' +
+                '<div class="lovense-toy-id">' + t.id + '</div>' +
+                fns + '</div>' +
                 '<div style="display:flex;align-items:center;gap:var(--sp-2);">' +
                 '<span class="lovense-toy-battery">' + t.battery + '%</span>' +
                 '<span class="lovense-toy-status ' + (connected ? 'connected' : 'disconnected') + '">' +

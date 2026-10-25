@@ -911,11 +911,19 @@ export class FluxSession {
           if (firstThinkingAt === null) {
             firstThinkingAt = new Date().toISOString();
           }
-          this.opts.onThinking?.(fragment);
+          // STREAM OWNERSHIP: a live-streamed (routed) turn belongs to
+          // its posting client — the per-request stream renders it. The
+          // broadcast hooks (flux_ego_thinking/stream) exist for turns
+          // with NO owning client; firing both double-renders the same
+          // generation in the posting tab (its stream bubble plus the
+          // Ego-wake bubble grown from late-arriving broadcast
+          // fragments — the tail-fragment ghost bubbles). One
+          // generation, one rendering owner.
+          if (!liveSink) this.opts.onThinking?.(fragment);
           liveSink?.("thinking", fragment);
         },
         onContent: (fragment) => {
-          this.opts.onContent?.(fragment);
+          if (!liveSink) this.opts.onContent?.(fragment);
           liveSink?.("content", fragment);
         },
       },
@@ -1116,10 +1124,10 @@ export class FluxSession {
       for await (const chunk of this.client.chatStream(messages, [])) {
         if (chunk.type === "thinking") {
           outcome.thought += chunk.content;
-          this.opts.onThinking?.(chunk.content);
+          if (!liveSink) this.opts.onThinking?.(chunk.content);
         } else if (chunk.type === "content") {
           finalContent += chunk.content;
-          this.opts.onContent?.(chunk.content);
+          if (!liveSink) this.opts.onContent?.(chunk.content);
         }
       }
       if (finalContent.trim()) {
