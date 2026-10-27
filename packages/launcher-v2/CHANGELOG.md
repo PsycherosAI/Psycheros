@@ -5,6 +5,30 @@ format follows [Keep a Changelog](https://keepachangelog.com/), and this package
 follows [Semantic Versioning](https://semver.org/). It is pre-1.0 until
 cross-platform supervisors ship.
 
+## [0.2.49] - 2026-10-26
+
+### Fixed
+
+- **Backups can no longer be silently corrupt.** When entity-core data can't be
+  collected (daemon degraded, MCP down), the daemon answers the export request
+  with a JSON "partial" offer — a contract the launcher never learned, so it
+  wrote that JSON into `psycheros-backup-*.zip` and reported success. The
+  launcher now recognizes the offer, takes the partial export (`?partial=1`),
+  verifies the file is a real zip before writing, and shows a plain warning that
+  identity, memories, and the knowledge graph are NOT in the archive. Caught by
+  the backup/restore E2E test, which CI can finally run now that the cargo fmt
+  gate is green.
+
+## [0.2.48] - 2026-10-25
+
+### Fixed
+
+- The staged Deno runtime the launcher provisions stays in sync with the app
+  bundle's required version — the 2.9.8 security release (CVE-2026-111943,
+  compromised eMudhra CAs) ships with the app, so launcher users are covered by
+  updating the app alone; no manual `deno upgrade` needed.
+- Frontend assets aligned with the 2.9.8 formatter.
+
 ## [0.2.47] - 2026-10-23
 
 ### Changed
@@ -124,16 +148,6 @@ cross-platform supervisors ship.
   diagnose without direct measurement. Uses `Arc<AtomicU32>` for the frame
   counter since the tap closure must be `Fn` (not `FnMut`) and is called from
   AVAudioEngine's render thread.
-
-## [0.2.48] - 2026-10-25
-
-### Fixed
-
-- The staged Deno runtime the launcher provisions stays in sync with the app
-  bundle's required version — the 2.9.8 security release (CVE-2026-111943,
-  compromised eMudhra CAs) ships with the app, so launcher users are covered by
-  updating the app alone; no manual `deno upgrade` needed.
-- Frontend assets aligned with the 2.9.8 formatter.
 
 ## [0.2.37] - 2026-06-23
 

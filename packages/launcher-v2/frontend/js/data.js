@@ -193,8 +193,14 @@ async function runBackup() {
   try {
     const { ok: result, err } = await safeInvoke("backup_data");
     if (err) throw new Error(err);
+    // A partial backup is a real zip, but it's missing the entity-core
+    // side (identity, memories, knowledge graph) — say so plainly
+    // instead of letting it look complete.
+    const partialNote = result.partial
+      ? " — ⚠ PARTIAL: entity-core wasn't reachable; identity/memories/graph NOT included"
+      : "";
     showProgress(
-      `Saved ${humanBytes(result.size_bytes)} → ${result.path}`,
+      `Saved ${humanBytes(result.size_bytes)} → ${result.path}${partialNote}`,
     );
     // Leave the progress banner up so the user can see where the file
     // landed. They can dismiss by clicking back.

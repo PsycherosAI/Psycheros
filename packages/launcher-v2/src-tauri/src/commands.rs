@@ -1513,11 +1513,16 @@ pub fn set_tahoe_compat(enabled: bool) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 /// Outcome of a backup operation. Returned to the frontend so it can
-/// surface the resulting filename + byte count.
+/// surface the resulting filename + byte count. `partial` is true when
+/// entity-core data couldn't be collected and only the Psycheros-side
+/// archive was written — the file is a valid zip, but identity,
+/// memories, and the knowledge graph are NOT in it.
 #[derive(Debug, Serialize, Clone)]
 pub struct BackupResult {
     pub path: String,
     pub size_bytes: u64,
+    pub partial: bool,
+    pub warning: Option<String>,
 }
 
 /// Trigger psycheros's entity-data export and stream the result to
@@ -1553,6 +1558,61 @@ pub fn backup_data_blocking() -> Result<BackupResult, String> {
         ));
     }
 
+    // The daemon answers a healthy export with zip bytes, but when
+    // entity-core data can't be collected it returns a JSON "partial"
+    // offer instead (HTTP 200) — a contract the web UI knows to ask
+    // about. The launcher answers for the user: take the partial
+    // backup and say so plainly. A backup that happens beats a silent
+    // corrupt file named .zip.
+    let (mut body, mut partial, mut warning) = (resp.body, false, None);
+    if body.starts_with(b"{") {
+        let offered: serde_json::Value = serde_json::from_slice(&body).map_err(|e| {
+            format!(
+                "export endpoint returned unparseable non-zip content: {e} — body: {}",
+                String::from_utf8_lossy(&body).chars().take(200).collect::<String>()
+            )
+        })?;
+        if offered.get("partial").and_then(|v| v.as_bool()) != Some(true) {
+            let msg = offered
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("entity-data export declined");
+            return Err(format!("backup not taken: {msg}"));
+        }
+        let retry = http::request_localhost(
+            cfg.port,
+            "POST",
+            "/api/admin/entity-data/export?partial=1",
+            &[],
+            "",
+        )
+        .map_err(|e| format!("partial export request failed: {e}"))?;
+        if !retry.is_success() {
+            return Err(format!(
+                "partial export endpoint returned HTTP {} — body: {}",
+                retry.status,
+                String::from_utf8_lossy(&retry.body)
+                    .chars()
+                    .take(200)
+                    .collect::<String>(),
+            ));
+        }
+        body = retry.body;
+        partial = true;
+        warning = Some(
+            "Partial backup: entity-core wasn't reachable, so identity, memories, and the knowledge graph are NOT in this archive."
+                .to_string(),
+        );
+    }
+
+    // Belt and suspenders: never write a file named .zip that isn't one.
+    if !body.starts_with(b"PK\x03\x04") {
+        return Err(format!(
+            "export endpoint returned non-zip content — body: {}",
+            String::from_utf8_lossy(&body).chars().take(200).collect::<String>(),
+        ));
+    }
+
     let download_dir = paths::download_dir()
         .ok_or_else(|| "couldn't resolve the Downloads directory on this system".to_string())?;
     std::fs::create_dir_all(&download_dir).map_err(|e| format!("create Downloads dir: {e}"))?;
@@ -1565,12 +1625,14 @@ pub fn backup_data_blocking() -> Result<BackupResult, String> {
             filename
         ));
     }
-    std::fs::write(&dest, &resp.body)
+    std::fs::write(&dest, &body)
         .map_err(|e| format!("write backup to {}: {e}", dest.display()))?;
 
     Ok(BackupResult {
         path: dest.display().to_string(),
-        size_bytes: resp.body.len() as u64,
+        size_bytes: body.len() as u64,
+        partial,
+        warning,
     })
 }
 
