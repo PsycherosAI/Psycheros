@@ -1569,7 +1569,10 @@ pub fn backup_data_blocking() -> Result<BackupResult, String> {
         let offered: serde_json::Value = serde_json::from_slice(&body).map_err(|e| {
             format!(
                 "export endpoint returned unparseable non-zip content: {e} — body: {}",
-                String::from_utf8_lossy(&body).chars().take(200).collect::<String>()
+                String::from_utf8_lossy(&body)
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
             )
         })?;
         if offered.get("partial").and_then(|v| v.as_bool()) != Some(true) {
@@ -1609,7 +1612,10 @@ pub fn backup_data_blocking() -> Result<BackupResult, String> {
     if !body.starts_with(b"PK\x03\x04") {
         return Err(format!(
             "export endpoint returned non-zip content — body: {}",
-            String::from_utf8_lossy(&body).chars().take(200).collect::<String>(),
+            String::from_utf8_lossy(&body)
+                .chars()
+                .take(200)
+                .collect::<String>(),
         ));
     }
 
@@ -1625,8 +1631,7 @@ pub fn backup_data_blocking() -> Result<BackupResult, String> {
             filename
         ));
     }
-    std::fs::write(&dest, &body)
-        .map_err(|e| format!("write backup to {}: {e}", dest.display()))?;
+    std::fs::write(&dest, &body).map_err(|e| format!("write backup to {}: {e}", dest.display()))?;
 
     Ok(BackupResult {
         path: dest.display().to_string(),
