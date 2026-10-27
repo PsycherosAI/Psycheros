@@ -59,6 +59,8 @@ export interface ImportResult {
       plugins_restored?: number;
       plugin_restart_required?: boolean;
       workspace_pending_queries_restored?: boolean;
+      memory_summaries_restored?: number;
+      summarized_chats_restored?: number;
     };
     entity_core?: {
       success: boolean;
@@ -389,6 +391,28 @@ export async function exportEntityData(
   );
   pulseCount = pulses.length;
   zip.file("psycheros/pulses.json", JSON.stringify(pulses, null, 2));
+
+  // Memory bookkeeping — the local summary index and the ledger of which
+  // chats are already covered by a summary. An import that wipes the ledger
+  // without restoring it leaves every imported conversation looking
+  // unsummarized, so the next boot's catch-up re-summarizes all of them and
+  // duplicates memories in entity-core.
+  const memorySummaries = queryAll<Record<string, unknown>>(
+    ctx,
+    "SELECT * FROM memory_summaries ORDER BY date",
+  );
+  zip.file(
+    "psycheros/memory-summaries.json",
+    JSON.stringify(memorySummaries, null, 2),
+  );
+  const summarizedChats = queryAll<Record<string, unknown>>(
+    ctx,
+    "SELECT * FROM summarized_chats ORDER BY message_date",
+  );
+  zip.file(
+    "psycheros/summarized-chats.json",
+    JSON.stringify(summarizedChats, null, 2),
+  );
 
   // Anchor images
   const anchorImages = queryAll<
@@ -767,10 +791,13 @@ export async function importEntityData(
         });
         await yieldLoop();
 
-        // Clear existing (messages cascade via FK)
+        // Clear existing (messages cascade via FK). memory_summaries first —
+        // its delete cascades summarized_chats, both are restored together
+        // from the export after the messages phase.
         execSql(ctx, "DELETE FROM lorebook_state");
         execSql(ctx, "DELETE FROM context_snapshots");
         execSql(ctx, "DELETE FROM turn_metrics");
+        execSql(ctx, "DELETE FROM memory_summaries");
         execSql(ctx, "DELETE FROM summarized_chats");
         execSql(ctx, "DELETE FROM messages");
         execSql(ctx, "DELETE FROM conversations");
@@ -1055,6 +1082,57 @@ export async function importEntityData(
       details.psycheros.messages_restored = messageTotal;
     }
 
+    // Memory bookkeeping — restore the summary index and the
+    // already-summarized ledger as a pair (summarized_chats.summary_id FKs
+    // memory_summaries, and foreign keys are enforced). The wipe above
+    // cleared both; without this restore, boot-time catch-up sees every
+    // imported conversation as unsummarized. Older exports don't carry
+    // these files — skip cleanly so they still import.
+    {
+      const summariesFile = zip.file("psycheros/memory-summaries.json");
+      const ledgerFile = zip.file("psycheros/summarized-chats.json");
+      if (summariesFile && ledgerFile) {
+        const summaries = JSON.parse(
+          await summariesFile.async("string"),
+        ) as Array<Record<string, unknown>>;
+        for (const s of summaries) {
+          execSql(
+            ctx,
+            `INSERT OR IGNORE INTO memory_summaries (id, date, granularity, file_path, chat_ids, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              String(s.id),
+              String(s.date),
+              String(s.granularity),
+              String(s.file_path ?? ""),
+              String(s.chat_ids ?? "[]"),
+              String(s.created_at ?? new Date().toISOString()),
+            ],
+          );
+        }
+
+        const ledger = JSON.parse(
+          await ledgerFile.async("string"),
+        ) as Array<Record<string, unknown>>;
+        for (const row of ledger) {
+          execSql(
+            ctx,
+            `INSERT OR IGNORE INTO summarized_chats (chat_id, message_date, summary_id, summarized_at)
+             VALUES (?, ?, ?, ?)`,
+            [
+              String(row.chat_id),
+              String(row.message_date),
+              String(row.summary_id),
+              String(row.summarized_at ?? new Date().toISOString()),
+            ],
+          );
+        }
+
+        details.psycheros.memory_summaries_restored = summaries.length;
+        details.psycheros.summarized_chats_restored = ledger.length;
+      }
+    }
+
     // Vault documents (all scopes)
     if (psycherosParts.vault) {
       const vaultPrefix = "psycheros/vault/";
@@ -1093,6 +1171,18 @@ export async function importEntityData(
         await ensureDir(
           join(ctx.dataRoot, ".psycheros", "vault", "documents", scope),
         );
+      }
+
+      // Pre-count the files the restore loop matches, so in-loop progress
+      // events carry a real total — vault restores can run for minutes.
+      let docTotal = 0;
+      for (const [filename, file] of Object.entries(zip.files)) {
+        if (file.dir || !filename.startsWith(vaultPrefix)) continue;
+        const basename = filename.slice(vaultPrefix.length);
+        if (!basename || basename.includes("/")) continue;
+        // Skip metadata file
+        if (basename === "vault-metadata.json") continue;
+        docTotal++;
       }
 
       let docCount = 0;
@@ -1176,7 +1266,15 @@ export async function importEntityData(
         }
 
         docCount++;
-        if (docCount % 50 === 0) await yieldLoop();
+        if (docCount % 50 === 0) {
+          await progress({
+            phase: "vault",
+            status: "Restoring vault documents...",
+            current: docCount,
+            total: docTotal,
+          });
+          await yieldLoop();
+        }
       }
 
       await progress({
@@ -1201,6 +1299,15 @@ export async function importEntityData(
       await progress({ phase: "images", status: "Restoring images..." });
       await yieldLoop();
 
+      // Pre-count the matching files so in-loop progress carries a real total.
+      let imgTotal = 0;
+      for (const [filename, file] of Object.entries(zip.files)) {
+        if (file.dir || !filename.startsWith(imagesPrefix)) continue;
+        const basename = filename.slice(imagesPrefix.length);
+        if (!basename || basename.includes("/")) continue;
+        imgTotal++;
+      }
+
       let imgCount = 0;
       for (const [filename, file] of Object.entries(zip.files)) {
         if (file.dir || !filename.startsWith(imagesPrefix)) continue;
@@ -1210,7 +1317,15 @@ export async function importEntityData(
         const bytes = await file.async("uint8array");
         await Deno.writeFile(join(generatedDir, basename), bytes);
         imgCount++;
-        if (imgCount % 50 === 0) await yieldLoop();
+        if (imgCount % 50 === 0) {
+          await progress({
+            phase: "images",
+            status: "Restoring images...",
+            current: imgCount,
+            total: imgTotal,
+          });
+          await yieldLoop();
+        }
       }
 
       await progress({

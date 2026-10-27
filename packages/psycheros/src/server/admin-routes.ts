@@ -588,32 +588,26 @@ export function handleAdminEntityDataImport(
   ctx: RouteContext,
   body: Uint8Array,
 ): Response {
-  const encoder = new TextEncoder();
-
   const stream = new ReadableStream({
     start(controller) {
-      const emit = (event: ImportProgressEvent | Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
-      };
-
       // Progress callback passed to importEntityData().
       // Also yields to the event loop so /health stays responsive.
       const onProgress = async (event: ImportProgressEvent) => {
-        emit(event);
+        emit(controller, event);
         await new Promise<void>((r) => setTimeout(r, 0));
       };
 
       importEntityData(ctx, body, onProgress)
         .then((result) => {
-          emit({ phase: "done", ...result });
-          controller.close();
+          emit(controller, { phase: "done", ...result });
+          closeQuietly(controller);
         })
         .catch((error) => {
-          emit({
+          emit(controller, {
             phase: "error",
             error: error instanceof Error ? error.message : String(error),
           });
-          controller.close();
+          closeQuietly(controller);
         });
     },
   });
@@ -1022,7 +1016,7 @@ export async function handleAdminEntityDataRestoreConversations(
             error: error instanceof Error ? error.message : String(error),
           });
         } finally {
-          controller.close();
+          closeQuietly(controller);
         }
       },
     });
@@ -1228,11 +1222,35 @@ interface ImportStats {
   messages_embed_skipped: number;
 }
 
+// A client that disconnects mid-import (closed tab, refresh, dropped
+// connection) makes every later enqueue/close on the stream throw — never let
+// that abort the import or kill the daemon. The import finishes writing its
+// data; nobody is watching anymore, that's all. Dead controllers are
+// remembered so the disconnect warns once, not per progress event.
+const deadStreams = new WeakSet<ReadableStreamDefaultController>();
+
 function emit(
   controller: ReadableStreamDefaultController,
-  data: Record<string, unknown>,
+  data: Record<string, unknown> | ImportProgressEvent,
 ) {
-  controller.enqueue(new TextEncoder().encode(JSON.stringify(data) + "\n"));
+  if (deadStreams.has(controller)) return;
+  try {
+    controller.enqueue(new TextEncoder().encode(JSON.stringify(data) + "\n"));
+  } catch {
+    deadStreams.add(controller);
+    console.warn(
+      "[admin] Progress stream client disconnected; import continues.",
+    );
+  }
+}
+
+/** Close a progress stream, tolerating one already closed by the client. */
+function closeQuietly(controller: ReadableStreamDefaultController) {
+  try {
+    controller.close();
+  } catch {
+    // Already closed or cancelled — nothing to do.
+  }
 }
 
 function formatElapsed(ms: number): string {
@@ -1660,7 +1678,7 @@ export async function handleAdminDataMigrationChats(
         } finally {
           loomDb.close();
           await Deno.remove(tempPath).catch(() => {});
-          controller.close();
+          closeQuietly(controller);
         }
       },
     });
@@ -2172,7 +2190,7 @@ export async function handleAdminDataMigrationGraph(
             duration: formatElapsed(Date.now() - overallStart),
           });
 
-          controller.close();
+          closeQuietly(controller);
         }
       },
     });

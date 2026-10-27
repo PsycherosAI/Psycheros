@@ -533,7 +533,10 @@ mod tests {
 
     #[test]
     fn parses_version_only_line() {
-        assert_eq!(parse_deno_version_output("deno 2.7.14"), Some("2.7.14".to_string()));
+        assert_eq!(
+            parse_deno_version_output("deno 2.7.14"),
+            Some("2.7.14".to_string())
+        );
     }
 
     #[test]

@@ -21,7 +21,9 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::commands::{check_for_launcher_update_blocking, check_for_updates_blocking, LauncherUpdateInfo, UpdateInfo};
+use crate::commands::{
+    check_for_launcher_update_blocking, check_for_updates_blocking, LauncherUpdateInfo, UpdateInfo,
+};
 
 /// Event name the frontend listens on. Payload is `UpdateInfo` (shape
 /// identical to what the explicit `check_for_updates` command returns).

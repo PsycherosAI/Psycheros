@@ -1069,7 +1069,9 @@ fn apply_source_update_blocking(app: AppHandle, target_tag: Option<String>) -> R
     // semantics.
     let _ = app.emit(
         "source-update-progress",
-        SourceUpdateProgress::Phase { phase: "stop-daemon" },
+        SourceUpdateProgress::Phase {
+            phase: "stop-daemon",
+        },
     );
     let _ = default_supervisor().stop_daemon();
 

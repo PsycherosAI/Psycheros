@@ -244,7 +244,10 @@ export class MessageRouter {
 
     const accumulated: AccumulatedMessage = {
       authorId: msg.author.id,
-      authorUsername: msg.author.global_name || msg.author.username,
+      // The nickname is how this server knows them — prefer it, then the
+      // account-wide display name, then the raw username.
+      authorUsername: msg.member?.nick || msg.author.global_name ||
+        msg.author.username,
       authorBot: msg.author.bot,
       content: msg.content,
       attachments: msg.attachments ?? [],
