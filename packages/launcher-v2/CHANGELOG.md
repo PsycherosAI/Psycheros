@@ -18,6 +18,12 @@ cross-platform supervisors ship.
   identity, memories, and the knowledge graph are NOT in the archive. Caught by
   the backup/restore E2E test, which CI can finally run now that the cargo fmt
   gate is green.
+- **Restore works against the streaming import endpoint.** The daemon now
+  streams import progress as chunked NDJSON; the launcher's HTTP client required
+  a Content-Length header and couldn't read that response at all, so restores
+  failed with "response missing Content-Length header". The client handles
+  chunked and close-delimited responses, and the restore result is read from the
+  stream's final done/error event.
 
 ## [0.2.48] - 2026-10-25
 

@@ -11,10 +11,9 @@
 //! - `127.0.0.1` only. No TLS, no proxies, no DNS resolution.
 //! - HTTP/1.1 with `Connection: close` (we always close after each
 //!   request — no keepalive complexity).
-//! - Server is expected to set `Content-Length` on every response.
-//!   Psycheros's [`server.ts`] does this for all the routes we hit;
-//!   we don't implement chunked transfer-encoding because we don't
-//!   need to.
+//! - Response framing: `Content-Length` bodies, chunked
+//!   transfer-encoding, and close-delimited bodies are all handled.
+//!   (Psycheros's import endpoint streams progress as chunked NDJSON.)
 //! - Response body is read into memory up to a 2 GB cap (see
 //!   [`MAX_BODY_BYTES`]). The entity data export is bounded by what
 //!   an entity has accumulated over weeks/months — realistically tens
@@ -99,8 +98,10 @@ pub fn request_localhost(
 }
 
 /// Read a complete HTTP/1.1 response off the stream. Parses the
-/// status line + headers, then reads exactly `Content-Length` bytes
-/// of body. Errors if Content-Length is missing — see module doc.
+/// status line + headers, then reads the body according to the
+/// response framing: `Content-Length`, chunked transfer-encoding, or
+/// close-delimited (the request always sends `Connection: close`, so
+/// the daemon closing the socket is a valid end-of-body signal).
 fn read_response(stream: &mut TcpStream) -> std::io::Result<Response> {
     // Read into a growing buffer until we see the header terminator.
     // The buffer doubles as the body-prefix carrier — any bytes after
@@ -131,41 +132,119 @@ fn read_response(stream: &mut TcpStream) -> std::io::Result<Response> {
     let header_text = std::str::from_utf8(header_bytes)
         .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "non-UTF-8 headers"))?;
     let (status, content_length) = parse_status_and_length(header_text)?;
+    let chunked = transfer_encoding_is_chunked(header_text);
 
     // Body starts at header_end_idx + 4 (the `\r\n\r\n`). Anything
-    // already in `buf` past that point is part of the body — we
-    // carry it forward, then read the remaining bytes from the
-    // socket up to the advertised content_length.
+    // already in `buf` past that point is part of the body.
     let body_start = header_end_idx + 4;
-    let body_in_buffer = buf.len().saturating_sub(body_start);
-    if content_length > MAX_BODY_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("response body too large ({content_length} bytes)"),
-        ));
-    }
-    let mut body = Vec::with_capacity(content_length);
-    body.extend_from_slice(&buf[body_start..]);
+    let mut body = buf[body_start..].to_vec();
 
-    while body.len() < content_length {
-        let need = content_length - body.len();
-        let take = need.min(chunk.len());
-        let n = stream.read(&mut chunk[..take])?;
-        if n == 0 {
+    match content_length {
+        // Framed by Content-Length: read exactly that many bytes.
+        Some(len) if !chunked => {
+            if len > MAX_BODY_BYTES {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("response body too large ({len} bytes)"),
+                ));
+            }
+            while body.len() < len {
+                let need = (len - body.len()).min(chunk.len());
+                let n = stream.read(&mut chunk[..need])?;
+                if n == 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        format!("connection closed mid-body ({}/{} bytes)", body.len(), len),
+                    ));
+                }
+                body.extend_from_slice(&chunk[..n]);
+            }
+            body.truncate(len);
+        }
+        // Chunked or close-delimited: read to EOF (the request always
+        // sends `Connection: close`, so the daemon closing the socket
+        // is the end-of-body signal), then decode the chunked framing
+        // when present.
+        _ => {
+            loop {
+                let n = stream.read(&mut chunk)?;
+                if n == 0 {
+                    break;
+                }
+                body.extend_from_slice(&chunk[..n]);
+                if body.len() > MAX_BODY_BYTES {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "response body exceeded the size cap",
+                    ));
+                }
+            }
+            if chunked {
+                body = decode_chunked(&body)?;
+            }
+        }
+    }
+
+    Ok(Response { status, body })
+}
+
+/// True when the header block advertises `Transfer-Encoding: chunked`.
+fn transfer_encoding_is_chunked(headers: &str) -> bool {
+    headers.to_ascii_lowercase().split("\r\n").any(|line| {
+        line.split_once(':')
+            .filter(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"))
+            .map(|(_, v)| v.to_ascii_lowercase().contains("chunked"))
+            .unwrap_or(false)
+    })
+}
+
+/// Decode a chunked transfer-encoded body into its actual payload.
+/// Wire shape: repeated `<size-hex>[;ext]\r\n<size bytes>\r\n` blocks,
+/// terminated by a zero-size chunk plus optional trailers.
+fn decode_chunked(raw: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut out = Vec::with_capacity(raw.len());
+    let mut pos = 0usize;
+    loop {
+        let line_end = raw[pos..]
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .map(|p| pos + p)
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "chunked body truncated (size line)",
+                )
+            })?;
+        let size_text = std::str::from_utf8(&raw[pos..line_end])
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "non-UTF-8 chunk size")
+            })?
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim();
+        let size = usize::from_str_radix(size_text, 16).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("bad chunk size: {size_text}"),
+            )
+        })?;
+        pos = line_end + 2;
+        if size == 0 {
+            return Ok(out); // last chunk; trailers (if any) carry no payload
+        }
+        if pos + size > raw.len() {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                format!(
-                    "connection closed mid-body ({}/{} bytes)",
-                    body.len(),
-                    content_length
-                ),
+                std::io::ErrorKind::InvalidData,
+                "chunked body truncated (chunk data)",
             ));
         }
-        body.extend_from_slice(&chunk[..n]);
+        out.extend_from_slice(&raw[pos..pos + size]);
+        pos += size;
+        if raw.len() >= pos + 2 && &raw[pos..pos + 2] == b"\r\n" {
+            pos += 2;
+        }
     }
-
-    let _ = body_in_buffer; // pre-allocated; the prefix is already in `body`.
-    Ok(Response { status, body })
 }
 
 /// Find the `\r\n\r\n` separator between headers and body. Returns
@@ -178,7 +257,9 @@ fn find_header_terminator(buf: &[u8]) -> Option<usize> {
 /// Pull status code + Content-Length out of the response header
 /// block. Status line is `HTTP/1.1 <code> <reason>`; Content-Length
 /// is a case-insensitive header. Returns
-/// `(status, content_length_bytes)`.
+/// `(status, Option<content_length_bytes>)` — `None` when the
+/// response has no Content-Length header (chunked or close-delimited
+/// framing; see [`read_response`]).
 fn parse_status_and_length(headers: &str) -> std::io::Result<(u16, usize)> {
     let mut lines = headers.split("\r\n");
     let status_line = lines
@@ -204,12 +285,6 @@ fn parse_status_and_length(headers: &str) -> std::io::Result<(u16, usize)> {
             content_length = value.parse().ok();
         }
     }
-    let content_length = content_length.ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "response missing Content-Length header",
-        )
-    })?;
     Ok((status, content_length))
 }
 
@@ -222,7 +297,7 @@ mod tests {
         let headers = "HTTP/1.1 200 OK\r\nContent-Length: 42\r\nContent-Type: application/json";
         let (status, len) = parse_status_and_length(headers).unwrap();
         assert_eq!(status, 200);
-        assert_eq!(len, 42);
+        assert_eq!(len, Some(42));
     }
 
     #[test]
@@ -230,21 +305,38 @@ mod tests {
         let headers = "HTTP/1.1 404 Not Found\r\nContent-Length: 9";
         let (status, len) = parse_status_and_length(headers).unwrap();
         assert_eq!(status, 404);
-        assert_eq!(len, 9);
+        assert_eq!(len, Some(9));
     }
 
     #[test]
-    fn rejects_missing_content_length() {
+    fn missing_content_length_is_none() {
         let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain";
-        let err = parse_status_and_length(headers).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        let (status, len) = parse_status_and_length(headers).unwrap();
+        assert_eq!(status, 200);
+        assert_eq!(len, None);
     }
 
     #[test]
     fn content_length_is_case_insensitive() {
         let headers = "HTTP/1.1 200 OK\r\ncontent-length: 7";
         let (_status, len) = parse_status_and_length(headers).unwrap();
-        assert_eq!(len, 7);
+        assert_eq!(len, Some(7));
+    }
+
+    #[test]
+    fn decodes_chunked_body() {
+        let raw = b"4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n";
+        assert_eq!(decode_chunked(raw).unwrap(), b"Wikipedia");
+    }
+
+    #[test]
+    fn transfer_encoding_detection() {
+        assert!(transfer_encoding_is_chunked(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: application/x-ndjson"
+        ));
+        assert!(!transfer_encoding_is_chunked(
+            "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nContent-Type: text/plain"
+        ));
     }
 
     #[test]

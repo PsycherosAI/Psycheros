@@ -1733,9 +1733,12 @@ pub fn restore_data_blocking(path: String) -> Result<RestoreResult, String> {
         ));
     }
 
-    // Psycheros returns { success: bool, error?: string, message?: string,
-    // summary?: object }. We surface the salient pieces back to the UI
-    // and let the frontend render the details.
+    // Psycheros streams the import as NDJSON progress events —
+    // {phase: "…"} lines ending in {phase: "done", success, …} or
+    // {phase: "error", error} — and surfaces the same
+    // { success, error?, message?, summary? } shape the frontend
+    // renders. Older daemons answered a single JSON object with those
+    // fields; both shapes are handled here.
     #[derive(Deserialize)]
     struct ImportResp {
         success: bool,
@@ -1744,8 +1747,48 @@ pub fn restore_data_blocking(path: String) -> Result<RestoreResult, String> {
         #[serde(default)]
         error: String,
     }
-    let parsed: ImportResp =
-        serde_json::from_slice(&resp.body).map_err(|e| format!("parse import response: {e}"))?;
+    let parsed: ImportResp = {
+        let text = String::from_utf8_lossy(&resp.body);
+        let mut done: Option<ImportResp> = None;
+        let mut saw_event = false;
+        for line in text.lines() {
+            let line = line.trim();
+            if !line.starts_with('{') {
+                continue;
+            }
+            saw_event = true;
+            let event: serde_json::Value = serde_json::from_str(line)
+                .map_err(|e| format!("unparseable import event: {e} — line: {line}"))?;
+            let phase = event
+                .get("phase")
+                .and_then(|p| p.as_str())
+                .map(|s| s.to_string());
+            match phase.as_deref() {
+                Some("error") => {
+                    let msg = event
+                        .get("error")
+                        .and_then(|e| e.as_str())
+                        .unwrap_or("unknown import error");
+                    return Err(format!("import failed: {msg}"));
+                }
+                Some("done") => {
+                    done = Some(
+                        serde_json::from_value(event)
+                            .map_err(|e| format!("unparseable import result: {e}"))?,
+                    );
+                }
+                _ => {} // progress lines
+            }
+        }
+        match done {
+            Some(parsed) => parsed,
+            None if saw_event => {
+                return Err("import stream ended without a done event".to_string());
+            }
+            None => serde_json::from_str(&text)
+                .map_err(|e| format!("parse import response: {e}"))?,
+        }
+    };
 
     // Restart the daemon so in-memory caches (the LLM client, MCP
     // session, scheduler, RAG indexes) re-read from the freshly
