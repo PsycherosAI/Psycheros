@@ -1785,8 +1785,9 @@ pub fn restore_data_blocking(path: String) -> Result<RestoreResult, String> {
             None if saw_event => {
                 return Err("import stream ended without a done event".to_string());
             }
-            None => serde_json::from_str(&text)
-                .map_err(|e| format!("parse import response: {e}"))?,
+            None => {
+                serde_json::from_str(&text).map_err(|e| format!("parse import response: {e}"))?
+            }
         }
     };
 
