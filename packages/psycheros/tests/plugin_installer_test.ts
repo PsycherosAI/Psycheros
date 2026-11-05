@@ -58,7 +58,11 @@ Deno.test("plugin installer stages singleton zip packages and installs drafts", 
   const dataRoot = await Deno.makeTempDir({ prefix: "psycheros-plugin-ui-" });
   const installer = new PluginInstaller(dataRoot);
   const bytes = await zipPackage({
-    "wrapped/plugin.json": JSON.stringify(pluginManifest("wrapped-plugin")),
+    "wrapped/plugin.json": JSON.stringify(
+      pluginManifest("wrapped-plugin", {
+        capabilities: { settings: true },
+      }),
+    ),
     "wrapped/psycheros.ts": "export default {};",
   });
 
@@ -66,6 +70,7 @@ Deno.test("plugin installer stages singleton zip packages and installs drafts", 
   assertEquals(preview.manifest.id, "wrapped-plugin");
   assertEquals(preview.source.type, "zip");
   assertEquals(preview.restartRequired, true);
+  assertEquals(preview.capabilities.settings, 1);
   assertStringIncludes(preview.warnings.join("\n"), "dependencies");
   assert(
     await Deno.stat(
