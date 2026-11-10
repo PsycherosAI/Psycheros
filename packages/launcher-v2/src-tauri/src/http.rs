@@ -260,7 +260,7 @@ fn find_header_terminator(buf: &[u8]) -> Option<usize> {
 /// `(status, Option<content_length_bytes>)` — `None` when the
 /// response has no Content-Length header (chunked or close-delimited
 /// framing; see [`read_response`]).
-fn parse_status_and_length(headers: &str) -> std::io::Result<(u16, usize)> {
+fn parse_status_and_length(headers: &str) -> std::io::Result<(u16, Option<usize>)> {
     let mut lines = headers.split("\r\n");
     let status_line = lines
         .next()
