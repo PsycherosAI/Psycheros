@@ -2535,6 +2535,15 @@ fn current_target_triple() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    static LAUNCHER_DATA_DIR_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn launcher_data_dir_guard() -> MutexGuard<'static, ()> {
+        LAUNCHER_DATA_DIR_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -2757,13 +2766,10 @@ mod tests {
 
     #[test]
     fn prune_snapshots_keeps_n_most_recent() {
+        let _guard = launcher_data_dir_guard();
         let launcher_dir = tempfile::tempdir().unwrap();
-        // Override the launcher data dir for this test. Note: env
-        // mutation is per-test-process; unit tests share a process
-        // so concurrent prune-* tests could trample each other.
-        // Cargo defaults to serial-within-suite for these, and
-        // we keep the snapshot count distinct per test so even with
-        // overlap the assertions still hold.
+        // Environment mutation is process-wide, so every test using this
+        // override holds the shared guard for its full lifetime.
         std::env::set_var("PSYCHEROS_LAUNCHER_DATA_DIR", launcher_dir.path());
 
         let snapshots = launcher_dir.path().join(".snapshots");
@@ -2788,6 +2794,7 @@ mod tests {
 
     #[test]
     fn prune_snapshots_noop_when_under_keep() {
+        let _guard = launcher_data_dir_guard();
         let launcher_dir = tempfile::tempdir().unwrap();
         std::env::set_var("PSYCHEROS_LAUNCHER_DATA_DIR", launcher_dir.path());
 
@@ -2801,6 +2808,7 @@ mod tests {
 
     #[test]
     fn prune_snapshots_noop_when_dir_absent() {
+        let _guard = launcher_data_dir_guard();
         let launcher_dir = tempfile::tempdir().unwrap();
         std::env::set_var("PSYCHEROS_LAUNCHER_DATA_DIR", launcher_dir.path());
         // .snapshots/ deliberately not created.
@@ -2811,6 +2819,7 @@ mod tests {
 
     #[test]
     fn create_pre_update_snapshot_captures_data_psycheros_tree() {
+        let _guard = launcher_data_dir_guard();
         let launcher_dir = tempfile::tempdir().unwrap();
         std::env::set_var("PSYCHEROS_LAUNCHER_DATA_DIR", launcher_dir.path());
 
@@ -2850,6 +2859,7 @@ mod tests {
 
     #[test]
     fn create_pre_update_snapshot_handles_absent_data_dir() {
+        let _guard = launcher_data_dir_guard();
         let launcher_dir = tempfile::tempdir().unwrap();
         std::env::set_var("PSYCHEROS_LAUNCHER_DATA_DIR", launcher_dir.path());
         // No data/.psycheros/ at all — snapshot should still succeed
