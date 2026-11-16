@@ -92,11 +92,27 @@ try {
   // The sidebar list arrives over htmx after the page is interactive, and the
   // closed sidebar is inert, so open it before reaching for a row.
   await page.evaluate(() => globalThis.Psycheros.toggleSidebar());
-  await page.waitForSelector(".conv-item-wrapper .conv-item", {
+  await page.waitForSelector("#conv-list", {
     timeout: 5000,
-  }).catch(() => {});
+  });
   const rowReady = await page.evaluate(async () => {
-    const link = document.querySelector(".conv-item-wrapper .conv-item");
+    const list = document.getElementById("conv-list");
+    let link = list?.querySelector(".conv-item-wrapper .conv-item");
+    if (!link && list) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "conv-item-wrapper";
+      wrapper.innerHTML = `
+        <a class="conv-item" href="#focus-test">
+          <span class="conv-title">Focus test conversation</span>
+          <span class="conv-date">test</span>
+        </a>
+        <div class="conv-actions">
+          <button class="conv-action-btn conv-action-btn--delete"
+            aria-label="Delete conversation: Focus test conversation">Delete</button>
+        </div>`;
+      list.append(wrapper);
+      link = wrapper.querySelector(".conv-item");
+    }
     if (!link) return null;
     const btn = link.closest(".conv-item-wrapper")?.querySelector(
       ".conv-action-btn--delete",
@@ -126,6 +142,31 @@ try {
       "Escape returns focus to the row's Delete button",
       back.opener,
       JSON.stringify(back),
+    );
+
+    await page.evaluate(() =>
+      globalThis.Psycheros.showDeleteModal([
+        "00000000-0000-0000-0000-000000000000",
+      ])
+    );
+    const openerVisibilityWhileReopened = await page.evaluate(() =>
+      document.querySelector("[data-test-opener]")?.style.visibility
+    );
+    report.check(
+      "reopening preserves the row button visibility pin",
+      openerVisibilityWhileReopened === "visible",
+      openerVisibilityWhileReopened,
+    );
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(150);
+    const backAfterRepeat = await page.evaluate(() => ({
+      opener: !!document.activeElement?.dataset?.testOpener,
+      label: document.activeElement?.getAttribute("aria-label"),
+    }));
+    report.check(
+      "a repeated dismissal returns focus to the row's Delete button",
+      backAfterRepeat.opener,
+      JSON.stringify(backAfterRepeat),
     );
   } else {
     report.skip(

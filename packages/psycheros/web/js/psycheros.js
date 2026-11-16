@@ -3912,6 +3912,7 @@ function deleteSelected() {
 
 // Where focus was before the dialog opened, so it can be handed back.
 let deleteModalOpener = null;
+let deleteModalOpenerBlurCleanup = null;
 
 /**
  * Show the delete confirmation modal.
@@ -3922,6 +3923,14 @@ let deleteModalOpener = null;
  */
 function showDeleteModal(ids) {
   if (!ids || ids.length === 0) return;
+
+  // A previous close leaves a one-shot blur handler on its opener so the row
+  // action can hide itself after focus moves away. If the dialog is reopened
+  // while that opener still has focus, remove the old handler before pinning it
+  // visible again; otherwise its blur clears the new pin as focus enters this
+  // dialog.
+  deleteModalOpenerBlurCleanup?.();
+  deleteModalOpenerBlurCleanup = null;
 
   pendingDeleteIds = ids;
 
@@ -3962,13 +3971,17 @@ function closeDeleteModal() {
   if (document.activeElement === opener) {
     // Now that the row holds focus again, let its own :focus-within rule own
     // visibility once focus leaves the control.
+    const clearVisibilityOnBlur = () => {
+      opener.style.visibility = '';
+      deleteModalOpenerBlurCleanup = null;
+    };
     opener.addEventListener(
       'blur',
-      () => {
-        opener.style.visibility = '';
-      },
+      clearVisibilityOnBlur,
       { once: true },
     );
+    deleteModalOpenerBlurCleanup = () =>
+      opener.removeEventListener('blur', clearVisibilityOnBlur);
     return;
   }
 

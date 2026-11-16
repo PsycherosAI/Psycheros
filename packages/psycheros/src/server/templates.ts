@@ -2278,7 +2278,7 @@ export function renderSidebar(conversations: Conversation[]): string {
   return `<aside class="sidebar" id="sidebar" inert>
   <div class="sidebar-header">
     <span class="sidebar-title">Conversations</span>
-    <button class="btn btn--primary btn--sm" onclick="Psycheros.newConversation()"><span><span aria-hidden="true">+</span> New<span class="sr-only"> conversation</span></span></button>
+    <button class="btn btn--primary btn--sm" onclick="Psycheros.newConversation()" aria-label="New conversation"><span><span aria-hidden="true">+</span> New</span></button>
   </div>
   <nav class="conv-list" id="conv-list" hx-get="/fragments/conv-list" hx-trigger="load" hx-swap="innerHTML">
     ${renderConversationList(conversations)}
