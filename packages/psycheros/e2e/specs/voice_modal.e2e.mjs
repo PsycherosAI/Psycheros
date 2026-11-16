@@ -71,7 +71,7 @@ try {
       stop() {}
     };
 
-    const opener = document.getElementById("voice-call-btn");
+    const opener = document.getElementById("action-menu-btn");
     opener.style.display = "flex";
     opener.focus();
     await globalThis.openVoiceChat("a11y-probe", opener);
@@ -96,7 +96,7 @@ try {
   );
 
   const backgroundBlocked = await page.evaluate(() => {
-    document.getElementById("voice-call-btn").focus();
+    document.getElementById("action-menu-btn").focus();
     return !!document.activeElement?.closest("#voice-overlay");
   });
   report.check("background controls cannot receive focus", backgroundBlocked);
@@ -118,7 +118,7 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.getElementById("voice-overlay"));
   await page.waitForFunction(() =>
-    document.activeElement?.id === "voice-call-btn"
+    document.activeElement?.id === "action-menu-btn"
   );
   report.check(
     "Escape closes and restores focus despite a stale PTT binding",

@@ -27,6 +27,7 @@ try {
   );
 
   // The context viewer toggle must report opened/closed state.
+  await page.locator("#action-menu-btn").click();
   const toggleState = await page.evaluate(async () => {
     const toggle = document.querySelector(".context-toggle");
     if (!toggle) return null;
