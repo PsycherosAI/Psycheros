@@ -369,7 +369,7 @@ export function renderAppShell(
   <div class="app">
     ${renderHeader()}
     <div class="main" role="main" id="main" tabindex="-1">
-      <div class="sidebar-overlay" onclick="Psycheros.toggleSidebar()"></div>
+      <div class="sidebar-overlay" aria-hidden="true" onclick="Psycheros.toggleSidebar()"></div>
       ${renderSidebar([])}
       <div id="reindex-banner" class="reindex-banner" hidden></div>
       <div class="chat" id="chat">
@@ -1968,9 +1968,11 @@ async function loadBackgroundGallery() {
   const currentTheme = Theme.get();
 
   gallery.innerHTML = backgrounds.map(bg => \`
-    <div class="bg-gallery-item \${currentTheme.bgImage === bg.url ? 'active' : ''}" onclick="selectBackground('\${escapeAttr(bg.url)}')">
-      <img src="\${escapeAttr(bg.url)}" alt="\${escapeAttr(bg.filename)}">
-      <button class="delete-btn" onclick="event.stopPropagation(); deleteBackground('\${escapeAttr(bg.filename)}')" title="Delete">×</button>
+    <div class="bg-gallery-item \${currentTheme.bgImage === bg.url ? 'active' : ''}">
+      <button type="button" class="bg-gallery-select" aria-pressed="\${currentTheme.bgImage === bg.url}" aria-label="Use background \${escapeAttr(bg.filename)}" onclick="selectBackground('\${escapeAttr(bg.url)}')">
+        <img src="\${escapeAttr(bg.url)}" alt="">
+      </button>
+      <button type="button" class="delete-btn" aria-label="Delete \${escapeAttr(bg.filename)}" onclick="deleteBackground('\${escapeAttr(bg.filename)}')">×</button>
     </div>
   \`).join('');
 }
@@ -1978,7 +1980,11 @@ async function loadBackgroundGallery() {
 function selectBackground(url) {
   Theme.setBackground(url);
   document.querySelectorAll('.bg-gallery-item').forEach(el => {
-    el.classList.toggle('active', el.querySelector('img').src === url);
+    // bg.url is root-relative; img.src resolves to an absolute URL, so
+    // compare the serialized attribute to keep aria-pressed in sync.
+    const active = el.querySelector('img').getAttribute('src') === url;
+    el.classList.toggle('active', active);
+    el.querySelector('.bg-gallery-select')?.setAttribute('aria-pressed', String(active));
   });
 }
 
@@ -2000,7 +2006,10 @@ async function deleteBackground(filename) {
 function clearBackground() {
   Theme.setBackground(null);
   document.getElementById('bg-url').value = '';
-  document.querySelectorAll('.bg-gallery-item').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.bg-gallery-item').forEach(el => {
+    el.classList.remove('active');
+    el.querySelector('.bg-gallery-select')?.setAttribute('aria-pressed', 'false');
+  });
 }
 </script>`;
 }
@@ -2157,9 +2166,11 @@ export function renderSASettings(
         <div id="event-rules-list">
           ${webhooksRulesList}
         </div>
-        <div style="margin-top: 12px;">
+        <div style="margin-top: 12px; display: flex; gap: 8px;">
           <button class="btn btn--primary" onclick="addEventRule()">Add Webhook</button>
+          <button class="btn" onclick="saveEventRules()">Save Webhooks</button>
         </div>
+        <div id="event-rules-status" class="settings-status" role="status" aria-live="polite"></div>
       </section>
       <template id="event-rule-blank-row">
         <div class="event-rule-card" data-rule-id="" style="border:1px solid var(--c-border);border-radius:8px;padding:12px;margin-bottom:8px;">
@@ -2188,7 +2199,7 @@ export function renderSASettings(
             <input type="text" data-cond-value aria-label="Value" placeholder="value"
               style="width:60px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
             <input type="number" data-cond-sustained aria-label="Sustain minutes" placeholder="sustain min" min="0"
-              style="width:80px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;" title="Sustained: condition must hold for this many minutes before firing">
+              style="width:80px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;">
             <label style="font-size:12px;color:var(--c-fg-muted);">THEN</label>
@@ -10281,7 +10292,7 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
               <span>${escapeHtml(formatPTTKey(key))}</span>
               <button type="button" onclick="removePTTKeyBinding(${i})" aria-label="Remove ${
         escapeHtml(formatPTTKey(key))
-      } binding" title="Remove binding" style="background: none; border: none; color: var(--c-fg-subtle); cursor: pointer; padding: 0 0 0 4px; font-size: var(--font-size-xs);">&times;</button>
+      } binding" style="background: none; border: none; color: var(--c-fg-subtle); cursor: pointer; padding: 0 0 0 4px; font-size: var(--font-size-xs);">&times;</button>
             </span>`
     ).join("")
   }
