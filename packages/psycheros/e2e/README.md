@@ -43,6 +43,8 @@ The `*.e2e.mjs` suffix keeps `deno test` from collecting these files.
 - `target_size.e2e.mjs` - icon-only controls meet 24x24 (2.5.8).
 - `voice_modal.e2e.mjs` - the voice call owns focus and Escape dismissal even
   when an old push-to-talk setting bound Escape.
+- `whats_new_modal.e2e.mjs` - the What's New splash is a labelled modal that
+  traps Tab, closes on Escape, restores its opener, and inerts the app.
 
 `run.mjs` runs them all in sequence. Each prints an `ok`/`FAIL` line per check
 and exits non-zero on failure.
