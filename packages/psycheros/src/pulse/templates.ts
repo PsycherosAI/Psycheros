@@ -283,10 +283,15 @@ export function renderPulseSettings(
       </svg>
       <span>Settings</span>
     </a>
-    <div class="settings-tabs" style="padding: 0; border: none;">
-      <button class="settings-tab active" id="pulse-tab-prompts"
+    <div class="settings-tabs" role="tablist" aria-label="Pulse settings"
+      style="padding: 0; border: none;">
+      <button class="settings-tab active" id="pulse-tab-prompts" role="tab"
+        aria-selected="true" aria-controls="pulse-prompts" tabindex="0"
+        onkeydown="settingsTablistKeydown(event)"
         onclick="Psycheros.switchTab('pulse', 'prompts')">Prompts</button>
-      <button class="settings-tab" id="pulse-tab-log"
+      <button class="settings-tab" id="pulse-tab-log" role="tab"
+        aria-selected="false" aria-controls="pulse-log" tabindex="-1"
+        onkeydown="settingsTablistKeydown(event)"
         onclick="Psycheros.switchTab('pulse', 'log')">Execution Log</button>
     </div>
     <div class="settings-header-actions">
@@ -297,10 +302,12 @@ export function renderPulseSettings(
     </div>
   </div>
   <div class="settings-content" id="settings-content">
-  <div id="pulse-prompts" class="tab-content">
+  <div id="pulse-prompts" class="tab-content" role="tabpanel"
+    aria-labelledby="pulse-tab-prompts">
     ${renderPulseList(pulses, getStats)}
   </div>
-  <div id="pulse-log" class="tab-content" style="display:none">
+  <div id="pulse-log" class="tab-content" role="tabpanel"
+    aria-labelledby="pulse-tab-log" style="display:none">
     <div id="pulse-log-content"
       hx-get="/fragments/settings/pulse/log"
       hx-trigger="load"></div>

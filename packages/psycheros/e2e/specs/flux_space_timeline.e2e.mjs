@@ -152,6 +152,16 @@ try {
       /timeline/i.test(semantics.label ?? ""),
     JSON.stringify(semantics),
   );
+  const landmarks = {
+    h1: await page.getByRole("heading", { level: 1 }).count(),
+    main: await page.getByRole("main", { name: "Flux Space" }).count(),
+    log: await page.getByRole("log", { name: "Flux Space timeline" }).count(),
+  };
+  report.check(
+    "the page exposes one h1, a named main landmark, and the named timeline",
+    landmarks.h1 === 1 && landmarks.main === 1 && landmarks.log === 1,
+    JSON.stringify(landmarks),
+  );
   report.check(
     "the status announcer and toast are polite regions",
     semantics.announcerRole === "status" &&

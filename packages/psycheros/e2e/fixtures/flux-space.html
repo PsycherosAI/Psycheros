@@ -10,6 +10,8 @@
     .flux-shell { display: flex; flex-direction: column; height: 100vh; max-width: 760px; margin: 0 auto; }
     .flux-header { padding: 16px 20px; border-bottom: 1px solid #23262e; display: flex; justify-content: space-between; align-items: center; }
     .flux-header a { color: #8b8f99; text-decoration: none; font-size: 14px; }
+    .flux-header h1 { display: inline; font-size: inherit; font-weight: 700; margin: 0; }
+    .flux-shell > main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
     #flux-timeline { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
     .flux-entry { padding: 10px 14px; border-radius: 12px; max-width: 82%; word-wrap: break-word; line-height: 1.5; }
     .flux-edit-btn { position: absolute; top: -6px; right: -6px; opacity: 0; background: #1c1f26; border: 1px solid #2a2e36; color: #8b8f99; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 11px; z-index: 5; }
@@ -98,10 +100,10 @@
 </head>
 <body>
   <div class="flux-shell">
-    <div class="flux-header">
+    <header class="flux-header">
       <span>
         <span id="flux-badge" class="flux-badge stopped">Loading…</span>
-        <strong>Flux Space</strong>
+        <h1 id="flux-space-title">Flux Space</h1>
       </span>
       <div class="flux-controls">
         <button id="flux-btn-start" class="primary" onclick="fluxControl('start')">Start</button>
@@ -111,16 +113,18 @@
         <a href="/fragments/settings/flux">settings</a>
         <a href="/">chat</a>
       </div>
-    </div>
+    </header>
     <div id="flux-mood-strip"></div>
     <div id="flux-mode-row"><span id="flux-mode-badge" class="flux-mode-badge"></span></div>
     <div id="flux-organ-health"></div>
-    <div id="flux-timeline" role="log" aria-live="off" aria-label="Flux Space timeline"></div>
-    <div id="flux-announcer" class="sr-only" role="status" aria-live="polite"></div>
-    <div class="flux-input-bar">
-      <textarea id="flux-input" rows="1" aria-label="Message" placeholder="say something..." autocomplete="off"></textarea>
-      <button id="flux-send">send</button>
-    </div>
+    <main aria-labelledby="flux-space-title">
+      <div id="flux-timeline" role="log" aria-live="off" aria-label="Flux Space timeline"></div>
+      <div id="flux-announcer" class="sr-only" role="status" aria-live="polite"></div>
+      <div class="flux-input-bar">
+        <textarea id="flux-input" rows="1" aria-label="Message" placeholder="say something..." autocomplete="off"></textarea>
+        <button id="flux-send">send</button>
+      </div>
+    </main>
   </div>
   <div id="flux-toast" role="status" aria-live="polite"></div>
   <script>

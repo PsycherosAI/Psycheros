@@ -5176,15 +5176,21 @@ function switchTab(section, tab) {
   const target = document.getElementById(`${section}-${tab}`);
   if (target) target.style.display = '';
 
-  // Update button active states
+  // Update tab state: the visual active class plus the ARIA selection,
+  // roving tabindex, and panel label that a screen reader announces.
   const tabContainer = document.querySelector(`[id^="${section}-tab-"]`)?.parentElement;
+  const activeBtn = document.getElementById(`${section}-tab-${tab}`);
   if (tabContainer) {
-    tabContainer.querySelectorAll('.settings-tab').forEach(btn => {
-      btn.classList.remove('active');
+    tabContainer.querySelectorAll('[role="tab"]').forEach(btn => {
+      const selected = btn === activeBtn;
+      btn.classList.toggle('active', selected);
+      btn.setAttribute('aria-selected', String(selected));
+      btn.tabIndex = selected ? 0 : -1;
+      const panelId = btn.getAttribute('aria-controls');
+      const panel = panelId ? document.getElementById(panelId) : null;
+      if (panel) panel.setAttribute('aria-labelledby', btn.id);
     });
   }
-  const activeBtn = document.getElementById(`${section}-tab-${tab}`);
-  if (activeBtn) activeBtn.classList.add('active');
 }
 
 /**
@@ -8327,7 +8333,10 @@ globalThis.moodModelDownload = moodModelDownload;
 
 function switchFluxSettingsTab(tab) {
   document.querySelectorAll('[data-flux-tab]').forEach(function(b) {
-    b.classList.toggle('active', b.getAttribute('data-flux-tab') === tab);
+    var selected = b.getAttribute('data-flux-tab') === tab;
+    b.classList.toggle('active', selected);
+    b.setAttribute('aria-selected', selected ? 'true' : 'false');
+    b.tabIndex = selected ? 0 : -1;
   });
   ['general', 'hookups', 'sensory'].forEach(function(name) {
     var panel = document.getElementById('flux-tab-' + name);
@@ -8335,6 +8344,72 @@ function switchFluxSettingsTab(tab) {
   });
 }
 globalThis.switchFluxSettingsTab = switchFluxSettingsTab;
+
+// Arrow-key model shared by every .settings-tabs tablist. Activation is
+// automatic: the target tab's own click handler runs, so local panel
+// switches and HTMX navigations both stay in charge of their own state.
+function settingsTablistKeydown(event) {
+  var key = event.key;
+  if (key !== 'ArrowLeft' && key !== 'ArrowRight' && key !== 'Home' && key !== 'End') return;
+  var list = event.currentTarget.closest('[role="tablist"]');
+  if (!list) return;
+  var buttons = Array.prototype.slice.call(
+    list.querySelectorAll('[role="tab"]'),
+  );
+  var index = buttons.indexOf(event.currentTarget);
+  if (index < 0 || buttons.length === 0) return;
+  var next = index;
+  if (key === 'ArrowLeft') next = (index - 1 + buttons.length) % buttons.length;
+  else if (key === 'ArrowRight') next = (index + 1) % buttons.length;
+  else if (key === 'Home') next = 0;
+  else next = buttons.length - 1;
+  event.preventDefault();
+  var tab = buttons[next];
+  // A HTMX tab may replace the whole view region, which drops the focused
+  // button; put focus back on the re-rendered tab after the swap.
+  if (tab.hasAttribute('hx-get') && tab.id) {
+    var restore = function() {
+      document.body.removeEventListener('htmx:afterSettle', restore);
+      var again = document.getElementById(tab.id);
+      if (again) again.focus();
+    };
+    document.body.addEventListener('htmx:afterSettle', restore);
+    setTimeout(function() {
+      document.body.removeEventListener('htmx:afterSettle', restore);
+    }, 5000);
+  }
+  tab.click();
+  if (tab.isConnected) tab.focus();
+}
+globalThis.settingsTablistKeydown = settingsTablistKeydown;
+
+// The htmx tab views mark the current tab with `.active` and replace only
+// the panel body, so re-derive the ARIA state after every swap: a tab may
+// arrive through an out-of-band swap, and the surviving panel needs the
+// label of whichever tab is now current.
+function syncSettingsTabState() {
+  document.querySelectorAll('[role="tablist"]').forEach(function(list) {
+    var tabs = Array.prototype.slice.call(list.querySelectorAll('[role="tab"]'));
+    var active = tabs.filter(function(t) {
+      return t.classList.contains('active');
+    });
+    if (active.length !== 1) return;
+    tabs.forEach(function(t) {
+      var on = t === active[0];
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+    });
+    var panelId = active[0].getAttribute('aria-controls');
+    var panel = panelId ? document.getElementById(panelId) : null;
+    if (panel && active[0].id) {
+      panel.setAttribute('aria-labelledby', active[0].id);
+    }
+  });
+}
+globalThis.syncSettingsTabState = syncSettingsTabState;
+// afterSettle, not afterSwap: out-of-band tab swaps are applied after the
+// main swap, so the ARIA pass has to run once the request has settled.
+document.body.addEventListener('htmx:afterSettle', syncSettingsTabState);
 
 // Test a hookup card's TYPED values (not saved state) with one tiny
 // completion. A masked key round-trips and the server substitutes the

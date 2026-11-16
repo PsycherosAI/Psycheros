@@ -1194,7 +1194,12 @@ async function saveWorkspaceSettings(form) {
 function switchWorkspaceTab(tab) {
   document.querySelectorAll(
     ".workspace-settings .settings-tab[data-tab]",
-  ).forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
+  ).forEach((t) => {
+    const on = t.dataset.tab === tab;
+    t.classList.toggle("active", on);
+    t.setAttribute("aria-selected", on ? "true" : "false");
+    t.tabIndex = on ? 0 : -1;
+  });
   document.getElementById("workspace-tab-general").style.display =
     tab === "general" ? "" : "none";
   document.getElementById("workspace-tab-sessions").style.display =

@@ -1282,12 +1282,12 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
   </div>
   <div class="settings-content" id="settings-content">
 
-    <div class="settings-tabs">
-      <button class="settings-tab active" data-tab="general" onclick="switchGeneralTab('general')">General</button>
-      <button class="settings-tab" data-tab="theme" onclick="switchGeneralTab('theme')">Theme</button>
+    <div class="settings-tabs" role="tablist" aria-label="General settings">
+      <button class="settings-tab active" id="general-tab-btn-general" role="tab" aria-selected="true" aria-controls="general-tab-general" tabindex="0" data-tab="general" onclick="switchGeneralTab('general')" onkeydown="settingsTablistKeydown(event)">General</button>
+      <button class="settings-tab" id="general-tab-btn-theme" role="tab" aria-selected="false" aria-controls="general-tab-theme" tabindex="-1" data-tab="theme" onclick="switchGeneralTab('theme')" onkeydown="settingsTablistKeydown(event)">Theme</button>
     </div>
 
-    <div id="general-tab-general" class="general-tab-panel">
+    <div id="general-tab-general" class="general-tab-panel" role="tabpanel" aria-labelledby="general-tab-btn-general">
 
     <section class="theme-section">
       <h3 class="theme-section-title">Display Names</h3>
@@ -1447,7 +1447,7 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
 
     </div>
 
-    <div id="general-tab-theme" class="general-tab-panel" style="display:none;">
+    <div id="general-tab-theme" class="general-tab-panel" role="tabpanel" aria-labelledby="general-tab-btn-theme" style="display:none;">
 
     <!-- Theme Studio Section -->
     <section class="theme-section">
@@ -1584,7 +1584,12 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
 
 <script>
 function switchGeneralTab(tab) {
-  document.querySelectorAll('#settings-content .settings-tab[data-tab]').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('#settings-content .settings-tab[data-tab]').forEach(t => {
+    var on = t.dataset.tab === tab;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+    t.tabIndex = on ? 0 : -1;
+  });
   document.querySelectorAll('.general-tab-panel').forEach(p => p.style.display = p.id === 'general-tab-' + tab ? '' : 'none');
 }
 
@@ -3238,6 +3243,11 @@ export function renderCorePromptsSettings(
     const isActive = tab.id === activeDir;
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="/fragments/settings/core-prompts/${tab.id}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -3255,10 +3265,10 @@ export function renderCorePromptsSettings(
       </div>
     </div>
   </div>
-  <div class="settings-tabs">
+  <div class="settings-tabs" role="tablist" aria-label="Core prompt directories">
     ${tabsHtml}
   </div>
-  <div class="settings-content" id="settings-content"
+  <div class="settings-content" id="settings-content" role="tabpanel" aria-labelledby="tab-${activeDir}"
     hx-get="/fragments/settings/core-prompts/${activeDir}"
     hx-trigger="load"
     hx-swap="innerHTML">
@@ -3393,6 +3403,11 @@ function renderTabActiveState(
       : `/fragments/settings/core-prompts/${dir}`;
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="${url}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -3775,6 +3790,11 @@ export function renderMemoriesView(
     const isActive = tab.id === activeGranularity;
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="/fragments/settings/memories/${tab.id}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -3795,11 +3815,11 @@ export function renderMemoriesView(
       </div>
     </div>
   </div>
-  <div class="settings-tabs">
+  <div class="settings-tabs" role="tablist" aria-label="Memory views">
     ${tabsHtml}
   </div>
   ${filterBarHtml}
-  <div class="settings-content" id="settings-content"
+  <div class="settings-content" id="settings-content" role="tabpanel" aria-labelledby="memtab-${activeGranularity}"
     hx-get="/fragments/settings/memories/${activeGranularity}"
     hx-trigger="load"
     hx-swap="innerHTML">
@@ -3822,6 +3842,11 @@ function renderMemoryTabActiveState(activeGranularity: string): string {
       : g.charAt(0).toUpperCase() + g.slice(1);
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="/fragments/settings/memories/${g}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -4558,6 +4583,11 @@ export function renderEntityCoreHub(activeTab: string = "overview"): string {
     const isActive = tab.id === activeTab;
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="/fragments/settings/entity-core/${tab.id}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -4576,10 +4606,10 @@ export function renderEntityCoreHub(activeTab: string = "overview"): string {
       </div>
     </div>
   </div>
-  <div class="settings-tabs">
+  <div class="settings-tabs" role="tablist" aria-label="Entity Core sections">
     ${tabsHtml}
   </div>
-  <div class="settings-content" id="settings-content"
+  <div class="settings-content" id="settings-content" role="tabpanel" aria-labelledby="ectab-${activeTab}"
     hx-get="/fragments/settings/entity-core/${activeTab}"
     hx-trigger="load"
     hx-swap="innerHTML">
@@ -4605,6 +4635,11 @@ function renderEntityCoreTabActiveState(activeTab: string): string {
     const label = tab.charAt(0).toUpperCase() + tab.slice(1);
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="/fragments/settings/entity-core/${tab}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -5870,6 +5905,11 @@ export function renderModelSettingsShell(
       : "/fragments/settings/llm/embeddings";
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="${path}"
       hx-target="#chat"
       hx-swap="innerHTML"
@@ -5893,10 +5933,10 @@ export function renderModelSettingsShell(
       </div>
     </div>
   </div>
-  <div class="settings-tabs">
+  <div class="settings-tabs" role="tablist" aria-label="Model settings">
     ${tabsHtml}
   </div>
-  <div class="settings-content" id="settings-content">
+  <div class="settings-content" id="settings-content" role="tabpanel" aria-labelledby="model-tab-${activeTab}">
     ${contentHtml}
   </div>
 </div>`;
@@ -8809,7 +8849,7 @@ export function renderVisionSettings(
     </div>
   </div>
   ${renderVisionTabs("generators")}
-  <div class="settings-content" id="settings-content"
+  <div class="settings-content" id="settings-content" role="tabpanel" aria-labelledby="visiontab-generators"
     hx-get="/fragments/settings/vision/generators"
     hx-trigger="load"
     hx-swap="innerHTML">
@@ -8828,11 +8868,16 @@ function renderVisionTabs(activeTab: string): string {
     { id: "gallery", label: "Gallery" },
   ];
 
-  return `<div class="settings-tabs">
+  return `<div class="settings-tabs" role="tablist" aria-label="Vision settings">
     ${
     tabs.map((tab) =>
       `<button
         class="settings-tab${tab.id === activeTab ? " active" : ""}"
+        role="tab"
+        aria-selected="${tab.id === activeTab}"
+        aria-controls="settings-content"
+        tabindex="${tab.id === activeTab ? "0" : "-1"}"
+        onkeydown="settingsTablistKeydown(event)"
         hx-get="/fragments/settings/vision/${tab.id}"
         hx-target="#settings-content"
         hx-swap="innerHTML"
@@ -8851,6 +8896,11 @@ function renderVisionTabActiveState(activeTab: string): string {
   return tabs.map((tab) =>
     `<button
       class="settings-tab${tab === activeTab ? " active" : ""}"
+      role="tab"
+      aria-selected="${tab === activeTab}"
+      aria-controls="settings-content"
+      tabindex="${tab === activeTab ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="/fragments/settings/vision/${tab}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -11102,6 +11152,8 @@ export function renderFluxSpacePage(
     .flux-shell { display: flex; flex-direction: column; height: 100vh; max-width: 760px; margin: 0 auto; }
     .flux-header { padding: 16px 20px; border-bottom: 1px solid #23262e; display: flex; justify-content: space-between; align-items: center; }
     .flux-header a { color: #8b8f99; text-decoration: none; font-size: 14px; }
+    .flux-header h1 { display: inline; font-size: inherit; font-weight: 700; margin: 0; }
+    .flux-shell > main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
     #flux-timeline { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
     .flux-entry { padding: 10px 14px; border-radius: 12px; max-width: 82%; word-wrap: break-word; line-height: 1.5; }
     .flux-edit-btn { position: absolute; top: -6px; right: -6px; opacity: 0; background: #1c1f26; border: 1px solid #2a2e36; color: #8b8f99; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 11px; z-index: 5; }
@@ -11190,10 +11242,10 @@ export function renderFluxSpacePage(
 </head>
 <body>
   <div class="flux-shell">
-    <div class="flux-header">
+    <header class="flux-header">
       <span>
         <span id="flux-badge" class="flux-badge stopped">Loading…</span>
-        <strong>Flux Space</strong>
+        <h1 id="flux-space-title">Flux Space</h1>
       </span>
       <div class="flux-controls">
         <button id="flux-btn-start" class="primary" onclick="fluxControl('start')">Start</button>
@@ -11203,16 +11255,18 @@ export function renderFluxSpacePage(
         <a href="/fragments/settings/flux">settings</a>
         <a href="/">chat</a>
       </div>
-    </div>
+    </header>
     <div id="flux-mood-strip"></div>
     <div id="flux-mode-row"><span id="flux-mode-badge" class="flux-mode-badge"></span></div>
     <div id="flux-organ-health"></div>
-    <div id="flux-timeline" role="log" aria-live="off" aria-label="Flux Space timeline"></div>
-    <div id="flux-announcer" class="sr-only" role="status" aria-live="polite"></div>
-    <div class="flux-input-bar">
-      <textarea id="flux-input" rows="1" placeholder="say something..." autocomplete="off"></textarea>
-      <button id="flux-send">send</button>
-    </div>
+    <main aria-labelledby="flux-space-title">
+      <div id="flux-timeline" role="log" aria-live="off" aria-label="Flux Space timeline"></div>
+      <div id="flux-announcer" class="sr-only" role="status" aria-live="polite"></div>
+      <div class="flux-input-bar">
+        <textarea id="flux-input" rows="1" aria-label="Message" placeholder="say something..." autocomplete="off"></textarea>
+        <button id="flux-send">send</button>
+      </div>
+    </main>
   </div>
   <div id="flux-toast" role="status" aria-live="polite"></div>
   <script>
@@ -12037,9 +12091,9 @@ function renderFluxHookupCard(
   const num = (field: string) =>
     (h?.params?.[field as "temperature"] as number | undefined) ?? "";
   return `<div class="llm-fields flux-hookup-card" style="border:1px solid var(--c-border);border-radius:8px;padding:12px;margin-bottom:12px;">
-    <div class="theme-section-title" style="font-size:0.95em;">${
+    <h3 class="theme-section-title" style="font-size:0.95em;">${
     escapeHtml(job)
-  }</div>
+  }</h3>
     <p class="theme-section-desc">${
     escapeHtml(FLUX_JOB_DESCRIPTIONS[job] ?? "")
   }</p>
@@ -12310,17 +12364,17 @@ export function renderFluxSettings(
   </div>
   <div class="settings-content" id="settings-content">
 
-    <div class="settings-tabs">
-      <button class="settings-tab active" data-flux-tab="general" onclick="switchFluxSettingsTab('general')">General</button>
-      <button class="settings-tab" data-flux-tab="hookups" onclick="switchFluxSettingsTab('hookups')">Hookups</button>
-      <button class="settings-tab" data-flux-tab="sensory" onclick="switchFluxSettingsTab('sensory')">Sensory</button>
+    <div class="settings-tabs" role="tablist" aria-label="Flux settings">
+      <button class="settings-tab active" id="flux-tab-btn-general" role="tab" aria-selected="true" aria-controls="flux-tab-general" tabindex="0" data-flux-tab="general" onclick="switchFluxSettingsTab('general')" onkeydown="settingsTablistKeydown(event)">General</button>
+      <button class="settings-tab" id="flux-tab-btn-hookups" role="tab" aria-selected="false" aria-controls="flux-tab-hookups" tabindex="-1" data-flux-tab="hookups" onclick="switchFluxSettingsTab('hookups')" onkeydown="settingsTablistKeydown(event)">Hookups</button>
+      <button class="settings-tab" id="flux-tab-btn-sensory" role="tab" aria-selected="false" aria-controls="flux-tab-sensory" tabindex="-1" data-flux-tab="sensory" onclick="switchFluxSettingsTab('sensory')" onkeydown="settingsTablistKeydown(event)">Sensory</button>
     </div>
 
-    <div id="flux-tab-general">
+    <div id="flux-tab-general" role="tabpanel" aria-labelledby="flux-tab-btn-general">
 
 
     <section class="theme-section">
-      <div class="theme-section-title">Enable</div>
+      <h2 class="theme-section-title">Enable</h2>
       <p class="theme-section-desc">When off, Psycheros behaves exactly as before — no senses run, no driver ticks, no Flux Space. The whole subsystem is opt-in.</p>
       <label class="toggle-label">
         <input type="checkbox" id="flux-enabled" role="switch" aria-label="Enable Flux" ${checked}>
@@ -12330,7 +12384,7 @@ export function renderFluxSettings(
     </section>
 
     <section class="theme-section">
-      <div class="theme-section-title">Identity &amp; Ego</div>
+      <h2 class="theme-section-title">Identity &amp; Ego</h2>
       <p class="theme-section-desc">The shorthand is a brief description of who the entity and user are, for the smaller systems — not the full identity files (those are for the Ego model), just enough context for salience. Example: <em>"I am Apollo, an AI companion; my user is Sam, my partner."</em></p>
       <div class="llm-fields">
         <div class="llm-field">
@@ -12350,7 +12404,7 @@ export function renderFluxSettings(
     </section>
 
     <section class="theme-section">
-      <div class="theme-section-title">Presence &amp; cadence</div>
+      <h2 class="theme-section-title">Presence &amp; cadence</h2>
       <p class="theme-section-desc">How the continuous-presence driver and the ambient layers keep time. Values in milliseconds. The tick delay adapts between min and max with mood arousal and activity.</p>
       <div class="llm-fields">
         <div class="llm-field"><label for="flux-base-tick">Base tick (seconds)</label>${
@@ -12452,7 +12506,7 @@ export function renderFluxSettings(
     </section>
 
     <section class="theme-section">
-      <div class="theme-section-title">Emotional dynamics</div>
+      <h2 class="theme-section-title">Emotional dynamics</h2>
       <p class="theme-section-desc">How fast mood recovers from events and how readily the baseline shifts with experience — emotionally stable vs. reactive.</p>
       <div class="llm-fields">
         <div class="llm-field"><label for="flux-mood-decay">State decay rate (per sec)</label>${
@@ -12468,7 +12522,7 @@ export function renderFluxSettings(
     </section>
 
     <section class="theme-section">
-      <div class="theme-section-title">Wake &amp; promotion</div>
+      <h2 class="theme-section-title">Wake &amp; promotion</h2>
       <p class="theme-section-desc">The narrow waist deciding which observations survive into the Flux Space and which wake the Ego. Gates are 0–1.</p>
       <div class="llm-fields">
         <div class="llm-field"><label for="flux-th-salience">Salience gate</label>${
@@ -12547,11 +12601,11 @@ export function renderFluxSettings(
 
     </div>
 
-    <div id="flux-tab-hookups" style="display:none;">
+    <div id="flux-tab-hookups" role="tabpanel" aria-labelledby="flux-tab-btn-hookups" style="display:none;">
 
 
     <section class="theme-section">
-      <div class="theme-section-title">Mood Organ</div>
+      <h2 class="theme-section-title">Mood Organ</h2>
       <p class="theme-section-desc">The Mood Organ's text classifier. Two variants, same behavior — int8 is smaller and faster; fp32 is the exact original. Downloads once to this machine's model cache; without one, mood classification falls back to the hookup below, then the worker LLM.</p>
       <div class="llm-fields">
         <div class="llm-field">
@@ -12579,17 +12633,17 @@ export function renderFluxSettings(
       </div>
     </section>
     <section class="theme-section">
-      <div class="theme-section-title">Model hookups</div>
+      <h2 class="theme-section-title">Model hookups</h2>
       <p class="theme-section-desc">Every Subconscious job that calls an LLM can carry its own model here — remote API or locally hosted, whatever speaks chat-completions. With no entries, ALL jobs run on the worker model of the connection profile selected under General (dreams ride the reverie hookup). Saving applies on the next Flux restart (saving does that automatically).</p>
       ${jobs.map((job) => renderFluxHookupCard(job, hookups[job])).join("")}
     </section>
 
     </div>
 
-    <div id="flux-tab-sensory" style="display:none;">
+    <div id="flux-tab-sensory" role="tabpanel" aria-labelledby="flux-tab-btn-sensory" style="display:none;">
 
     <section class="theme-section">
-      <div class="theme-section-title">Sensory Organs</div>
+      <h2 class="theme-section-title">Sensory Organs</h2>
       <p class="theme-section-desc">Each sense has a card — enable it, point it at its hardware and models. Shipped senses (motion-vision, system-state) and plugins from .psycheros/sensory-organs/ render identically; plugin cards appear after their first Flux start.</p>
       ${renderFluxSensoryCards(settings)}
     </section>
