@@ -39,6 +39,23 @@ The `*.e2e.mjs` suffix keeps `deno test` from collecting these files.
 - `CONV` (optional) - a conversation id; tests that need messages or the graph
   toggle should point at a populated conversation.
 
+## Network mocks
+
+The app registers a service worker for `/api/*`. Once it controls the page,
+Playwright's `page.route()` never sees those fetches, so a mock silently falls
+through to the real server. Create the page with the harness `newPage()`, which
+blocks service workers, and match on `url.pathname` rather than a glob so query
+strings such as `?limit=500` still match:
+
+```js
+import { newPage } from "../lib/harness.mjs";
+
+const page = await newPage(browser);
+await page.route((url) => url.pathname === "/api/graph", async (route) => {
+  await route.fulfill({ contentType: "application/json", body: "{}" });
+});
+```
+
 ## Specs
 
 - `skip_link.e2e.mjs` - the skip link is the first tab stop and targets `#main`.
@@ -48,6 +65,9 @@ The `*.e2e.mjs` suffix keeps `deno test` from collecting these files.
   `inert`, so Tab never reaches them.
 - `graph_keyboard.e2e.mjs` - every filtered graph node is reachable, card focus
   survives rerenders, and List/Network state is exposed.
+- `graph_node_limit_status.e2e.mjs` - a node-limit reload announces the shown
+  and total counts through the persistent status region, the visible count stays
+  a non-live hint, and the Max control keeps focus.
 - `target_size.e2e.mjs` - icon-only controls meet 24x24 (2.5.8).
 - `voice_modal.e2e.mjs` - the voice call owns focus and Escape dismissal even
   when an old push-to-talk setting bound Escape.

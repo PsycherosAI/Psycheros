@@ -3,13 +3,19 @@
  * sequential navigation, card disclosures retain focus, and view state is
  * exposed independently of color.
  */
-import { launch, makeReport, openChat, openGraph } from "../lib/harness.mjs";
+import {
+  launch,
+  makeReport,
+  newPage,
+  openChat,
+  openGraph,
+} from "../lib/harness.mjs";
 
 const report = makeReport("graph keyboard controls");
 const browser = await launch();
 try {
-  const page = await browser.newPage();
-  await page.route("**/api/graph", async (route) => {
+  const page = await newPage(browser);
+  await page.route((url) => url.pathname === "/api/graph", async (route) => {
     const nodes = Array.from({ length: 25 }, (_, i) => ({
       id: `node-${i + 1}`,
       type: "topic",

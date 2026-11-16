@@ -34,6 +34,18 @@ export async function openChat(page) {
   });
 }
 
+/**
+ * Open a page whose network stays interceptable.
+ *
+ * The app registers a service worker for /api/*; once that worker controls
+ * the page its fetches bypass page.route(), so mocked endpoints hit the real
+ * server instead. Block service workers in this context.
+ */
+export async function newPage(browser) {
+  const context = await browser.newContext({ serviceWorkers: "block" });
+  return await context.newPage();
+}
+
 /** Load the entity-core graph fragment into #chat. */
 export async function openGraph(page) {
   await page.evaluate(() =>

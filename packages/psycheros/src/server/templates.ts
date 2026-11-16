@@ -546,7 +546,7 @@ export function renderHeader(): string {
         <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
       </svg>
     </button>
-    <button class="header-icon" id="action-menu-btn" onclick="Psycheros.toggleActionDrawer()" aria-label="Open action menu" title="Actions">
+    <button class="header-icon" id="action-menu-btn" onclick="Psycheros.toggleActionDrawer()" aria-label="Actions" title="Actions" aria-expanded="false" aria-controls="action-drawer">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none">
         <circle cx="12" cy="5" r="2"></circle>
         <circle cx="12" cy="12" r="2"></circle>
@@ -845,7 +845,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/flux" class="settings-hub-card"
         hx-get="/fragments/settings/flux"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -11099,7 +11099,7 @@ export function renderFluxOverlayView(
     <div id="flux-timeline" role="log" aria-live="off" aria-label="Flux timeline"></div>
     <div id="flux-announcer" class="sr-only" role="status" aria-live="polite"></div>
     <div class="flux-input-bar">
-      <textarea id="flux-input" rows="1" placeholder="say something..." autocomplete="off"></textarea>
+      <textarea id="flux-input" rows="1" aria-label="Message" placeholder="say something..." autocomplete="off"></textarea>
       <button id="flux-send">send</button>
     </div>
   </div>
@@ -12099,24 +12099,26 @@ function renderFluxHookupCard(
   }</p>
     <div class="llm-fields">
       <div class="llm-field">
-        <label>Endpoint URL</label>
-        <input type="text" ${
+        <label for="flux-hookup-${escapeHtml(job)}-url">Endpoint URL</label>
+        <input type="text" id="flux-hookup-${escapeHtml(job)}-url" ${
     attr("url")
   } class="input-field llm-input" placeholder="http://localhost:8080/v1/chat/completions" value="${
     escapeHtml(String(val("url")))
   }">
       </div>
       <div class="llm-field">
-        <label>Model</label>
-        <input type="text" ${
+        <label for="flux-hookup-${escapeHtml(job)}-model">Model</label>
+        <input type="text" id="flux-hookup-${escapeHtml(job)}-model" ${
     attr("model")
   } class="input-field llm-input" placeholder="gemma-4-31b-it" value="${
     escapeHtml(String(val("model")))
   }">
       </div>
       <div class="llm-field">
-        <label>API key <span class="theme-section-desc">(optional — local servers don\'t need one; masked after save)</span></label>
-        <input type="text" ${
+        <label for="flux-hookup-${
+    escapeHtml(job)
+  }-apiKey">API key <span class="theme-section-desc">(optional — local servers don\'t need one; masked after save)</span></label>
+        <input type="text" id="flux-hookup-${escapeHtml(job)}-apiKey" ${
     attr("apiKey")
   } class="input-field llm-input" autocomplete="off" value="${
     escapeHtml(h?.apiKey ? maskApiKey(h.apiKey) : "")
@@ -12128,30 +12130,36 @@ function renderFluxHookupCard(
   } style="margin-top:8px;"><summary class="theme-section-desc" style="cursor:pointer;font-size:12px;">Sampling &amp; thinking</summary>
       <div class="llm-fields" style="margin-top:8px;">
         <div class="llm-field">
-          <label>Temperature</label>
-          <input type="number" ${
+          <label for="flux-hookup-${
+    escapeHtml(job)
+  }-temperature">Temperature</label>
+          <input type="number" id="flux-hookup-${
+    escapeHtml(job)
+  }-temperature" ${
     attr("temperature")
   } class="input-field llm-input" min="0" max="2" step="0.05" value="${
     num("temperature")
   }">
         </div>
         <div class="llm-field">
-          <label>top_p</label>
-          <input type="number" ${
+          <label for="flux-hookup-${escapeHtml(job)}-top_p">top_p</label>
+          <input type="number" id="flux-hookup-${escapeHtml(job)}-top_p" ${
     attr("top_p")
   } class="input-field llm-input" min="0" max="1" step="0.05" value="${
     num("top_p")
   }">
         </div>
         <div class="llm-field">
-          <label>top_k</label>
-          <input type="number" ${
+          <label for="flux-hookup-${escapeHtml(job)}-top_k">top_k</label>
+          <input type="number" id="flux-hookup-${escapeHtml(job)}-top_k" ${
     attr("top_k")
   } class="input-field llm-input" min="0" step="1" value="${num("top_k")}">
         </div>
         <div class="llm-field">
-          <label>Max tokens</label>
-          <input type="number" ${
+          <label for="flux-hookup-${
+    escapeHtml(job)
+  }-max_tokens">Max tokens</label>
+          <input type="number" id="flux-hookup-${escapeHtml(job)}-max_tokens" ${
     attr("max_tokens")
   } class="input-field llm-input" min="16" step="16" value="${
     num("max_tokens")
@@ -12212,7 +12220,10 @@ function renderFluxSensoryCards(
     values: Record<string, unknown>,
   ) => {
     const value = values[f.key] ?? f.default ?? "";
-    const attr = `data-so-setting="${escapeHtml(id)}.${escapeHtml(f.key)}"`;
+    const controlId = `flux-organ-${escapeHtml(id)}-${escapeHtml(f.key)}`;
+    const attr = `id="${controlId}" data-so-setting="${escapeHtml(id)}.${
+      escapeHtml(f.key)
+    }"`;
     let control = "";
     if (f.type === "toggle") {
       control =
@@ -12246,7 +12257,7 @@ function renderFluxSensoryCards(
     return `<div class="llm-field">${
       f.type === "toggle"
         ? control
-        : `<label>${escapeHtml(f.label)}</label>${control}`
+        : `<label for="${controlId}">${escapeHtml(f.label)}</label>${control}`
     }${
       f.help ? `<span class="llm-field-hint">${escapeHtml(f.help)}</span>` : ""
     }</div>`;
@@ -12629,7 +12640,7 @@ export function renderFluxSettings(
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:0.5rem;">
         <button class="btn primary" onclick="moodModelSave()">Save choice</button>
         <button class="btn" onclick="moodModelDownload()">Download variant</button>
-        <span id="mood-model-status" class="settings-status"></span>
+        <span id="mood-model-status" class="settings-status" role="status" aria-live="polite"></span>
       </div>
     </section>
     <section class="theme-section">
@@ -12656,7 +12667,7 @@ export function renderFluxSettings(
     </div>
 
     </div>
-    <div id="flux-settings-status" class="settings-status"></div>
+    <div id="flux-settings-status" class="settings-status" role="status" aria-live="polite"></div>
 
   </div>
 </div>`;

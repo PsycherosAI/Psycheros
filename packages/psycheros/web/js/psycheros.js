@@ -251,15 +251,11 @@ function initPersistentSSE() {
     if (el) return el;
     if (isStreaming) return null;
     if (!currentConversationId || currentConversationId !== actionState.flux.hostConversationId) return null;
-    el = document.createElement('div');
-    el.className = 'msg msg--assistant';
+    el = createAssistantBubble(currentConversationId);
     el.id = 'flux-wake-bubble';
-    el.innerHTML =
-      '<div class="msg-header"><span>' +
-      (globalThis.PsycherosSettings.entityName || 'Assistant') +
-      '</span><span></span></div>' +
-      '<div class="thinking expanded"><div class="thinking-header"><span class="thinking-toggle">&#9660;</span><span>Thinking</span></div><div class="thinking-content"></div></div>' +
-      '<div class="msg-content"></div>';
+    var thinkingId = nextDisclosureId('flux-thinking-content');
+    el.querySelector('.msg-content').insertAdjacentHTML('beforebegin',
+      '<div class="thinking expanded"><button type="button" class="thinking-header" aria-expanded="true" aria-controls="' + thinkingId + '" onclick="Psycheros.toggleDisclosure(this)"><span class="thinking-toggle" aria-hidden="true">&#9660;</span><span>Thinking</span></button><div class="thinking-content" id="' + thinkingId + '"></div></div>');
     messages.appendChild(el);
     AutoScroll.streamStart();
     return el;
@@ -277,7 +273,7 @@ function initPersistentSSE() {
       // this same container; textContent assignment would wipe them.
       if (c) c.appendChild(document.createTextNode(fragment));
       var th = el.querySelector('.thinking');
-      if (th) th.classList.remove('expanded');
+      if (th) setDisclosureExpanded(th.querySelector('.thinking-header'), false);
     }
     AutoScroll.streamTick();
   }
@@ -1719,7 +1715,7 @@ async function sendMessage() {
     }
 
     // Announce the completed reply; #messages itself is never a live region.
-    announceTranscript(assistantEl);
+    announceTranscript(turnStream.currentBubble());
 
     // Clear state
     pendingToolCalls.clear();
@@ -1881,7 +1877,7 @@ async function retryFailedTurn(failedAssistantEl) {
     }
 
     // Announce the completed reply; #messages itself is never a live region.
-    announceTranscript(failedAssistantEl);
+    announceTranscript(turnStream.currentBubble());
 
     pendingToolCalls.clear();
     currentAbortController = null;
@@ -2718,8 +2714,7 @@ function createAssistantBubble(conversationId) {
   const streamTime = formatChatTimestamp(new Date());
   el.innerHTML = `
     <div class="msg-header">
-      <span>${globalThis.PsycherosSettings.entityName || 'Assistant'}</span>
-      <span class="msg-timestamp">${streamTime}</span>
+      <span class="msg-meta"><span class="msg-author">${globalThis.PsycherosSettings.entityName || 'Assistant'}</span><span class="msg-timestamp"><span class="sr-only">, </span>${streamTime}</span></span>
       <div class="streaming"><span></span><span></span><span></span></div>
     </div>
     <div class="msg-content"></div>
@@ -2766,8 +2761,8 @@ function createTurnStreamState({ conversationId, firstBubble }) {
     // moving on, the finished bubble settles into its resting state —
     // cards folded, still toggleable. Without this, only the FINAL
     // done would collapse, and it reaches just the last bubble.
-    anchor?.querySelectorAll('.tool.expanded').forEach(el => {
-      el.classList.remove('expanded');
+    anchor?.querySelectorAll('.tool.expanded > .tool-header').forEach(button => {
+      setDisclosureExpanded(button, false);
     });
     const el = createAssistantBubble(conversationId);
     if (anchor) anchor.after(el);
@@ -7020,9 +7015,9 @@ async function showHeldSkill(name) {
     var resp = await fetch('/api/skills/' + encodeURIComponent(name));
     if (!resp.ok) { showToast('Could not load ' + name); return; }
     var skill = await resp.json();
-    var panel = document.createElement('div');
+    var panel = document.createElement('dialog');
     panel.className = 'skill-viewer';
-    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', skill.name || name);
     panel.innerHTML =
       '<div class="skill-viewer-card">' +
       '<div class="skill-viewer-title">' + escapeHtml(skill.name || name) + '</div>' +
@@ -7033,11 +7028,13 @@ async function showHeldSkill(name) {
       '<button class="skill-viewer-close">Close</button>' +
       '</div>';
     document.body.appendChild(panel);
+    panel.addEventListener('close', function() { panel.remove(); });
+    panel.showModal();
     panel.querySelector('.skill-viewer-close').addEventListener('click', function() {
-      panel.remove();
+      panel.close();
     });
     panel.addEventListener('click', function(e) {
-      if (e.target === panel) panel.remove();
+      if (e.target === panel) panel.close();
     });
   } catch (_) {
     showToast('Could not load ' + name);
@@ -7048,9 +7045,9 @@ async function showHeldSkill(name) {
 function showHeldSkills() {
   var names = actionState.skills;
   if (names.length === 1) { showHeldSkill(names[0]); return; }
-  var panel = document.createElement('div');
+  var panel = document.createElement('dialog');
   panel.className = 'skill-viewer';
-  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', 'Held skills');
   panel.innerHTML = '<div class="skill-viewer-card">' +
     '<div class="skill-viewer-title">Held skills</div>' +
     names.map(function(n) {
@@ -7059,17 +7056,19 @@ function showHeldSkills() {
     '<button class="skill-viewer-close">Close</button>' +
     '</div>';
   document.body.appendChild(panel);
+    panel.addEventListener('close', function() { panel.remove(); });
+    panel.showModal();
   panel.querySelectorAll('.skill-viewer-row').forEach(function(row) {
     row.addEventListener('click', function() {
-      panel.remove();
+      panel.close();
       showHeldSkill(row.getAttribute('data-name'));
     });
   });
   panel.querySelector('.skill-viewer-close').addEventListener('click', function() {
-    panel.remove();
+    panel.close();
   });
   panel.addEventListener('click', function(e) {
-    if (e.target === panel) panel.remove();
+    if (e.target === panel) panel.close();
   });
 }
 
@@ -7081,13 +7080,13 @@ function renderStateSubBar() {
   if (!bar) return;
   var segs = [];
   if (actionState.flux.state === 'running') {
-    segs.push('<span class="state-seg state-flux" onclick="Psycheros.startFluxOverlay()">Flux ON</span>');
+    segs.push('<button type="button" class="state-seg state-flux" onclick="Psycheros.startFluxOverlay()">Flux ON</button>');
   }
   if (actionState.workspace.active > 0) {
     var wsLabel = actionState.workspace.active === 1
       ? 'Workspace Active'
       : 'Workspace (' + actionState.workspace.active + ')';
-    segs.push('<span class="state-seg" onclick="Psycheros.openWorkspaceList()">' + wsLabel + '</span>');
+    segs.push('<button type="button" class="state-seg" onclick="Psycheros.openWorkspaceList()">' + wsLabel + '</button>');
   }
   if (typeof globalThis.isVoiceCallActive === 'function' && globalThis.isVoiceCallActive()) {
     segs.push('<span class="state-seg">Voice ON</span>');
@@ -7096,11 +7095,22 @@ function renderStateSubBar() {
     var sk = actionState.skills[0];
     // "Skill: name" — the bare name reads as a mystery chip;
     // the label names the subsystem, sub-bar format.
-    segs.push('<span class="state-seg" data-skill="' + escapeHtml(sk) + '">Skill: ' + escapeHtml(sk) + '</span>');
+    segs.push('<button type="button" class="state-seg" data-skill="' + escapeHtml(sk) + '">Skill: ' + escapeHtml(sk) + '</button>');
   } else if (actionState.skills.length > 1) {
-    segs.push('<span class="state-seg state-seg-multi">Skill (' + actionState.skills.length + ')</span>');
+    segs.push('<button type="button" class="state-seg state-seg-multi">Skill (' + actionState.skills.length + ')</button>');
   }
-  bar.innerHTML = segs.join('<span class="state-sep">|</span>');
+  var html = segs.join('<span class="state-sep" aria-hidden="true">|</span>');
+  if (bar.dataset.renderedHtml === html) return;
+  bar.dataset.renderedHtml = html;
+  var focused = bar.contains(document.activeElement) ? document.activeElement : null;
+  bar.innerHTML = html;
+  if (focused) {
+    var replacement = Array.from(bar.querySelectorAll('button')).find(function(button) {
+      return button.getAttribute('onclick') === focused.getAttribute('onclick') &&
+        button.getAttribute('data-skill') === focused.getAttribute('data-skill');
+    });
+    (replacement || document.getElementById('action-menu-btn'))?.focus();
+  }
   bar.classList.toggle('on', segs.length > 0);
   // Skill segments show the skill on tap (delegation — the bar rerenders
   // every sweep).
@@ -7128,7 +7138,7 @@ function renderActionDrawerRows(inConv) {
   );
   if (actionState.voice.enabled && inConv) {
     rows.push(
-      '<button class="action-row" onclick="Psycheros.startVoiceCall(); Psycheros.closeActionDrawer()">Voice</button>'
+      '<button class="action-row" aria-haspopup="dialog" onclick="Psycheros.startVoiceCall(); Psycheros.closeActionDrawer()">Voice</button>'
     );
   }
   if (inConv && actionState.workspace.active >= 0) {
@@ -7144,7 +7154,18 @@ function renderActionDrawerRows(inConv) {
       (fluxOn ? 'Flux · turn off' : 'Flux · turn on') + '</button>'
     );
   }
-  drawer.innerHTML = rows.join('');
+  var html = rows.join('');
+  if (drawer.dataset.renderedHtml === html) return;
+  drawer.dataset.renderedHtml = html;
+  var focusedAction = drawer.contains(document.activeElement)
+    ? document.activeElement.getAttribute('onclick') : null;
+  drawer.innerHTML = html;
+  if (focusedAction) {
+    var replacement = Array.from(drawer.children).find(function(button) {
+      return button.getAttribute('onclick') === focusedAction;
+    });
+    (replacement || document.getElementById('action-menu-btn'))?.focus();
+  }
 }
 
 // The Flux entry STARTS Flux — hosted in the open conversation — and
@@ -7183,7 +7204,11 @@ function toggleActionDrawer() {
   var willOpen = !drawer.classList.contains('open');
   drawer.classList.toggle('open', willOpen);
   var btn = document.getElementById('action-menu-btn');
-  if (btn) btn.classList.toggle('header-icon--open', willOpen);
+  if (btn) {
+    btn.classList.toggle('header-icon--open', willOpen);
+    btn.setAttribute('aria-expanded', String(willOpen));
+    if (!willOpen && drawer.contains(document.activeElement)) btn.focus();
+  }
   if (willOpen) refreshActionState();
 }
 

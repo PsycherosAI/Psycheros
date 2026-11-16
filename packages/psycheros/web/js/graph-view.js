@@ -168,9 +168,6 @@ let initialized = false;
 let deleteTargetNodeId = null;
 let eventListenersAbort = null;
 
-const CARD_HEIGHT_EST = 56;
-const VISIBLE_BUFFER = 10;
-
 const NODE_LIMIT_STORAGE_KEY = 'psycheros:graphNodeLimit';
 const DEFAULT_NODE_LIMIT = 500;
 
@@ -189,7 +186,7 @@ function applyStoredNodeLimit() {
   if (Number.isInteger(saved) && saved >= 1) el.value = String(saved);
 }
 
-function updateShownHint() {
+function updateShownHint(announce) {
   const countEl = document.getElementById('gv-shown-count');
   if (!countEl) return;
   const total = graphData.stats?.totalNodes ?? 0;
@@ -202,6 +199,18 @@ function updateShownHint() {
   document.querySelectorAll('.gv-shown-row').forEach((el) => {
     el.classList.toggle('gv-hidden', !truncated);
   });
+  if (!announce) return;
+  // The visible hint collapses to display:none unless the load is truncated,
+  // so speak the result through the shared persistent status region instead.
+  let message;
+  if (total === 0) {
+    message = 'The knowledge graph is empty.';
+  } else if (truncated) {
+    message = `Showing ${shown} of ${total} nodes. Raise Max to load more.`;
+  } else {
+    message = `Showing all ${total} nodes.`;
+  }
+  globalThis.announceStatus?.(message);
 }
 
 // ─── Initialization ──────────────────────────────────────────────────────────
@@ -221,7 +230,7 @@ async function initGraph() {
 
 // ─── Data Loading ────────────────────────────────────────────────────────────
 
-async function loadGraphData() {
+async function loadGraphData({ announce = false } = {}) {
   const listView = document.getElementById('gv-list-view');
   const graphView = document.getElementById('gv-graph-view');
 
@@ -233,7 +242,7 @@ async function loadGraphData() {
     buildConnectionCounts();
     populateTypeFilter();
     getFilteredNodes();
-    updateShownHint();
+    updateShownHint(announce);
 
     if (!graphData.nodes || graphData.nodes.length === 0) {
       const emptyHtml = `
@@ -959,11 +968,11 @@ function setupEventListeners() {
     const el = document.getElementById('graph-node-limit');
     if (el) el.value = String(limit);
     localStorage.setItem(NODE_LIMIT_STORAGE_KEY, String(limit));
-    loadGraphData();
+    loadGraphData({ announce: true });
   }, opts);
 
   // Refresh
-  document.getElementById('graph-refresh')?.addEventListener('click', () => loadGraphData(), opts);
+  document.getElementById('graph-refresh')?.addEventListener('click', () => loadGraphData({ announce: true }), opts);
 
   // Add node button
   document.getElementById('gv-add-node')?.addEventListener('click', () => {
