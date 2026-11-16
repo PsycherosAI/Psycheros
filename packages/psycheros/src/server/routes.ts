@@ -9675,8 +9675,8 @@ function renderVaultView(
             </label>
           </div>
           <div class="form-group">
-            <label>Title (optional)</label>
-            <input type="text" name="title" placeholder="Auto-detected from filename" />
+            <label for="vault-doc-title">Title (optional)</label>
+            <input type="text" id="vault-doc-title" name="title" placeholder="Auto-detected from filename" />
           </div>
           <div class="form-group" style="flex:0;align-items:flex-end">
             <button type="submit" class="btn btn--primary">Upload</button>

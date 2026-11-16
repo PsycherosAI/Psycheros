@@ -527,7 +527,8 @@ function renderBrandMark(
 export function renderHeader(): string {
   return `<header class="header">
   <div class="header-left">
-    <button class="logo-btn" onclick="Psycheros.toggleSidebar()" aria-label="Toggle sidebar">
+    <button class="logo-btn" onclick="Psycheros.toggleSidebar()" aria-label="Toggle sidebar"
+      aria-controls="sidebar" aria-expanded="false">
       <div class="logo-icon">
         ${renderBrandMark("logo-grad")}
       </div>
@@ -1504,7 +1505,7 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
 
       <div class="bg-controls">
         <div class="bg-url-input">
-          <input type="url" id="bg-url" class="input-field" placeholder="Enter image URL...">
+          <input type="url" id="bg-url" class="input-field" aria-label="Background image URL" placeholder="Enter image URL...">
           <button class="btn btn--primary btn--sm" onclick="applyBackgroundUrl()">Apply URL</button>
         </div>
 
@@ -2160,7 +2161,7 @@ export function renderSASettings(
               <input type="checkbox" data-rule-enabled role="switch" checked>
               <span class="toggle-slider"></span>
             </label>
-            <input type="text" data-rule-name placeholder="Rule name"
+            <input type="text" data-rule-name aria-label="Rule name" placeholder="Rule name"
               style="flex:1;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:6px 8px;font-size:14px;">
             <button class="btn" onclick="deleteEventRule(this)" title="Delete rule"
               style="padding:4px 8px;color:var(--c-fg-muted);">
@@ -2177,9 +2178,9 @@ export function renderSASettings(
               <option value="goes_above">goes above</option>
               <option value="goes_below">goes below</option>
             </select>
-            <input type="text" data-cond-value placeholder="value"
+            <input type="text" data-cond-value aria-label="Value" placeholder="value"
               style="width:60px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
-            <input type="number" data-cond-sustained placeholder="sustain min" min="0"
+            <input type="number" data-cond-sustained aria-label="Sustain minutes" placeholder="sustain min" min="0"
               style="width:80px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;" title="Sustained: condition must hold for this many minutes before firing">
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;">
@@ -2272,10 +2273,12 @@ function renderEventRuleCard(
  * Render the sidebar with conversation list.
  */
 export function renderSidebar(conversations: Conversation[]): string {
-  return `<aside class="sidebar" id="sidebar">
+  // inert while closed: a translated-off-screen panel must stay out of the tab
+  // and reading order (audit finding 23). setSidebarOpen() toggles it.
+  return `<aside class="sidebar" id="sidebar" inert>
   <div class="sidebar-header">
     <span class="sidebar-title">Conversations</span>
-    <button class="btn btn--primary btn--sm" onclick="Psycheros.newConversation()">+ New</button>
+    <button class="btn btn--primary btn--sm" onclick="Psycheros.newConversation()"><span><span aria-hidden="true">+</span> New<span class="sr-only"> conversation</span></span></button>
   </div>
   <nav class="conv-list" id="conv-list" hx-get="/fragments/conv-list" hx-trigger="load" hx-swap="innerHTML">
     ${renderConversationList(conversations)}
@@ -3014,7 +3017,7 @@ export function renderInputArea(): string {
   return `<div class="input-area">
   <div class="input-container">
     <label class="attach-btn" title="Attach image" style="position:relative;overflow:hidden;cursor:pointer;">
-      <input type="file" id="attach-input" accept="image/*" style="position:absolute;inset:0;opacity:0;cursor:pointer;" onchange="Psycheros.handleAttachment(this)" />
+      <input type="file" id="attach-input" aria-label="Attach image" accept="image/*" style="position:absolute;inset:0;opacity:0;cursor:pointer;" onchange="Psycheros.handleAttachment(this)" />
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
         <circle cx="8.5" cy="8.5" r="1.5"/>
@@ -3284,11 +3287,13 @@ export function renderFileList(
           type="text"
           class="settings-create-file-input"
           id="upload-filename-input"
+          aria-label="File name"
           placeholder="File name (e.g., base_instructions.md)"
           style="padding: 8px; border: 1px solid var(--c-border); border-radius: 6px; background: var(--c-bg-raised); color: var(--c-fg); font-family: inherit; font-size: 13px;"
         />
         <textarea
           id="upload-content-input"
+          aria-label="File content"
           placeholder="Paste file content here..."
           rows="5"
           style="padding: 8px; border: 1px solid var(--c-border); border-radius: 6px; background: var(--c-bg-raised); color: var(--c-fg); resize: vertical; font-family: inherit; font-size: 13px;"
@@ -3697,7 +3702,7 @@ function renderMemoryFilterBar(
       <form class="memory-search-form" hx-get="/fragments/settings/memories/search"
             hx-target="#settings-content" hx-swap="innerHTML"
             hx-trigger="submit">
-        <input type="search" name="q" class="memory-search-input"
+        <input type="search" name="q" class="memory-search-input" aria-label="Search memories"
                placeholder="Search all memories..."
                autocomplete="off" />
       </form>
@@ -3846,6 +3851,7 @@ export function renderMemoryList(
         />
         <textarea
           id="significant-content-input"
+          aria-label="Memory content"
           placeholder="Memory content..."
           rows="2"
           style="flex: 1 1 100%; padding: 8px; border: 1px solid var(--c-border); border-radius: 6px; background: var(--c-bg-raised); color: var(--c-fg); resize: vertical; font-family: inherit; font-size: 13px;"
@@ -5088,7 +5094,7 @@ export function renderEntityCoreGraph(
   </div>
 
   <div class="gv-toolbar">
-    <input type="text" id="graph-search" placeholder="Search nodes..." class="gv-search" />
+    <input type="text" id="graph-search" aria-label="Search nodes" placeholder="Search nodes..." class="gv-search" />
     <select id="graph-filter-type" class="gv-filter">
       <option value="">All types</option>
     </select>
@@ -5112,23 +5118,23 @@ export function renderEntityCoreGraph(
     <div id="graph-container" class="gv-canvas">
       <div class="gv-loading"><div class="gv-spinner"></div></div>
     </div>
-    <div id="graph-node-panel" class="gv-panel">
+    <div id="graph-node-panel" class="gv-panel" inert>
       <div class="gv-panel-header">
         <h3 id="panel-node-label">Node</h3>
-        <button id="panel-close" class="btn btn--ghost btn--sm">&times;</button>
+        <button id="panel-close" class="btn btn--ghost btn--sm" aria-label="Close node panel">&times;</button>
       </div>
       <div class="gv-panel-body" id="panel-content"></div>
     </div>
   </div>
 
   <!-- Create Node Modal -->
-  <div id="graph-create-modal" class="gv-modal">
+  <div id="graph-create-modal" class="gv-modal" role="dialog" aria-modal="true" aria-labelledby="graph-create-title">
     <div class="gv-modal-box">
-      <h3>Create Node</h3>
+      <h3 id="graph-create-title">Create Node</h3>
       <form id="create-node-form">
         <div class="gv-field">
           <label for="node-type">Type</label>
-          <select id="node-type" name="type" required>
+          <select id="node-type" name="type" aria-required="true">
             <option value="person">Person</option>
             <option value="emotion">Emotion</option>
             <option value="topic" selected>Topic</option>
@@ -5143,7 +5149,7 @@ export function renderEntityCoreGraph(
         </div>
         <div class="gv-field">
           <label for="node-label">Label</label>
-          <input type="text" id="node-label" name="label" required placeholder="e.g. hiking, my partner, anxiety" />
+          <input type="text" id="node-label" name="label" aria-required="true" placeholder="e.g. hiking, my partner, anxiety" />
         </div>
         <div class="gv-field">
           <label for="node-description">Description</label>
@@ -5158,14 +5164,14 @@ export function renderEntityCoreGraph(
   </div>
 
   <!-- Edit Node Modal -->
-  <div id="graph-edit-modal" class="gv-modal">
+  <div id="graph-edit-modal" class="gv-modal" role="dialog" aria-modal="true" aria-labelledby="graph-edit-title">
     <div class="gv-modal-box gv-modal-box--wide">
-      <h3>Edit Node</h3>
+      <h3 id="graph-edit-title">Edit Node</h3>
       <form id="edit-node-form">
         <input type="hidden" id="edit-node-id" />
         <div class="gv-field">
           <label for="edit-node-type">Type</label>
-          <select id="edit-node-type" name="type" required>
+          <select id="edit-node-type" name="type" aria-required="true">
             <option value="person">Person</option>
             <option value="emotion">Emotion</option>
             <option value="topic">Topic</option>
@@ -5180,7 +5186,7 @@ export function renderEntityCoreGraph(
         </div>
         <div class="gv-field">
           <label for="edit-node-label">Label</label>
-          <input type="text" id="edit-node-label" required />
+          <input type="text" id="edit-node-label" aria-required="true" />
         </div>
         <div class="gv-field">
           <label for="edit-node-description">Description</label>
@@ -5189,7 +5195,7 @@ export function renderEntityCoreGraph(
         <div class="gv-field" id="edit-connections-field" style="display:none">
           <label>Connections</label>
           <div id="edit-connections-list" class="gv-edit-conns"></div>
-          <button type="button" class="btn btn--ghost btn--sm" id="edit-add-conn">+ Add Connection</button>
+          <button type="button" class="btn btn--ghost btn--sm" id="edit-add-conn"><span><span aria-hidden="true">+</span> Add Connection</span></button>
         </div>
         <div class="gv-modal-actions">
           <button type="button" class="btn btn--ghost" id="cancel-edit">Cancel</button>
@@ -5200,29 +5206,29 @@ export function renderEntityCoreGraph(
   </div>
 
   <!-- Edge Creation Modal -->
-  <div id="graph-edge-modal" class="gv-modal">
+  <div id="graph-edge-modal" class="gv-modal" role="dialog" aria-modal="true" aria-labelledby="graph-edge-title">
     <div class="gv-modal-box">
-      <h3>Connect Nodes</h3>
+      <h3 id="graph-edge-title">Connect Nodes</h3>
       <form id="edge-create-form">
         <div class="gv-field">
-          <label>From</label>
+          <label for="edge-from-search">From</label>
           <div class="gv-node-picker" id="edge-from-picker">
-            <input type="text" class="gv-node-search-input" placeholder="Search nodes..." autocomplete="off" />
+            <input type="text" id="edge-from-search" class="gv-node-search-input" placeholder="Search nodes..." autocomplete="off" />
             <div class="gv-node-search-results" id="edge-from-results"></div>
-            <input type="hidden" id="edge-from" name="fromId" required />
+            <input type="hidden" id="edge-from" name="fromId" />
           </div>
         </div>
         <div class="gv-field">
-          <label>To</label>
+          <label for="edge-to-search">To</label>
           <div class="gv-node-picker" id="edge-to-picker">
-            <input type="text" class="gv-node-search-input" placeholder="Search nodes..." autocomplete="off" />
+            <input type="text" id="edge-to-search" class="gv-node-search-input" placeholder="Search nodes..." autocomplete="off" />
             <div class="gv-node-search-results" id="edge-to-results"></div>
-            <input type="hidden" id="edge-to" name="toId" required />
+            <input type="hidden" id="edge-to" name="toId" />
           </div>
         </div>
         <div class="gv-field">
           <label for="edge-type">Relationship</label>
-          <input type="text" id="edge-type" name="type" list="edge-type-suggestions" required placeholder="e.g. loves, works_with, values" />
+          <input type="text" id="edge-type" name="type" list="edge-type-suggestions" aria-required="true" placeholder="e.g. loves, works_with, values" />
           <datalist id="edge-type-suggestions">
             <option value="loves"><option value="close_to"><option value="friend_of">
             <option value="works_with"><option value="values"><option value="believes_in">
@@ -5246,9 +5252,10 @@ export function renderEntityCoreGraph(
   </div>
 
   <!-- Delete Confirmation Modal -->
-  <div id="graph-delete-modal" class="gv-modal">
+  <div id="graph-delete-modal" class="gv-modal" role="dialog" aria-modal="true"
+    aria-labelledby="graph-delete-title" aria-describedby="delete-confirm-msg">
     <div class="gv-modal-box gv-delete-confirm">
-      <h3>Delete Node</h3>
+      <h3 id="graph-delete-title">Delete Node</h3>
       <p id="delete-confirm-msg" class="gv-delete-msg">Are you sure?</p>
       <div class="gv-modal-actions">
         <button type="button" class="btn btn--ghost" id="cancel-delete">Cancel</button>
@@ -6924,7 +6931,7 @@ export function renderConnectionsDiscordSettings(
           }</span>`
           : ""
       }
-                  <input class="settings-input dm-wl-edit-notes" value="${
+                  <input class="settings-input dm-wl-edit-notes" aria-label="Notes" value="${
         escapeHtml(e.notes)
       }" style="display:none;font-size:var(--font-size-sm);flex:1;" placeholder="Notes">
                 </div>
@@ -6982,7 +6989,7 @@ export function renderConnectionsDiscordSettings(
   }">
           <div class="llm-field">
             <label class="settings-label">Global Instructions</label>
-            <textarea class="settings-textarea" id="discord-global-instructions" rows="3"
+            <textarea class="settings-textarea" id="discord-global-instructions" rows="3" aria-label="Global Instructions"
               placeholder="Instructions that apply to all Discord channels...">${
     escapeHtml(settings.globalInstructions)
   }</textarea>
@@ -7005,7 +7012,7 @@ export function renderConnectionsDiscordSettings(
           </div>
           <div class="llm-field" id="discord-memory-instructions-field">
             <label class="settings-label">Memory Writer Instructions</label>
-            <textarea class="settings-textarea" id="discord-memory-instructions" rows="3"
+            <textarea class="settings-textarea" id="discord-memory-instructions" rows="3" aria-label="Memory Writer Instructions"
               placeholder="e.g. @superdog420 is James — write memories about him as James">${
     escapeHtml(gc?.memoryInstructions ?? "")
   }</textarea>
@@ -7091,7 +7098,7 @@ function renderDmWhitelistUI() {
   if (!container) return;
   fetch('/api/discord/dm-whitelist').then(r => r.json()).then(data => {
     if (data.entries.length > 0) {
-      container.innerHTML = data.entries.map(e => '<div class="dm-whitelist-entry" data-user-id="' + e.userId + '"><div class="dm-whitelist-info"><strong class="dm-wl-display">' + e.username + '</strong><input class="settings-input dm-wl-edit-username" value="' + e.username + '" style="display:none;font-size:var(--font-size-sm);"><span class="dm-wl-display dm-whitelist-meta">' + e.userId + '</span>' + (e.notes ? '<span class="dm-wl-display dm-whitelist-notes">' + e.notes + '</span>' : '') + '<input class="settings-input dm-wl-edit-notes" value="' + (e.notes || '') + '" style="display:none;font-size:var(--font-size-sm);flex:1;" placeholder="Notes"></div><div class="dm-whitelist-actions"><button class="btn btn--ghost btn--sm dm-whitelist-edit" data-user-id="' + e.userId + '" title="Edit">edit</button><button class="btn btn--ghost btn--sm dm-whitelist-save" data-user-id="' + e.userId + '" style="display:none;" title="Save">save</button><button class="btn btn--ghost btn--sm dm-whitelist-remove" data-user-id="' + e.userId + '" title="Remove">&times;</button></div></div>').join("");
+      container.innerHTML = data.entries.map(e => '<div class="dm-whitelist-entry" data-user-id="' + e.userId + '"><div class="dm-whitelist-info"><strong class="dm-wl-display">' + e.username + '</strong><input class="settings-input dm-wl-edit-username" value="' + e.username + '" style="display:none;font-size:var(--font-size-sm);"><span class="dm-wl-display dm-whitelist-meta">' + e.userId + '</span>' + (e.notes ? '<span class="dm-wl-display dm-whitelist-notes">' + e.notes + '</span>' : '') + '<input class="settings-input dm-wl-edit-notes" aria-label="Notes" value="' + (e.notes || '') + '" style="display:none;font-size:var(--font-size-sm);flex:1;" placeholder="Notes"></div><div class="dm-whitelist-actions"><button class="btn btn--ghost btn--sm dm-whitelist-edit" data-user-id="' + e.userId + '" title="Edit">edit</button><button class="btn btn--ghost btn--sm dm-whitelist-save" data-user-id="' + e.userId + '" style="display:none;" title="Save">save</button><button class="btn btn--ghost btn--sm dm-whitelist-remove" data-user-id="' + e.userId + '" title="Remove">&times;</button></div></div>').join("");
       container.querySelectorAll('.dm-whitelist-remove').forEach(btn => {
         btn.addEventListener('click', () => removeDmWhitelistEntry(btn.dataset.userId));
       });
@@ -7396,7 +7403,7 @@ function renderLovenseTab(
       <p class="theme-section-desc">Instructions for me when I'm using connected Lovense devices. Only included in my context when a device is connected.</p>
       <div class="llm-fields">
         <div class="llm-field">
-          <textarea id="lovense-custom-instructions" class="input-field llm-input" rows="4" placeholder="e.g. Start slow, ramp up gradually, prefer pattern mode...">${
+          <textarea id="lovense-custom-instructions" class="input-field llm-input" rows="4" aria-label="Custom instructions" placeholder="e.g. Start slow, ramp up gradually, prefer pattern mode...">${
     escapeHtml(settings.customInstructions ?? "")
   }</textarea>
         </div>
@@ -7631,7 +7638,7 @@ function renderButtplugTab(
       <p class="theme-section-desc">Instructions for me when I'm using connected Intiface devices. Only included in my context when a device is connected.</p>
       <div class="llm-fields">
         <div class="llm-field">
-          <textarea id="buttplug-custom-instructions" class="input-field llm-input" rows="4" placeholder="e.g. Start slow, prefer vibration over rotation...">${
+          <textarea id="buttplug-custom-instructions" class="input-field llm-input" rows="4" aria-label="Custom instructions" placeholder="e.g. Start slow, prefer vibration over rotation...">${
     escapeHtml(settings.customInstructions ?? "")
   }</textarea>
         </div>
@@ -9045,10 +9052,10 @@ export function renderVisionAnchorsTab(
     escapeHtml(a.label)
   }" loading="lazy"/>
       <div class="anchor-info">
-        <input type="text" class="input-field anchor-label" value="${
+        <input type="text" class="input-field anchor-label" aria-label="Anchor label" value="${
     escapeHtml(a.label)
   }" placeholder="Label" style="font-size:var(--font-size-sm);padding:var(--sp-1) var(--sp-2);margin-bottom:var(--sp-1);">
-        <input type="text" class="input-field anchor-desc" value="${
+        <input type="text" class="input-field anchor-desc" aria-label="Anchor description" value="${
     escapeHtml(a.description)
   }" placeholder="Description" style="font-size:var(--font-size-xs);padding:var(--sp-1) var(--sp-2);color:var(--c-fg-muted);">
         <div class="anchor-meta">${(a.file_size / 1024).toFixed(1)} KB</div>
@@ -9801,7 +9808,7 @@ async function loadDiscordChannelPicker() {
         html += '<option value="lurk"' + (mode === 'lurk' ? ' selected' : '') + '>Lurk</option>';
         html += '<option value="strict"' + (mode === 'strict' ? ' selected' : '') + '>Strict</option>';
         html += '</select>';
-        html += '<input type="text" class="settings-input discord-picker-instructions" placeholder="Instructions" value="' + instr.replace(/"/g, '&quot;') + '" style="flex:1;min-width:0;">';
+        html += '<input type="text" class="settings-input discord-picker-instructions" aria-label="Instructions" placeholder="Instructions" value="' + instr.replace(/"/g, '&quot;') + '" style="flex:1;min-width:0;">';
         html += '</div>';
       });
       html += '</div></div>';
@@ -10291,7 +10298,7 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
       <div id="voice-chat-debug-panel" style="${
     settings.voiceChatDebug ? "" : "display: none;"
   }">
-        <textarea id="voice-chat-debug-log" readonly rows="8" class="input-field" style="font-family: monospace; font-size: 11px; white-space: pre; resize: vertical; width: 100%; box-sizing: border-box;" placeholder="Click 'Run test' to capture diagnostic info, or start a voice call — events will appear here."></textarea>
+      <textarea id="voice-chat-debug-log" readonly rows="8" class="input-field" aria-label="Voice chat debug log" style="font-family: monospace; font-size: 11px; white-space: pre; resize: vertical; width: 100%; box-sizing: border-box;" placeholder="Click 'Run test' to capture diagnostic info, or start a voice call — events will appear here."></textarea>
         <div style="display: flex; gap: var(--sp-2); margin-top: var(--sp-2); flex-wrap: wrap;">
           <button type="button" class="btn btn--ghost btn--sm" onclick="runVoiceChatTest()">Run test</button>
           <button type="button" class="btn btn--ghost btn--sm" onclick="copyVoiceChatDebugLog(this)">Copy</button>
@@ -10337,11 +10344,11 @@ export function renderVoiceProfileEdit(
     if (!p?.pronunciation?.length) return "";
     return p.pronunciation.map((entry, idx) => `
       <div class="pronunciation-row" data-idx="${idx}">
-        <input type="text" class="input-field llm-input" value="${
+        <input type="text" class="input-field llm-input" aria-label="Written form" value="${
       escapeHtml(entry.written)
     }" placeholder="Written (e.g. Psycheros)">
         <span style="color: var(--c-fg-muted);">&rarr;</span>
-        <input type="text" class="input-field llm-input" value="${
+        <input type="text" class="input-field llm-input" aria-label="Spoken form" value="${
       escapeHtml(entry.spoken)
     }" placeholder="Spoken (e.g. sy-KEH-ros)">
         <button class="btn btn--ghost btn--sm" onclick="removePronunciationEntry(${idx})" title="Remove">&times;</button>
@@ -10353,11 +10360,11 @@ export function renderVoiceProfileEdit(
     if (!p?.sttCorrections?.length) return "";
     return p.sttCorrections.map((entry, idx) => `
       <div class="pronunciation-row stt-correction-row" data-idx="${idx}">
-        <input type="text" class="input-field llm-input" value="${
+        <input type="text" class="input-field llm-input" aria-label="Misheard form" value="${
       escapeHtml(entry.misheard)
     }" placeholder="Misheard (e.g. sih keh ros)">
         <span style="color: var(--c-fg-muted);">&rarr;</span>
-        <input type="text" class="input-field llm-input" value="${
+        <input type="text" class="input-field llm-input" aria-label="Correct form" value="${
       escapeHtml(entry.correct)
     }" placeholder="Correct (e.g. Psycheros)">
         <button class="btn btn--ghost btn--sm" onclick="removeSTTCorrectionEntry(${idx})" title="Remove">&times;</button>
@@ -10894,23 +10901,24 @@ export function renderVoiceCallView(
       <textarea
         class="voice-text-input"
         id="voice-text-input"
+        aria-label="Voice message"
         placeholder="Type a message..."
         rows="2"
         onkeydown="handleVoiceTextInputKey(event)"
       ></textarea>
-      <button class="voice-btn voice-text-send-btn" id="voice-text-send-btn" onclick="sendVoiceTextInput()" aria-label="Send" title="Send">
+      <button class="voice-btn voice-text-send-btn" id="voice-text-send-btn" onclick="sendVoiceTextInput()" aria-label="Send">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
       </button>
     </div>
 
     <div class="voice-controls">
-      <button class="voice-btn" id="voice-btn-yinyang" onclick="toggleYinYangMode()" aria-label="Toggle Yin Yang mode" title="Yin Yang mode (type instead of speak)">
+      <button class="voice-btn" id="voice-btn-yinyang" onclick="toggleYinYangMode()" aria-label="Toggle Yin Yang mode (type instead of speak)">
         ☯
       </button>
-      <button class="voice-btn" id="voice-btn-ptt-toggle" onclick="togglePTTMode()" aria-label="Toggle push-to-talk" title="Push to talk">
+      <button class="voice-btn" id="voice-btn-ptt-toggle" onclick="togglePTTMode()" aria-label="Toggle push-to-talk">
         🎙️
       </button>
-      <button class="voice-btn voice-btn--end" onclick="endVoiceChat()" aria-label="End voice call" title="End call">
+      <button class="voice-btn voice-btn--end" onclick="endVoiceChat()" aria-label="End voice call">
         📞
       </button>
     </div>

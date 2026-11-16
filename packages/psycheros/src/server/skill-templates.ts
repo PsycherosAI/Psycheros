@@ -49,17 +49,17 @@ export function renderSkillEditor(skill: SkillEditorData): string {
     ${generatedNote}
     <div style="display:flex;flex-direction:column;gap:var(--sp-3);">
       <div>
-        <label style="display:block;font-size:var(--font-size-sm);color:var(--c-fg-muted);margin-bottom:var(--sp-1);">Name (lowercase letters, digits, hyphens)</label>
+        <label for="skill-editor-name" style="display:block;font-size:var(--font-size-sm);color:var(--c-fg-muted);margin-bottom:var(--sp-1);">Name (lowercase letters, digits, hyphens)</label>
         ${nameField}
       </div>
       <div>
-        <label style="display:block;font-size:var(--font-size-sm);color:var(--c-fg-muted);margin-bottom:var(--sp-1);">Description (one line — shown in the entity's context index)</label>
+        <label for="skill-editor-description" style="display:block;font-size:var(--font-size-sm);color:var(--c-fg-muted);margin-bottom:var(--sp-1);">Description (one line — shown in the entity's context index)</label>
         <input type="text" id="skill-editor-description" value="${
     escapeHtml(skill.description)
   }" placeholder="What this skill is for" style="width:100%;padding:var(--sp-2);border-radius:var(--radius-sm);border:1px solid var(--c-border);background:var(--c-bg);color:var(--c-fg);" />
       </div>
       <div>
-        <label style="display:block;font-size:var(--font-size-sm);color:var(--c-fg-muted);margin-bottom:var(--sp-1);">Body (markdown — what the entity sees when it loads this skill)</label>
+        <label for="skill-editor-body" style="display:block;font-size:var(--font-size-sm);color:var(--c-fg-muted);margin-bottom:var(--sp-1);">Body (markdown — what the entity sees when it loads this skill)</label>
         <textarea id="skill-editor-body" rows="18" placeholder="# Skill procedure…" style="width:100%;font-family:var(--font-mono,monospace);font-size:var(--font-size-sm);padding:var(--sp-2);border-radius:var(--radius-sm);border:1px solid var(--c-border);background:var(--c-bg);color:var(--c-fg);min-height:240px;">${
     escapeHtml(skill.body)
   }</textarea>

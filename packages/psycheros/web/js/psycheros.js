@@ -765,14 +765,39 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ESC key exits selection mode or closes modal
+  // Escape closes the delete dialog, Tab stays inside it, and Escape falls
+  // back to leaving selection mode (audit finding 15). The dialog is
+  // aria-modal, but the browser does not trap Tab for us, so background
+  // controls stay reachable until we wrap focus here.
   document.addEventListener('keydown', (e) => {
+    const backdrop = document.getElementById('modal-backdrop');
+    const modalOpen = backdrop?.classList.contains('visible');
+
     if (e.key === 'Escape') {
-      if (document.querySelector('.modal-backdrop.visible')) {
+      if (modalOpen) {
         closeDeleteModal();
       } else if (selectionMode) {
         exitSelectionMode();
       }
+      return;
+    }
+    if (!modalOpen || e.key !== 'Tab') return;
+
+    const items = backdrop.querySelectorAll('button');
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+
+    if (!backdrop.contains(active)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    } else if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
     }
   });
 
@@ -912,25 +937,36 @@ window.requestNotificationPermission = async function() {
   return permission;
 };
 
-function toggleSidebar() {
+/**
+ * Open or close the sidebar.
+ *
+ * A closed sidebar is only translated off-screen, so its conversation links
+ * stay in the tab order and in the reading order (audit finding 23). `inert`
+ * takes the whole panel out of both, and the toggle reports its own state.
+ */
+function setSidebarOpen(open) {
   const sidebar = document.getElementById('sidebar');
   const overlay = document.querySelector('.sidebar-overlay');
 
-  sidebar?.classList.toggle('open');
-  overlay?.classList.toggle('open');
+  sidebar?.classList.toggle('open', open);
+  overlay?.classList.toggle('open', open);
+  if (sidebar) sidebar.inert = !open;
+  document.querySelector('.logo-btn')?.setAttribute(
+    'aria-expanded',
+    String(open),
+  );
+}
+
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  setSidebarOpen(!sidebar?.classList.contains('open'));
 }
 
 /**
  * Close sidebar after navigation (for settings links).
  */
 function closeSidebarAfterNav() {
-  const sidebar = document.getElementById('sidebar');
-  const overlay = document.querySelector('.sidebar-overlay');
-
-  if (sidebar?.classList.contains('open')) {
-    sidebar.classList.remove('open');
-    overlay?.classList.remove('open');
-  }
+  setSidebarOpen(false);
 }
 
 // =============================================================================
@@ -2371,9 +2407,9 @@ function addPronunciationEntry() {
   row.className = 'pronunciation-row';
   row.dataset.idx = idx;
   row.innerHTML =
-    '<input type="text" class="input-field llm-input" placeholder="Written (e.g. Psycheros)">' +
+    '<input type="text" class="input-field llm-input" aria-label="Written form" placeholder="Written (e.g. Psycheros)">' +
     '<span style="color: var(--c-fg-muted);">&rarr;</span>' +
-    '<input type="text" class="input-field llm-input" placeholder="Spoken (e.g. sy-KEH-ros)">' +
+    '<input type="text" class="input-field llm-input" aria-label="Spoken form" placeholder="Spoken (e.g. sy-KEH-ros)">' +
     '<button class="btn btn--ghost btn--sm" onclick="removePronunciationEntry(this)" title="Remove">&times;</button>';
   list.appendChild(row);
 }
@@ -2389,9 +2425,9 @@ function addSTTCorrectionEntry() {
   var row = document.createElement('div');
   row.className = 'pronunciation-row stt-correction-row';
   row.innerHTML =
-    '<input type="text" class="input-field llm-input" placeholder="Misheard (e.g. sih keh ros)">' +
+    '<input type="text" class="input-field llm-input" aria-label="Misheard form" placeholder="Misheard (e.g. sih keh ros)">' +
     '<span style="color: var(--c-fg-muted);">&rarr;</span>' +
-    '<input type="text" class="input-field llm-input" placeholder="Correct (e.g. Psycheros)">' +
+    '<input type="text" class="input-field llm-input" aria-label="Correct form" placeholder="Correct (e.g. Psycheros)">' +
     '<button class="btn btn--ghost btn--sm" onclick="removeSTTCorrectionEntry(this)" title="Remove">&times;</button>';
   list.appendChild(row);
 }
@@ -3640,8 +3676,8 @@ function createUIContainers() {
       if (e.target === backdrop) closeDeleteModal();
     };
     backdrop.innerHTML = `
-      <div class="modal" onclick="event.stopPropagation()">
-        <div class="modal-title">Delete Conversation</div>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" onclick="event.stopPropagation()">
+        <div class="modal-title" id="modal-title">Delete Conversation</div>
         <div class="modal-message" id="modal-message">Are you sure you want to delete this conversation?</div>
         <div class="modal-actions">
           <button class="btn btn--ghost" onclick="Psycheros.closeDeleteModal()">Cancel</button>
@@ -3874,8 +3910,15 @@ function deleteSelected() {
 // Delete Modal
 // =============================================================================
 
+// Where focus was before the dialog opened, so it can be handed back.
+let deleteModalOpener = null;
+
 /**
  * Show the delete confirmation modal.
+ *
+ * Focus moves to Cancel on open and back to whatever opened the dialog on
+ * close, so a screen reader announces the dialog and the user does not have
+ * to hunt for the next control (audit finding 15).
  */
 function showDeleteModal(ids) {
   if (!ids || ids.length === 0) return;
@@ -3893,6 +3936,15 @@ function showDeleteModal(ids) {
   }
 
   backdrop?.classList.add('visible');
+  deleteModalOpener = document.activeElement;
+  // A row action is visibility:hidden until its row is hovered or focused, and
+  // a visibility flip is a frame or two late, so focus() into one silently
+  // fails. Keep the opener visible while the dialog is open so focus can return
+  // to it on close. The graph pins its dialogs with inert for the same reason.
+  if (deleteModalOpener?.closest?.('.conv-actions')) {
+    deleteModalOpener.style.visibility = 'visible';
+  }
+  backdrop?.querySelector('.modal-actions button')?.focus();
 }
 
 /**
@@ -3901,6 +3953,29 @@ function showDeleteModal(ids) {
 function closeDeleteModal() {
   pendingDeleteIds = null;
   document.getElementById('modal-backdrop')?.classList.remove('visible');
+
+  const opener = deleteModalOpener;
+  deleteModalOpener = null;
+  if (!opener?.isConnected) return;
+
+  opener.focus();
+  if (document.activeElement === opener) {
+    // Now that the row holds focus again, let its own :focus-within rule own
+    // visibility once focus leaves the control.
+    opener.addEventListener(
+      'blur',
+      () => {
+        opener.style.visibility = '';
+      },
+      { once: true },
+    );
+    return;
+  }
+
+  // The opener could not take focus (deleted row, or a hidden control we could
+  // not pin). Settle on the row link rather than dropping focus on <body>.
+  opener.style.visibility = '';
+  opener.closest?.('.conv-item-wrapper')?.querySelector('.conv-item')?.focus();
 }
 
 /**
@@ -4150,7 +4225,17 @@ function showContextInspector() {
 
   backdrop?.classList.add('visible');
   viewer?.classList.add('visible');
+  setContextToggleExpanded(true);
   loadContextSnapshots();
+}
+
+/**
+ * Mirror the context panel's open state onto its toggle (WCAG 4.1.2).
+ */
+function setContextToggleExpanded(open) {
+  document.querySelectorAll('.context-toggle').forEach((btn) => {
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
 }
 
 /**
@@ -4160,6 +4245,7 @@ function hideContextViewer() {
   contextInspectorOpen = false;
   document.getElementById('context-viewer')?.classList.remove('visible');
   document.getElementById('context-viewer-backdrop')?.classList.remove('visible');
+  setContextToggleExpanded(false);
 }
 
 /**
@@ -4230,6 +4316,7 @@ function createContextInspector() {
     </div>
     <div class="context-search-bar">
       <input type="text" class="context-search" id="context-search-input"
+             aria-label="Search context"
              placeholder="Search context..." oninput="Psycheros.searchContext(this.value)">
     </div>
     <div class="context-viewer-tabs">

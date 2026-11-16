@@ -8,6 +8,91 @@
 
 // ─── Color Utilities (reused from graph view) ─────────────────────────────────
 
+// ─── Dialog plumbing (audit finding 22) ──────────────────────────────────────
+// The four graph dialogs are opened and closed by class changes in a dozen
+// handlers. Focus, Escape and the Tab trap are wired once here rather than at
+// every call site, and the CSS keeps a closed dialog out of the tab order.
+const GRAPH_MODAL_FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
+let graphFocusOutside = null;
+
+/** The topmost open dialog — later in DOM order wins when one stacks on another. */
+function openGraphModal() {
+  const open = document.querySelectorAll(".gv-modal.gv-modal-open");
+  return open.length ? open[open.length - 1] : null;
+}
+
+document.addEventListener("focusin", (e) => {
+  if (!e.target.closest(".gv-modal")) graphFocusOutside = e.target;
+});
+
+document.addEventListener("keydown", (e) => {
+  const modal = openGraphModal();
+  if (!modal) return;
+
+  if (e.key === "Escape") {
+    e.preventDefault();
+    modal.classList.remove("gv-modal-open");
+    return;
+  }
+  if (e.key !== "Tab") return;
+
+  const items = [...modal.querySelectorAll(GRAPH_MODAL_FOCUSABLE)];
+  if (items.length === 0) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  const active = document.activeElement;
+
+  if (!modal.contains(active)) {
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus();
+  } else if (e.shiftKey && active === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && active === last) {
+    e.preventDefault();
+    first.focus();
+  }
+});
+
+// Opening a dialog moves focus into it; closing it hands focus back to whatever
+// the user was on before (the row or button that opened it). Re-observed on
+// every initGraph because the dialogs are re-rendered with the fragment.
+//
+// A closed dialog is taken out of the tab order with inert, not with
+// visibility:hidden: a child inherits a visibility flip two to four frames
+// late, so focus() into a just-opened dialog is a silent no-op and focus stayed
+// on the card behind it (Playwright probe, 2026-09-28). inert is read straight
+// off the DOM, so moving focus in works in the same task.
+const graphModalObserver = new MutationObserver((records) => {
+  for (const record of records) {
+    const modal = record.target;
+    const open = modal.classList.contains("gv-modal-open");
+    modal.inert = !open;
+    if (!open) {
+      if (graphFocusOutside?.isConnected) graphFocusOutside.focus();
+      continue;
+    }
+    if (!modal.contains(document.activeElement)) {
+      modal.querySelector(GRAPH_MODAL_FOCUSABLE)?.focus();
+    }
+  }
+});
+
+function watchGraphModals() {
+  // The dialogs are re-rendered with the fragment, so drop the previous set
+  // before observing the new one.
+  graphModalObserver.disconnect();
+  for (const modal of document.querySelectorAll(".gv-modal")) {
+    modal.inert = !modal.classList.contains("gv-modal-open");
+    graphModalObserver.observe(modal, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }
+}
+
 function getNodeTypeConfig() {
   return {
     self:       { hue: 160, label: 'Self' },
@@ -131,6 +216,7 @@ async function initGraph() {
   applyStoredNodeLimit();
   await loadGraphData();
   setupEventListeners();
+  watchGraphModals();
 }
 
 // ─── Data Loading ────────────────────────────────────────────────────────────
@@ -540,10 +626,15 @@ function showNodePanel(nodeId) {
     </div>`;
 
   panel.classList.add('gv-panel-open');
+  // A closed panel is translated off-canvas but still in the DOM, so without
+  // this its buttons stay tabbable (audit: off-canvas but focusable).
+  panel.inert = false;
 }
 
 function hideNodePanel() {
-  document.getElementById('graph-node-panel')?.classList.remove('gv-panel-open');
+  const panel = document.getElementById('graph-node-panel');
+  panel?.classList.remove('gv-panel-open');
+  if (panel) panel.inert = true;
 }
 
 // ─── Type Filter ──────────────────────────────────────────────────────────────
