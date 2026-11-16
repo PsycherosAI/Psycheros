@@ -87,6 +87,11 @@
   transition: all var(--transition);
 }
 
+/* The display rule above overrides the hidden attribute's UA display:none. */
+.btn[hidden] {
+  display: none;
+}
+
 .btn:hover:not(:disabled) {
   border-color: var(--c-accent-muted);
   color: var(--c-accent);
@@ -1417,6 +1422,11 @@ body[data-decor="stamp"] .msg--user .msg-content,
   font-size: var(--font-size-sm);
   color: var(--c-fg-muted);
   font-style: italic;
+}
+
+.voice-test-status {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
 }
 
 .status-retry {

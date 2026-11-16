@@ -6149,7 +6149,7 @@ export function renderLLMProfileEdit(
             <input type="password" id="llm-api-key" class="input-field llm-input" value="${
     escapeHtml(maskedKey)
   }" placeholder="Enter API key...">
-            <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleApiKeyVisibility()" title="Show/hide key">
+            <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show LLM API key" title="Show LLM API key" data-key-label="LLM API key" onclick="toggleApiKeyVisibility(this)">
               <svg id="eye-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                 <circle cx="12" cy="12" r="3"/>
@@ -10302,11 +10302,11 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
             </span>`
     ).join("")
   }
-          <button type="button" class="btn btn--ghost btn--sm" id="ptt-add-key-btn" onclick="capturePTTKey()" style="font-size: var(--font-size-xs);"><span><span aria-hidden="true">+</span> Add binding</span></button>
+          <button type="button" class="btn btn--ghost btn--sm" id="ptt-add-key-btn" onclick="capturePTTKey()" aria-disabled="false" style="font-size: var(--font-size-xs);"><span><span aria-hidden="true">+</span> Add binding</span></button>
         </div>
-        <div id="ptt-capture-hint" style="display: none; margin-top: var(--sp-2); font-size: var(--font-size-xs); color: var(--c-accent);">
-          Press any key or mouse button...
-          <button type="button" class="btn btn--ghost btn--sm" onclick="cancelPTTKeyCapture()" style="margin-left: var(--sp-2);">Cancel</button>
+        <div id="ptt-capture-hint" style="margin-top: 0; font-size: var(--font-size-xs); color: var(--c-accent);">
+          <span id="ptt-capture-status" role="status" aria-live="polite"></span>
+          <button type="button" class="btn btn--ghost btn--sm" onclick="cancelPTTKeyCapture()" hidden style="margin-left: var(--sp-2);">Cancel</button>
         </div>
       </div>
     </div>
@@ -10382,7 +10382,7 @@ export function renderVoiceProfileEdit(
         <input type="text" class="input-field llm-input" aria-label="Spoken form" value="${
       escapeHtml(entry.spoken)
     }" placeholder="Spoken (e.g. sy-KEH-ros)">
-        <button class="btn btn--ghost btn--sm" onclick="removePronunciationEntry(${idx})" title="Remove">&times;</button>
+        <button class="btn btn--ghost btn--sm" onclick="removePronunciationEntry(this)" aria-label="Remove pronunciation entry">&times;</button>
       </div>
     `).join("");
   }
@@ -10398,7 +10398,7 @@ export function renderVoiceProfileEdit(
         <input type="text" class="input-field llm-input" aria-label="Correct form" value="${
       escapeHtml(entry.correct)
     }" placeholder="Correct (e.g. Psycheros)">
-        <button class="btn btn--ghost btn--sm" onclick="removeSTTCorrectionEntry(${idx})" title="Remove">&times;</button>
+        <button class="btn btn--ghost btn--sm" onclick="removeSTTCorrectionEntry(this)" aria-label="Remove STT correction">&times;</button>
       </div>
     `).join("");
   }
@@ -10472,7 +10472,7 @@ export function renderVoiceProfileEdit(
                 <input type="password" id="tts-minimax-api-key" class="input-field llm-input" value="${
     tts?.provider === "minimax" ? escapeHtml(tts.minimax?.apiKey || "") : ""
   }" placeholder="Minimax API key">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('tts-minimax-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show Minimax API key" title="Show Minimax API key" data-key-label="Minimax API key" onclick="toggleVoiceFieldVisibility('tts-minimax-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10513,7 +10513,7 @@ export function renderVoiceProfileEdit(
       ? escapeHtml(tts.elevenlabs?.apiKey || "")
       : ""
   }" placeholder="ElevenLabs API key">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('tts-elevenlabs-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show ElevenLabs API key" title="Show ElevenLabs API key" data-key-label="ElevenLabs API key" onclick="toggleVoiceFieldVisibility('tts-elevenlabs-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10548,7 +10548,7 @@ export function renderVoiceProfileEdit(
                 <input type="password" id="tts-openai-api-key" class="input-field llm-input" value="${
     tts?.provider === "openai" ? escapeHtml(tts.openai?.apiKey || "") : ""
   }" placeholder="OpenAI API key">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('tts-openai-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show TTS OpenAI API key" title="Show TTS OpenAI API key" data-key-label="TTS OpenAI API key" onclick="toggleVoiceFieldVisibility('tts-openai-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10594,7 +10594,7 @@ export function renderVoiceProfileEdit(
                 <input type="password" id="tts-custom-api-key" class="input-field llm-input" value="${
     tts?.provider === "custom" ? escapeHtml(tts.custom?.apiKey || "") : ""
   }" placeholder="Optional">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('tts-custom-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show custom TTS API key" title="Show custom TTS API key" data-key-label="custom TTS API key" onclick="toggleVoiceFieldVisibility('tts-custom-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10653,7 +10653,7 @@ export function renderVoiceProfileEdit(
                 <input type="password" id="stt-deepgram-api-key" class="input-field llm-input" value="${
     stt?.provider === "deepgram" ? escapeHtml(stt.deepgram?.apiKey || "") : ""
   }" placeholder="Deepgram API key">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('stt-deepgram-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show Deepgram API key" title="Show Deepgram API key" data-key-label="Deepgram API key" onclick="toggleVoiceFieldVisibility('stt-deepgram-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10688,7 +10688,7 @@ export function renderVoiceProfileEdit(
                 <input type="password" id="stt-openai-api-key" class="input-field llm-input" value="${
     stt?.provider === "openai" ? escapeHtml(stt.openai?.apiKey || "") : ""
   }" placeholder="OpenAI API key">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('stt-openai-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show STT OpenAI API key" title="Show STT OpenAI API key" data-key-label="STT OpenAI API key" onclick="toggleVoiceFieldVisibility('stt-openai-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10728,7 +10728,7 @@ export function renderVoiceProfileEdit(
                 <input type="password" id="stt-custom-api-key" class="input-field llm-input" value="${
     stt?.provider === "custom" ? escapeHtml(stt.custom?.apiKey || "") : ""
   }" placeholder="Optional">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('stt-custom-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show custom STT API key" title="Show custom STT API key" data-key-label="custom STT API key" onclick="toggleVoiceFieldVisibility('stt-custom-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10829,7 +10829,7 @@ export function renderVoiceProfileEdit(
     p?.voiceEffect === "cavern" ? "selected" : ""
   }>Cavern &mdash; distant space</option>
             </select>
-            <button type="button" class="btn btn--ghost btn--sm" onclick="testVoiceEffect()" style="margin-top: var(--sp-1);">Test Effect</button>
+            <button type="button" class="btn btn--ghost btn--sm" id="voice-test-effect-btn" onclick="testVoiceEffect(this)" style="margin-top: var(--sp-1);">Test Effect</button>
             <span class="llm-field-hint">Adds character to TTS playback.</span>
           </div>
           <div class="llm-field">
@@ -10869,7 +10869,7 @@ export function renderVoiceProfileEdit(
         <div id="pronunciation-list">
           ${pronunciationRows()}
         </div>
-        <button class="btn btn--ghost btn--sm" onclick="addPronunciationEntry()" style="margin-top: var(--sp-2);" aria-label="Add Entry: pronunciation"><span><span aria-hidden="true">+</span> Add Entry</span></button>
+        <button class="btn btn--ghost btn--sm" id="add-pronunciation-btn" onclick="addPronunciationEntry()" style="margin-top: var(--sp-2);" aria-label="Add Entry: pronunciation"><span><span aria-hidden="true">+</span> Add Entry</span></button>
       </section>
 
       <!-- STT Corrections -->
@@ -10879,14 +10879,15 @@ export function renderVoiceProfileEdit(
         <div id="stt-corrections-list">
           ${sttCorrectionRows()}
         </div>
-        <button class="btn btn--ghost btn--sm" onclick="addSTTCorrectionEntry()" style="margin-top: var(--sp-2);" aria-label="Add Entry: corrections"><span><span aria-hidden="true">+</span> Add Entry</span></button>
+        <button class="btn btn--ghost btn--sm" id="add-stt-correction-btn" onclick="addSTTCorrectionEntry()" style="margin-top: var(--sp-2);" aria-label="Add Entry: corrections"><span><span aria-hidden="true">+</span> Add Entry</span></button>
       </section>
 
       <!-- Action Bar -->
       <div class="llm-actions">
         <div class="llm-actions-left">
           <button class="btn btn--primary" onclick="saveVoiceProfile(event)">Save Profile</button>
-          <button class="btn btn--ghost" onclick="testTTSConnection()" id="test-tts-btn">Test TTS</button>
+          <button class="btn btn--ghost" onclick="testTTSConnection(this)" id="profile-test-tts-btn">Test TTS</button>
+          <span id="voice-test-status" class="voice-test-status" role="status" aria-live="polite"></span>
           ${
     !isNew && !isActive
       ? `<button class="btn btn--ghost" onclick="setActiveVoiceProfile('${
@@ -10924,7 +10925,7 @@ export function renderVoiceCallView(
     <div class="voice-status" id="voice-status">
       <span class="voice-status-dot voice-status-dot--connecting" id="voice-status-dot"></span>
       <span id="voice-status-text" role="status" aria-live="polite">Connecting...</span>
-      <button class="btn btn--ghost" id="test-tts-btn" onclick="testTTSConnection()" style="margin-left: auto; font-size: var(--font-size-xs);">Test TTS</button>
+      <button class="btn btn--ghost" id="voice-test-tts-btn" onclick="testTTSConnection(this)" style="margin-left: auto; font-size: var(--font-size-xs);">Test TTS</button>
     </div>
 
     <div id="voice-announcer" class="sr-only" role="status" aria-live="polite"></div>
@@ -10962,6 +10963,7 @@ export function renderVoiceCallView(
         onmousedown="startPTT()" ontouchstart="startPTT()"
         onmouseup="endPTT()" ontouchend="endPTT()"
         onkeydown="handleHoldKey(event)"
+        onclick="handleHoldClick(event)"
         aria-label="Hold to talk" title="Hold to talk">
         <span>HOLD<br>TO<br>TALK</span>
       </button>

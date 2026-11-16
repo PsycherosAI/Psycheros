@@ -1415,8 +1415,31 @@ function handleHoldKey(e) {
   else startPTT();
 }
 
+/**
+ * Assistive technology activates a button with a click, not a pointer press
+ * or a key event. Pointer presses are owned by mousedown/up and
+ * touchstart/end, and keyboard Space/Enter is consumed by handleHoldKey
+ * before it can produce a click. A remaining detail===0 click is therefore
+ * an AT or programmatic activation and toggles capture (WCAG 2.1.1).
+ */
+function handleHoldClick(e) {
+  if (e.detail !== 0) return;
+  if (pttHolding) endPTT();
+  else startPTT();
+}
+
+function entityTurnActive() {
+  const effective =
+    currentWalkieState === 'idle' &&
+    (playbackPlaying || playbackBuffer.length > 0)
+      ? 'speaking'
+      : currentWalkieState;
+  return effective === 'processing' || effective === 'speaking';
+}
+
 function startPTT() {
   if (!pttEnabled) return;
+  if (entityTurnActive()) return;
   if (!voiceWs || voiceWs.readyState !== WebSocket.OPEN) return;
   if (sttDebug) console.log('[Voice:ptt] startPTT — sttProvider=' + sttProvider);
   voiceWs.send(JSON.stringify({ type: 'ptt_start' }));
@@ -1836,7 +1859,9 @@ function refreshDisplayState() {
   const holdBtn = document.getElementById('voice-hold-btn');
   if (holdBtn) {
     const entityTurn = effective === 'processing' || effective === 'speaking';
-    holdBtn.disabled = entityTurn;
+    // aria-disabled keeps the control focusable so a turn that starts while
+    // the button has focus does not drop the user back to <body>.
+    holdBtn.setAttribute('aria-disabled', String(entityTurn));
     holdBtn.style.opacity = entityTurn ? '0.35' : '';
     holdBtn.style.pointerEvents = entityTurn ? 'none' : '';
   }
@@ -2223,7 +2248,11 @@ function toggleYinYangMode() {
   } else {
     // Leaving Yin Yang mode — hide text input, re-acquire the mic
     // (server STT only) and resume listening.
+    const textInput = document.getElementById('voice-text-input');
+    const textHadFocus = !!textInput && document.activeElement === textInput;
     if (textArea) textArea.style.display = 'none';
+    // Hiding the focused textarea would otherwise strand focus on <body>.
+    if (textHadFocus) btn?.focus();
 
     if (sttProvider === 'browser') {
       // Browser STT: we never held the mic in the first place (Chrome
@@ -2413,22 +2442,40 @@ function voiceMouseHandler(e) {
  * a temporary effect chain. Called from the "Test Effect" button on the
  * voice profile edit form. Lets the user preview how each effect sounds
  * without starting a full voice call.
+ *
+ * The button stays focusable while the test runs (aria-busy/aria-disabled,
+ * not disabled), a second activation is ignored, and start and result both
+ * reach the shared toast plus #transcript-announcer. The settings fragment is
+ * not inside #voice-overlay, so the dialog announcer is not available here
+ * (WCAG 4.1.3, 2.4.3).
  */
-async function testVoiceEffect() {
+let voiceEffectTestBusy = false;
+
+async function testVoiceEffect(button) {
+  var btn = button || null;
+  if (voiceEffectTestBusy) return;
   var effectSelect = document.getElementById('voice-effect');
   if (!effectSelect) return;
   var effect = effectSelect.value || 'none';
+  var effectLabel = effect === 'none' ? 'no effect' : effect;
+  var effectPhrase = effect === 'none' ? 'no effect' : 'the ' + effect + ' effect';
+  var hadFocus = !!btn && document.activeElement === btn;
 
+  voiceEffectTestBusy = true;
+  if (btn) {
+    btn.setAttribute('aria-busy', 'true');
+    btn.setAttribute('aria-disabled', 'true');
+  }
+  announceStatus('Testing ' + effectPhrase);
+  showToast('Testing ' + effectLabel + '...');
+
+  var ctx = null;
   try {
-    showToast('Testing ' + (effect === 'none' ? 'no effect' : effect) + '...');
     var resp = await fetch('/api/voice/test-tts', { method: 'POST' });
-    if (!resp.ok) {
-      showToast('TTS test failed');
-      return;
-    }
+    if (!resp.ok) throw new Error('TTS test failed (' + resp.status + ')');
     var arrayBuffer = await resp.arrayBuffer();
 
-    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
     if (ctx.state === 'suspended') await ctx.resume();
 
     var audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
@@ -2448,13 +2495,41 @@ async function testVoiceEffect() {
       gain.connect(ctx.destination);
     }
 
-    source.onended = function () {
-      try { ctx.close(); } catch (e) {}
-    };
-    source.start();
+    // Stay busy until playback ends so a retest cannot stack a second
+    // AudioContext. The timeout only guards a muted or blocked tab where
+    // onended never fires; it is generous compared to the clip length.
+    await new Promise(function (resolve) {
+      var settled = false;
+      var settle = function () {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      source.onended = settle;
+      setTimeout(settle, (audioBuffer.duration || 0) * 1000 + 3000);
+      source.start();
+    });
+    announceStatus('Finished testing ' + effectLabel);
+    showToast('Finished testing ' + effectLabel);
   } catch (err) {
-    showToast('Test failed: ' + (err.message || err));
+    var message = 'Test failed: ' + (err.message || err);
+    announceStatus(message);
+    showToast(message);
     console.error('[Voice] Effect test failed:', err);
+  } finally {
+    if (ctx) {
+      try { ctx.close(); } catch (e) {}
+    }
+    voiceEffectTestBusy = false;
+    if (btn) {
+      btn.removeAttribute('aria-busy');
+      btn.removeAttribute('aria-disabled');
+      // Only put focus back if it fell to the document body during the async
+      // work; a user who deliberately tabbed elsewhere keeps their place.
+      if (hadFocus && btn.isConnected && document.activeElement === document.body) {
+        btn.focus();
+      }
+    }
   }
 }
 
@@ -2471,6 +2546,7 @@ globalThis.sendVoiceTextInput = sendVoiceTextInput;
 globalThis.startPTT = startPTT;
 globalThis.endPTT = endPTT;
 globalThis.handleHoldKey = handleHoldKey;
+globalThis.handleHoldClick = handleHoldClick;
 globalThis.buildVoiceEffectChain = buildVoiceEffectChain;
 globalThis.testVoiceEffect = testVoiceEffect;
 

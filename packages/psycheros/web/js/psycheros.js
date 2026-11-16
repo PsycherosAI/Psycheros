@@ -1941,11 +1941,33 @@ async function startVoiceCall() {
   openVoiceChat(convId, opener);
 }
 
-async function testTTSConnection() {
-  var btn = document.getElementById('test-tts-btn');
-  if (!btn) return;
-  btn.disabled = true;
-  btn.textContent = 'Testing...';
+function announceTtsTest(btn, message) {
+  var announcer = btn.closest?.('#voice-overlay')?.querySelector(
+    '#voice-announcer',
+  );
+  // The profile form carries its own persistent status region; a toast is
+  // inserted and removed on a timer, so a result can land between polls.
+  if (!announcer) announcer = document.getElementById('voice-test-status');
+  if (announcer) {
+    announcer.textContent = '';
+    requestAnimationFrame(() => {
+      announcer.textContent = message;
+    });
+    return;
+  }
+  showToast(message);
+}
+
+async function testTTSConnection(button) {
+  var btn = button;
+  if (!btn || btn.dataset.ttsBusy === 'true') return;
+
+  var hadFocus = document.activeElement === btn;
+  btn.dataset.ttsBusy = 'true';
+  btn.setAttribute("aria-busy", "true");
+  btn.setAttribute("aria-disabled", "true");
+  btn.textContent = 'Testing TTS...';
+  announceTtsTest(btn, 'Testing TTS connection');
 
   try {
     var resp = await fetch('/api/voice/test-tts', {
@@ -1958,23 +1980,42 @@ async function testTTSConnection() {
       var blob = await resp.blob();
       var url = URL.createObjectURL(blob);
       var audio = new Audio(url);
-      audio.play();
+      audio.onended = function() { URL.revokeObjectURL(url); };
       var latency = resp.headers.get('X-TTS-Latency') || '?';
       var provider = resp.headers.get('X-TTS-Provider') || '?';
-      btn.textContent = 'Test TTS';
-      showToast('TTS test OK (' + latency + 'ms, ' + provider + ')');
-      audio.onended = function() { URL.revokeObjectURL(url); };
+      // Announce synthesis success as soon as the audio arrives. Playback
+      // can be blocked or silent in a remote session, and the result is
+      // still what the user asked to hear.
+      announceTtsTest(
+        btn,
+        'TTS test OK (' + latency + 'ms, ' + provider + ')',
+      );
+      audio.play().catch(function(err) {
+        URL.revokeObjectURL(url);
+        announceTtsTest(
+          btn,
+          'TTS test audio could not play: ' + (err.message || err),
+        );
+      });
     } else {
       var data = await resp.json();
-      btn.textContent = 'Test TTS';
-      showToast('TTS test failed: ' + (data.error || 'Unknown error'), 'error');
+      announceTtsTest(
+        btn,
+        'TTS test failed: ' + (data.error || 'Unknown error'),
+      );
     }
   } catch (e) {
-    btn.textContent = 'Test TTS';
-    showToast('TTS test failed: ' + e.message, 'error');
+    announceTtsTest(btn, 'TTS test failed: ' + e.message);
   } finally {
-    btn.disabled = false;
-    if (btn.textContent === 'Testing...') btn.textContent = 'Test TTS';
+    delete btn.dataset.ttsBusy;
+    btn.removeAttribute('aria-busy');
+    btn.removeAttribute('aria-disabled');
+    btn.textContent = 'Test TTS';
+    if (
+      hadFocus && btn.isConnected && document.activeElement !== btn
+    ) {
+      btn.focus();
+    }
   }
 }
 
@@ -2002,10 +2043,21 @@ function onVoiceSTTProviderChange() {
   if (target) target.style.display = 'block';
 }
 
-function toggleVoiceFieldVisibility(fieldId) {
+function toggleVoiceFieldVisibility(fieldId, button) {
   var field = document.getElementById(fieldId);
   if (!field) return;
-  field.type = field.type === 'password' ? 'text' : 'password';
+  var show = field.type === 'password';
+  field.type = show ? 'text' : 'password';
+  if (button) {
+    // The eye icon has no text, so the name and pressed state are the only
+    // signal that the key is now readable (WCAG 4.1.2). Keep the tooltip in
+    // sync so pointer users see the same action.
+    var noun = button.dataset?.keyLabel || 'API key';
+    var label = (show ? 'Hide ' : 'Show ') + noun;
+    button.setAttribute('aria-pressed', show ? 'true' : 'false');
+    button.setAttribute('aria-label', label);
+    button.setAttribute('title', label);
+  }
 }
 
 function gatherVoiceProfile() {
@@ -2253,11 +2305,20 @@ var pttKeyCaptureActive = false;
 var pttCaptureSilentAudio = null;
 
 function capturePTTKey() {
+  if (pttKeyCaptureActive) return;
   pttKeyCaptureActive = true;
   var hint = document.getElementById('ptt-capture-hint');
   var addBtn = document.getElementById('ptt-add-key-btn');
-  if (hint) hint.style.display = 'block';
-  if (addBtn) addBtn.style.display = 'none';
+  var cancelBtn = hint ? hint.querySelector('button') : null;
+  // The hint stays rendered so its live region is always in the
+  // accessibility tree; a status region that is revealed and filled in the
+  // same frame never announces. Only its spacing and Cancel button change.
+  if (hint) hint.style.marginTop = 'var(--sp-2)';
+  if (cancelBtn) cancelBtn.hidden = false;
+  // Keep the trigger visible and focusable: hiding a focused button drops
+  // focus to <body>, and the user needs a stable place to return to.
+  if (addBtn) addBtn.setAttribute('aria-disabled', 'true');
+  setPTTCaptureStatus('Press any key or mouse button. Escape cancels.');
   document.addEventListener('keydown', handlePTTKeyCapture, true);
   document.addEventListener('mousedown', handlePTTMouseCapture, true);
   // Play silent audio so the OS routes Bluetooth media button events to
@@ -2331,12 +2392,29 @@ function capturePTTKey() {
   }
 }
 
+function setPTTCaptureStatus(message) {
+  var status = document.getElementById('ptt-capture-status');
+  if (!status) return;
+  // Re-fill on the next frame so a repeated capture still announces.
+  status.textContent = '';
+  requestAnimationFrame(function() {
+    status.textContent = message;
+  });
+}
+
 function cancelPTTKeyCapture() {
   pttKeyCaptureActive = false;
-  var hint = document.getElementById('ptt-capture-hint');
   var addBtn = document.getElementById('ptt-add-key-btn');
-  if (hint) hint.style.display = 'none';
-  if (addBtn) addBtn.style.display = '';
+  var hint = document.getElementById('ptt-capture-hint');
+  var cancelBtn = hint ? hint.querySelector('button') : null;
+  var status = document.getElementById('ptt-capture-status');
+  if (hint) hint.style.marginTop = '0';
+  if (cancelBtn) cancelBtn.hidden = true;
+  if (status) status.textContent = '';
+  if (addBtn) {
+    addBtn.setAttribute('aria-disabled', 'false');
+    addBtn.focus();
+  }
   document.removeEventListener('keydown', handlePTTKeyCapture, true);
   document.removeEventListener('mousedown', handlePTTMouseCapture, true);
   // Stop the silent audio used to claim the media session during capture.
@@ -2354,12 +2432,19 @@ function cancelPTTKeyCapture() {
 
 function handlePTTKeyCapture(e) {
   if (!pttKeyCaptureActive) return;
-  e.preventDefault();
-  e.stopPropagation();
   if (e.code === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
     cancelPTTKeyCapture();
     return;
   }
+  // Tab belongs to the browser: it must reach the Cancel button, never
+  // become a binding (WCAG 2.1.2).
+  if (e.key === 'Tab') return;
+  // Enter/Space on the focused Cancel button must activate it, not bind it.
+  if (e.target.closest && e.target.closest('#ptt-capture-hint')) return;
+  e.preventDefault();
+  e.stopPropagation();
   var key = e.code;
   addPTTKeyBinding(key);
   cancelPTTKeyCapture();
@@ -2367,8 +2452,11 @@ function handlePTTKeyCapture(e) {
 
 function handlePTTMouseCapture(e) {
   if (!pttKeyCaptureActive) return;
-  // Ignore clicks on the Cancel button
-  if (e.target.closest && e.target.closest('#ptt-capture-hint')) return;
+  // Ignore the Cancel button and the disabled Add trigger.
+  if (
+    e.target.closest &&
+    e.target.closest('#ptt-capture-hint, #ptt-add-key-btn')
+  ) return;
   e.preventDefault();
   e.stopPropagation();
   var key = 'Mouse' + e.button;
@@ -2423,21 +2511,21 @@ async function removePTTKeyBinding(index) {
 function addPronunciationEntry() {
   var list = document.getElementById('pronunciation-list');
   if (!list) return;
-  var idx = list.querySelectorAll('.pronunciation-row').length;
   var row = document.createElement('div');
   row.className = 'pronunciation-row';
-  row.dataset.idx = idx;
   row.innerHTML =
     '<input type="text" class="input-field llm-input" aria-label="Written form" placeholder="Written (e.g. Psycheros)">' +
     '<span style="color: var(--c-fg-muted);">&rarr;</span>' +
     '<input type="text" class="input-field llm-input" aria-label="Spoken form" placeholder="Spoken (e.g. sy-KEH-ros)">' +
-    '<button class="btn btn--ghost btn--sm" onclick="removePronunciationEntry(this)" title="Remove">&times;</button>';
+    '<button class="btn btn--ghost btn--sm" onclick="removePronunciationEntry(this)" aria-label="Remove pronunciation entry">&times;</button>';
   list.appendChild(row);
+  row.querySelector('input[type="text"]')?.focus();
 }
 
 function removePronunciationEntry(el) {
   var row = el.closest ? el.closest('.pronunciation-row') : el.parentElement;
-  if (row) row.remove();
+  if (!row) return;
+  removeRowAndRestoreFocus(row, 'add-pronunciation-btn');
 }
 
 function addSTTCorrectionEntry() {
@@ -2449,13 +2537,24 @@ function addSTTCorrectionEntry() {
     '<input type="text" class="input-field llm-input" aria-label="Misheard form" placeholder="Misheard (e.g. sih keh ros)">' +
     '<span style="color: var(--c-fg-muted);">&rarr;</span>' +
     '<input type="text" class="input-field llm-input" aria-label="Correct form" placeholder="Correct (e.g. Psycheros)">' +
-    '<button class="btn btn--ghost btn--sm" onclick="removeSTTCorrectionEntry(this)" title="Remove">&times;</button>';
+    '<button class="btn btn--ghost btn--sm" onclick="removeSTTCorrectionEntry(this)" aria-label="Remove STT correction">&times;</button>';
   list.appendChild(row);
+  row.querySelector('input[type="text"]')?.focus();
 }
 
 function removeSTTCorrectionEntry(el) {
   var row = el.closest ? el.closest('.stt-correction-row') : el.parentElement;
-  if (row) row.remove();
+  if (!row) return;
+  removeRowAndRestoreFocus(row, 'add-stt-correction-btn');
+}
+
+function removeRowAndRestoreFocus(row, addButtonId) {
+  var sibling = row.nextElementSibling || row.previousElementSibling;
+  var target = sibling
+    ? sibling.querySelector('button[aria-label^="Remove"]')
+    : null;
+  row.remove();
+  (target || document.getElementById(addButtonId))?.focus();
 }
 
 globalThis.onVoiceTTSProviderChange = onVoiceTTSProviderChange;
@@ -7264,13 +7363,11 @@ function getLLMProviderPresets() {
   try { return JSON.parse(tag.textContent); } catch { return null; }
 }
 
-var llmApiKeyVisible = false;
-
-function toggleApiKeyVisibility() {
-  var input = document.getElementById('llm-api-key');
-  if (!input) return;
-  llmApiKeyVisible = !llmApiKeyVisible;
-  input.type = llmApiKeyVisible ? 'text' : 'password';
+function toggleApiKeyVisibility(button) {
+  // Derive the state from the field itself so a re-rendered form cannot drift
+  // from a stale flag. The shared toggle also keeps aria-pressed and the
+  // button's name in sync (WCAG 4.1.2).
+  toggleVoiceFieldVisibility('llm-api-key', button);
 }
 
 function onProviderChange() {
