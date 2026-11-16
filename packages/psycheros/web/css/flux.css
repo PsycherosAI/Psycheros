@@ -501,6 +501,7 @@
   transition: opacity var(--transition);
 }
 .flux-entry:hover .msg-edit-btn,
+.flux-entry:focus-within .msg-edit-btn,
 .flux-entry .msg-edit-btn:focus {
   opacity: 0.7;
 }

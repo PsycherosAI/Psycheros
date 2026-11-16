@@ -11102,9 +11102,12 @@ export function renderFluxSpacePage(
     .flux-header a { color: #8b8f99; text-decoration: none; font-size: 14px; }
     #flux-timeline { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
     .flux-entry { padding: 10px 14px; border-radius: 12px; max-width: 82%; word-wrap: break-word; line-height: 1.5; }
-    .flux-edit-btn { position: absolute; top: -6px; right: -6px; display: none; background: #1c1f26; border: 1px solid #2a2e36; color: #8b8f99; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 11px; z-index: 5; }
+    .flux-edit-btn { position: absolute; top: -6px; right: -6px; opacity: 0; background: #1c1f26; border: 1px solid #2a2e36; color: #8b8f99; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 11px; z-index: 5; }
     .flux-entry { position: relative; }
-    .flux-entry:hover .flux-edit-btn { display: inline-block; }
+    /* opacity, not display:none: the control must stay in the tab order. */
+    .flux-entry:hover .flux-edit-btn,
+    .flux-entry:focus-within .flux-edit-btn,
+    .flux-edit-btn:focus { opacity: 1; }
     .flux-generating { align-self: flex-start; background: #1c1f26; border: 1px solid #2a2e36; color: #8b8f99; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
     .flux-generating .typing-cursor { display: inline-block; animation: fluxblink 1s steps(1) infinite; }
     .flux-generating.streaming .typing-cursor { display: none; }
@@ -11404,6 +11407,7 @@ export function renderFluxSpacePage(
         btn.className = 'flux-edit-btn';
         btn.textContent = '\u270E';
         btn.title = 'Edit this entry';
+        btn.setAttribute('aria-label', 'Edit entity entry');
         btn.onclick = function(ev) {
           ev.stopPropagation();
           editSessionEntry(e, div);
@@ -11450,6 +11454,7 @@ export function renderFluxSpacePage(
         ubtn.className = 'flux-edit-btn';
         ubtn.textContent = '\u270E';
         ubtn.title = 'Edit this entry';
+        ubtn.setAttribute('aria-label', 'Edit your entry');
         ubtn.onclick = function(ev) {
           ev.stopPropagation();
           editSessionEntry(e, div);
@@ -11523,6 +11528,8 @@ export function renderFluxSpacePage(
         btn.className = 'flux-edit-btn';
         btn.textContent = '✎';
         btn.title = 'Edit this entry';
+        btn.setAttribute('aria-label',
+          entry.role === 'user' ? 'Edit your entry' : 'Edit entity entry');
         btn.onclick = function(ev) {
           ev.stopPropagation();
           editSessionEntry(entry, div);
