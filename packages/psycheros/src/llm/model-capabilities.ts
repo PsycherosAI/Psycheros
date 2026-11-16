@@ -44,6 +44,13 @@ export interface ModelFamilyCapabilities {
   usesMaxCompletionTokens: boolean;
   /** Whether this model family accepts image inputs (vision) */
   vision: boolean;
+  /**
+   * Whether the provider rejects requests that specify BOTH temperature and
+   * top_p ("temperature and top_p cannot both be specified for this model").
+   * When set and both are present, temperature wins and top_p is stripped —
+   * temperature is the knob people actually steer.
+   */
+  exclusiveTempTopP?: boolean;
 }
 
 /**
@@ -145,6 +152,8 @@ const MODEL_FAMILY_RULES: ReadonlyArray<ModelFamilyRule> = [
 
   // --- Claude (Anthropic) ---
   // Via OpenRouter: anthropic/claude-*, direct: claude-*
+  // Anthropic's API (native and OpenAI-compatible) rejects requests that set
+  // both temperature and top_p on current Claude models with HTTP 400.
   {
     pattern: /(?:anthropic\/)?claude-/,
     capabilities: {
@@ -152,6 +161,7 @@ const MODEL_FAMILY_RULES: ReadonlyArray<ModelFamilyRule> = [
       supportedParams: new Set(["temperature", "topP", "topK", "maxTokens"]),
       usesMaxCompletionTokens: false,
       vision: true,
+      exclusiveTempTopP: true,
     },
   },
 
@@ -465,6 +475,18 @@ export function filterSamplingParams(
     } else {
       stripped.push({ param, value });
     }
+  }
+
+  // Some providers accept temperature and top_p individually but reject
+  // requests naming both. I keep temperature — the knob people actually
+  // steer — and strip top_p, reporting it like any other unsupported param.
+  if (
+    capabilities.exclusiveTempTopP &&
+    params.temperature !== undefined &&
+    params.topP !== undefined
+  ) {
+    stripped.push({ param: "topP", value: params.topP });
+    delete params.topP;
   }
 
   return { params, stripped };

@@ -271,10 +271,12 @@ Deno.test("filterSamplingParams: Claude strips penalties but keeps topK", () => 
     },
   );
   assertEquals(params.temperature, 0.7);
-  assertEquals(params.topP, 0.9);
+  // Anthropic rejects temperature + top_p together, so top_p yields to
+  // temperature (exclusiveTempTopP) instead of riding along like it used to.
+  assertEquals(params.topP, undefined);
   assertEquals(params.topK, 40);
   assertEquals(params.maxTokens, 4096);
-  assertEquals(stripped.length, 2); // freqPenalty, presPenalty
+  assertEquals(stripped.length, 3); // freqPenalty, presPenalty, topP
 });
 
 Deno.test("filterSamplingParams: undefined values are not stripped", () => {
@@ -446,4 +448,61 @@ Deno.test("supportsVision: vision-splitting rules keep the family unchanged", ()
   assertEquals(detectModelCapabilities("llama-4-maverick").family, "llama");
   assertEquals(detectModelCapabilities("pixtral-12b").family, "mistral");
   assertEquals(detectModelCapabilities("kimi-vl-a3b").family, "kimi");
+});
+
+// =============================================================================
+// exclusive temperature / top_p (Anthropic rejects both together)
+// =============================================================================
+
+Deno.test("filterSamplingParams: Claude with both temperature and topP keeps temperature, strips topP", () => {
+  const { params, stripped } = filterSamplingParams("claude-opus-4-6", {
+    temperature: 0.85,
+    topP: 1,
+    maxTokens: 4096,
+  });
+  assertEquals(params.temperature, 0.85);
+  assertEquals(params.topP, undefined);
+  assertEquals(params.maxTokens, 4096);
+  assert(stripped.some((s) => s.param === "topP" && s.value === 1));
+});
+
+Deno.test("filterSamplingParams: Claude worker model strips topP too", () => {
+  const { params } = filterSamplingParams("claude-haiku-4-5", {
+    temperature: 0.7,
+    topP: 0.95,
+  });
+  assertEquals(params.temperature, 0.7);
+  assertEquals(params.topP, undefined);
+});
+
+Deno.test("filterSamplingParams: Claude via OpenRouter prefix strips topP as well", () => {
+  const { params } = filterSamplingParams(
+    "anthropic/claude-sonnet-4-20250514",
+    {
+      temperature: 1,
+      topP: 0.9,
+    },
+  );
+  assertEquals(params.temperature, 1);
+  assertEquals(params.topP, undefined);
+});
+
+Deno.test("filterSamplingParams: Claude with topP alone still sends topP", () => {
+  const { params, stripped } = filterSamplingParams("claude-opus-4-6", {
+    topP: 0.9,
+    maxTokens: 2048,
+  });
+  assertEquals(params.topP, 0.9);
+  assertEquals(params.temperature, undefined);
+  assertEquals(stripped.length, 0);
+});
+
+Deno.test("filterSamplingParams: non-exclusive families keep both temperature and topP", () => {
+  const { params, stripped } = filterSamplingParams("gpt-4o", {
+    temperature: 0.8,
+    topP: 0.95,
+  });
+  assertEquals(params.temperature, 0.8);
+  assertEquals(params.topP, 0.95);
+  assertEquals(stripped.length, 0);
 });
