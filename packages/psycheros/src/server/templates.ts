@@ -369,6 +369,12 @@ export function renderAppShell(
   <div class="app">
     ${renderHeader()}
     <div class="main" role="main" id="main" tabindex="-1">
+      <!-- App-shell status and actions sit at the TOP of the DOM, next to
+           the header trigger. Absolute positioning keeps them visually over
+           the conversation; this placement keeps tab order matching the
+           visual order (DOM order is tab order). -->
+      <div id="state-sub-bar" class="state-sub-bar" hidden></div>
+      <nav id="action-drawer" class="action-drawer" aria-label="Actions"></nav>
       <div class="sidebar-overlay" aria-hidden="true" onclick="Psycheros.toggleSidebar()"></div>
       ${renderSidebar([])}
       <div id="reindex-banner" class="reindex-banner" hidden></div>
@@ -376,14 +382,6 @@ export function renderAppShell(
         ${renderEmptyState()}
         ${renderInputArea()}
       </div>
-      <!-- The state sub-bar: one line, subprocess+state segments
-           (Flux ON | Workspace (2) | Voice ON), tappable, hidden when
-           nothing is active. -->
-      <div id="state-sub-bar" class="state-sub-bar" hidden></div>
-      <!-- The action drawer: the kebab in the
-           header opens this; it hangs from the state sub-bar. App-shell
-           elements — HTMX-swap survivors, like the FABs they replace. -->
-      <nav id="action-drawer" class="action-drawer" aria-label="Actions"></nav>
       <!-- No aria-atomic: JAWS on Firefox stays silent on live regions that carry
            aria-atomic="true" (FreedomScientific/standards-support#876), and this
            region only ever holds one text node, so each rewrite is atomic anyway. -->

@@ -52,6 +52,73 @@ try {
     ),
   );
 
+  // Tab from the trigger must reach the drawer rows before the sidebar, log,
+  // or composer. The sub-bar may come first; it sits above the drawer.
+  await page.locator("#action-menu-btn").focus();
+  await page.keyboard.press("Enter");
+  const stops = [];
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press("Tab");
+    stops.push(
+      await page.evaluate(() => {
+        const active = document.activeElement;
+        return {
+          text: (active?.textContent ?? "").trim(),
+          inBar: !!active?.closest("#state-sub-bar"),
+          inDrawer: !!active?.closest("#action-drawer"),
+          inChat: !!active?.closest("#chat"),
+          inSidebar: !!active?.closest("#sidebar"),
+        };
+      }),
+    );
+  }
+  const contextIndex = stops.findIndex((stop) =>
+    stop.inDrawer && stop.text === "Context"
+  );
+  const outsideIndex = stops.findIndex((stop) => stop.inChat || stop.inSidebar);
+  report.check(
+    "Tab from the Actions trigger reaches the drawer before the conversation",
+    contextIndex >= 0 && (outsideIndex === -1 || contextIndex < outsideIndex),
+    JSON.stringify(stops),
+  );
+
+  // The Context row opens a panel that lives on <body>, so the panel itself
+  // has to take focus, keep Tab inside, and hand focus back on Escape.
+  await page.locator("#action-drawer .context-toggle").focus();
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("#context-viewer.visible", { timeout: 5000 });
+  report.check(
+    "the Context Inspector takes focus as a named modal",
+    await page.evaluate(() => {
+      const viewer = document.getElementById("context-viewer");
+      return viewer?.getAttribute("role") === "dialog" &&
+        viewer.getAttribute("aria-modal") === "true" &&
+        viewer.getAttribute("aria-labelledby") === "context-viewer-title" &&
+        document.activeElement === document.getElementById(
+            "context-viewer-title",
+          );
+    }),
+  );
+  await page.locator("#context-viewer .context-viewer-close").focus();
+  await page.keyboard.press("Shift+Tab");
+  report.check(
+    "Shift+Tab wraps inside the Inspector",
+    await page.evaluate(() =>
+      document.getElementById("context-viewer").contains(
+        document.activeElement,
+      )
+    ),
+  );
+  await page.keyboard.press("Escape");
+  report.check(
+    "Escape closes the Inspector and restores the Actions trigger",
+    await page.evaluate(() => {
+      const viewer = document.getElementById("context-viewer");
+      return !viewer.classList.contains("visible") && viewer.inert &&
+        document.activeElement?.id === "action-menu-btn";
+    }),
+  );
+
   const chip = page.locator('[data-skill="probe"]');
   report.check(
     "the skill chip is a native button",

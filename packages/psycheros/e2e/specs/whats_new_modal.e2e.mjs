@@ -69,7 +69,11 @@ try {
   );
   const closed = await page.evaluate(() => ({
     focused: document.activeElement?.id ?? null,
-    inertLeft: [...document.body.children].some((el) => el.inert),
+    // The closed context inspector is inert by design, which is the state the
+    // splash found it in; only elements the splash changed have to revert.
+    inertLeft: [...document.body.children].some((el) =>
+      el.inert && el.id !== "context-viewer"
+    ),
     overflow: document.body.style.overflow,
   }));
   report.check(

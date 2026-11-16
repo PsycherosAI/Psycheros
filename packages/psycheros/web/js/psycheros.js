@@ -130,6 +130,9 @@ const touchState = {
 
 // Context inspector state
 let contextInspectorOpen = false;
+let contextViewerOpener = null;
+let contextViewerBodyOverflow = null;
+let contextViewerAppWasInert = false;
 let contextSnapshot = null;
 let contextSearchQuery = '';
 
@@ -3839,6 +3842,10 @@ function createUIContainers() {
     `;
     document.body.appendChild(backdrop);
   }
+
+  // The Context Inspector lives on <body>; build it up front so the drawer
+  // row's aria-controls always resolves to an existing element.
+  if (!document.getElementById('context-viewer')) createContextInspector();
 }
 
 // =============================================================================
@@ -4377,6 +4384,11 @@ function toggleContextViewer() {
 
 /**
  * Show the context inspector panel and load data.
+ *
+ * The panel is a modal dialog whose markup sits on <body> rather than next
+ * to the drawer row that opens it, so it owns focus explicitly: remember the
+ * opener, take the app out of the tab order, and land focus on the heading
+ * so the dialog name is announced.
  */
 function showContextInspector() {
   let viewer = document.getElementById('context-viewer');
@@ -4388,10 +4400,25 @@ function showContextInspector() {
     backdrop = document.getElementById('context-viewer-backdrop');
   }
 
+  contextViewerOpener = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+  const app = document.querySelector('.app');
+  if (app) {
+    contextViewerAppWasInert = app.inert;
+    app.inert = true;
+  }
+  if (contextViewerBodyOverflow === null) {
+    contextViewerBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+
+  if (viewer) viewer.inert = false;
   backdrop?.classList.add('visible');
   viewer?.classList.add('visible');
   setContextToggleExpanded(true);
   loadContextSnapshots();
+  viewer?.querySelector('.context-viewer-title')?.focus();
 }
 
 /**
@@ -4408,9 +4435,27 @@ function setContextToggleExpanded(open) {
  */
 function hideContextViewer() {
   contextInspectorOpen = false;
-  document.getElementById('context-viewer')?.classList.remove('visible');
+  const viewer = document.getElementById('context-viewer');
+  viewer?.classList.remove('visible');
+  // A closed panel stays in the layer just off-screen, so inert it or its
+  // controls keep answering Tab behind the conversation.
+  if (viewer) viewer.inert = true;
   document.getElementById('context-viewer-backdrop')?.classList.remove('visible');
+  const app = document.querySelector('.app');
+  if (app) app.inert = contextViewerAppWasInert;
+  if (contextViewerBodyOverflow !== null) {
+    document.body.style.overflow = contextViewerBodyOverflow;
+    contextViewerBodyOverflow = null;
+  }
   setContextToggleExpanded(false);
+
+  const opener = contextViewerOpener;
+  contextViewerOpener = null;
+  if (opener?.isConnected) {
+    opener.focus();
+  } else {
+    document.getElementById('action-menu-btn')?.focus();
+  }
 }
 
 /**
@@ -4473,11 +4518,18 @@ function createContextInspector() {
   const viewer = document.createElement('div');
   viewer.id = 'context-viewer';
   viewer.className = 'context-viewer';
+  // The panel is off-screen but still in the layer when closed, so it starts
+  // inert and only joins the tab order and the accessibility tree when open.
+  viewer.inert = true;
+  viewer.setAttribute('role', 'dialog');
+  viewer.setAttribute('aria-modal', 'true');
+  viewer.setAttribute('aria-labelledby', 'context-viewer-title');
   viewer.onclick = (e) => e.stopPropagation();
+  viewer.addEventListener('keydown', handleContextViewerKeydown);
   viewer.innerHTML = `
     <div class="context-viewer-header">
-      <h2>Context Inspector</h2>
-      <button class="context-viewer-close" onclick="Psycheros.hideContextViewer()">&times;</button>
+      <h2 class="context-viewer-title" id="context-viewer-title" tabindex="-1">Context Inspector</h2>
+      <button class="context-viewer-close" onclick="Psycheros.hideContextViewer()" aria-label="Close context inspector">&times;</button>
     </div>
     <div class="context-search-bar">
       <input type="text" class="context-search" id="context-search-input"
@@ -4504,6 +4556,38 @@ function createContextInspector() {
   viewer.querySelectorAll('.context-tab').forEach(tab => {
     tab.onclick = () => switchContextTab(tab.dataset.tab);
   });
+}
+
+/**
+ * Escape closes the panel and Tab wraps inside it. The dialog is marked
+ * aria-modal, so background controls must not stay reachable.
+ */
+function handleContextViewerKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    hideContextViewer();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+
+  const controls = [...event.currentTarget.querySelectorAll(
+    'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+  )].filter((element) => element.offsetParent !== null);
+  if (controls.length === 0) return;
+
+  const first = controls[0];
+  const last = controls[controls.length - 1];
+  const active = document.activeElement;
+  const inside = event.currentTarget.contains(active);
+
+  if (event.shiftKey && (!inside || active === first)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (!inside || active === last)) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 /**
@@ -7034,7 +7118,7 @@ function renderActionDrawerRows(inConv) {
   if (!drawer) return;
   var rows = [];
   rows.push(
-    '<button class="action-row" onclick="Psycheros.toggleContextViewer(); Psycheros.closeActionDrawer()">Context</button>'
+    '<button class="context-toggle action-row" aria-expanded="' + contextInspectorOpen + '" aria-controls="context-viewer" onclick="Psycheros.closeActionDrawer(); Psycheros.toggleContextViewer()">Context</button>'
   );
   if (actionState.voice.enabled && inConv) {
     rows.push(

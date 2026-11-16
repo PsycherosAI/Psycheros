@@ -1,6 +1,7 @@
 /**
- * WCAG 2.4.3 / 2.1.1: closed off-canvas surfaces (the sidebar and the graph
- * node panel) must not stay in the tab order. Both ship `inert` until opened.
+ * WCAG 2.4.3 / 2.1.1: closed off-canvas surfaces (the sidebar, the context
+ * inspector, and the graph node panel) must not stay in the tab order. All
+ * three ship `inert` until opened.
  */
 import { launch, makeReport, openChat, openGraph } from "../lib/harness.mjs";
 
@@ -44,6 +45,22 @@ try {
     toggleState?.before === "false" && toggleState?.open === "true" &&
       toggleState?.closed === "false",
     JSON.stringify(toggleState),
+  );
+
+  const viewerInert = await page.evaluate(() =>
+    document.getElementById("context-viewer")?.hasAttribute("inert") ?? null
+  );
+  report.check("the closed context inspector is inert", viewerInert === true);
+
+  const viewerReached = await tabWalk(
+    page,
+    40,
+    () => !!document.activeElement?.closest("#context-viewer"),
+  );
+  report.check(
+    "Tab never lands in the closed context inspector",
+    viewerReached === null,
+    viewerReached ? JSON.stringify(viewerReached) : "",
   );
 
   await openGraph(page);
