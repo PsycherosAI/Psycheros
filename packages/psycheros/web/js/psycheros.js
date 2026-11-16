@@ -15,14 +15,14 @@
 function focusInputWhenReady() {
   // Judge the input in use, not the hardware: a touchscreen laptop with a
   // keyboard reports maxTouchPoints > 0, and the old test then skipped the
-  // composer on exactly the machines a JAWS user is on (finding 21).
+  // composer on exactly the machines a JAWS user is on.
   if (!globalThis.matchMedia('(pointer: coarse)').matches) {
     document.getElementById('message-input')?.focus();
   }
 }
 
 /**
- * WCAG 4.1.3 Status Messages (accessibility audit finding 21, iOS follow-up).
+ * WCAG 4.1.3 Status Messages (iOS follow-up).
  *
  * #messages holds the whole conversation, so it is never a live region:
  * any announcement of it reads the history from the top, and iOS VoiceOver
@@ -61,7 +61,7 @@ function announceTranscript(messageEl) {
 }
 
 /**
- * WCAG 2.4.2 Page Titled / 2.4.3 Focus Order (accessibility audit finding 21).
+ * WCAG 2.4.2 Page Titled / 2.4.3 Focus Order.
  *
  * A swapped view must name itself in the window title, and focus must not be
  * left stranded on the old trigger. Focus only moves when it would otherwise
@@ -342,8 +342,8 @@ function initPersistentSSE() {
         if (update.target === '#messages') {
           AutoScroll.streamTick();
         }
-        // A renamed or auto-titled conversation must retitle the window too
-        // (finding 21). No focus move: this is a background update.
+        // A renamed or auto-titled conversation must retitle the window too.
+        // No focus move: this is a background update.
         if (update.target === '#header-title') {
           syncViewTitleAndFocus(false);
         }
@@ -766,7 +766,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Escape closes the delete dialog, Tab stays inside it, and Escape falls
-  // back to leaving selection mode (audit finding 15). The dialog is
+  // back to leaving selection mode. The dialog is
   // aria-modal, but the browser does not trap Tab for us, so background
   // controls stay reachable until we wrap focus here.
   document.addEventListener('keydown', (e) => {
@@ -836,7 +836,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // saved draft would be lost. saveDraft on every keystroke keeps
       // localStorage current; we don't need a matching beforeSwap save.
       restoreDraft();
-      // Finding 21: the new view must name itself and hold focus.
+      // The new view must name itself and hold focus.
       syncViewTitleAndFocus();
     }
 
@@ -941,7 +941,7 @@ window.requestNotificationPermission = async function() {
  * Open or close the sidebar.
  *
  * A closed sidebar is only translated off-screen, so its conversation links
- * stay in the tab order and in the reading order (audit finding 23). `inert`
+ * stay in the tab order and in the reading order. `inert`
  * takes the whole panel out of both, and the toggle reports its own state.
  */
 function setSidebarOpen(open) {
@@ -2873,7 +2873,7 @@ function handleSSEEvent(eventType, data, state) {
           } else {
             htmx.swap(target, update.html, { swapStyle: update.swap || 'innerHTML' });
           }
-          // Auto-titling arrives mid-turn as a header-title update (finding 21).
+          // Auto-titling arrives mid-turn as a header-title update.
           if (update.target === '#header-title') {
             syncViewTitleAndFocus(false);
           }
@@ -3485,7 +3485,7 @@ function showToast(message, variant) {
   // its text already in place is still not announced - the change has to
   // happen after the region is in the tree - so it arrives empty and is
   // filled on the next tick (JAWS stayed silent on "Node created" without
-  // this, audit finding 22).
+  // this).
   toast.setAttribute('role', 'status');
   document.body.appendChild(toast);
   setTimeout(() => {
@@ -3955,7 +3955,7 @@ let deleteModalOpenerBlurCleanup = null;
  *
  * Focus moves to Cancel on open and back to whatever opened the dialog on
  * close, so a screen reader announces the dialog and the user does not have
- * to hunt for the next control (audit finding 15).
+ * to hunt for the next control.
  */
 function showDeleteModal(ids) {
   if (!ids || ids.length === 0) return;

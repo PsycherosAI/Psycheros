@@ -1,6 +1,5 @@
 /**
- * Accessibility contract tests for the standalone graph preview
- * (ACCESSIBILITY-AUDIT.md findings 6, 7 and 8).
+ * Accessibility contract tests for the standalone graph preview.
  *
  * Node cards were click-only divs, the network was a keyboard-disabled canvas
  * with no name, and the four dialogs had no role, no focus handling and no

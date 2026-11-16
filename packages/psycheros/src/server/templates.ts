@@ -2292,7 +2292,7 @@ function renderEventRuleCard(
  */
 export function renderSidebar(conversations: Conversation[]): string {
   // inert while closed: a translated-off-screen panel must stay out of the tab
-  // and reading order (audit finding 23). setSidebarOpen() toggles it.
+  // and reading order. setSidebarOpen() toggles it.
   return `<aside class="sidebar" id="sidebar" inert>
   <div class="sidebar-header">
     <span class="sidebar-title">Conversations</span>

@@ -8,7 +8,7 @@
 
 // ─── Color Utilities (reused from graph view) ─────────────────────────────────
 
-// ─── Dialog plumbing (audit finding 22) ──────────────────────────────────────
+// ─── Dialog plumbing ─────────────────────────────────────────────────────────
 // The four graph dialogs are opened and closed by class changes in a dozen
 // handlers. Focus, Escape and the Tab trap are wired once here rather than at
 // every call site, and the CSS keeps a closed dialog out of the tab order.
@@ -1080,7 +1080,7 @@ function showToast(msg) {
   toast.className = 'gv-toast';
   // role=status is the whole reason the message is announced at all, and a
   // region that arrives already populated is not announced either, so it goes
-  // in empty and is filled on the next tick (audit finding 22) - the same
+  // in empty and is filled on the next tick - the same
   // contract as the app's toast in psycheros.js. This is a separate function
   // from that one because the graph panel is also rendered in the launcher,
   // where the app toast does not exist.
