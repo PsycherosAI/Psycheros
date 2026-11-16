@@ -1,14 +1,14 @@
 /**
  * Shared helpers for the Psycheros accessibility browser specs.
  *
- * These specs need a running server (BASE_URL, default http://127.0.0.1:7780)
+ * These specs need a running server (BASE_URL, default http://127.0.0.1:3000)
  * and a Playwright Chromium. They are deliberately NOT part of `deno task
  * test` / CI - see ../README.md.
  */
 import { createRequire } from "node:module";
 import process from "node:process";
 
-export const BASE = process.env.BASE_URL ?? "http://127.0.0.1:7780";
+export const BASE = process.env.BASE_URL ?? "http://127.0.0.1:3000";
 export const CONV = process.env.CONV ?? "";
 
 export async function launch() {

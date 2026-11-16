@@ -11,8 +11,16 @@ The `*.e2e.mjs` suffix keeps `deno test` from collecting these files.
 
 ## Prerequisites
 
-- A running dev server. Start one with `deno task start` from
-  `packages/psycheros/`; it listens on `http://127.0.0.1:7780`.
+- A running dev server on `http://127.0.0.1:3000`. Prefer a scratch data root so
+  a spec cannot write conversations or graph nodes into the checkout:
+
+  ```bash
+  PSYCHEROS_PORT=3000 PSYCHEROS_DATA_DIR=/tmp/<scratch> \
+    PSYCHEROS_ENTITY_CORE_DATA_DIR=/tmp/<scratch>/entity-core deno task start
+  ```
+
+  Stop it by port (`fuser -k -INT -n tcp 3000`). `deno task stop` signals every
+  running `deno.*main.ts`, so it is an awkward way to stop just this server.
 - Playwright Chromium. Install the browser once, then run the suite from
   `packages/psycheros/`:
 
@@ -27,7 +35,7 @@ The `*.e2e.mjs` suffix keeps `deno test` from collecting these files.
 
 ## Environment
 
-- `BASE_URL` (default `http://127.0.0.1:7780`) - the server under test.
+- `BASE_URL` (default `http://127.0.0.1:3000`) - the server under test.
 - `CONV` (optional) - a conversation id; tests that need messages or the graph
   toggle should point at a populated conversation.
 
