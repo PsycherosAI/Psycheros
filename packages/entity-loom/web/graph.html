@@ -1339,7 +1339,9 @@
       // Every filtered node is rendered, not just the visible window: a
       // virtualized list leaves nodes below the fold out of the DOM, so Tab
       // can never reach them.
-      container.innerHTML = filteredNodes.map(renderNodeCard).join("");
+      container.innerHTML = filteredNodes.map((node) =>
+        node.id === expandedNodeId ? renderNodeDetail(node) : renderNodeCard(node)
+      ).join("");
     }
 
     // ─── Card Rendering ───────────────────────────────────────────────────────

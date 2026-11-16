@@ -7,7 +7,7 @@
  * Escape. The page is a static file, so the contract is pinned against its
  * source rather than a rendered template.
  */
-import { assertMatch, assertNotMatch } from "@std/assert";
+import { assertEquals, assertMatch, assertNotMatch } from "@std/assert";
 
 const graphHtml = await Deno.readTextFile(
   new URL("../../web/graph.html", import.meta.url),
@@ -40,11 +40,43 @@ Deno.test("graph node cards are native disclosure buttons", () => {
     /renderListView\(\);\n\s*focusNodeHeader\(nodeId\);/,
     "expanding or collapsing a card must hand focus back to its header",
   );
-  assertMatch(
-    graphHtml,
-    /filteredNodes\.map\(renderNodeCard\)\.join\(""\)/,
-    "a virtualized list leaves nodes below the fold unreachable by Tab",
+});
+
+Deno.test("graph list expands the selected node while keeping every node rendered", () => {
+  const source = graphHtml.match(
+    /^( *)function renderListView\(\) \{[\s\S]*?\n\1\}/m,
+  )?.[0];
+  assertMatch(source ?? "", /function renderListView/);
+  const container = { innerHTML: "" };
+  const render = new Function(
+    "document",
+    "filteredNodes",
+    "expandedNodeId",
+    "renderNodeCard",
+    "renderNodeDetail",
+    `${source}; renderListView();`,
   );
+  const nodes = Array.from({ length: 100 }, (_, id) => ({ id }));
+  for (const expanded of [null, 99, null]) {
+    const collapsed: number[] = [];
+    const details: number[] = [];
+    render(
+      { getElementById: () => container },
+      nodes,
+      expanded,
+      (node: { id: number }) => {
+        collapsed.push(node.id);
+        return "card";
+      },
+      (node: { id: number }) => {
+        details.push(node.id);
+        return "detail";
+      },
+    );
+    assertEquals(collapsed.length + details.length, 100);
+    assertEquals(details, expanded === null ? [] : [99]);
+    assertEquals(collapsed.includes(99), expanded === null);
+  }
 });
 
 Deno.test("graph network is named, keyboard-driven and described", () => {
