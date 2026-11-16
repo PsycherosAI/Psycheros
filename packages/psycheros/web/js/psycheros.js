@@ -2704,14 +2704,15 @@ function handleSSEEvent(eventType, data, state) {
       const retryThink = contentContainer.querySelector('.status-retry');
       if (retryThink) retryThink.remove();
       if (!state.getThinking()) {
+        const contentId = nextDisclosureId('thinking-content');
         const thinkingSection = document.createElement('div');
         thinkingSection.className = 'thinking expanded';
         thinkingSection.innerHTML = `
-          <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-            <span class="thinking-toggle">&#9660;</span>
+          <button type="button" class="thinking-header" aria-expanded="true" aria-controls="${contentId}" onclick="Psycheros.toggleDisclosure(this)">
+            <span class="thinking-toggle" aria-hidden="true">&#9660;</span>
             <span>Thinking</span>
-          </div>
-          <div class="thinking-content"></div>
+          </button>
+          <div class="thinking-content" id="${contentId}"></div>
         `;
         contentContainer.insertBefore(thinkingSection, contentContainer.firstChild);
         state.setThinking(thinkingSection.querySelector('.thinking-content'));
@@ -2743,14 +2744,15 @@ function handleSSEEvent(eventType, data, state) {
         }
 
         if (correction.thinking) {
+          const contentId = nextDisclosureId('thinking-content');
           const residual = document.createElement('div');
           residual.className = 'thinking';
           residual.innerHTML = `
-            <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-              <span class="thinking-toggle">&#9660;</span>
+            <button type="button" class="thinking-header" aria-expanded="false" aria-controls="${contentId}" onclick="Psycheros.toggleDisclosure(this)">
+              <span class="thinking-toggle" aria-hidden="true">&#9660;</span>
               <span>Thinking</span>
-            </div>
-            <div class="thinking-content"></div>
+            </button>
+            <div class="thinking-content" id="${contentId}"></div>
           `;
           residual.querySelector('.thinking-content').textContent = correction.thinking;
           contentContainer.insertBefore(residual, contentContainer.firstChild);
@@ -2824,7 +2826,7 @@ function handleSSEEvent(eventType, data, state) {
           // collapsed it while tools were still executing). The image (if
           // any) renders as a sibling via the separate image_generated
           // event, so we don't need to keep this card pinned open.
-          toolCard.classList.add('expanded');
+          setDisclosureExpanded(toolCard.querySelector('.tool-header'), true);
           pendingToolCalls.delete(result.toolCallId);
           AutoScroll.streamTick();
         }
@@ -2843,7 +2845,7 @@ function handleSSEEvent(eventType, data, state) {
         // payload; the toggle uses toolCallId as a stable anchor so it
         // survives HTMX swaps of the surrounding content.
         const captionHtml = img.description && img.toolCallId
-          ? `<div class="generated-image-caption-toggle" onclick="Psycheros.toggleImageCaption('${escapeHtml(img.toolCallId)}')">▸ Show caption</div>
+          ? `<button type="button" class="generated-image-caption-toggle" aria-expanded="false" aria-controls="caption-${escapeHtml(img.toolCallId)}" onclick="Psycheros.toggleImageCaption('${escapeHtml(img.toolCallId)}')"><span aria-hidden="true">▸</span> <span>Show caption</span></button>
              <div class="generated-image-caption" id="caption-${escapeHtml(img.toolCallId)}" hidden>${escapeHtml(img.description)}</div>`
           : '';
         container.innerHTML = `
@@ -2961,8 +2963,8 @@ function handleSSEEvent(eventType, data, state) {
     case 'done': {
       if (!messageEl) return;
       // Collapse all thinking and tool sections after streaming completes.
-      contentContainer.querySelectorAll('.thinking.expanded, .tool.expanded').forEach(el => {
-        el.classList.remove('expanded');
+      contentContainer.querySelectorAll('.thinking.expanded > .thinking-header, .tool.expanded > .tool-header').forEach(button => {
+        setDisclosureExpanded(button, false);
       });
 
       // Final render of the last content segment
@@ -3022,6 +3024,23 @@ function handleSSEEvent(eventType, data, state) {
 // DOM Helpers
 // =============================================================================
 
+let disclosureId = 0;
+
+function nextDisclosureId(prefix) {
+  disclosureId += 1;
+  return `${prefix}-${disclosureId}`;
+}
+
+function setDisclosureExpanded(button, expanded) {
+  if (!button) return;
+  button.parentElement?.classList.toggle('expanded', expanded);
+  button.setAttribute('aria-expanded', String(expanded));
+}
+
+function toggleDisclosure(button) {
+  setDisclosureExpanded(button, button.getAttribute('aria-expanded') !== 'true');
+}
+
 function createToolCard(toolCall) {
   const card = document.createElement('div');
   card.className = 'tool expanded';
@@ -3053,14 +3072,17 @@ function createToolCard(toolCall) {
     // Keep as-is
   }
 
+  const contentId = `tool-content-${escapeHtml(toolCall.id)}`;
   card.innerHTML = `
-    <div class="tool-header" onclick="this.parentElement.classList.toggle('expanded')">
-      <span class="tool-icon">&#9881;</span>
+    <button type="button" class="tool-header" aria-expanded="true" aria-controls="${contentId}" onclick="Psycheros.toggleDisclosure(this)">
+      <span class="tool-icon" aria-hidden="true">&#9881;</span>
       <span class="tool-name">${escapeHtml(name)}</span>
       ${summary ? `<span class="tool-summary">${escapeHtml(summary)}</span>` : ''}
-      <span class="tool-toggle">&#9660;</span>
+      <span class="tool-toggle" aria-hidden="true">&#9660;</span>
+    </button>
+    <div class="tool-disclosure-content" id="${contentId}">
+      <div class="tool-args">${escapeHtml(args)}</div>
     </div>
-    <div class="tool-args">${escapeHtml(args)}</div>
   `;
 
   return card;
@@ -3086,7 +3108,7 @@ function addToolResult(card, result) {
     ${escapeHtml(displayContent)}
   `;
 
-  card.appendChild(resultEl);
+  card.querySelector('.tool-disclosure-content')?.appendChild(resultEl);
 }
 
 /**
@@ -3099,12 +3121,18 @@ function toggleImageCaption(toolCallId) {
   if (!caption) return;
   const toggle = caption.previousElementSibling;
   const isHidden = caption.hasAttribute('hidden');
+  const icon = toggle?.querySelector('[aria-hidden="true"]');
+  const label = toggle?.lastElementChild;
   if (isHidden) {
     caption.removeAttribute('hidden');
-    if (toggle) toggle.textContent = '▾ Hide caption';
+    toggle?.setAttribute('aria-expanded', 'true');
+    if (icon) icon.textContent = '▾';
+    if (label) label.textContent = 'Hide caption';
   } else {
     caption.setAttribute('hidden', '');
-    if (toggle) toggle.textContent = '▸ Show caption';
+    toggle?.setAttribute('aria-expanded', 'false');
+    if (icon) icon.textContent = '▸';
+    if (label) label.textContent = 'Show caption';
   }
 }
 
@@ -4452,21 +4480,27 @@ function highlightSearch(text) {
 /**
  * Render a collapsible section.
  */
+function renderContextDisclosure(headerHtml, contentHtml, expanded = false) {
+  const contentId = nextDisclosureId('context-section-content');
+  return `
+    <div class="context-section${expanded ? ' expanded' : ''}">
+      <button type="button" class="context-section-header" aria-expanded="${expanded}" aria-controls="${contentId}" onclick="Psycheros.toggleDisclosure(this)">
+        ${headerHtml}
+        <span class="context-section-toggle" aria-hidden="true">&#9660;</span>
+      </button>
+      <div class="context-section-content" id="${contentId}">${contentHtml}</div>
+    </div>
+  `;
+}
+
 function renderContextSection(title, text, expanded) {
   const badge = formatSizeBadge(text);
   const content = text ? highlightSearch(text) : '<span class="context-dim">Not available</span>';
-  return `
-    <div class="context-section${expanded && text ? ' expanded' : ''}">
-      <div class="context-section-header" onclick="this.parentElement.classList.toggle('expanded')">
-        <span>${escapeHtml(title)}</span>
-        <span class="context-size-badge">${badge}</span>
-        <span class="context-section-toggle">&#9660;</span>
-      </div>
-      <div class="context-section-content">
-        <pre>${content}</pre>
-      </div>
-    </div>
-  `;
+  return renderContextDisclosure(
+    `<span>${escapeHtml(title)}</span><span class="context-size-badge" aria-hidden="true">${badge}</span>`,
+    `<pre>${content}</pre>`,
+    !!(expanded && text),
+  );
 }
 
 /**
@@ -4532,15 +4566,10 @@ function renderMessagesTab(snap) {
           <span class="context-message-index">#${i + 1}</span>
           <span class="context-size-badge">${charCount.toLocaleString()} chars</span>
         </div>
-        <div class="context-section">
-          <div class="context-section-header" onclick="this.parentElement.classList.toggle('expanded')">
-            <span>Content</span>
-            <span class="context-section-toggle">&#9660;</span>
-          </div>
-          <div class="context-section-content">
-            <pre class="context-message-content">${highlightSearch(contentText)}</pre>
-          </div>
-        </div>
+        ${renderContextDisclosure(
+          '<span>Content</span>',
+          `<pre class="context-message-content">${highlightSearch(contentText)}</pre>`,
+        )}
         ${msg.toolCalls && msg.toolCalls.length > 0 ? `<div class="context-tool-calls">Tool Calls: ${msg.toolCalls.length}</div>` : ''}
       </div>
     `;
@@ -4573,16 +4602,10 @@ function renderToolsTab(snap) {
     const desc = fn.description || '';
     const params = fn.parameters ? JSON.stringify(fn.parameters, null, 2) : '{}';
     html += `
-      <div class="context-section">
-        <div class="context-section-header" onclick="this.parentElement.classList.toggle('expanded')">
-          <span>${escapeHtml(name)}</span>
-          <span class="context-section-toggle">&#9660;</span>
-        </div>
-        <div class="context-section-content">
-          <p class="tool-description">${escapeHtml(desc)}</p>
-          <pre>${highlightSearch(params)}</pre>
-        </div>
-      </div>
+      ${renderContextDisclosure(
+        `<span>${escapeHtml(name)}</span>`,
+        `<p class="tool-description">${escapeHtml(desc)}</p><pre>${highlightSearch(params)}</pre>`,
+      )}
     `;
   });
 
@@ -4751,16 +4774,11 @@ function renderPluginsTab(snap) {
       ? highlightSearch(h.output)
       : '<span class="context-dim">No output captured</span>';
     html += `
-      <div class="context-section${h.output ? ' expanded' : ''}">
-        <div class="context-section-header" onclick="this.parentElement.classList.toggle('expanded')">
-          <span>${escapeHtml(h.hookName || 'unnamed')} ${statusBadge}</span>
-          <span class="context-size-badge">${meta}</span>
-          <span class="context-section-toggle">&#9660;</span>
-        </div>
-        <div class="context-section-content">
-          <pre>${output}</pre>
-        </div>
-      </div>
+      ${renderContextDisclosure(
+        `<span>${escapeHtml(h.hookName || 'unnamed')} ${statusBadge}</span><span class="context-size-badge" aria-hidden="true">${meta}</span>`,
+        `<pre>${output}</pre>`,
+        !!h.output,
+      )}
     `;
   }
 
@@ -5857,6 +5875,7 @@ globalThis.Psycheros = {
   restoreDeletedMessage,
   clearGlitchedFlag,
   // Tool card image caption toggle
+  toggleDisclosure,
   toggleImageCaption,
   // Context inspector
   toggleContextViewer,

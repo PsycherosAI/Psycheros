@@ -87,6 +87,13 @@ export function escapeHtml(text: string): string {
     .replace(/'/g, "&#039;");
 }
 
+let disclosureId = 0;
+
+function nextDisclosureId(prefix: string): string {
+  disclosureId += 1;
+  return `${prefix}-${disclosureId}`;
+}
+
 /**
  * Safely parse JSON with a fallback value.
  * Returns the fallback if parsing fails.
@@ -3050,12 +3057,13 @@ export function renderInputArea(): string {
  * Collapsed by default; toggle 'expanded' class to show content.
  */
 export function renderThinkingSection(content: string): string {
+  const contentId = nextDisclosureId("rendered-thinking-content");
   return `<div class="thinking">
-  <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-    <span class="thinking-toggle">&#9660;</span>
+  <button type="button" class="thinking-header" aria-expanded="false" aria-controls="${contentId}" onclick="Psycheros.toggleDisclosure(this)">
+    <span class="thinking-toggle" aria-hidden="true">&#9660;</span>
     <span>Thinking</span>
-  </div>
-  <div class="thinking-content">${escapeHtml(content)}</div>
+  </button>
+  <div class="thinking-content" id="${contentId}">${escapeHtml(content)}</div>
 </div>`;
 }
 
@@ -3085,20 +3093,23 @@ export function renderToolCard(
     args = JSON.stringify(parsedForFormat, null, 2);
   }
 
-  let html = `<div class="tool" data-tool-call-id="${toolCall.id}">
-  <div class="tool-header" onclick="this.parentElement.classList.toggle('expanded')">
-    <span class="tool-icon">&#9881;</span>
+  const contentId = `tool-content-${escapeHtml(toolCall.id)}`;
+  let html = `<div class="tool" data-tool-call-id="${escapeHtml(toolCall.id)}">
+  <button type="button" class="tool-header" aria-expanded="false" aria-controls="${contentId}" onclick="Psycheros.toggleDisclosure(this)">
+    <span class="tool-icon" aria-hidden="true">&#9881;</span>
     <span class="tool-name">${name}</span>
     ${summary ? `<span class="tool-summary">${escapeHtml(summary)}</span>` : ""}
-    <span class="tool-toggle">&#9660;</span>
-  </div>
-  <div class="tool-args">${escapeHtml(args)}</div>`;
+    <span class="tool-toggle" aria-hidden="true">&#9660;</span>
+  </button>
+  <div class="tool-disclosure-content" id="${contentId}">
+    <div class="tool-args">${escapeHtml(args)}</div>`;
 
   if (result) {
     html += renderToolResult(result);
   }
 
-  html += `</div>`;
+  html += `</div>
+</div>`;
   return html;
 }
 
@@ -3112,9 +3123,11 @@ function renderGeneratedImageSibling(
   toolCallId: string,
 ): string {
   const captionHtml = image.description
-    ? `<div class="generated-image-caption-toggle" onclick="Psycheros.toggleImageCaption('${
+    ? `<button type="button" class="generated-image-caption-toggle" aria-expanded="false" aria-controls="caption-${
       escapeHtml(toolCallId)
-    }')">▸ Show caption</div>
+    }" onclick="Psycheros.toggleImageCaption('${
+      escapeHtml(toolCallId)
+    }')"><span aria-hidden="true">▸</span> <span>Show caption</span></button>
   <div class="generated-image-caption" id="caption-${
       escapeHtml(toolCallId)
     }" hidden>${escapeHtml(image.description)}</div>`
@@ -5080,9 +5093,9 @@ export function renderEntityCoreGraph(
       </div>
     </div>
     <div class="gv-header-actions">
-      <div class="gv-view-toggle" id="gv-view-toggle">
-        <button class="gv-view-toggle-btn active" data-view="list">List</button>
-        <button class="gv-view-toggle-btn" data-view="graph">Network</button>
+      <div class="gv-view-toggle" id="gv-view-toggle" role="group" aria-label="Knowledge graph view">
+        <button type="button" class="gv-view-toggle-btn active" data-view="list" aria-pressed="true" aria-controls="gv-list-view">List</button>
+        <button type="button" class="gv-view-toggle-btn" data-view="graph" aria-pressed="false" aria-controls="gv-graph-view">Network</button>
       </div>
       <button id="graph-refresh" class="btn btn--ghost btn--sm" title="Refresh">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -5115,7 +5128,8 @@ export function renderEntityCoreGraph(
   </div>
 
   <div id="gv-graph-view" class="gv-hidden">
-    <div id="graph-container" class="gv-canvas">
+    <p id="graph-network-help" class="sr-only">Use arrow keys to pan and plus or minus to zoom. Switch to List for node names, relationships, and actions.</p>
+    <div id="graph-container" class="gv-canvas" role="region" aria-label="Knowledge graph network" aria-describedby="graph-network-help">
       <div class="gv-loading"><div class="gv-spinner"></div></div>
     </div>
     <div id="graph-node-panel" class="gv-panel" inert>

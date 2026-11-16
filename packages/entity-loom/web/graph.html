@@ -250,10 +250,6 @@
       position: relative;
       min-height: 0;
     }
-    .gv-list-spacer {
-      pointer-events: none;
-    }
-
     .gv-card {
       padding: var(--sp-3) var(--sp-4);
       border-bottom: 1px solid var(--border);
@@ -264,10 +260,32 @@
       background: var(--bg-raised);
     }
     .gv-card-header {
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      appearance: none;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      line-height: inherit;
+      text-align: left;
+      cursor: pointer;
       display: flex;
       align-items: center;
       gap: var(--sp-2);
       min-width: 0;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
     .gv-badge {
       display: inline-flex;
@@ -340,8 +358,9 @@
       width: 100%;
       height: 100%;
     }
-    .vis-network {
-      outline: none !important;
+    .vis-network:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
     }
 
     /* Loading */
@@ -827,11 +846,28 @@
           >
             &#x21bb;
           </button>
-          <div class="gv-view-toggle" id="gv-view-toggle">
-            <button class="gv-view-toggle-btn active" data-view="list">
+          <div
+            class="gv-view-toggle"
+            id="gv-view-toggle"
+            role="group"
+            aria-label="Knowledge graph view"
+          >
+            <button
+              type="button"
+              class="gv-view-toggle-btn active"
+              data-view="list"
+              aria-pressed="true"
+              aria-controls="gv-list-view"
+            >
               List
             </button>
-            <button class="gv-view-toggle-btn" data-view="graph">
+            <button
+              type="button"
+              class="gv-view-toggle-btn"
+              data-view="graph"
+              aria-pressed="false"
+              aria-controls="gv-graph-view"
+            >
               Network
             </button>
           </div>
@@ -860,9 +896,18 @@
       <!-- Graph View -->
       <div id="gv-graph-view" class="gv-hidden">
         <div class="gv-canvas">
-          <div id="graph-container"></div>
+          <p id="graph-network-help" class="sr-only">
+            Use arrow keys to pan and plus or minus to zoom. Switch to List for
+            node names, relationships, and actions.
+          </p>
+          <div
+            id="graph-container"
+            role="region"
+            aria-label="Knowledge graph network"
+            aria-describedby="graph-network-help"
+          ></div>
         </div>
-        <div class="gv-panel" id="graph-node-panel">
+        <div class="gv-panel" id="graph-node-panel" inert>
           <div class="gv-panel-header">
             <h3 id="panel-node-label"></h3>
             <button class="btn btn--ghost btn--sm" id="panel-close">
@@ -875,9 +920,16 @@
     </div>
 
     <!-- Create Node Modal -->
-    <div class="gv-modal" id="graph-create-modal">
+    <div
+      class="gv-modal"
+      id="graph-create-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="graph-create-title"
+      inert
+    >
       <div class="gv-modal-box">
-        <h3>Add Node</h3>
+        <h3 id="graph-create-title">Add Node</h3>
         <form id="create-node-form">
           <div class="gv-field">
             <label>Type</label>
@@ -916,9 +968,16 @@
     </div>
 
     <!-- Edit Node Modal -->
-    <div class="gv-modal" id="graph-edit-modal">
+    <div
+      class="gv-modal"
+      id="graph-edit-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="graph-edit-title"
+      inert
+    >
       <div class="gv-modal-box gv-modal-box--wide">
-        <h3>Edit Node</h3>
+        <h3 id="graph-edit-title">Edit Node</h3>
         <form id="edit-node-form">
           <input type="hidden" id="edit-node-id">
           <div class="gv-field">
@@ -966,9 +1025,16 @@
     </div>
 
     <!-- Edge Modal -->
-    <div class="gv-modal" id="graph-edge-modal">
+    <div
+      class="gv-modal"
+      id="graph-edge-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="graph-edge-title"
+      inert
+    >
       <div class="gv-modal-box">
-        <h3>Connect Nodes</h3>
+        <h3 id="graph-edge-title">Connect Nodes</h3>
         <form id="edge-create-form">
           <div class="gv-field">
             <label>From</label>
@@ -1018,9 +1084,16 @@
     </div>
 
     <!-- Delete Confirm Modal -->
-    <div class="gv-modal gv-delete-confirm" id="graph-delete-modal">
+    <div
+      class="gv-modal gv-delete-confirm"
+      id="graph-delete-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="graph-delete-title"
+      inert
+    >
       <div class="gv-modal-box">
-        <h3>Delete Node</h3>
+        <h3 id="graph-delete-title">Delete Node</h3>
         <p class="gv-delete-msg" id="delete-confirm-msg"></p>
         <div class="gv-modal-actions">
           <button type="button" class="btn btn--ghost" id="cancel-delete">
@@ -1132,9 +1205,6 @@
     let initialized = false;
     let deleteTargetNodeId = null;
     let eventListenersAbort = null;
-
-    const CARD_HEIGHT_EST = 56;
-    const VISIBLE_BUFFER = 10;
 
     // ─── Initialization ──────────────────────────────────────────────────────
 
@@ -1255,8 +1325,6 @@
 
     // ─── List View ────────────────────────────────────────────────────────────
 
-    let scrollListenerAttached = false;
-
     function renderListView() {
       const container = document.getElementById("gv-list-view");
       if (!container) return;
@@ -1268,95 +1336,29 @@
         </div>`;
         return;
       }
-      renderVisibleCards(container);
-      if (!scrollListenerAttached) {
-        container.addEventListener(
-          "scroll",
-          () => renderVisibleCards(container),
-        );
-        scrollListenerAttached = true;
-      }
-    }
-
-    function renderVisibleCards(container) {
-      const scrollTop = container.scrollTop;
-      const viewHeight = container.clientHeight;
-
-      let startIdx = 0;
-      let y = 0;
-      for (let i = 0; i < filteredNodes.length; i++) {
-        const isExpanded = filteredNodes[i].id === expandedNodeId;
-        const h = isExpanded
-          ? estimateExpandedHeight(filteredNodes[i])
-          : CARD_HEIGHT_EST;
-        if (y + h > scrollTop - CARD_HEIGHT_EST * VISIBLE_BUFFER) {
-          startIdx = i;
-          break;
-        }
-        y += h;
-      }
-
-      const visibleCards = [];
-      let curY = y;
-      for (
-        let i = startIdx;
-        i < filteredNodes.length &&
-        curY <
-          scrollTop + viewHeight + CARD_HEIGHT_EST * VISIBLE_BUFFER;
-        i++
-      ) {
-        const node = filteredNodes[i];
-        const isExpanded = node.id === expandedNodeId;
-        const h = isExpanded ? estimateExpandedHeight(node) : CARD_HEIGHT_EST;
-        visibleCards.push({ node, y: curY, height: h, isExpanded });
-        curY += h;
-      }
-
-      let totalHeight = 0;
-      for (const node of filteredNodes) {
-        totalHeight += node.id === expandedNodeId
-          ? estimateExpandedHeight(node)
-          : CARD_HEIGHT_EST;
-      }
-
-      const topPad = visibleCards.length > 0 ? visibleCards[0].y : 0;
-      const bottomPad = totalHeight -
-        (visibleCards.length > 0
-          ? visibleCards[visibleCards.length - 1].y +
-            visibleCards[visibleCards.length - 1].height
-          : 0);
-
-      let html = `<div class="gv-list-spacer" style="height:${topPad}px"></div>`;
-      for (const { node, isExpanded } of visibleCards) {
-        html += isExpanded ? renderNodeDetail(node) : renderNodeCard(node);
-      }
-      html += `<div class="gv-list-spacer" style="height:${
-        Math.max(0, bottomPad)
-      }px"></div>`;
-      html += `<div class="gv-list-spacer" style="height:${
-        viewHeight + 200
-      }px"></div>`;
-
-      container.innerHTML = html;
-    }
-
-    function estimateExpandedHeight(node) {
-      const edges = graphData.edges.filter((e) =>
-        e.fromId === node.id || e.toId === node.id
-      );
-      return 130 + edges.length * 28;
+      // Every filtered node is rendered, not just the visible window: a
+      // virtualized list leaves nodes below the fold out of the DOM, so Tab
+      // can never reach them.
+      container.innerHTML = filteredNodes.map(renderNodeCard).join("");
     }
 
     // ─── Card Rendering ───────────────────────────────────────────────────────
+
+    function nodeDetailId(nodeId) {
+      return `gv-node-detail-${encodeURIComponent(nodeId)}`;
+    }
 
     function renderNodeCard(node) {
       const config = getNodeTypeConfig();
       const typeInfo = config[node.type] || config.default;
       const conns = connectionCounts.get(node.id) || 0;
+      const detailId = nodeDetailId(node.id);
       return `<div class="gv-card" data-node-id="${
         escapeHtml(node.id)
       }" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
-      <div class="gv-card-header">
+      <button type="button" class="gv-card-header" aria-expanded="false" aria-controls="${detailId}" onclick="event.stopPropagation(); toggleNodeCard('${
+        escapeHtml(node.id)
+      }')">
         <span class="gv-badge" style="background:${
         hslColor(typeInfo.hue, 55, 35)
       };color:${hslColor(typeInfo.hue, 55, 70)}">${
@@ -1366,7 +1368,8 @@
         <span class="gv-card-conns">${
         conns > 0 ? conns + " conn" + (conns > 1 ? "s" : "") : ""
       }</span>
-      </div>
+      </button>
+      <div class="gv-card-detail" id="${detailId}" hidden></div>
     </div>`;
     }
 
@@ -1389,10 +1392,11 @@
         }</span></li>`;
       }).join("");
 
+      const detailId = nodeDetailId(node.id);
       return `<div class="gv-card gv-card--expanded" data-node-id="${
         escapeHtml(node.id)
       }">
-      <div class="gv-card-header" onclick="toggleNodeCard('${
+      <button type="button" class="gv-card-header" aria-expanded="true" aria-controls="${detailId}" onclick="event.stopPropagation(); toggleNodeCard('${
         escapeHtml(node.id)
       }')">
         <span class="gv-badge" style="background:${
@@ -1401,9 +1405,9 @@
         escapeHtml(typeInfo.label)
       }</span>
         <span class="gv-card-label">${escapeHtml(node.label)}</span>
-        <span class="gv-card-conns">${conns} conn${conns !== 1 ? "s" : ""}</span>
-      </div>
-      <div class="gv-card-detail">
+      <span class="gv-card-conns">${conns} conn${conns !== 1 ? "s" : ""}</span>
+      </button>
+      <div class="gv-card-detail" id="${detailId}">
         ${
         node.description
           ? `<div class="gv-card-desc">${escapeHtml(node.description)}</div>`
@@ -1436,6 +1440,16 @@
     function toggleNodeCard(nodeId) {
       expandedNodeId = expandedNodeId === nodeId ? null : nodeId;
       renderListView();
+      focusNodeHeader(nodeId);
+    }
+
+    function focusNodeHeader(nodeId) {
+      const container = document.getElementById("gv-list-view");
+      if (!container) return;
+      const header = [...container.querySelectorAll(".gv-card-header")]
+        .find((button) => button.closest(".gv-card")?.dataset.nodeId === nodeId);
+      if (header) header.focus({ preventScroll: true });
+      else document.getElementById("graph-search")?.focus();
     }
 
     // ─── View Toggle ──────────────────────────────────────────────────────────
@@ -1452,6 +1466,10 @@
         toggle.querySelectorAll(".gv-view-toggle-btn").forEach(
           (btn) => {
             btn.classList.toggle("active", btn.dataset.view === view);
+            btn.setAttribute(
+              "aria-pressed",
+              String(btn.dataset.view === view),
+            );
           },
         );
       }
@@ -1564,7 +1582,11 @@
           dragView: true,
           multiselect: true,
           navigationButtons: false,
-          keyboard: false,
+          keyboard: {
+            enabled: true,
+            bindToWindow: false,
+            autoFocus: false,
+          },
         },
         nodes: {
           shape: "dot",
@@ -1578,6 +1600,12 @@
       };
 
       network = new vis.Network(container, { nodes, edges }, options);
+      const surface = container.querySelector(".vis-network");
+      if (surface) {
+        surface.setAttribute("role", "group");
+        surface.setAttribute("aria-label", "Knowledge graph network");
+        surface.setAttribute("aria-describedby", "graph-network-help");
+      }
       network.on("click", handleNetworkClick);
       network.on("doubleClick", handleNetworkDoubleClick);
       network.on("stabilizationIterationsDone", () => {
@@ -1925,7 +1953,7 @@
         <span class="gv-edit-conn-info">
           <span class="gv-conn-dir">${dir}</span>
           <span class="gv-conn-type">${escapeHtml(edge.type)}</span>
-          <span class="gv-conn-label">${escapeHtml(otherNode?.label || "?")}</span>
+        <span class="gv-conn-label">${escapeHtml(otherNode?.label || "?")}</span>
         </span>
         <button class="gv-edit-conn-del" data-edge-id="${
           escapeHtml(edge.id)
@@ -2039,6 +2067,107 @@
       renderEditConnections(node.id);
       modal.classList.add("gv-modal-open");
     }
+
+    // ─── Dialog Plumbing ──────────────────────────────────────────────────────
+    // The four graph dialogs open and close by toggling `gv-modal-open` in
+    // more than a dozen handlers. Focus, Escape and the Tab trap are wired
+    // once here rather than at every call site.
+
+    const MODAL_FOCUSABLE =
+      'a[href], button:not([disabled]), input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
+    // Where focus was before a dialog opened, so it can be handed back.
+    let focusOutsideModal = null;
+
+    /** The topmost open dialog - later in DOM order wins when one stacks. */
+    function openGraphModal() {
+      const open = document.querySelectorAll(".gv-modal.gv-modal-open");
+      return open.length ? open[open.length - 1] : null;
+    }
+
+    // A closed dialog is taken out of the tab order with inert, not with
+    // visibility:hidden: a child inherits a visibility flip two to four
+    // frames late, so focus() into a just-opened dialog is a silent no-op.
+    // inert is read straight off the DOM, so moving focus in works in the
+    // same task.
+    function syncModalState(modal) {
+      const open = modal.classList.contains("gv-modal-open");
+      modal.inert = !open;
+      if (!open) {
+        if (focusOutsideModal?.isConnected) focusOutsideModal.focus();
+        return;
+      }
+      if (!modal.contains(document.activeElement)) {
+        modal.querySelector(MODAL_FOCUSABLE)?.focus();
+      }
+    }
+
+    const modalObserver = new MutationObserver((records) => {
+      for (const record of records) syncModalState(record.target);
+    });
+
+    function watchModals() {
+      for (const modal of document.querySelectorAll(".gv-modal")) {
+        syncModalState(modal);
+        modalObserver.observe(modal, {
+          attributes: true,
+          attributeFilter: ["class"],
+        });
+      }
+    }
+
+    // The node panel slides off-canvas rather than leaving the DOM, so it
+    // keeps its buttons tabbable while closed until it is inert.
+    const panelObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        record.target.inert = !record.target.classList.contains(
+          "gv-panel-open",
+        );
+      }
+    });
+
+    function watchNodePanel() {
+      const panel = document.getElementById("graph-node-panel");
+      if (!panel) return;
+      panel.inert = !panel.classList.contains("gv-panel-open");
+      panelObserver.observe(panel, {
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+    }
+
+    document.addEventListener("focusin", (e) => {
+      if (!e.target.closest(".gv-modal")) focusOutsideModal = e.target;
+    });
+
+    document.addEventListener("keydown", (e) => {
+      const modal = openGraphModal();
+      if (!modal) return;
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        modal.classList.remove("gv-modal-open");
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      const items = [...modal.querySelectorAll(MODAL_FOCUSABLE)];
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+
+      if (!modal.contains(active)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    });
 
     // ─── Event Listeners ──────────────────────────────────────────────────────
 
@@ -2302,6 +2431,8 @@
 
     // ─── Boot ─────────────────────────────────────────────────────────────────
 
+    watchModals();
+    watchNodePanel();
     initGraph();
     </script>
     <!--VERSION_CHIP-->

@@ -4,6 +4,9 @@ Opt-in Playwright checks for the interaction issues a source-level test cannot
 see: focus movement, tab order, and target size. They live outside `deno test`
 on purpose, mirroring `packages/launcher-v2/e2e/`, so CI stays unchanged.
 
+`disclosure_keyboard.e2e.mjs` verifies that Enter and Space operate disclosure
+buttons while keeping their expanded state synchronized.
+
 The `*.e2e.mjs` suffix keeps `deno test` from collecting these files.
 
 ## Prerequisites
@@ -35,6 +38,8 @@ The `*.e2e.mjs` suffix keeps `deno test` from collecting these files.
   restores focus on Escape.
 - `focus_hidden_panels.e2e.mjs` - the closed sidebar and graph node panel are
   `inert`, so Tab never reaches them.
+- `graph_keyboard.e2e.mjs` - every filtered graph node is reachable, card focus
+  survives rerenders, and List/Network state is exposed.
 - `target_size.e2e.mjs` - icon-only controls meet 24x24 (2.5.8).
 - `voice_modal.e2e.mjs` - the voice call owns focus and Escape dismissal even
   when an old push-to-talk setting bound Escape.

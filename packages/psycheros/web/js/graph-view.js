@@ -1,7 +1,7 @@
 /**
  * Knowledge Graph — List Editor + Network Graph Toggle
  *
- * Mobile-first card list with virtual scrolling, optional vis-network graph,
+ * Mobile-first card list with an optional vis-network graph,
  * proper edge creation modal, and delete confirmation modal.
  * No prompt(), confirm(), or confidence fields.
  */
@@ -302,9 +302,7 @@ function getFilteredNodes() {
   return filteredNodes;
 }
 
-// ─── List View — Virtual Scroll ───────────────────────────────────────────────
-
-let scrollListenerAttached = false;
+// ─── List View ────────────────────────────────────────────────────────────────
 
 function renderListView() {
   const container = document.getElementById('gv-list-view');
@@ -319,62 +317,7 @@ function renderListView() {
     return;
   }
 
-  renderVisibleCards(container);
-
-  if (!scrollListenerAttached) {
-    container.addEventListener('scroll', () => renderVisibleCards(container));
-    scrollListenerAttached = true;
-  }
-}
-
-function renderVisibleCards(container) {
-  const scrollTop = container.scrollTop;
-  const viewHeight = container.clientHeight;
-
-  let startIdx = 0;
-  let y = 0;
-  for (let i = 0; i < filteredNodes.length; i++) {
-    const isExpanded = filteredNodes[i].id === expandedNodeId;
-    const h = isExpanded ? estimateExpandedHeight(filteredNodes[i]) : CARD_HEIGHT_EST;
-    if (y + h > scrollTop - CARD_HEIGHT_EST * VISIBLE_BUFFER) { startIdx = i; break; }
-    y += h;
-  }
-
-  // Collect visible nodes with their y positions
-  const visibleCards = [];
-  let curY = y;
-  for (let i = startIdx; i < filteredNodes.length && curY < scrollTop + viewHeight + CARD_HEIGHT_EST * VISIBLE_BUFFER; i++) {
-    const node = filteredNodes[i];
-    const isExpanded = node.id === expandedNodeId;
-    const h = isExpanded ? estimateExpandedHeight(node) : CARD_HEIGHT_EST;
-    visibleCards.push({ node, y: curY, height: h, isExpanded });
-    curY += h;
-  }
-
-  // Calculate total height
-  let totalHeight = 0;
-  for (const node of filteredNodes) {
-    totalHeight += node.id === expandedNodeId ? estimateExpandedHeight(node) : CARD_HEIGHT_EST;
-  }
-
-  const topPad = visibleCards.length > 0 ? visibleCards[0].y : 0;
-  const bottomPad = totalHeight - (visibleCards.length > 0 ? visibleCards[visibleCards.length - 1].y + visibleCards[visibleCards.length - 1].height : 0);
-
-  let html = `<div class="gv-list-spacer" style="height:${topPad}px"></div>`;
-  for (const { node, isExpanded } of visibleCards) {
-    html += isExpanded ? renderNodeDetail(node) : renderNodeCard(node);
-  }
-  html += `<div class="gv-list-spacer" style="height:${Math.max(0, bottomPad)}px"></div>`;
-  html += `<div class="gv-list-spacer" style="height:${viewHeight + 200}px"></div>`;
-
-  container.innerHTML = html;
-}
-
-function estimateExpandedHeight(node) {
-  const edges = graphData.edges.filter(e => e.fromId === node.id || e.toId === node.id);
-  const base = 130; // header + desc + buttons
-  const connLines = edges.length * 28;
-  return base + connLines;
+  container.innerHTML = filteredNodes.map(renderNodeCard).join('');
 }
 
 // ─── Card Rendering ───────────────────────────────────────────────────────────
@@ -385,16 +328,19 @@ function estimateExpandedHeight(node) {
 const SPEECH_SEP = '<span class="sr-only">, </span>';
 
 function renderNodeCard(node) {
+  if (node.id === expandedNodeId) return renderNodeDetail(node);
   const config = getNodeTypeConfig();
   const typeInfo = config[node.type] || config.default;
   const conns = connectionCounts.get(node.id) || 0;
+  const detailId = nodeDetailId(node.id);
 
   return `<div class="gv-card" data-node-id="${escapeHtml(node.id)}" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
-    <div class="gv-card-header">
+    <button type="button" class="gv-card-header" aria-expanded="false" aria-controls="${detailId}" onclick="event.stopPropagation(); toggleNodeCard('${escapeHtml(node.id)}')">
       <span class="gv-badge" style="background:${hslColor(typeInfo.hue, 55, 35)};color:${hslColor(typeInfo.hue, 55, 70)}">${escapeHtml(typeInfo.label)}</span>
       <span class="gv-card-label">${SPEECH_SEP}${escapeHtml(node.label)}</span>
       <span class="gv-card-conns">${conns > 0 ? SPEECH_SEP + conns + ' conn' + (conns > 1 ? 's' : '') : ''}</span>
-    </div>
+    </button>
+    <div class="gv-card-detail" id="${detailId}" hidden></div>
   </div>`;
 }
 
@@ -402,6 +348,7 @@ function renderNodeDetail(node) {
   const config = getNodeTypeConfig();
   const typeInfo = config[node.type] || config.default;
   const conns = connectionCounts.get(node.id) || 0;
+  const detailId = nodeDetailId(node.id);
 
   const edges = graphData.edges.filter(e => e.fromId === node.id || e.toId === node.id);
   const connHtml = edges.map(edge => {
@@ -412,13 +359,13 @@ function renderNodeDetail(node) {
     return `<li><span class="gv-conn-dir">${dir}</span> <span class="gv-conn-type">${escapeHtml(edge.customType || edge.type)}</span> <span class="gv-conn-label">${escapeHtml(otherNode?.label || '?')}</span></li>`;
   }).join('');
 
-  return `<div class="gv-card gv-card--expanded" data-node-id="${escapeHtml(node.id)}">
-    <div class="gv-card-header" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
+  return `<div class="gv-card gv-card--expanded" data-node-id="${escapeHtml(node.id)}" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
+    <button type="button" class="gv-card-header" aria-expanded="true" aria-controls="${detailId}" onclick="event.stopPropagation(); toggleNodeCard('${escapeHtml(node.id)}')">
       <span class="gv-badge" style="background:${hslColor(typeInfo.hue, 55, 35)};color:${hslColor(typeInfo.hue, 55, 70)}">${escapeHtml(typeInfo.label)}</span>
       <span class="gv-card-label">${SPEECH_SEP}${escapeHtml(node.label)}</span>
       <span class="gv-card-conns">${SPEECH_SEP}${conns} conn${conns !== 1 ? 's' : ''}</span>
-    </div>
-    <div class="gv-card-detail">
+    </button>
+    <div class="gv-card-detail" id="${detailId}">
       ${node.description ? `<div class="gv-card-desc">${escapeHtml(node.description)}</div>` : ''}
       ${connHtml ? `
         <div class="gv-card-section">
@@ -434,10 +381,23 @@ function renderNodeDetail(node) {
   </div>`;
 }
 
+function nodeDetailId(nodeId) {
+  return `gv-node-detail-${encodeURIComponent(nodeId)}`;
+}
+
+function focusNodeHeader(nodeId) {
+  const container = document.getElementById('gv-list-view');
+  if (!container) return;
+  const header = [...container.querySelectorAll('.gv-card-header')]
+    .find(button => button.closest('.gv-card')?.dataset.nodeId === nodeId);
+  if (header) header.focus({ preventScroll: true });
+  else document.getElementById('graph-search')?.focus();
+}
+
 function toggleNodeCard(nodeId) {
   expandedNodeId = expandedNodeId === nodeId ? null : nodeId;
-  const container = document.getElementById('gv-list-view');
-  if (container) renderListView();
+  renderListView();
+  focusNodeHeader(nodeId);
 }
 
 // ─── View Toggle ──────────────────────────────────────────────────────────────
@@ -453,7 +413,9 @@ async function toggleView(view) {
   // Update toggle buttons
   if (toggle) {
     toggle.querySelectorAll('.gv-view-toggle-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.view === view);
+      const active = btn.dataset.view === view;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', String(active));
     });
   }
 
@@ -546,13 +508,23 @@ function renderGraph() {
       dragView: true,
       multiselect: true,
       navigationButtons: false,
-      keyboard: false
+      keyboard: {
+        enabled: true,
+        bindToWindow: false,
+        autoFocus: false
+      }
     },
     nodes: { shape: 'dot', size: 18, scaling: { min: 12, max: 28 } },
     edges: { arrows: { to: { enabled: true, scaleFactor: 0.6 } }, smooth: { enabled: true, type: 'continuous' } }
   };
 
   network = new vis.Network(container, { nodes, edges }, options);
+  const surface = container.querySelector('.vis-network');
+  if (surface) {
+    surface.setAttribute('role', 'group');
+    surface.setAttribute('aria-label', 'Knowledge graph network');
+    surface.setAttribute('aria-describedby', 'graph-network-help');
+  }
   network.on('click', handleNetworkClick);
   network.on('doubleClick', handleNetworkDoubleClick);
   network.on('stabilizationIterationsDone', () => {
@@ -725,6 +697,7 @@ function setupEdgeModalListeners(opts) {
         form.reset();
         showToast('Connection created');
         await loadGraphData();
+        focusNodeHeader(fromId);
       } else {
         showToast('Failed: ' + (result.error || 'unknown error'));
       }
@@ -1077,6 +1050,7 @@ function setupEventListeners() {
         document.getElementById('graph-edit-modal').classList.remove('gv-modal-open');
         showToast('Node updated');
         await loadGraphData();
+        focusNodeHeader(nodeId);
       } else {
         showToast('Failed to update node: ' + result.error);
       }
