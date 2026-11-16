@@ -22,6 +22,8 @@
 /* ------------------------------------------------------------------------- */
 
 :root {
+  color-scheme: dark;
+
   --psy-bg: #000000;
   --psy-bg-raised: #0a0a0a;
   --psy-bg-sunken: #050505;
@@ -112,8 +114,16 @@
 /* ------------------------------------------------------------------------- */
 
 :focus-visible {
-  outline: none;
+  outline: 2px solid var(--psy-accent);
+  outline-offset: 2px;
   box-shadow: 0 0 0 2px var(--psy-accent), 0 0 12px var(--psy-accent-glow);
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline-color: CanvasText;
+    box-shadow: none;
+  }
 }
 
 /* ------------------------------------------------------------------------- */

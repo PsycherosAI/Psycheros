@@ -334,8 +334,8 @@ function renderNodeCard(node) {
   const conns = connectionCounts.get(node.id) || 0;
   const detailId = nodeDetailId(node.id);
 
-  return `<div class="gv-card" data-node-id="${escapeHtml(node.id)}" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
-    <button type="button" class="gv-card-header" aria-expanded="false" aria-controls="${detailId}" onclick="event.stopPropagation(); toggleNodeCard('${escapeHtml(node.id)}')">
+  return `<div class="gv-card" data-node-id="${escapeHtml(node.id)}">
+    <button type="button" class="gv-card-header" aria-expanded="false" aria-controls="${detailId}" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
       <span class="gv-badge" style="background:${hslColor(typeInfo.hue, 55, 35)};color:${hslColor(typeInfo.hue, 55, 70)}">${escapeHtml(typeInfo.label)}</span>
       <span class="gv-card-label">${SPEECH_SEP}${escapeHtml(node.label)}</span>
       <span class="gv-card-conns">${conns > 0 ? SPEECH_SEP + conns + ' conn' + (conns > 1 ? 's' : '') : ''}</span>
@@ -359,8 +359,8 @@ function renderNodeDetail(node) {
     return `<li><span class="gv-conn-dir">${dir}</span> <span class="gv-conn-type">${escapeHtml(edge.customType || edge.type)}</span> <span class="gv-conn-label">${escapeHtml(otherNode?.label || '?')}</span></li>`;
   }).join('');
 
-  return `<div class="gv-card gv-card--expanded" data-node-id="${escapeHtml(node.id)}" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
-    <button type="button" class="gv-card-header" aria-expanded="true" aria-controls="${detailId}" onclick="event.stopPropagation(); toggleNodeCard('${escapeHtml(node.id)}')">
+  return `<div class="gv-card gv-card--expanded" data-node-id="${escapeHtml(node.id)}">
+    <button type="button" class="gv-card-header" aria-expanded="true" aria-controls="${detailId}" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
       <span class="gv-badge" style="background:${hslColor(typeInfo.hue, 55, 35)};color:${hslColor(typeInfo.hue, 55, 70)}">${escapeHtml(typeInfo.label)}</span>
       <span class="gv-card-label">${SPEECH_SEP}${escapeHtml(node.label)}</span>
       <span class="gv-card-conns">${SPEECH_SEP}${conns} conn${conns !== 1 ? 's' : ''}</span>

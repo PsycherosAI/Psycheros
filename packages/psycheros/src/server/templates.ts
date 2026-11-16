@@ -578,7 +578,7 @@ export function renderSettingsBackButton(
     : href === "/fragments/settings"
     ? "Settings"
     : "Back";
-  return `<a class="settings-back-btn"
+  return `<a href="${escapeHtml(href)}" class="settings-back-btn"
     hx-get="${escapeHtml(href)}"
     hx-target="#chat"
     hx-swap="innerHTML">
@@ -600,7 +600,7 @@ export function renderSettingsHub(): string {
   </div>
   <div class="settings-content" id="settings-content">
     <div class="settings-hub-grid">
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/general" class="settings-hub-card"
         hx-get="/fragments/settings/general"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -625,7 +625,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/core-prompts" class="settings-hub-card"
         hx-get="/fragments/settings/core-prompts"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -643,7 +643,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/memories" class="settings-hub-card"
         hx-get="/fragments/settings/memories"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -662,7 +662,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/vault" class="settings-hub-card"
         hx-get="/fragments/settings/vault"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -681,7 +681,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/lorebooks" class="settings-hub-card"
         hx-get="/fragments/settings/lorebooks"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -699,7 +699,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/vision" class="settings-hub-card"
         hx-get="/fragments/settings/vision"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -717,7 +717,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/voice" class="settings-hub-card"
         hx-get="/fragments/settings/voice"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -734,7 +734,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/pulse" class="settings-hub-card"
         hx-get="/fragments/settings/pulse"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -751,7 +751,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/sa" class="settings-hub-card"
         hx-get="/fragments/settings/sa"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -772,7 +772,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/connections" class="settings-hub-card"
         hx-get="/fragments/settings/connections"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -791,7 +791,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/entity-core" class="settings-hub-card"
         hx-get="/fragments/settings/entity-core"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -812,7 +812,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/tools" class="settings-hub-card"
         hx-get="/fragments/settings/tools"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -829,7 +829,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/plugins" class="settings-hub-card"
         hx-get="/fragments/settings/plugins"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -866,7 +866,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/workspace" class="settings-hub-card"
         hx-get="/fragments/settings/workspace"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -885,7 +885,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/llm" class="settings-hub-card"
         hx-get="/fragments/settings/llm"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -905,7 +905,7 @@ export function renderSettingsHub(): string {
         </svg>
       </a>
 
-      <a class="settings-hub-card"
+      <a href="/fragments/admin" class="settings-hub-card"
         hx-get="/fragments/admin"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -2187,7 +2187,7 @@ export function renderSASettings(
             </button>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;">
-            <label style="font-size:12px;color:var(--c-fg-muted);">IF</label>
+            <span style="font-size:12px;color:var(--c-fg-muted);">IF</span>
             <select data-cond-stream style="background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
               ${streamOptions}
             </select>
@@ -2202,14 +2202,14 @@ export function renderSASettings(
               style="width:80px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;">
-            <label style="font-size:12px;color:var(--c-fg-muted);">THEN</label>
+            <span style="font-size:12px;color:var(--c-fg-muted);">THEN</span>
             <span style="font-size:13px;">Run Pulse:</span>
             <select data-action-pulse style="background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
               ${pulseOptions}
             </select>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
-            <label style="font-size:13px;color:var(--c-fg-muted);">Cooldown:</label>
+            <span style="font-size:13px;color:var(--c-fg-muted);">Cooldown:</span>
             <input type="number" data-rule-cooldown value="5" min="0"
               style="width:50px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
             <span style="font-size:12px;color:var(--c-fg-muted);">min</span>
@@ -4649,7 +4649,7 @@ export function renderEntityCoreOverview(data: EntityCoreOverviewData): string {
     </div>
     <p>Entity-core is not connected. Enable MCP in your environment with
       <code>PSYCHEROS_MCP_ENABLED=true</code> to manage identity, memories, and knowledge graph.</p>
-    <a class="btn btn--primary"
+    <a href="/fragments/settings/connections" class="btn btn--primary"
       hx-get="/fragments/settings/connections"
       hx-target="#chat"
       hx-swap="innerHTML">
@@ -5796,7 +5796,9 @@ export function renderLLMProfileHub(settings: LLMProfileSettings): string {
     const isActive = p.id === settings.activeProfileId;
     const preset = LLM_PROVIDER_PRESETS[p.provider];
     return `
-    <a class="settings-hub-card ${isActive ? "settings-hub-card--active" : ""}"
+    <a href="/fragments/settings/llm/${
+      escapeHtml(p.id)
+    }" class="settings-hub-card ${isActive ? "settings-hub-card--active" : ""}"
        hx-get="/fragments/settings/llm/${escapeHtml(p.id)}"
        hx-target="#chat"
        hx-swap="innerHTML">
@@ -6811,7 +6813,7 @@ export function renderConnectionsSettings(
 function renderChannelsTab(settings: DiscordSettings): string {
   return `<div class="settings-hub-grid">
 
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/connections/discord" class="settings-hub-card"
         hx-get="/fragments/settings/connections/discord"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -7013,7 +7015,7 @@ export function renderConnectionsDiscordSettings(
     settings.gatewayEnabled ? "" : "display:none;"
   }">
           <div class="llm-field">
-            <label class="settings-label">Global Instructions</label>
+            <label class="settings-label" for="discord-global-instructions">Global Instructions</label>
             <textarea class="settings-textarea" id="discord-global-instructions" rows="3" aria-label="Global Instructions"
               placeholder="Instructions that apply to all Discord channels...">${
     escapeHtml(settings.globalInstructions)
@@ -7036,7 +7038,7 @@ export function renderConnectionsDiscordSettings(
             <span class="field-hint">Summarize Discord activity into daily memories (pre-summarized, not raw messages)</span>
           </div>
           <div class="llm-field" id="discord-memory-instructions-field">
-            <label class="settings-label">Memory Writer Instructions</label>
+            <label class="settings-label" for="discord-memory-instructions">Memory Writer Instructions</label>
             <textarea class="settings-textarea" id="discord-memory-instructions" rows="3" aria-label="Memory Writer Instructions"
               placeholder="e.g. @superdog420 is James — write memories about him as James">${
     escapeHtml(gc?.memoryInstructions ?? "")
@@ -7047,7 +7049,7 @@ export function renderConnectionsDiscordSettings(
             <label class="settings-label">Servers & Channels</label>
             <p class="settings-note">
               Configure servers and channels from the
-              <a hx-get="/fragments/discord" hx-target="#chat" hx-swap="innerHTML"
+              <a href="/fragments/discord" hx-get="/fragments/discord" hx-target="#chat" hx-swap="innerHTML"
                  style="color:var(--c-accent);cursor:pointer;">Discord Hub</a>.
             </p>
           </div>
@@ -7061,7 +7063,7 @@ export function renderConnectionsDiscordSettings(
             </label>
           </div>
           <div class="llm-field">
-            <label class="settings-label">Allowed Tools (comma-separated)</label>
+            <label class="settings-label" for="discord-allowed-tools">Allowed Tools (comma-separated)</label>
             <input class="settings-input" id="discord-allowed-tools"
               value="${
     gc?.allowedTools.join(", ") ??
@@ -7071,19 +7073,19 @@ export function renderConnectionsDiscordSettings(
           </div>
           <div class="llm-field-row" style="display:flex;gap:var(--sp-4);">
             <div class="llm-field inline" style="flex:1;">
-              <label class="settings-label">Blocked Bot IDs</label>
+              <label class="settings-label" for="discord-blocked-bots">Blocked Bot IDs</label>
               <input class="settings-input" id="discord-blocked-bots"
                 value="${gc?.blockedBotIds.join(", ") ?? ""}">
               <span class="field-hint">Comma-separated bot user IDs to ignore</span>
             </div>
             <div class="llm-field inline" style="flex:1;">
-              <label class="settings-label">Debounce (ms)</label>
+              <label class="settings-label" for="discord-debounce">Debounce (ms)</label>
               <input class="settings-input" type="number" id="discord-debounce"
                 value="${gc?.debounceWindowMs ?? 5000}" min="1000" max="30000">
               <span class="field-hint">Wait time before responding (default: 5000)</span>
             </div>
             <div class="llm-field inline" style="flex:1;">
-              <label class="settings-label">Max Buffer</label>
+              <label class="settings-label" for="discord-max-buffer">Max Buffer</label>
               <input class="settings-input" type="number" id="discord-max-buffer"
                 value="${gc?.maxBufferSize ?? 50}" min="5" max="200">
               <span class="field-hint">Max messages before forced response (default: 50)</span>
@@ -8226,10 +8228,10 @@ export function renderSkillsListSection(skills: SkillMeta[]): string {
       : "";
     return `<div class="custom-tool-row" style="display:flex;align-items:flex-start;gap:var(--sp-2);">
   <div style="flex:1;min-width:0;">
-    <label class="tool-item">
+    <div class="tool-item">
       <span class="tool-item-name">${escapeHtml(skill.name)}${badge}</span>
       <span class="tool-item-desc">${escapeHtml(skill.description)}</span>
-    </label>
+    </div>
   </div>
   <button class="btn btn--xs" onclick="psycherosSkillsEdit('${
       escapeHtml(skill.name)
@@ -8865,7 +8867,9 @@ function renderVisionTabActiveState(activeTab: string): string {
  */
 export function renderVisionGeneratorsTab(settings: ImageGenSettings): string {
   const cards = settings.generators.map((g) => `
-    <a class="settings-hub-card"
+    <a href="/fragments/settings/vision/image-gen/${
+    escapeHtml(g.id)
+  }" class="settings-hub-card"
       hx-get="/fragments/settings/vision/image-gen/${escapeHtml(g.id)}"
       hx-target="#chat"
       hx-swap="innerHTML">
@@ -9324,7 +9328,7 @@ export function renderImageGenSlotSettings(
   return `<div class="settings-view">
   <div class="settings-header">
     <div class="settings-header-row">
-      <a class="settings-back-btn"
+      <a href="/fragments/settings/vision" class="settings-back-btn"
         hx-get="/fragments/settings/vision"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -9676,7 +9680,7 @@ export function renderDiscordHub(data: DiscordHubData): string {
   );
 
   const renderConversationItem = (c: typeof data.conversations[0]) => `
-    <a class="discord-conversation-item"
+    <a href="/fragments/discord/channel/${c.sourceChannelId}" class="discord-conversation-item"
        hx-get="/fragments/discord/channel/${c.sourceChannelId}"
        hx-target="#chat"
        hx-swap="innerHTML">
@@ -10209,7 +10213,9 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
       s.value === p.providerSettings.stt.provider
     )?.label || p.providerSettings.stt.provider;
     return `
-    <a class="settings-hub-card ${isActive ? "settings-hub-card--active" : ""}"
+    <a href="/fragments/settings/voice/${
+      escapeHtml(p.id)
+    }" class="settings-hub-card ${isActive ? "settings-hub-card--active" : ""}"
        hx-get="/fragments/settings/voice/${escapeHtml(p.id)}"
        hx-target="#chat"
        hx-swap="innerHTML">

@@ -1511,19 +1511,19 @@ function getHTML(): string {
     <div class="card-title">Settings</div>
     <div class="form">
       <div class="field">
-        <label>Install path (monorepo root)</label>
+        <label for="installDir">Install path (monorepo root)</label>
         <input type="text" id="installDir" placeholder="~/psycheros">
       </div>
       <div class="field">
-        <label>Your name</label>
+        <label for="userName">Your name</label>
         <input type="text" id="userName" placeholder="You">
       </div>
       <div class="field">
-        <label>Entity's name</label>
+        <label for="entityName">Entity's name</label>
         <input type="text" id="entityName" placeholder="Assistant">
       </div>
       <div class="field">
-        <label>Timezone</label>
+        <label for="timezone">Timezone</label>
         <input type="text" id="timezone" placeholder="America/New_York" list="tz-list">
         <datalist id="tz-list">
           <option value="America/New_York"><option value="America/Chicago"><option value="America/Denver">

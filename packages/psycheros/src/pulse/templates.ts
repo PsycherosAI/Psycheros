@@ -250,7 +250,7 @@ export function pulseIndicatorSvg(): string {
  * This gets embedded into renderSettingsHub().
  */
 export function renderPulseHubCard(): string {
-  return `<a class="settings-hub-card"
+  return `<a href="/fragments/settings/pulse" class="settings-hub-card"
     hx-get="/fragments/settings/pulse"
     hx-target="#chat"
     hx-swap="innerHTML">
@@ -277,7 +277,7 @@ export function renderPulseSettings(
 ): string {
   return `<div class="settings-view">
   <div class="settings-header">
-    <a class="settings-back-btn" onclick="htmx.ajax('GET', '/fragments/settings', {target: '#chat', swap: 'innerHTML'})">
+    <a href="/fragments/settings" class="settings-back-btn" onclick="htmx.ajax('GET', '/fragments/settings', {target: '#chat', swap: 'innerHTML'})">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="15 18 9 12 15 6"/>
       </svg>
@@ -418,7 +418,7 @@ export function renderPulseEditor(
 
   return `<div class="settings-view">
   <div class="settings-header">
-    <a class="settings-back-btn" onclick="htmx.ajax('GET', '/fragments/settings/pulse', {target: '#chat', swap: 'innerHTML'})">
+    <a href="/fragments/settings/pulse" class="settings-back-btn" onclick="htmx.ajax('GET', '/fragments/settings/pulse', {target: '#chat', swap: 'innerHTML'})">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="15 18 9 12 15 6"/>
       </svg>
@@ -740,9 +740,9 @@ export function renderPulseEditor(
     p.triggerType !== "webhook" ? "style='display:none'" : ""
   }>
         <div class="form-group">
-          <label>Webhook URL</label>
+          <label for="pulse-webhook-url">Webhook URL</label>
           <div class="input-with-copy">
-            <input type="text" readonly value="/api/webhook/pulse/${
+            <input type="text" id="pulse-webhook-url" readonly value="/api/webhook/pulse/${
     pulse?.id ?? "..."
   }" class="readonly-field">
             <button type="button" class="btn btn--sm" onclick="navigator.clipboard.writeText(this.previousElementSibling.value)">Copy</button>
@@ -751,9 +751,9 @@ export function renderPulseEditor(
     isEdit && p.webhookToken
       ? `
           <div class="form-group" style="margin-top: 0.5rem">
-            <label>Token</label>
+            <label for="pulse-webhook-token">Token</label>
             <div class="input-with-copy">
-              <input type="text" readonly value="${p.webhookToken}" class="readonly-field">
+              <input type="text" id="pulse-webhook-token" readonly value="${p.webhookToken}" class="readonly-field">
               <button type="button" class="btn btn--sm" onclick="navigator.clipboard.writeText(this.previousElementSibling.value)">Copy</button>
             </div>
             <small>Use as Bearer token: <code>Authorization: Bearer ${p.webhookToken}</code></small>

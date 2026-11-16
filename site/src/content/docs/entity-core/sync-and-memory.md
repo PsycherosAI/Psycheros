@@ -56,7 +56,9 @@ conflicts are detected when clocks are concurrent (neither dominates the other).
 Memories are organized hierarchically. All memories are **permanently retained**
 — consolidation tiers produce supplementary summaries, not replacements.
 
-```
+Memory consolidation follows this sequence:
+
+```text
 daily → weekly → monthly → yearly
 ```
 
@@ -81,7 +83,9 @@ search.
 
 ### Storage Layout
 
-```
+This directory tree shows where each memory period is stored:
+
+```text
 data/memories/
 ├── daily/          # YYYY-MM-DD_instance.md (per-instance)
 ├── weekly/         # YYYY-WNN.md
