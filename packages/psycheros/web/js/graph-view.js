@@ -293,6 +293,11 @@ function estimateExpandedHeight(node) {
 
 // ─── Card Rendering ───────────────────────────────────────────────────────────
 
+// Flex containers drop whitespace-only text nodes, so badge + label + conn
+// count would be announced as one run ("Selfme2 conns"). A real character in
+// an sr-only span restores the boundaries.
+const SPEECH_SEP = '<span class="sr-only">, </span>';
+
 function renderNodeCard(node) {
   const config = getNodeTypeConfig();
   const typeInfo = config[node.type] || config.default;
@@ -301,8 +306,8 @@ function renderNodeCard(node) {
   return `<div class="gv-card" data-node-id="${escapeHtml(node.id)}" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
     <div class="gv-card-header">
       <span class="gv-badge" style="background:${hslColor(typeInfo.hue, 55, 35)};color:${hslColor(typeInfo.hue, 55, 70)}">${escapeHtml(typeInfo.label)}</span>
-      <span class="gv-card-label">${escapeHtml(node.label)}</span>
-      <span class="gv-card-conns">${conns > 0 ? conns + ' conn' + (conns > 1 ? 's' : '') : ''}</span>
+      <span class="gv-card-label">${SPEECH_SEP}${escapeHtml(node.label)}</span>
+      <span class="gv-card-conns">${conns > 0 ? SPEECH_SEP + conns + ' conn' + (conns > 1 ? 's' : '') : ''}</span>
     </div>
   </div>`;
 }
@@ -324,8 +329,8 @@ function renderNodeDetail(node) {
   return `<div class="gv-card gv-card--expanded" data-node-id="${escapeHtml(node.id)}">
     <div class="gv-card-header" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
       <span class="gv-badge" style="background:${hslColor(typeInfo.hue, 55, 35)};color:${hslColor(typeInfo.hue, 55, 70)}">${escapeHtml(typeInfo.label)}</span>
-      <span class="gv-card-label">${escapeHtml(node.label)}</span>
-      <span class="gv-card-conns">${conns} conn${conns !== 1 ? 's' : ''}</span>
+      <span class="gv-card-label">${SPEECH_SEP}${escapeHtml(node.label)}</span>
+      <span class="gv-card-conns">${SPEECH_SEP}${conns} conn${conns !== 1 ? 's' : ''}</span>
     </div>
     <div class="gv-card-detail">
       ${node.description ? `<div class="gv-card-desc">${escapeHtml(node.description)}</div>` : ''}
@@ -809,6 +814,10 @@ function setupDeleteModalListeners(opts) {
         expandedNodeId = null;
         showToast('Node deleted');
         await loadGraphData();
+        // loadGraphData() re-renders the list, which takes the card and its
+        // Delete button with it, so the focus the dialog observer restored is
+        // gone by now. Hand it to a control that outlives the re-render.
+        document.getElementById('gv-add-node')?.focus();
       } else {
         showToast('Failed: ' + (result.error || 'unknown error'));
       }
@@ -916,6 +925,11 @@ function setupEventListeners() {
       label: form.label.value,
       description: form.description.value,
     };
+    if (!data.label.trim()) {
+      showToast('Label is required');
+      form.label.focus();
+      return;
+    }
     try {
       const response = await fetch('/api/graph/nodes', {
         method: 'POST',
@@ -956,6 +970,11 @@ function setupEventListeners() {
       label: document.getElementById('edit-node-label').value,
       description: document.getElementById('edit-node-description').value,
     };
+    if (!data.label.trim()) {
+      showToast('Label is required');
+      document.getElementById('edit-node-label').focus();
+      return;
+    }
     try {
       const response = await fetch(`/api/graph/nodes/${nodeId}`, {
         method: 'PUT',
@@ -994,8 +1013,17 @@ function showToast(msg) {
   }
   const toast = document.createElement('div');
   toast.className = 'gv-toast';
-  toast.textContent = msg;
+  // role=status is the whole reason the message is announced at all, and a
+  // region that arrives already populated is not announced either, so it goes
+  // in empty and is filled on the next tick (audit finding 22) - the same
+  // contract as the app's toast in psycheros.js. This is a separate function
+  // from that one because the graph panel is also rendered in the launcher,
+  // where the app toast does not exist.
+  toast.setAttribute('role', 'status');
   container.appendChild(toast);
+  setTimeout(() => {
+    toast.textContent = msg;
+  }, 50);
   requestAnimationFrame(() => toast.classList.add('gv-toast-visible'));
   setTimeout(() => {
     toast.classList.remove('gv-toast-visible');
@@ -1020,4 +1048,6 @@ globalThis.toggleNodeCard = toggleNodeCard;
 globalThis.openEdgeModal = openEdgeModal;
 globalThis.openEdgeModalFromNode = openEdgeModalFromNode;
 globalThis.renderDeleteConfirmModal = renderDeleteConfirmModal;
-globalThis.showToast = showToast;
+// showToast deliberately stays local: assigning it here shadowed the app's
+// role=status toast in psycheros.js for every other caller on the page
+// (reindex-banner.js and the discord inline handler go through the global).

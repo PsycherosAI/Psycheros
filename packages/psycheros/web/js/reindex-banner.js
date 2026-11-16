@@ -84,6 +84,7 @@ function onEvent(evt) {
       dismissed = false;
       reindexing = true;
       renderProgress(evt);
+      announce('Re-indexing entity memory started');
       break;
     case 'progress':
       reindexing = true;
@@ -104,8 +105,18 @@ function onEvent(evt) {
     case 'model_change_detected':
       reindexing = false;
       if (!dismissed) renderModelChange(evt);
+      announce(
+        evt.message || 'Embedding model changed — memory indexes need rebuilding',
+      );
       break;
   }
+}
+
+// The banner is visible but not a live region (progress repaints would spam
+// one), so the two one-shot phases announce themselves through the app's
+// shared status region instead.
+function announce(text) {
+  if (globalThis.announceStatus) globalThis.announceStatus(text);
 }
 
 globalThis.ReindexBanner = { onEvent, dismiss: dismissBanner, startReindex };

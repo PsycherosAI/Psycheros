@@ -356,11 +356,12 @@ export function renderAppShell(
   ${pluginHeadHtml}
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="bg-layer"></div>
   <div class="bg-overlay"></div>
   <div class="app">
     ${renderHeader()}
-    <div class="main">
+    <div class="main" role="main" id="main" tabindex="-1">
       <div class="sidebar-overlay" onclick="Psycheros.toggleSidebar()"></div>
       ${renderSidebar([])}
       <div id="reindex-banner" class="reindex-banner" hidden></div>
@@ -376,6 +377,10 @@ export function renderAppShell(
            header opens this; it hangs from the state sub-bar. App-shell
            elements — HTMX-swap survivors, like the FABs they replace. -->
       <nav id="action-drawer" class="action-drawer" aria-label="Actions"></nav>
+      <!-- No aria-atomic: JAWS on Firefox stays silent on live regions that carry
+           aria-atomic="true" (FreedomScientific/standards-support#876), and this
+           region only ever holds one text node, so each rewrite is atomic anyway. -->
+      <div id="transcript-announcer" class="sr-only" role="status" aria-live="polite"></div>
     </div>
   </div>
   <script src="/js/color.js"></script>
@@ -1432,7 +1437,7 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
     </div>
 
     <!-- Status messages -->
-    <div id="general-settings-status" class="settings-status"></div>
+    <div id="general-settings-status" class="settings-status" role="status" aria-live="polite"></div>
 
     </div>
 
@@ -1564,7 +1569,7 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
     </section>
 
     <!-- Status messages -->
-    <div id="appearance-status" class="settings-status"></div>
+    <div id="appearance-status" class="settings-status" role="status" aria-live="polite"></div>
 
     </div>
 
@@ -2198,7 +2203,7 @@ export function renderSASettings(
       <button class="btn btn--primary" onclick="saveSASettings()">Save Changes</button>
     </div>
 
-    <div id="sa-settings-status" class="settings-status"></div>
+    <div id="sa-settings-status" class="settings-status" role="status" aria-live="polite"></div>
 
   </div>
 </div>
@@ -2326,6 +2331,15 @@ export function renderConversationList(
 }
 
 /**
+ * Visually hidden separator for adjacent inline spans.
+ *
+ * Flex containers drop whitespace-only text nodes, so a row title + date or a
+ * message author + timestamp are announced as one run ("Universe!06:37 PM",
+ * "ASSISTANT6:37 PM"). A real character between them restores the boundary.
+ */
+const SPEECH_SEP = `<span class="sr-only">, </span>`;
+
+/**
  * Render a single conversation list item with swipe actions.
  */
 export function renderConversationItem(
@@ -2341,7 +2355,10 @@ export function renderConversationItem(
     ? `<svg class="pulse-indicator" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" title="Active Pulse"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`
     : "";
 
-  // Swipe wrapper structure with edit action (delete removed - too easy to lose conversations)
+  // Swipe wrapper structure with edit action (delete removed - too easy to lose conversations).
+  // The anchor carries no hx-get: selectConversation() owns the swap (draft
+  // save, SSE reconnect, focus, context reset), and hx-get on the same anchor
+  // made every sidebar click swap #chat twice.
   return `<div class="conv-item-wrapper" data-conv-id="${escapedId}">
   <div class="conv-swipe-action conv-swipe-action--edit" data-action="edit">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2349,30 +2366,27 @@ export function renderConversationItem(
       <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
     </svg>
   </div>
+  <input type="checkbox" class="conv-select-checkbox" data-conv-id="${escapedId}" aria-label="Select ${title}">
   <a class="conv-item${isActive ? " active" : ""}"
     data-conv-id="${escapedId}"
-    hx-get="/fragments/chat/${encodedId}"
-    hx-target="#chat"
-    hx-swap="innerHTML"
-    hx-push-url="/c/${encodedId}">
-    <input type="checkbox" class="conv-select-checkbox" data-conv-id="${escapedId}" onclick="event.stopPropagation()">
+    href="/c/${encodedId}">
     <span class="conv-title">${pulseIndicator}${title}</span>
-    <span class="conv-date">${date}</span>
-    <div class="conv-actions">
-      <button class="conv-action-btn conv-action-btn--edit" data-action="edit" title="Edit title" onclick="event.preventDefault(); event.stopPropagation(); Psycheros.startTitleEdit('${escapedId}')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-        </svg>
-      </button>
-      <button class="conv-action-btn conv-action-btn--delete" data-action="delete" title="Delete" onclick="event.preventDefault(); event.stopPropagation(); Psycheros.showDeleteModal(['${escapedId}'])">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="3,6 5,6 21,6"/>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-        </svg>
-      </button>
-    </div>
+    <span class="conv-date">${SPEECH_SEP}${date}</span>
   </a>
+  <div class="conv-actions">
+    <button class="conv-action-btn conv-action-btn--edit" data-action="edit" aria-label="Edit title: ${title}" onclick="event.stopPropagation(); Psycheros.startTitleEdit('${escapedId}')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+      </svg>
+    </button>
+    <button class="conv-action-btn conv-action-btn--delete" data-action="delete" aria-label="Delete conversation: ${title}" onclick="event.stopPropagation(); Psycheros.showDeleteModal(['${escapedId}'])">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3,6 5,6 21,6"/>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+      </svg>
+    </button>
+  </div>
 </div>`;
 }
 
@@ -2410,7 +2424,11 @@ export function renderChatView(
     <div class="load-earlier-spinner"></div>
   </div>`
     : "";
-  return `<div class="messages" id="messages">
+  // The transcript holds the whole history, so it is never a live region —
+  // announcing it reads the conversation from the top. New replies go through
+  // #transcript-announcer instead (see announceTranscript in psycheros.js).
+  return `<h1 class="sr-only">Conversation</h1>
+<div class="messages" id="messages" role="log" aria-live="off">
   ${sentinel}${
     messages.length === 0
       ? ""
@@ -2683,7 +2701,7 @@ function renderTombstoneMessage(msg: Message): string {
     ? ` — reason: ${escapeHtml(tombstoneMeta.reason)}`
     : "";
   const id = escapeHtml(msg.id);
-  return `<div class="message tombstone" data-message-id="${id}" role="status">
+  return `<div class="message tombstone" data-message-id="${id}">
     <div class="tombstone-marker">✕</div>
     <div class="tombstone-content">
       <div class="tombstone-notice">${escapeHtml(tombstoneNotice)}</div>
@@ -2703,7 +2721,7 @@ function renderTombstoneMessage(msg: Message): string {
  */
 function renderGlitchedMessage(msg: Message): string {
   const id = escapeHtml(msg.id);
-  return `<div class="message glitched" data-message-id="${id}" role="alert">
+  return `<div class="message glitched" data-message-id="${id}">
     <div class="glitched-marker">⚠</div>
     <div class="glitched-content">
       <div class="glitched-placeholder">▒▒▒ MESSAGE CORRUPTED ▒▒▒</div>
@@ -2738,7 +2756,7 @@ export function renderUserMessage(
     : "";
   const timeStr = createdAt ? formatMessageTime(createdAt) : "";
   const timeEl = timeStr
-    ? `<span class="msg-timestamp">${escapeHtml(timeStr)}</span>`
+    ? `<span class="msg-timestamp">${escapeHtml(timeStr)}${SPEECH_SEP}</span>`
     : "";
   const displayName = escapeHtml(userName || "You");
 
@@ -2762,9 +2780,7 @@ export function renderUserMessage(
 
   return `<div class="msg msg--user" ${dataAttr}>
   <div class="msg-header">
-    ${timeEl}
-    <span>${displayName}</span>
-    ${editedIndicator}
+    <span class="msg-meta">${timeEl}<span class="msg-author">${displayName}</span>${editedIndicator}</span>
     ${actionButtons}
   </div>
   <div class="msg-content user-text" data-raw-content="${
@@ -2780,7 +2796,7 @@ function renderPulseMessage(msg: Message): string {
   const dataAttr = msg.id ? `data-message-id="${escapeHtml(msg.id)}"` : "";
   const timeStr = msg.createdAt ? formatMessageTime(msg.createdAt) : "";
   const timeEl = timeStr
-    ? `<span class="msg-timestamp">${escapeHtml(timeStr)}</span>`
+    ? `<span class="msg-timestamp">${SPEECH_SEP}${escapeHtml(timeStr)}</span>`
     : "";
   const pulseName = escapeHtml(msg.pulseName || "Pulse");
   const icon = pulseIconSvg(14);
@@ -2789,8 +2805,7 @@ function renderPulseMessage(msg: Message): string {
   return `<div class="msg msg--pulse" ${dataAttr}>
   <div class="msg-header">
     <span class="pulse-header-icon">${icon}</span>
-    <span>${pulseName}</span>
-    ${timeEl}
+    <span class="msg-meta"><span class="msg-author">${pulseName}</span>${timeEl}</span>
     ${actionButtons}
   </div>
   <div class="msg-content" data-raw-content="${escapeHtml(msg.content)}">${
@@ -2815,7 +2830,7 @@ export function renderAssistantMessage(
 
   const timeStr = msg.createdAt ? formatMessageTime(msg.createdAt) : "";
   const timeEl = timeStr
-    ? `<span class="msg-timestamp">${escapeHtml(timeStr)}</span>`
+    ? `<span class="msg-timestamp">${SPEECH_SEP}${escapeHtml(timeStr)}</span>`
     : "";
   const displayName = escapeHtml(entityName || "Assistant");
 
@@ -2823,9 +2838,7 @@ export function renderAssistantMessage(
     escapeHtml(msg.id)
   }">
   <div class="msg-header">
-    <span>${displayName}</span>
-    ${timeEl}
-    ${editedIndicator}
+    <span class="msg-meta"><span class="msg-author">${displayName}</span>${timeEl}${editedIndicator}</span>
     ${metrics ? renderMetricsIndicator(metrics) : ""}
     ${actionButtons}
   </div>
@@ -2972,8 +2985,8 @@ export function renderMetricsIndicator(metrics: TurnMetrics): string {
     .join("");
 
   return `<div class="metrics-indicator">
-    <span class="metrics-indicator-icon">&#9201;</span>
-    <span class="metrics-indicator-summary">${summary}</span>
+    <span class="metrics-indicator-icon" aria-hidden="true">&#9201;</span>
+    <span class="metrics-indicator-summary"><span class="sr-only">, </span>${summary}</span>
     <div class="metrics-tooltip">${tooltipRows}</div>
   </div>`;
 }
@@ -2982,12 +2995,12 @@ export function renderMetricsIndicator(metrics: TurnMetrics): string {
  * Render the empty state when no conversation is selected.
  */
 export function renderEmptyState(): string {
-  return `<div class="messages" id="messages">
+  return `<div class="messages" id="messages" role="log" aria-live="off">
   <div class="empty-state" id="empty-state">
     <div class="empty-logo">
       ${renderBrandMark("empty-logo-grad", 120, "Psycheros")}
     </div>
-    <div class="empty-title">Psycheros</div>
+    <h1 class="empty-title">Psycheros</h1>
     <div class="empty-tagline">seize the means of companionship</div>
     <p class="empty-text">Start a new conversation or select one from the sidebar.</p>
   </div>
@@ -3013,10 +3026,11 @@ export function renderInputArea(): string {
       id="message-input"
       placeholder="Type your message..."
       rows="1"
+      aria-label="Message"
       onkeydown="Psycheros.handleKeyDown(event)"
       oninput="Psycheros.autoResize(this); Psycheros.saveDraft()"
     ></textarea>
-    <button class="send-btn" id="send-btn" onclick="Psycheros.sendMessage()">
+    <button class="send-btn" id="send-btn" aria-label="Send message" onclick="Psycheros.sendMessage()">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
     </button>
   </div>
@@ -3248,6 +3262,7 @@ export function renderFileList(
           type="text"
           class="settings-create-file-input"
           id="custom-filename-input"
+          aria-label="File name"
           placeholder="New file name (e.g., my_context.md)"
           pattern="[a-zA-Z0-9_]+\\.md"
         />
@@ -3402,7 +3417,7 @@ export function renderFileEditor(
       hx-target="#prompt-label-status"
       hx-swap="innerHTML"
     />
-    <div id="prompt-label-status" class="settings-prompt-label-status"></div>
+    <div id="prompt-label-status" class="settings-prompt-label-status" role="status" aria-live="polite"></div>
   </div>
   <form
     class="settings-editor-form"
@@ -3414,6 +3429,7 @@ export function renderFileEditor(
       class="settings-textarea"
       name="content"
       data-tokenize
+      aria-label="Prompt content"
       placeholder="Enter prompt content..."
       rows="20"
     >${safeContent}</textarea>
@@ -3427,7 +3443,7 @@ export function renderFileEditor(
       >Cancel</button>
       <button type="submit" class="btn btn--primary">Save</button>
     </div>
-    <div id="settings-editor-status" class="settings-editor-status"></div>
+    <div id="settings-editor-status" class="settings-editor-status" role="status" aria-live="polite"></div>
   </form>
 </div>`;
 }
@@ -3818,6 +3834,7 @@ export function renderMemoryList(
           type="text"
           class="settings-create-file-input"
           id="significant-title-input"
+          aria-label="Memory title"
           placeholder="Memory title..."
           style="flex: 1 1 100%; padding: 8px; border: 1px solid var(--c-border); border-radius: 6px; background: var(--c-bg-raised); color: var(--c-fg); font-family: inherit; font-size: 13px;"
         />
@@ -4033,6 +4050,7 @@ export function renderMemoryEditor(
       class="settings-textarea"
       name="content"
       data-tokenize
+      aria-label="Memory content"
       placeholder="Memory content..."
       rows="20"
     >${safeContent}</textarea>
@@ -4046,7 +4064,7 @@ export function renderMemoryEditor(
       >Cancel</button>
       <button type="submit" class="btn btn--primary">Save</button>
     </div>
-    <div id="settings-editor-status" class="settings-editor-status"></div>
+    <div id="settings-editor-status" class="settings-editor-status" role="status" aria-live="polite"></div>
   </form>
 </div>`;
 }
@@ -5949,7 +5967,7 @@ export function renderEmbeddingsTab(
     escapeHtml(activePreset?.label ?? settings.modelRepoId)
   }</span>${activePreset ? ` (${activePreset.downloadSizeMb}MB)` : ""}
         </button>
-        <span id="embedding-download-status" class="theme-section-desc" style="margin-left:8px;"></span>
+        <span id="embedding-download-status" class="theme-section-desc" role="status" aria-live="polite" style="margin-left:8px;"></span>
       </div>
       <div id="embedding-downloaded-badge" class="theme-section-desc" style="${
     activeDownloaded ? "" : "display:none;"
@@ -5993,7 +6011,7 @@ export function renderEmbeddingsTab(
 
     <div style="margin-top: 16px;">
       <button id="embedding-save-btn" class="btn btn--primary" onclick="globalThis.saveEmbeddingSettings()">Save & Re-embed</button>
-      <span id="embedding-save-status" class="theme-section-desc" style="margin-left:12px;"></span>
+      <span id="embedding-save-status" class="theme-section-desc" role="status" aria-live="polite" style="margin-left:12px;"></span>
     </div>
 
     <div id="embedding-reembed-progress" class="import-progress" style="display:none;margin-top:16px;">
@@ -6295,7 +6313,7 @@ export function renderLLMProfileEdit(
     </div>
 
     <!-- Status -->
-    <div id="llm-status" class="llm-status" style="display:none;"></div>
+    <div id="llm-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
   </div>
 </div>
@@ -6352,7 +6370,7 @@ export function renderLLMSettings(_settings: LLMSettings): string {
     </div>
   </div>
   <div class="settings-content" id="settings-content">
-    <div class="llm-status" style="display:block;">This settings page has been updated. Please refresh.</div>
+    <div class="llm-status" role="status" aria-live="polite" style="display:block;">This settings page has been updated. Please refresh.</div>
   </div>
 </div>`;
 }
@@ -6667,7 +6685,7 @@ export function renderConnectionsSettings(
     </div>
 
     <!-- Status -->
-    <div id="ws-status" class="llm-status" style="display:none;"></div>
+    <div id="ws-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
     </div>
 
@@ -6734,7 +6752,7 @@ export function renderConnectionsSettings(
           </button>
           <button class="btn btn--primary btn--xs" onclick="saveBLEDevices()">Save Devices</button>
         </div>
-        <div id="ble-devices-status" style="margin-top:8px;display:none;" class="llm-status"></div>
+        <div id="ble-devices-status" style="margin-top:8px;display:none;" class="llm-status" role="status" aria-live="polite"></div>
       </section>
       <template id="ble-blank-device-row">${renderBLEDeviceRow()}</template>
     </div>
@@ -7053,7 +7071,7 @@ export function renderConnectionsDiscordSettings(
       <button class="btn btn--ghost" onclick="resetDiscordDefaults(event)">Reset to Defaults</button>
     </div>
 
-    <div id="discord-status" class="llm-status" style="display:none;"></div>
+    <div id="discord-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
   </div>
 </div>
@@ -7362,7 +7380,7 @@ function renderLovenseTab(
       <h3 class="theme-section-title">Test Connection</h3>
       <p class="theme-section-desc">Verify the connection to Lovense Connect and discover connected toys</p>
       <button class="btn btn--secondary" id="lovense-test-btn" onclick="testLovenseConnection()">Test Connection</button>
-      <div id="lovense-test-status" class="llm-status" style="display:none; margin-top: var(--sp-2);"></div>
+      <div id="lovense-test-status" class="llm-status" role="status" aria-live="polite" style="display:none; margin-top: var(--sp-2);"></div>
       <div id="lovense-toys-list" style="display:none; margin-top: var(--sp-2);">
         <div class="lovense-toys-grid"></div>
       </div>
@@ -7393,7 +7411,7 @@ function renderLovenseTab(
     </div>
 
     <!-- Status -->
-    <div id="lovense-status" class="llm-status" style="display:none;"></div>
+    <div id="lovense-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
     <style>
       .lovense-toys-grid { display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -7601,7 +7619,7 @@ function renderButtplugTab(
       <h3 class="theme-section-title">Test Connection</h3>
       <p class="theme-section-desc">Verify the connection to Intiface Central and discover connected devices</p>
       <button class="btn btn--secondary" id="buttplug-test-btn" onclick="testButtplugConnection()">Test Connection</button>
-      <div id="buttplug-test-status" class="llm-status" style="display:none; margin-top: var(--sp-2);"></div>
+      <div id="buttplug-test-status" class="llm-status" role="status" aria-live="polite" style="display:none; margin-top: var(--sp-2);"></div>
       <div id="buttplug-devices-list" style="display:none; margin-top: var(--sp-2);">
         <div class="buttplug-devices-grid"></div>
       </div>
@@ -7628,7 +7646,7 @@ function renderButtplugTab(
     </div>
 
     <!-- Status -->
-    <div id="buttplug-status" class="llm-status" style="display:none;"></div>
+    <div id="buttplug-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
     <style>
       .intimacy-section-header { margin: var(--sp-8) 0 var(--sp-4) 0; padding-bottom: var(--sp-3); border-bottom: 1px solid var(--c-border); }
@@ -7900,7 +7918,7 @@ function renderHomeSettingsContent(
       <button class="btn btn--primary" onclick="saveHomeSettings(event)">Save Settings</button>
     </div>
 
-    <div id="home-status" class="llm-status" style="display:none;"></div>
+    <div id="home-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
   <style>
     .home-device-list { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
@@ -8388,7 +8406,7 @@ export function renderToolsSettings(
     </div>
 
     <!-- Status -->
-    <div id="tools-status" class="llm-status" style="display:none;"></div>
+    <div id="tools-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
   </div>
 
@@ -8700,6 +8718,7 @@ export function renderInstructionsTab(settings: MemorySettings): string {
           class="settings-textarea"
           name="dailyInstructions"
           rows="8"
+          aria-label="Custom daily memory instructions"
           placeholder="e.g. I do not include vitamin reminders in my daily memories. I always mention how I felt about creative projects. When I remember conversations about music, I name specific songs or artists that came up."
         >${escapeHtml(settings.dailyInstructions)}</textarea>
       </div>
@@ -8727,7 +8746,7 @@ export function renderInstructionsTab(settings: MemorySettings): string {
         <button class="btn btn--primary" type="submit">
           Save
         </button>
-        <span id="instructions-save-status"></span>
+        <span id="instructions-save-status" role="status" aria-live="polite"></span>
       </div>
     </form>
   </div>
@@ -9702,7 +9721,7 @@ export function renderDiscordHub(data: DiscordHubData): string {
           hx-target="#chat"
           hx-swap="innerHTML">Settings</button>
       </div>
-      <div id="discord-hub-status" class="llm-status" style="display:none;"></div>
+      <div id="discord-hub-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
     `
       : `
       <div class="discord-info-bar">
@@ -10239,11 +10258,13 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
     (settings.pttKeys ?? ["Space"]).map((key, i) =>
       `<span class="ptt-key-chip" data-index="${i}">
               <span>${escapeHtml(formatPTTKey(key))}</span>
-              <button type="button" onclick="removePTTKeyBinding(${i})" style="background: none; border: none; color: var(--c-fg-subtle); cursor: pointer; padding: 0 0 0 4px; font-size: var(--font-size-xs);">&times;</button>
+              <button type="button" onclick="removePTTKeyBinding(${i})" aria-label="Remove ${
+        escapeHtml(formatPTTKey(key))
+      } binding" title="Remove binding" style="background: none; border: none; color: var(--c-fg-subtle); cursor: pointer; padding: 0 0 0 4px; font-size: var(--font-size-xs);">&times;</button>
             </span>`
     ).join("")
   }
-          <button type="button" class="btn btn--ghost btn--sm" id="ptt-add-key-btn" onclick="capturePTTKey()" style="font-size: var(--font-size-xs);">+ Add binding</button>
+          <button type="button" class="btn btn--ghost btn--sm" id="ptt-add-key-btn" onclick="capturePTTKey()" style="font-size: var(--font-size-xs);"><span><span aria-hidden="true">+</span> Add binding</span></button>
         </div>
         <div id="ptt-capture-hint" style="display: none; margin-top: var(--sp-2); font-size: var(--font-size-xs); color: var(--c-accent);">
           Press any key or mouse button...
@@ -10810,7 +10831,7 @@ export function renderVoiceProfileEdit(
         <div id="pronunciation-list">
           ${pronunciationRows()}
         </div>
-        <button class="btn btn--ghost btn--sm" onclick="addPronunciationEntry()" style="margin-top: var(--sp-2);">+ Add Entry</button>
+        <button class="btn btn--ghost btn--sm" onclick="addPronunciationEntry()" style="margin-top: var(--sp-2);" aria-label="Add Entry: pronunciation"><span><span aria-hidden="true">+</span> Add Entry</span></button>
       </section>
 
       <!-- STT Corrections -->
@@ -10820,7 +10841,7 @@ export function renderVoiceProfileEdit(
         <div id="stt-corrections-list">
           ${sttCorrectionRows()}
         </div>
-        <button class="btn btn--ghost btn--sm" onclick="addSTTCorrectionEntry()" style="margin-top: var(--sp-2);">+ Add Entry</button>
+        <button class="btn btn--ghost btn--sm" onclick="addSTTCorrectionEntry()" style="margin-top: var(--sp-2);" aria-label="Add Entry: corrections"><span><span aria-hidden="true">+</span> Add Entry</span></button>
       </section>
 
       <!-- Action Bar -->

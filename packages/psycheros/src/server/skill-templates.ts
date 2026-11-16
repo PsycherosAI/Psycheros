@@ -69,7 +69,7 @@ export function renderSkillEditor(skill: SkillEditorData): string {
         <button class="btn btn--ghost" onclick="psycherosSkillsCancel()">Cancel</button>
       </div>
     </div>
-    <div id="skills-editor-status" class="llm-status" style="display:none;"></div>
+    <div id="skills-editor-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
   </div>
 </div>`;
 }
