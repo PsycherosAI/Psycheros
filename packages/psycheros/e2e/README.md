@@ -36,6 +36,8 @@ The `*.e2e.mjs` suffix keeps `deno test` from collecting these files.
 - `focus_hidden_panels.e2e.mjs` - the closed sidebar and graph node panel are
   `inert`, so Tab never reaches them.
 - `target_size.e2e.mjs` - icon-only controls meet 24x24 (2.5.8).
+- `voice_modal.e2e.mjs` - the voice call owns focus and Escape dismissal even
+  when an old push-to-talk setting bound Escape.
 
 `run.mjs` runs them all in sequence. Each prints an `ok`/`FAIL` line per check
 and exits non-zero on failure.

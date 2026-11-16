@@ -1044,8 +1044,9 @@ async function loadConversationFromUrl(
       });
     }, 500);
 
-    // Focus input
-    focusInputWhenReady();
+    // Focus input unless a caller is preserving focus across a background
+    // refresh (for example, when a modal closes).
+    if (moveFocus) focusInputWhenReady();
     syncViewTitleAndFocus(moveFocus);
 
     // Restore any saved draft for this conversation (Discord-style persistence)
@@ -1147,7 +1148,7 @@ async function newConversation() {
   }
 }
 
-function selectConversation(id) {
+function selectConversation(id, { moveFocus = true } = {}) {
   // Don't abort in-progress generation — let it continue in the background
   // so the full response is persisted on the server. We just detach the
   // UI state from the old conversation's stream.
@@ -1196,7 +1197,7 @@ function selectConversation(id) {
   }
 
   // Load chat content (handles both initial load and returning from settings/views)
-  loadConversationFromUrl(id);
+  const load = loadConversationFromUrl(id, { moveFocus });
 
   // Update URL to reflect the selected conversation
   history.pushState({}, '', `/c/${id}`);
@@ -1207,6 +1208,7 @@ function selectConversation(id) {
   // Re-evaluate the hosted-conversation composer guard for the newly
   // selected conversation immediately (the 8s poll would lag a switch).
   updateFluxButtonVisibility();
+  return load;
 }
 
 // =============================================================================
@@ -1905,6 +1907,8 @@ async function startVoiceCall() {
     showToast('Wait for the current response to finish');
     return;
   }
+  // The Voice row leaves with the drawer; return focus to the trigger.
+  const opener = document.getElementById('action-menu-btn');
   try {
     const resp = await fetch('/api/voice/status');
     const status = await resp.json();
@@ -1921,7 +1925,7 @@ async function startVoiceCall() {
     showToast('Select a conversation first');
     return;
   }
-  openVoiceChat(convId);
+  openVoiceChat(convId, opener);
 }
 
 async function testTTSConnection() {
@@ -2339,6 +2343,10 @@ function handlePTTKeyCapture(e) {
   if (!pttKeyCaptureActive) return;
   e.preventDefault();
   e.stopPropagation();
+  if (e.code === 'Escape') {
+    cancelPTTKeyCapture();
+    return;
+  }
   var key = e.code;
   addPTTKeyBinding(key);
   cancelPTTKeyCapture();

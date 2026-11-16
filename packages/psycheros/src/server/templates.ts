@@ -10887,13 +10887,16 @@ export function renderVoiceCallView(
   voiceChatDebug: boolean,
 ): string {
   const sttProvider = profile.providerSettings.stt.provider;
-  return `<div class="voice-overlay" id="voice-overlay">
+  return `<dialog class="voice-overlay" id="voice-overlay" aria-labelledby="voice-call-title">
   <div class="voice-call">
+    <h2 class="sr-only" id="voice-call-title" tabindex="-1">Voice call</h2>
     <div class="voice-status" id="voice-status">
       <span class="voice-status-dot voice-status-dot--connecting" id="voice-status-dot"></span>
-      <span id="voice-status-text">Connecting...</span>
+      <span id="voice-status-text" role="status" aria-live="polite">Connecting...</span>
       <button class="btn btn--ghost" id="test-tts-btn" onclick="testTTSConnection()" style="margin-left: auto; font-size: var(--font-size-xs);">Test TTS</button>
     </div>
+
+    <div id="voice-announcer" class="sr-only" role="status" aria-live="polite"></div>
 
     <div class="voice-transcript" id="voice-transcript" aria-live="polite"></div>
 
@@ -10912,10 +10915,10 @@ export function renderVoiceCallView(
     </div>
 
     <div class="voice-controls">
-      <button class="voice-btn" id="voice-btn-yinyang" onclick="toggleYinYangMode()" aria-label="Toggle Yin Yang mode (type instead of speak)">
+      <button class="voice-btn" id="voice-btn-yinyang" onclick="toggleYinYangMode()" aria-pressed="false" aria-label="Toggle Yin Yang mode (type instead of speak)">
         ☯
       </button>
-      <button class="voice-btn" id="voice-btn-ptt-toggle" onclick="togglePTTMode()" aria-label="Toggle push-to-talk">
+      <button class="voice-btn" id="voice-btn-ptt-toggle" onclick="togglePTTMode()" aria-pressed="false" aria-label="Toggle push-to-talk">
         🎙️
       </button>
       <button class="voice-btn voice-btn--end" onclick="endVoiceChat()" aria-label="End voice call">
@@ -10927,6 +10930,7 @@ export function renderVoiceCallView(
       <button class="voice-hold-circle" id="voice-hold-btn"
         onmousedown="startPTT()" ontouchstart="startPTT()"
         onmouseup="endPTT()" ontouchend="endPTT()"
+        onkeydown="handleHoldKey(event)"
         aria-label="Hold to talk" title="Hold to talk">
         <span>HOLD<br>TO<br>TALK</span>
       </button>
@@ -10934,7 +10938,6 @@ export function renderVoiceCallView(
 
     <div class="voice-tools" id="voice-tools"></div>
   </div>
-</div>
 
 <script type="application/json" id="voice-config">${
     escapeHtml(
@@ -10956,7 +10959,8 @@ export function renderVoiceCallView(
         voiceEffect: profile.voiceEffect ?? "none",
       }),
     )
-  }</script>`;
+  }</script>
+</dialog>`;
 }
 
 /**
