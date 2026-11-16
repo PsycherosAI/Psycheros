@@ -7286,6 +7286,7 @@ async function loadGallery(offset) {
 
     galleryOffset = offset + 24;
     const esc = function(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+    const attr = function(s) { return esc(String(s)).replace(/"/g, '&quot;'); };
 
     const cardsHtml = data.images.map(function(img) {
       const sizeStr = img.size >= 1024 * 1024 ? (img.size / (1024 * 1024)).toFixed(1) + ' MB' : (img.size / 1024).toFixed(1) + ' KB';
@@ -7297,7 +7298,9 @@ async function loadGallery(offset) {
       const thumbUrl = img.url.replace(/^\/(generated-images|chat-attachments)\//, '/$1/thumbs/') + '.webp';
       return '<div class="gallery-card" data-category="' + img.category + '"' + promptAttr + '>'
         + '<div class="gallery-thumb-wrap">'
-        + '<img src="' + esc(thumbUrl) + '" class="gallery-thumb" loading="lazy" onclick="openLightbox(\'' + esc(img.url) + '\',\'' + esc(img.filename) + '\')"/>'
+        + '<button type="button" class="gallery-thumb-btn" aria-label="Open image ' + attr(img.filename) + '" onclick="openLightbox(\'' + esc(img.url) + '\',\'' + esc(img.filename) + '\',this)">'
+        + '<img src="' + esc(thumbUrl) + '" class="gallery-thumb" loading="lazy" alt=""/>'
+        + '</button>'
         + '<span class="gallery-badge ' + catClass + '">' + catLabel + '</span>'
         + '</div>'
         + '<div class="gallery-meta">'
@@ -7335,40 +7338,113 @@ globalThis.copyFilename = async function(filename, btn) {
   }
 };
 
-globalThis.openLightbox = function(url, filename) {
+let galleryLightboxOpener = null;
+let galleryLightboxAppWasInert = false;
+let galleryLightboxBodyOverflow = null;
+
+globalThis.openLightbox = function(url, filename, opener) {
   closeLightbox();
+
+  // Restore focus to the thumbnail even in browsers that do not focus a
+  // button on click, so the caller passes itself.
+  galleryLightboxOpener = opener instanceof HTMLElement
+    ? opener
+    : (document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null);
+  const app = document.querySelector('.app');
+  if (app) {
+    galleryLightboxAppWasInert = app.inert;
+    app.inert = true;
+  }
+  if (galleryLightboxBodyOverflow === null) {
+    galleryLightboxBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
 
   const overlay = document.createElement('div');
   overlay.className = 'gallery-lightbox';
   overlay.id = 'gallery-lightbox';
+  overlay.tabIndex = -1;
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-labelledby', 'gallery-lightbox-title');
   overlay.onclick = function(e) { if (e.target === overlay) closeLightbox(); };
-  overlay.innerHTML = '<button class="gallery-lightbox-close" onclick="closeLightbox()">&times;</button>'
-    + '<img src="' + url + '" onclick="event.stopPropagation()"/>'
-    + '<div class="gallery-lightbox-info">' + filename + '</div>';
+  overlay.innerHTML = '<button type="button" class="gallery-lightbox-close" aria-label="Close image">&times;</button>'
+    + '<img alt=""/>';
+  const img = overlay.querySelector('img');
+  img.src = url;
+  img.addEventListener('click', function(e) { e.stopPropagation(); });
+  overlay.querySelector('.gallery-lightbox-close').addEventListener('click', closeLightbox);
+
+  const title = document.createElement('h2');
+  title.className = 'gallery-lightbox-info';
+  title.id = 'gallery-lightbox-title';
+  title.textContent = filename;
+  overlay.appendChild(title);
+
   document.body.appendChild(overlay);
-  document.addEventListener('keydown', closeLightboxOnEsc);
+  document.addEventListener('keydown', handleLightboxKeydown);
 
   // Swipe to dismiss on touch devices
   let startY = 0;
-  const img = overlay.querySelector('img');
-  if (img) {
-    img.addEventListener('touchstart', function(e) { startY = e.touches[0].clientY; }, { passive: true });
-    img.addEventListener('touchend', function(e) {
-      const dy = e.changedTouches[0].clientY - startY;
-      if (dy > 80) closeLightbox();
-    }, { passive: true });
-  }
+  img.addEventListener('touchstart', function(e) { startY = e.touches[0].clientY; }, { passive: true });
+  img.addEventListener('touchend', function(e) {
+    const dy = e.changedTouches[0].clientY - startY;
+    if (dy > 80) closeLightbox();
+  }, { passive: true });
+
+  overlay.focus();
 };
 
 function closeLightbox() {
   const overlay = document.getElementById('gallery-lightbox');
-  if (overlay) overlay.remove();
-  document.removeEventListener('keydown', closeLightboxOnEsc);
+  if (!overlay) return;
+  overlay.remove();
+  document.removeEventListener('keydown', handleLightboxKeydown);
+  const app = document.querySelector('.app');
+  if (app) app.inert = galleryLightboxAppWasInert;
+  if (galleryLightboxBodyOverflow !== null) {
+    document.body.style.overflow = galleryLightboxBodyOverflow;
+    galleryLightboxBodyOverflow = null;
+  }
+  const opener = galleryLightboxOpener;
+  galleryLightboxOpener = null;
+  if (opener && opener.isConnected) opener.focus();
 }
 globalThis.closeLightbox = closeLightbox;
 
-function closeLightboxOnEsc(e) {
-  if (e.key === 'Escape') closeLightbox();
+/**
+ * Escape closes the lightbox and Tab stays on the close button, so keyboard
+ * focus cannot wander into the inert page behind the dialog.
+ */
+function handleLightboxKeydown(e) {
+  const overlay = document.getElementById('gallery-lightbox');
+  if (!overlay) return;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeLightbox();
+    return;
+  }
+  if (e.key !== 'Tab') return;
+  const items = Array.from(overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+    .filter(function(el) { return !el.disabled && el.offsetParent !== null; });
+  if (items.length === 0) {
+    e.preventDefault();
+    overlay.focus();
+    return;
+  }
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (e.shiftKey) {
+    if (document.activeElement === first || document.activeElement === overlay) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else if (document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
 }
 
 // Initialize gallery offset from server-rendered data attribute after HTMX swap

@@ -9232,7 +9232,9 @@ export function renderVisionGalleryTab(data: {
         escapeHtml(img.category)
       }"${promptAttr}>
       <div class="gallery-thumb-wrap">
-        <img src="${escapedThumb}" class="gallery-thumb" loading="lazy" onclick="openLightbox('${escapedUrl}','${escapedFilename}')"/>
+        <button type="button" class="gallery-thumb-btn" aria-label="Open image ${escapedFilename}" onclick="openLightbox('${escapedUrl}','${escapedFilename}',this)">
+        <img src="${escapedThumb}" class="gallery-thumb" loading="lazy" alt=""/>
+        </button>
         <span class="gallery-badge ${categoryClass}">${categoryLabel}</span>
       </div>
       <div class="gallery-meta">
@@ -9264,7 +9266,9 @@ export function renderVisionGalleryTab(data: {
     .gallery-card { border: 1px solid var(--c-border); border-radius: var(--radius-md); overflow: hidden; background: var(--c-bg); transition: border-color var(--transition); }
     .gallery-card:hover { border-color: var(--c-accent); }
     .gallery-thumb-wrap { position: relative; }
-    .gallery-thumb { width: 100%; aspect-ratio: 1; object-fit: cover; cursor: pointer; display: block; }
+    .gallery-thumb-btn { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+    .gallery-thumb-btn:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+    .gallery-thumb { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
     .gallery-badge { position: absolute; top: 6px; left: 6px; font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: var(--radius-sm); pointer-events: none; text-transform: uppercase; letter-spacing: 0.3px; }
     .gallery-badge--generated { background: var(--c-scrim-strong); color: #fff; }
     .gallery-badge--user { background: var(--c-fg); color: var(--c-bg); }
@@ -9283,7 +9287,7 @@ export function renderVisionGalleryTab(data: {
       .gallery-lightbox-close { top: 8px; right: 8px; width: 40px; height: 40px; }
       .gallery-lightbox-info { padding: 0 12px; }
     }
-    .gallery-lightbox-info { color: #ccc; font-size: var(--font-size-sm); font-family: var(--font-mono, monospace); text-align: center; max-width: 90vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .gallery-lightbox-info { color: #ccc; font-size: var(--font-size-sm); font-family: var(--font-mono, monospace); text-align: center; max-width: 90vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
     .gallery-lightbox-close { position: absolute; top: var(--sp-4); right: var(--sp-4); background: rgba(255,255,255,0.1); border: none; color: #fff; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; }
     .gallery-lightbox-close:hover { background: rgba(255,255,255,0.2); }
   </style>
