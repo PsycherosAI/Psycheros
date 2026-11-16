@@ -1,0 +1,50 @@
+<div
+  class="flux-overlay"
+  id="flux-overlay"
+  role="region"
+  aria-labelledby="flux-overlay-title"
+>
+  <div class="flux-overlay-shell">
+    <div class="flux-overlay-header">
+      <span>
+        <span id="flux-badge" class="flux-badge running">Running</span>
+        <h2 class="flux-overlay-title" id="flux-overlay-title">Flux</h2>
+      </span>
+      <div class="flux-overlay-controls">
+        <button onclick="closeFluxOverlay()">Close</button>
+        <button id="flux-btn-stop" onclick='fluxOverlayControl("stop")'>
+          Stop
+        </button>
+      </div>
+    </div>
+    <div id="flux-mood-strip"></div>
+    <div id="flux-mode-row">
+      <span id="flux-mode-badge" class="flux-mode-badge"></span>
+    </div>
+    <div id="flux-organ-health"></div>
+    <div id="flux-timeline"></div>
+    <div class="flux-input-bar">
+      <textarea
+        id="flux-input"
+        rows="1"
+        aria-label="Message"
+        placeholder="say something..."
+        autocomplete="off"
+      ></textarea>
+      <button id="flux-send">send</button>
+    </div>
+  </div>
+</div>
+<div id="flux-toast"></div>
+
+<script type="application/json" id="flux-config">
+{ "conversationId": "conv-1", "entityName": "Entity", "userName": "User" }
+</script>
+<script type="application/json" id="flux-overlay-cfg">
+{
+  "state": "running",
+  "moodState": null,
+  "organHealth": null,
+  "hostTitle": "Test conversation"
+}
+</script>

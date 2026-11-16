@@ -17,6 +17,7 @@
  */
 
 let overlayActive = false;
+let overlayOpener = null;
 let es = null;
 let pollTimer = null;
 let toastTimer = null;
@@ -117,8 +118,9 @@ const FluxScroll = (() => {
 // Mount / teardown
 // ---------------------------------------------------------------------------
 
-async function startFluxOverlay(convId) {
+async function startFluxOverlay(convId, opener) {
   if (overlayActive) return;
+  overlayOpener = opener || null;
   // Start FIRST — a refusal (already active elsewhere) surfaces before
   // any UI mounts.
   try {
@@ -373,6 +375,39 @@ function setModeBadge(mode) {
   }
 }
 
+// Closing Flux re-renders the thread, so the trigger element may be replaced.
+// Prefer the original opener while it lives, then the rebuilt Flux ON
+// segment, then the composer. The view is not modal: this only puts focus
+// back on a sensible control and never traps it.
+function restoreFluxFocus() {
+  const opener = overlayOpener;
+  overlayOpener = null;
+  let tries = 0;
+  const place = () => {
+    if (opener && opener.isConnected && typeof opener.focus === 'function') {
+      opener.focus();
+      return true;
+    }
+    const seg = document.querySelector('.state-flux');
+    if (seg) {
+      seg.focus();
+      return true;
+    }
+    const input = document.getElementById('message-input');
+    if (input) {
+      input.focus();
+      return true;
+    }
+    return false;
+  };
+  const attempt = () => {
+    // The state sub-bar refreshes asynchronously after the swap, so retry
+    // briefly before settling for the composer.
+    if (!place() && ++tries < 40) setTimeout(attempt, 50);
+  };
+  setTimeout(attempt, 0);
+}
+
 function cleanup() {
   overlayActive = false;
   FluxScroll.teardown();
@@ -394,8 +429,17 @@ function cleanup() {
   const conv = conversationId;
   conversationId = null;
   if (conv && window.Psycheros?.selectConversation) {
-    window.Psycheros.selectConversation(conv);
+    // moveFocus:false keeps the composer from stealing focus before the
+    // opener is restored.
+    const done = window.Psycheros.selectConversation(conv, {
+      moveFocus: false,
+    });
+    if (done && typeof done.then === 'function') {
+      done.then(restoreFluxFocus, restoreFluxFocus);
+      return;
+    }
   }
+  restoreFluxFocus();
 }
 
 // ---------------------------------------------------------------------------

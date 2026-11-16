@@ -11023,14 +11023,14 @@ export function renderFluxOverlayView(
       | null;
   },
 ): string {
-  return `<div class="flux-overlay" id="flux-overlay">
+  return `<div class="flux-overlay" id="flux-overlay" role="region" aria-labelledby="flux-overlay-title">
   <div class="flux-overlay-shell">
     <div class="flux-overlay-header">
       <span>
         <span id="flux-badge" class="flux-badge ${initialState.state}">${
     initialState.state.charAt(0).toUpperCase() + initialState.state.slice(1)
   }</span>
-        <strong>Flux</strong>
+        <h2 class="flux-overlay-title" id="flux-overlay-title">Flux</h2>
       </span>
       <div class="flux-overlay-controls">
         <button onclick="closeFluxOverlay()">Close</button>

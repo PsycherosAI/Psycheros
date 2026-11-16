@@ -34,6 +34,16 @@
   border-bottom: 1px solid var(--c-border);
 }
 
+/* Real heading, inline look: the view name must be announced when focus
+   enters, without changing the header's appearance. */
+.flux-overlay-title {
+  display: inline;
+  margin: 0;
+  font-size: inherit;
+  font-weight: 700;
+  line-height: inherit;
+}
+
 .flux-badge {
   font-size: 11px;
   padding: 3px 10px;

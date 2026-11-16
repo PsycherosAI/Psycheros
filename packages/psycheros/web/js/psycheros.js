@@ -1899,8 +1899,11 @@ async function retryFailedTurn(failedAssistantEl) {
 }
 
 /**
- * Start a voice call for the current conversation.
- * Checks voice status first, then delegates to voice.js openVoiceChat.
+ * Start the Flux overlay for the current conversation.
+ *
+ * The trigger is captured before mounting: closing Flux re-renders the
+ * thread, and the state sub-bar may be rebuilt too, so the element that had
+ * focus has to be remembered up front rather than looked up afterwards.
  */
 async function startFluxOverlay() {
   const convId = currentConversationId;
@@ -1912,7 +1915,8 @@ async function startFluxOverlay() {
     showToast('Flux interface not loaded');
     return;
   }
-  window.startFluxOverlayFn(convId);
+  const opener = document.activeElement;
+  window.startFluxOverlayFn(convId, opener);
 }
 
 async function startVoiceCall() {
