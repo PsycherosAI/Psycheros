@@ -32,6 +32,28 @@
   }
 
   /**
+   * Set the visual progress fill and mirror the value onto the enclosing
+   * progressbar so assistive tech reads a real percentage.
+   */
+  function setImportProgress(fill, pct) {
+    if (!fill) return;
+    var value = Math.max(0, Math.min(100, Math.round(pct) || 0));
+    fill.style.width = value + "%";
+    var bar = fill.closest('[role="progressbar"]');
+    if (bar) bar.setAttribute("aria-valuenow", String(value));
+  }
+
+  /**
+   * Announce one line through the flow's persistent polite status region.
+   * Callers pass phase changes and the final result only: the ticking
+   * counters stay visual so the region does not flood.
+   */
+  function announceImportStatus(statusEl, text) {
+    if (!statusEl || !text || statusEl.textContent === text) return;
+    statusEl.textContent = text;
+  }
+
+  /**
    * Refresh the log entries by fetching filtered data from the API.
    */
   window.adminRefreshLogs = function () {
@@ -401,6 +423,7 @@
     var progressFill = document.getElementById("admin-entity-import-fill");
     var progressText = document.getElementById("admin-entity-import-text");
     var overlay = document.getElementById("admin-entity-import-overlay");
+    var statusEl = document.getElementById("admin-entity-import-status");
 
     if (!btn || !outputEl) return;
 
@@ -408,8 +431,9 @@
     btn.innerHTML = '<span class="admin-action-spinner"></span> Importing...';
 
     if (progressSection) progressSection.style.display = "";
-    if (progressFill) progressFill.style.width = "0%";
+    setImportProgress(progressFill, 0);
     if (progressText) progressText.textContent = "Preparing...";
+    announceImportStatus(statusEl, "Entity import started.");
     outputEl.style.display = "none";
     outputEl.innerHTML = "";
 
@@ -430,6 +454,7 @@
       var decoder = new TextDecoder();
       var buffer = "";
       var finalData = null;
+      var lastStatusPhase = null;
 
       // Phase order for progress bar estimation. Must match the importer's
       // actual emit order (entity-data.ts): conversations → lorebooks →
@@ -459,6 +484,7 @@
             throw new Error(evt.error || "Import failed");
           } else if (evt.phase === "done") {
             finalData = evt;
+            setImportProgress(progressFill, 100);
           } else {
             // Progress event — update the progress bar
             var phaseIdx = phaseOrder.indexOf(evt.phase);
@@ -471,13 +497,17 @@
             var totalPhases = phaseOrder.length;
             var pct = Math.round(((currentPhaseIndex + phaseProgress) / totalPhases) * 100);
             if (pct > 98) pct = 98; // Reserve 100% for done
-            if (progressFill) progressFill.style.width = pct + "%";
+            setImportProgress(progressFill, pct);
 
             var label = evt.status || evt.phase;
             if (evt.current != null && evt.total != null) {
               label += " (" + evt.current + "/" + evt.total + ")";
             }
             if (progressText) progressText.textContent = label;
+            if (evt.phase !== lastStatusPhase) {
+              lastStatusPhase = evt.phase;
+              announceImportStatus(statusEl, evt.status || evt.phase);
+            }
 
             // Show blocking overlay during entity-core phases
             if ((evt.phase === "entity-core" || evt.phase === "restart" || evt.phase === "sync") && overlay) {
@@ -525,11 +555,14 @@
           }
           outputEl.innerHTML = '<div class="admin-action-output-header">Import successful</div>'
             + '<pre class="admin-action-output-pre">' + escapeHtmlForOutput(lines.join("\n")) + '</pre>';
+          announceImportStatus(statusEl, "Import complete.");
         } else {
           outputEl.innerHTML = '<div class="admin-action-output-header admin-action-error">Import failed: ' + escapeHtmlForOutput(finalData.error || "unknown error") + '</div>';
+          announceImportStatus(statusEl, "Import failed: " + (finalData.error || "unknown error"));
         }
       } else {
         outputEl.innerHTML = '<div class="admin-action-output-header admin-action-error">No response received</div>';
+        announceImportStatus(statusEl, "Import failed: no response received.");
       }
     } catch (err) {
       if (overlay) overlay.style.display = "none";
@@ -537,6 +570,7 @@
       outputEl.style.display = "";
       outputEl.innerHTML = '<div class="admin-action-output-header admin-action-error">'
         + 'Request failed: ' + escapeHtmlForOutput(err.message) + '</div>';
+      announceImportStatus(statusEl, "Import failed: " + err.message);
     }
 
     btn.disabled = false;
@@ -561,6 +595,7 @@
     var fileInput = document.getElementById(fileInputId);
     var btn = document.getElementById(btnId);
     var outputEl = document.getElementById(outputId);
+    var statusEl = document.getElementById(outputId.replace("-output", "-status"));
 
     if (!fileInput || !btn || !outputEl) return;
 
@@ -582,6 +617,7 @@
 
     outputEl.style.display = "";
     outputEl.textContent = "Importing " + files.length + " " + label.toLowerCase() + "...\n";
+    announceImportStatus(statusEl, label + " import started.");
 
     try {
       var formData = new FormData();
@@ -601,6 +637,7 @@
         // Fatal error (e.g., entity-core data dir not found)
         outputEl.innerHTML = '<div class="admin-action-output-header admin-action-error">'
           + escapeHtmlForOutput(data.error) + '</div>';
+        announceImportStatus(statusEl, label + " import failed: " + data.error);
       } else {
         var lines = [];
         lines.push(label + " import complete.");
@@ -620,10 +657,12 @@
         outputEl.innerHTML = '<div class="admin-action-output-header">'
           + escapeHtmlForOutput(lines[0]) + '</div>'
           + '<pre class="admin-action-output-pre">' + escapeHtmlForOutput(lines.join("\n")) + '</pre>';
+        announceImportStatus(statusEl, lines[0]);
       }
     } catch (err) {
       outputEl.innerHTML = '<div class="admin-action-output-header admin-action-error">'
         + 'Request failed: ' + escapeHtmlForOutput(err.message) + '</div>';
+      announceImportStatus(statusEl, label + " import failed: " + err.message);
     }
 
     // Restore button
@@ -651,6 +690,7 @@
     var progressFill = document.getElementById("admin-restore-conv-fill");
     var progressText = document.getElementById("admin-restore-conv-text");
     var outputEl = document.getElementById("admin-restore-conv-output");
+    var statusEl = document.getElementById("admin-restore-conv-status");
 
     if (!fileInput || !btn || !outputEl) return;
 
@@ -680,8 +720,9 @@
     btn.innerHTML = '<span class="admin-action-spinner"></span> Restoring...';
 
     if (progressSection) progressSection.style.display = "";
-    if (progressFill) progressFill.style.width = "0%";
+    setImportProgress(progressFill, 0);
     if (progressText) progressText.textContent = "Preparing...";
+    announceImportStatus(statusEl, "Conversation restore started.");
     outputEl.style.display = "none";
     outputEl.innerHTML = "";
 
@@ -704,6 +745,7 @@
       var decoder = new TextDecoder();
       var buffer = "";
       var finalData = null;
+      var lastStatusPhase = null;
 
       while (true) {
         var result = await reader.read();
@@ -724,18 +766,27 @@
 
           if (evt.phase === "db" && !evt.done) {
             var pct = evt.total > 0 ? Math.round((evt.conversations_processed / evt.total) * 100) : 0;
-            if (progressFill) progressFill.style.width = pct + "%";
+            setImportProgress(progressFill, pct);
             if (progressText) progressText.textContent = evt.status + " (" + evt.conversations_processed + "/" + evt.total + ")";
+            if (evt.phase !== lastStatusPhase) {
+              lastStatusPhase = evt.phase;
+              announceImportStatus(statusEl, evt.status || "Restoring conversations");
+            }
           } else if (evt.phase === "db" && evt.done) {
-            if (progressFill) progressFill.style.width = "100%";
+            setImportProgress(progressFill, 100);
             if (progressText) progressText.textContent = "Database import complete.";
             finalData = evt;
           } else if (evt.phase === "embed") {
             var pct = evt.total > 0 ? Math.round((evt.current / evt.total) * 100) : 0;
-            if (progressFill) progressFill.style.width = pct + "%";
+            setImportProgress(progressFill, pct);
             if (progressText) progressText.textContent = evt.status + " (" + evt.current + "/" + evt.total + ", " + evt.elapsed + ")";
+            if (evt.phase !== lastStatusPhase) {
+              lastStatusPhase = evt.phase;
+              announceImportStatus(statusEl, evt.status || "Embedding messages");
+            }
           } else if (evt.phase === "done") {
             finalData = evt;
+            setImportProgress(progressFill, 100);
           } else if (evt.phase === "error") {
             throw new Error(evt.error || "Restore failed");
           }
@@ -772,14 +823,17 @@
         outputEl.innerHTML = '<div class="admin-action-output-header">'
           + escapeHtmlForOutput(lines[0]) + '</div>'
           + '<pre class="admin-action-output-pre">' + escapeHtmlForOutput(lines.join("\n")) + '</pre>';
+        announceImportStatus(statusEl, lines[0]);
       } else {
         outputEl.innerHTML = '<div class="admin-action-output-header admin-action-error">No response received</div>';
+        announceImportStatus(statusEl, "Conversation restore failed: no response received.");
       }
     } catch (err) {
       if (progressSection) progressSection.style.display = "none";
       outputEl.style.display = "";
       outputEl.innerHTML = '<div class="admin-action-output-header admin-action-error">'
         + 'Request failed: ' + escapeHtmlForOutput(err.message) + '</div>';
+      announceImportStatus(statusEl, "Conversation restore failed: " + err.message);
     }
 
     // Restore button
@@ -804,6 +858,7 @@
     var progressFill = document.getElementById("admin-migration-chat-fill");
     var progressText = document.getElementById("admin-migration-chat-text");
     var outputEl = document.getElementById("admin-migration-chat-output");
+    var statusEl = document.getElementById("admin-migration-chat-status");
 
     if (!fileInput || !btn || !outputEl) return;
 
@@ -833,8 +888,9 @@
     btn.innerHTML = '<span class="admin-action-spinner"></span> Importing...';
 
     if (progressSection) progressSection.style.display = "";
-    if (progressFill) progressFill.style.width = "0%";
+    setImportProgress(progressFill, 0);
     if (progressText) progressText.textContent = "Preparing...";
+    announceImportStatus(statusEl, "Chat import started.");
     outputEl.style.display = "none";
     outputEl.innerHTML = "";
 
@@ -859,6 +915,7 @@
       var dbPhaseTotal = 0;
       var embedPhaseTotal = 0;
       var finalData = null;
+      var lastStatusPhase = null;
 
       while (true) {
         var result = await reader.read();
@@ -880,23 +937,32 @@
           if (evt.phase === "db" && !evt.done) {
             // DB phase progress
             var pct = evt.total > 0 ? Math.round((evt.conversations_processed / evt.total) * 100) : 0;
-            if (progressFill) progressFill.style.width = pct + "%";
+            setImportProgress(progressFill, pct);
             if (progressText) progressText.textContent = evt.status + " (" + evt.conversations_processed + "/" + evt.total + ")";
             dbPhaseTotal = evt.total;
+            if (evt.phase !== lastStatusPhase) {
+              lastStatusPhase = evt.phase;
+              announceImportStatus(statusEl, evt.status || "Importing conversations");
+            }
           } else if (evt.phase === "db" && evt.done) {
             // DB phase complete
-            if (progressFill) progressFill.style.width = "100%";
+            setImportProgress(progressFill, 100);
             if (progressText) progressText.textContent = "Database import complete.";
             finalData = evt;
           } else if (evt.phase === "embed") {
             // Embedding phase progress
             var pct = evt.total > 0 ? Math.round((evt.current / evt.total) * 100) : 0;
-            if (progressFill) progressFill.style.width = pct + "%";
+            setImportProgress(progressFill, pct);
             if (progressText) progressText.textContent = evt.status + " (" + evt.current + "/" + evt.total + ", " + evt.elapsed + ")";
             embedPhaseTotal = evt.total;
+            if (evt.phase !== lastStatusPhase) {
+              lastStatusPhase = evt.phase;
+              announceImportStatus(statusEl, evt.status || "Embedding messages");
+            }
           } else if (evt.phase === "done") {
             // All done
             finalData = evt;
+            setImportProgress(progressFill, 100);
           }
         }
       }
@@ -931,14 +997,17 @@
         outputEl.innerHTML = '<div class="admin-action-output-header">'
           + escapeHtmlForOutput(lines[0]) + '</div>'
           + '<pre class="admin-action-output-pre">' + escapeHtmlForOutput(lines.join("\n")) + '</pre>';
+        announceImportStatus(statusEl, lines[0]);
       } else {
         outputEl.innerHTML = '<div class="admin-action-output-header admin-action-error">No response received</div>';
+        announceImportStatus(statusEl, "Chat import failed: no response received.");
       }
     } catch (err) {
       if (progressSection) progressSection.style.display = "none";
       outputEl.style.display = "";
       outputEl.innerHTML = '<div class="admin-action-output-header admin-action-error">'
         + 'Request failed: ' + escapeHtmlForOutput(err.message) + '</div>';
+      announceImportStatus(statusEl, "Chat import failed: " + err.message);
     }
 
     // Restore button
@@ -964,6 +1033,7 @@
     var progressText = document.getElementById("admin-migration-graph-text");
     var overlay = document.getElementById("admin-migration-graph-overlay");
     var outputEl = document.getElementById("admin-migration-graph-output");
+    var statusEl = document.getElementById("admin-migration-graph-status");
 
     if (!fileInput || !btn || !outputEl) return;
 
@@ -993,8 +1063,9 @@
     btn.innerHTML = '<span class="admin-action-spinner"></span> Importing...';
 
     if (progressSection) progressSection.style.display = "";
-    if (progressFill) progressFill.style.width = "0%";
+    setImportProgress(progressFill, 0);
     if (progressText) progressText.textContent = "Preparing...";
+    announceImportStatus(statusEl, "Knowledge graph import started.");
     outputEl.style.display = "none";
     outputEl.innerHTML = "";
 
@@ -1018,6 +1089,7 @@
       var buffer = "";
       var finalData = null;
       var totalItems = 0;
+      var lastStatusPhase = null;
 
       while (true) {
         var result = await reader.read();
@@ -1042,23 +1114,36 @@
               if (overlay) overlay.style.display = "";
             }
             if (progressText) progressText.textContent = evt.status;
+            if (evt.phase !== lastStatusPhase) {
+              lastStatusPhase = evt.phase;
+              announceImportStatus(statusEl, evt.status || "Restarting entity-core");
+            }
           } else if (evt.phase === "db" && !evt.done) {
             // DB phase progress
             var items = evt.nodes_processed || evt.edges_processed || 0;
             totalItems = evt.total || totalItems;
             var pct = totalItems > 0 ? Math.round((items / totalItems) * 100) : 0;
-            if (progressFill) progressFill.style.width = pct + "%";
+            setImportProgress(progressFill, pct);
             if (progressText) progressText.textContent = evt.status + " (" + items + "/" + totalItems + ")";
+            if (evt.phase !== lastStatusPhase) {
+              lastStatusPhase = evt.phase;
+              announceImportStatus(statusEl, evt.status || "Importing graph data");
+            }
           } else if (evt.phase === "db" && evt.done) {
             finalData = evt;
-            if (progressFill) progressFill.style.width = "100%";
+            setImportProgress(progressFill, 100);
             if (progressText) progressText.textContent = "Database import complete.";
           } else if (evt.phase === "embed") {
             var pct = evt.total > 0 ? Math.round((evt.current / evt.total) * 100) : 0;
-            if (progressFill) progressFill.style.width = pct + "%";
+            setImportProgress(progressFill, pct);
             if (progressText) progressText.textContent = evt.status + " (" + evt.current + "/" + evt.total + ", " + evt.elapsed + ")";
+            if (evt.phase !== lastStatusPhase) {
+              lastStatusPhase = evt.phase;
+              announceImportStatus(statusEl, evt.status || "Embedding graph nodes");
+            }
           } else if (evt.phase === "done") {
             finalData = evt;
+            setImportProgress(progressFill, 100);
           } else if (evt.phase === "error") {
             throw new Error(evt.error || "Import failed");
           }
@@ -1096,8 +1181,10 @@
         outputEl.innerHTML = '<div class="admin-action-output-header">'
           + escapeHtmlForOutput(lines[0]) + '</div>'
           + '<pre class="admin-action-output-pre">' + escapeHtmlForOutput(lines.join("\n")) + '</pre>';
+        announceImportStatus(statusEl, lines[0]);
       } else {
         outputEl.innerHTML = '<div class="admin-action-output-header admin-action-error">No response received</div>';
+        announceImportStatus(statusEl, "Knowledge graph import failed: no response received.");
       }
     } catch (err) {
       if (overlay) overlay.style.display = "none";
@@ -1105,6 +1192,7 @@
       outputEl.style.display = "";
       outputEl.innerHTML = '<div class="admin-action-output-header admin-action-error">'
         + 'Request failed: ' + escapeHtmlForOutput(err.message) + '</div>';
+      announceImportStatus(statusEl, "Knowledge graph import failed: " + err.message);
     }
 
     // Restore button
