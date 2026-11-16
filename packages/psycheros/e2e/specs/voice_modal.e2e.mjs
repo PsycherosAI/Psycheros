@@ -105,6 +105,48 @@ try {
     JSON.stringify(opened),
   );
 
+  const liveRegions = await page.evaluate(() => {
+    const transcript = document.getElementById("voice-transcript");
+    const announcer = document.getElementById("voice-announcer");
+    return {
+      transcriptLive: transcript?.getAttribute("aria-live"),
+      transcriptRole: transcript?.getAttribute("role"),
+      announcerLive: announcer?.getAttribute("aria-live"),
+      announcerRole: announcer?.getAttribute("role"),
+    };
+  });
+  report.check(
+    "the transcript stays visual while the status channels announce",
+    liveRegions.transcriptLive === null &&
+      liveRegions.transcriptRole === null &&
+      liveRegions.announcerLive === "polite" &&
+      liveRegions.announcerRole === "status",
+    JSON.stringify(liveRegions),
+  );
+
+  // The entity reply is spoken by TTS; a live transcript would repeat it.
+  const transcriptUpdate = await page.evaluate(() => {
+    globalThis.__voiceSocket().onmessage({
+      data: JSON.stringify({
+        type: "transcript",
+        role: "assistant",
+        text: "spoken by TTS",
+      }),
+    });
+    const transcript = document.getElementById("voice-transcript");
+    return {
+      text: transcript?.textContent,
+      live: transcript?.getAttribute("aria-live"),
+      role: transcript?.getAttribute("role"),
+    };
+  });
+  report.check(
+    "an assistant transcript renders visually without live semantics",
+    transcriptUpdate.text?.includes("spoken by TTS") &&
+      transcriptUpdate.live === null && transcriptUpdate.role === null,
+    JSON.stringify(transcriptUpdate),
+  );
+
   const backgroundBlocked = await page.evaluate(() => {
     document.getElementById("action-menu-btn").focus();
     return !!document.activeElement?.closest("#voice-overlay");

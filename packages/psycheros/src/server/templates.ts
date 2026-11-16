@@ -2057,7 +2057,7 @@ export function renderSASettings(
         return `<div class="llm-field" style="margin-bottom:12px;" data-device-id="${
           escapeHtml(device.id)
         }">
-            <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <div class="llm-field-heading" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
               <span style="font-weight:500;">${
           escapeHtml(device.name || device.id)
         }</span>
@@ -2066,7 +2066,7 @@ export function renderSASettings(
             ? "background:var(--c-success-subtle);color:var(--c-success);"
             : "background:var(--c-wash-strong);color:var(--c-fg-muted);"
         }">${isConnected ? "Connected" : "Disconnected"}</span>
-            </label>
+            </div>
             ${
           Object.entries(device.streams ?? {}).map(([streamId, config]) =>
             `<div style="display:flex;align-items:center;gap:8px;padding:4px 0 4px 12px;">
@@ -2139,19 +2139,19 @@ export function renderSASettings(
         <p class="theme-section-desc">Built-in signal feeds currently providing data to the entity</p>
         <div class="llm-fields">
           <div class="llm-field">
-            <label>Current Conversation</label>
+            <div class="llm-field-heading">Current Conversation</div>
             <div class="sa-signal-desc">Tells the entity which conversation they are currently processing, including the conversation ID and title.</div>
           </div>
           <div class="llm-field">
-            <label>Last User Interaction</label>
+            <div class="llm-field-heading">Last User Interaction</div>
             <div class="sa-signal-desc">Tracks the most recent human message across all threads, excluding automated Pulse messages. The entity sees the timestamp and which thread the message was sent in.</div>
           </div>
           <div class="llm-field">
-            <label>Device Detection</label>
+            <div class="llm-field-heading">Device Detection</div>
             <div class="sa-signal-desc">Detects whether you're on desktop or mobile when sending a message. The entity receives this as a simple desktop/mobile indicator.</div>
           </div>
           <div class="llm-field">
-            <label>Connected Devices</label>
+            <div class="llm-field-heading">Connected Devices</div>
             <div class="sa-signal-desc">Shows which Lovense toys, Intiface devices, and home smart devices are currently connected. Refreshed every 30 seconds.</div>
           </div>
         </div>
@@ -5218,7 +5218,7 @@ export function renderEntityCoreGraph(
           <textarea id="edit-node-description" rows="2"></textarea>
         </div>
         <div class="gv-field" id="edit-connections-field" style="display:none">
-          <label>Connections</label>
+          <div class="gv-field-heading">Connections</div>
           <div id="edit-connections-list" class="gv-edit-conns"></div>
           <button type="button" class="btn btn--ghost btn--sm" id="edit-add-conn"><span><span aria-hidden="true">+</span> Add Connection</span></button>
         </div>
@@ -6933,7 +6933,7 @@ export function renderConnectionsDiscordSettings(
       <hr class="settings-divider">
       <div class="llm-fields" style="margin-top:var(--sp-4);">
         <div class="llm-field">
-          <label class="settings-label">DM Whitelist</label>
+          <div class="settings-label llm-field-heading">DM Whitelist</div>
           <span class="field-hint">Only whitelisted users can DM the entity. Add users by their Discord user ID.</span>
           <div id="dm-whitelist" class="dm-whitelist">
             ${
@@ -7023,7 +7023,7 @@ export function renderConnectionsDiscordSettings(
             <span class="field-hint">Write from the entity's perspective, in first-person</span>
           </div>
           <div class="llm-field">
-            <label class="settings-label">LLM Profile for Server Channels</label>
+            <div class="settings-label llm-field-heading">LLM Profile for Server Channels</div>
             ${llmProfileDropdown}
             <span class="field-hint">Used for server-channel responses — e.g. an economical model for chatter. Direct messages and private chat always use the active profile.</span>
           </div>
@@ -7046,7 +7046,7 @@ export function renderConnectionsDiscordSettings(
             <span class="field-hint">Write from the entity's perspective, in first-person. e.g. "@superdog420 is James — when I write memories about him, use his real name"</span>
           </div>
           <div class="llm-field">
-            <label class="settings-label">Servers & Channels</label>
+            <div class="settings-label llm-field-heading">Servers & Channels</div>
             <p class="settings-note">
               Configure servers and channels from the
               <a href="/fragments/discord" hx-get="/fragments/discord" hx-target="#chat" hx-swap="innerHTML"
@@ -9123,7 +9123,7 @@ export function renderVisionAnchorsTab(
     <h3 style="font-size:var(--font-size-sm);color:var(--c-fg-muted);">Upload Anchor Image</h3>
     <form id="anchor-upload-form" style="display:flex;gap:var(--sp-3);align-items:end;flex-wrap:wrap;">
       <div class="llm-field" style="flex:0 0 auto;">
-        <label>File</label>
+        <div class="llm-field-heading">File</div>
         <label class="btn btn--sm" style="position:relative;overflow:hidden;cursor:pointer;">
           Choose File
           <input type="file" id="anchor-file" accept="image/*" style="position:absolute;inset:0;opacity:0;cursor:pointer;" onchange="document.getElementById('anchor-file-name').textContent = this.files[0]?.name || ''" />
@@ -10919,6 +10919,10 @@ export function renderVoiceCallView(
   voiceChatDebug: boolean,
 ): string {
   const sttProvider = profile.providerSettings.stt.provider;
+  // The transcript blurb is visual-only: the entity reply also streams as
+  // TTS audio, so a live region here would make a screen reader speak the
+  // reply a second time. #voice-status-text and #voice-announcer remain the
+  // live channels for connection and transient state.
   return `<dialog class="voice-overlay" id="voice-overlay" aria-labelledby="voice-call-title">
   <div class="voice-call">
     <h2 class="sr-only" id="voice-call-title" tabindex="-1">Voice call</h2>
@@ -10930,7 +10934,7 @@ export function renderVoiceCallView(
 
     <div id="voice-announcer" class="sr-only" role="status" aria-live="polite"></div>
 
-    <div class="voice-transcript" id="voice-transcript" aria-live="polite"></div>
+    <div class="voice-transcript" id="voice-transcript"></div>
 
     <div class="voice-text-input-area" id="voice-text-input-area" style="display: none;">
       <textarea
@@ -11040,7 +11044,8 @@ export function renderFluxOverlayView(
     <div id="flux-mood-strip"></div>
     <div id="flux-mode-row"><span id="flux-mode-badge" class="flux-mode-badge"></span></div>
     <div id="flux-organ-health"></div>
-    <div id="flux-timeline"></div>
+    <div id="flux-timeline" role="log" aria-live="off" aria-label="Flux timeline"></div>
+    <div id="flux-announcer" class="sr-only" role="status" aria-live="polite"></div>
     <div class="flux-input-bar">
       <textarea id="flux-input" rows="1" placeholder="say something..." autocomplete="off"></textarea>
       <button id="flux-send">send</button>
@@ -11197,13 +11202,14 @@ export function renderFluxSpacePage(
     <div id="flux-mood-strip"></div>
     <div id="flux-mode-row"><span id="flux-mode-badge" class="flux-mode-badge"></span></div>
     <div id="flux-organ-health"></div>
-    <div id="flux-timeline"></div>
+    <div id="flux-timeline" role="log" aria-live="off" aria-label="Flux Space timeline"></div>
+    <div id="flux-announcer" class="sr-only" role="status" aria-live="polite"></div>
     <div class="flux-input-bar">
       <textarea id="flux-input" rows="1" placeholder="say something..." autocomplete="off"></textarea>
       <button id="flux-send">send</button>
     </div>
   </div>
-  <div id="flux-toast"></div>
+  <div id="flux-toast" role="status" aria-live="polite"></div>
   <script>
     var timeline = document.getElementById('flux-timeline');
     var input = document.getElementById('flux-input');
@@ -11216,6 +11222,24 @@ export function renderFluxSpacePage(
     });
     var toast = document.getElementById('flux-toast');
     var toastTimer = null;
+
+    // The timeline is role=log with aria-live="off" so history replays and
+    // token-by-token streaming stay silent. Completed entries and state
+    // changes are announced one at a time here instead.
+    var suppressAnnounce = false;
+    function announceFlux(text) {
+      if (suppressAnnounce || !text) return;
+      var announcer = document.getElementById('flux-announcer');
+      if (!announcer) return;
+      var message = String(text).replace(/\\s+/g, ' ').trim();
+      if (!message) return;
+      if (announcer.textContent === message) {
+        announcer.textContent = '';
+        requestAnimationFrame(function() { announcer.textContent = message; });
+        return;
+      }
+      announcer.textContent = message;
+    }
 
     function fmtTime(iso) {
       try { return new Date(iso).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); }
@@ -11257,16 +11281,25 @@ export function renderFluxSpacePage(
 
     var ENTITY_NAME = ${JSON.stringify(entityName)};
     var USER_NAME = ${JSON.stringify(userName)};
-    // Collapsed tool cards (classic persisted shape): header click
-    // toggles args/result visibility.
+    // Disclosure ids are per-render counters: reloads clear the timeline,
+    // so a counter is unique within any live document and never reuses one.
+    var disclosureSeq = 0;
+    function nextDisclosureId(prefix) {
+      disclosureSeq += 1;
+      return prefix + '-' + disclosureSeq;
+    }
+    // Collapsed tool cards (classic persisted shape): the header is a
+    // native button, so Enter/Space arrive as click; aria-expanded follows
+    // the .expanded class and focus stays on the button.
     function wireToolToggle(container) {
       var header = container.querySelector('.tool-header');
-      if (header) {
-        header.addEventListener('click', function() {
-          var card = this.parentElement;
-          if (card) card.classList.toggle('expanded');
-        });
-      }
+      if (!header) return;
+      header.addEventListener('click', function() {
+        var card = this.closest('.tool');
+        var expanded = this.getAttribute('aria-expanded') !== 'true';
+        this.setAttribute('aria-expanded', String(expanded));
+        if (card) card.classList.toggle('expanded', expanded);
+      });
     }
 
     function fillToolResult(callId, result, isError, metadata) {
@@ -11288,24 +11321,33 @@ export function renderFluxSpacePage(
         sib.innerHTML = '<img src="' + escapeHtml(imgPath) + '" alt="generated image" loading="lazy">';
         card.after(sib);
       }
+      var toolName = (card.querySelector('.tool-name') || {}).textContent || '';
+      toolName = toolName.replace(/\\s*·\\s*result\\s*$/, '').trim();
+      announceFlux(toolName ? 'Tool finished: ' + toolName : 'Tool finished');
       return true;
     }
 
     function appendSessionEntry(e) {
       var div = document.createElement('div');
       var label = USER_NAME;
+      var announceText = '';
+      var contentId;
       if (e.kind === 'tool_use') {
+        announceText = 'Using tool: ' + (e.source || 'tool');
         div.className = 'flux-entry tool-wrap';
         if (e.id) div.dataset.toolCallId = e.id;
+        contentId = nextDisclosureId('flux-tool-content');
         div.innerHTML =
           '<div class="tool">' +
-            '<div class="tool-header">' +
-              '<span class="tool-icon">&#9881;</span>' +
+            '<button type="button" class="tool-header" aria-expanded="false" aria-controls="' + contentId + '">' +
+              '<span class="tool-icon" aria-hidden="true">&#9881;</span>' +
               '<span class="tool-name">' + escapeHtml(e.source || 'tool') + '</span>' +
-              '<span class="tool-toggle">&#9660;</span>' +
+              '<span class="tool-toggle" aria-hidden="true">&#9660;</span>' +
+            '</button>' +
+            '<div class="tool-disclosure-content" id="' + contentId + '">' +
+              '<div class="tool-args">' + escapeHtml(e.content || '') + '</div>' +
+              '<div class="tool-result"></div>' +
             '</div>' +
-            '<div class="tool-args">' + escapeHtml(e.content || '') + '</div>' +
-            '<div class="tool-result"></div>' +
           '</div>';
         wireToolToggle(div);
       } else if (e.kind === 'tool_result') {
@@ -11319,15 +11361,19 @@ export function renderFluxSpacePage(
           follow();
           return;
         }
+        announceText = 'Tool finished' + (e.source ? ': ' + e.source : '');
         div.className = 'flux-entry tool-wrap';
+        contentId = nextDisclosureId('flux-tool-content');
         div.innerHTML =
           '<div class="tool">' +
-            '<div class="tool-header">' +
-              '<span class="tool-icon">&#9881;</span>' +
+            '<button type="button" class="tool-header" aria-expanded="false" aria-controls="' + contentId + '">' +
+              '<span class="tool-icon" aria-hidden="true">&#9881;</span>' +
               '<span class="tool-name">' + escapeHtml(e.source || 'tool') + ' · result</span>' +
-              '<span class="tool-toggle">&#9660;</span>' +
+              '<span class="tool-toggle" aria-hidden="true">&#9660;</span>' +
+            '</button>' +
+            '<div class="tool-disclosure-content" id="' + contentId + '">' +
+              '<div class="tool-result">' + escapeHtml(e.content || '') + '</div>' +
             '</div>' +
-            '<div class="tool-result">' + escapeHtml(e.content || '') + '</div>' +
           '</div>';
         wireToolToggle(div);
       } else if (e.kind === 'ego') {
@@ -11336,6 +11382,7 @@ export function renderFluxSpacePage(
         // stamp lives in the transcript for the model, never shows to
         // the user. Same rule as every other surface.
         var stripped = (e.content || '').replace(/<t>[^<]*<\\/t>\\s*/g, '');
+        if (stripped.trim()) announceText = ENTITY_NAME + ': ' + stripped;
         var body = '';
         if (e.thinking) {
           body += '<details class="thinking-details" style="margin-bottom:6px;"><summary style="cursor:pointer;color:#8b8f99;font-size:12px;">thinking</summary><div style="color:#9ca3af;font-size:13px;white-space:pre-wrap;border-left:2px solid #2a2e36;padding-left:8px;margin-top:4px;">' + escapeHtml(e.thinking) + '</div></details>';
@@ -11372,6 +11419,7 @@ export function renderFluxSpacePage(
           : s.indexOf('dream') >= 0 ? 'Dream'
           : isSystem ? 'system'
           : 'Noticing';
+        announceText = mod + ': ' + (e.content || '');
         var cls = 'flux-entry ambient';
         if (s.indexOf('compaction') === 0) {
           // Textures are working memory, not module output — neutral
@@ -11389,10 +11437,12 @@ export function renderFluxSpacePage(
         div.innerHTML = escapeHtml(e.content) +
           '<div class="meta">' + mod + (chain ? ' (' + chain + ')' : '') + ' · ' + fmtTime(e.timestamp) + '</div>';
       } else if (e.kind === 'system') {
+        announceText = e.content || '';
         div.className = 'flux-entry ambient';
         div.innerHTML = escapeHtml(e.content) +
           '<div class="meta">system · ' + fmtTime(e.timestamp) + '</div>';
       } else {
+        announceText = USER_NAME + ': ' + (e.content || '');
         div.className = 'flux-entry user';
         div.innerHTML = renderMd(e.content || '') +
           '<div class="meta">' + USER_NAME + ' · ' + fmtTime(e.timestamp) + '</div>';
@@ -11406,7 +11456,8 @@ export function renderFluxSpacePage(
         };
         div.appendChild(ubtn);
       }
-      addToTimeline(div, entry.timestamp);
+      addToTimeline(div, e.timestamp);
+      announceFlux(announceText);
       follow();
     }
 
@@ -11418,6 +11469,7 @@ export function renderFluxSpacePage(
       generatingEl.dataset.ts = String(Date.now()); // ordered inserts below it
       generatingEl.innerHTML = '<span class="flux-gen-text"></span><span class="typing-cursor">\u258C</span>';
       timeline.appendChild(generatingEl);
+      announceFlux('Generating reply');
       follow();
     }
     function hideGenerating() {
@@ -11477,7 +11529,8 @@ export function renderFluxSpacePage(
         };
         div.appendChild(btn);
       }
-      addToTimeline(div, e.timestamp);
+      addToTimeline(div, entry.timestamp);
+      announceFlux(label + ': ' + (entry.content || ''));
       follow();
     }
 
@@ -11509,10 +11562,17 @@ export function renderFluxSpacePage(
     }
 
     function showToast(msg) {
-      toast.textContent = msg;
       toast.style.display = 'block';
       if (toastTimer) clearTimeout(toastTimer);
-      toastTimer = setTimeout(function() { toast.style.display = 'none'; }, 6000);
+      // #flux-toast is a persistent status region: fill it after the
+      // clear so an identical repeat is a fresh insertion (some ATs skip
+      // a same-text rewrite).
+      toast.textContent = '';
+      requestAnimationFrame(function() { toast.textContent = msg; });
+      toastTimer = setTimeout(function() {
+        toast.style.display = 'none';
+        toast.textContent = '';
+      }, 6000);
     }
 
     function sendMessage() {
@@ -11541,7 +11601,10 @@ export function renderFluxSpacePage(
       }
       // Shift+Enter falls through — the textarea's native newline.
     });
-    toast.addEventListener('click', function() { toast.style.display = 'none'; });
+    toast.addEventListener('click', function() {
+      toast.style.display = 'none';
+      toast.textContent = '';
+    });
 
     // Load the timeline: fetch recent entries. The timeline is the MERGE
     // of the durable timeline (user/ambient) and the Ego session log (ego
@@ -11609,7 +11672,14 @@ export function renderFluxSpacePage(
       // Full render, not append — flux_turn_done re-runs this load; an
       // uncleared timeline doubled every entry per reload.
       timeline.innerHTML = '';
-      merged.forEach(function(m) { m.render(); });
+      // Bulk render: history must not be re-announced (4.1.3 covers live
+      // arrivals and state changes, not a view repaint).
+      suppressAnnounce = true;
+      try {
+        merged.forEach(function(m) { m.render(); });
+      } finally {
+        suppressAnnounce = false;
+      }
     }).catch(function(e) { console.error('flux load failed', e); });
     }
     loadTimeline();
@@ -11644,16 +11714,17 @@ export function renderFluxSpacePage(
         if (!thinkingCard || thinkingCard.closed) {
           var wrap = document.createElement('div');
           wrap.className = 'flux-entry thinking-wrap';
+          var thinkingId = nextDisclosureId('flux-thinking');
           // OPEN while streaming — the stream is meant to be watched
           // live (classic chat's pattern); the persisted entry's own
           // block is the collapsed-by-default record afterward.
           wrap.innerHTML =
             '<div class="thinking-card open">' +
-              '<div class="thinking-header">' +
+              '<button type="button" class="thinking-header" aria-expanded="true" aria-controls="' + thinkingId + '">' +
                 '<span>' + escapeHtml(ENTITY_NAME) + ' · thinking</span>' +
-                '<span class="toggle">&#9660;</span>' +
-              '</div>' +
-              '<div class="thinking-body"></div>' +
+                '<span class="toggle" aria-hidden="true">&#9660;</span>' +
+              '</button>' +
+              '<div class="thinking-body" id="' + thinkingId + '"></div>' +
             '</div>';
           timeline.appendChild(wrap);
           thinkingCard = wrap.querySelector('.thinking-card');
@@ -11661,6 +11732,10 @@ export function renderFluxSpacePage(
           var header = thinkingCard.querySelector('.thinking-header');
           header.addEventListener('click', function() {
             thinkingCard.classList.toggle('open');
+            header.setAttribute(
+              'aria-expanded',
+              String(thinkingCard.classList.contains('open')),
+            );
           });
           follow();
         }
@@ -11776,17 +11851,20 @@ export function renderFluxSpacePage(
         if (data.toolCallId) div.dataset.toolCallId = data.toolCallId;
         var formattedArgs = data.args;
         try { formattedArgs = JSON.stringify(JSON.parse(data.args), null, 2); } catch (ex) {}
+        var contentId = nextDisclosureId('flux-tool-content');
         div.innerHTML =
           '<div class="tool">' +
-            '<div class="tool-header">' +
-              '<span class="tool-icon">&#9881;</span>' +
+            '<button type="button" class="tool-header" aria-expanded="false" aria-controls="' + contentId + '">' +
+              '<span class="tool-icon" aria-hidden="true">&#9881;</span>' +
               '<span class="tool-name">' + escapeHtml(data.name) + '</span>' +
-              '<span class="tool-toggle">&#9660;</span>' +
-            '</div>' +
-            '<div class="tool-args">' + escapeHtml(formattedArgs) + '</div>' +
-            '<div class="tool-result' + (data.isError ? ' error' : '') + '">' +
-              '<div class="tool-result-label">' + (data.isError ? 'Error' : 'Output') + '</div>' +
-              escapeHtml(data.result) +
+              '<span class="tool-toggle" aria-hidden="true">&#9660;</span>' +
+            '</button>' +
+            '<div class="tool-disclosure-content" id="' + contentId + '">' +
+              '<div class="tool-args">' + escapeHtml(formattedArgs) + '</div>' +
+              '<div class="tool-result' + (data.isError ? ' error' : '') + '">' +
+                '<div class="tool-result-label">' + (data.isError ? 'Error' : 'Output') + '</div>' +
+                escapeHtml(data.result) +
+              '</div>' +
             '</div>' +
           '</div>';
         wireToolToggle(div);

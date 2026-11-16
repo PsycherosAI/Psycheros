@@ -1296,7 +1296,8 @@
   gap: var(--sp-1);
 }
 
-.llm-field label {
+.llm-field label,
+.llm-field .llm-field-heading {
   font-size: var(--font-size-sm);
   color: var(--c-fg-muted);
   font-weight: var(--font-weight-medium);

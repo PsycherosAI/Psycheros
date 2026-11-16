@@ -22,7 +22,18 @@
       <span id="flux-mode-badge" class="flux-mode-badge"></span>
     </div>
     <div id="flux-organ-health"></div>
-    <div id="flux-timeline"></div>
+    <div
+      id="flux-timeline"
+      role="log"
+      aria-live="off"
+      aria-label="Flux timeline"
+    ></div>
+    <div
+      id="flux-announcer"
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+    ></div>
     <div class="flux-input-bar">
       <textarea
         id="flux-input"

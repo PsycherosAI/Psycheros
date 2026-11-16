@@ -2351,7 +2351,9 @@ function updateConnectionStatus(state, text) {
 }
 
 // Latest-exchange blurb under the status row. Overwrites on each new
-// transcript — the full history lives in chat after the call ends.
+// transcript — the full history lives in chat after the call ends. It is
+// deliberately not a live region: the entity's reply also plays as TTS, and
+// announcing both makes screen-reader users hear the reply twice.
 function updateTranscript(speaker, role, text) {
   const el = document.getElementById('voice-transcript');
   if (!el) return;

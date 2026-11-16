@@ -50,7 +50,8 @@
   },
   "fmt": {
     "exclude": [
-      "packages/launcher-v2/e2e/"
+      "packages/launcher-v2/e2e/",
+      "packages/psycheros/e2e/fixtures/flux-space.html"
     ]
   },
   "allowScripts": [

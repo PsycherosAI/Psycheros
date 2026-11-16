@@ -506,7 +506,8 @@
 .gv-field {
   margin-bottom: var(--sp-4);
 }
-.gv-field label {
+.gv-field label,
+.gv-field .gv-field-heading {
   display: block;
   font-size: var(--font-size-xs);
   color: var(--c-fg-muted);

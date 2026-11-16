@@ -218,6 +218,222 @@ try {
     fallback.focused === "message-input",
     JSON.stringify(fallback),
   );
+
+  // The overlay timeline is a named log, and completed
+  // entries announce once through the status region while stream fragments
+  // stay silent.
+  const announcements = await page.evaluate(async () => {
+    const handlers = {};
+    globalThis.__overlayEvents = handlers;
+    globalThis.EventSource = class {
+      addEventListener(type, handler) {
+        (handlers[type] ??= []).push(handler);
+      }
+      close() {}
+    };
+    globalThis.__fireOverlay = (type, data) => {
+      for (const handler of handlers[type] ?? []) {
+        handler({ data: JSON.stringify(data) });
+      }
+    };
+    const trigger = document.createElement("button");
+    trigger.id = "flux-test-trigger";
+    trigger.className = "state-seg state-flux";
+    trigger.textContent = "Flux ON";
+    document.body.appendChild(trigger);
+    trigger.focus();
+    await Psycheros.startFluxOverlay();
+    for (
+      let i = 0;
+      i < 40 && !document.getElementById("flux-overlay");
+      i++
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const timeline = document.getElementById("flux-timeline");
+    const announcer = document.getElementById("flux-announcer");
+    const base = {
+      mounted: !!document.getElementById("flux-overlay"),
+      role: timeline?.getAttribute("role"),
+      live: timeline?.getAttribute("aria-live"),
+      label: timeline?.getAttribute("aria-label"),
+      announcerRole: announcer?.getAttribute("role"),
+      announcerLive: announcer?.getAttribute("aria-live"),
+      announced: announcer?.textContent ?? "",
+    };
+    globalThis.__fireOverlay("flux_entry", {
+      role: "user",
+      content: "overlay user entry",
+      timestamp: "2026-11-11T10:00:06.000Z",
+    });
+    const user = announcer?.textContent ?? "";
+    globalThis.__fireOverlay("flux_generating", {});
+    const generating = announcer?.textContent ?? "";
+    globalThis.__fireOverlay("flux_ego_stream", {
+      fragment: "overlay fragment",
+    });
+    const fragment = announcer?.textContent ?? "";
+    globalThis.__fireOverlay("flux_entry", {
+      role: "entity",
+      content: "overlay entity reply",
+      timestamp: "2026-11-11T10:00:07.000Z",
+    });
+    const entity = announcer?.textContent ?? "";
+    document.querySelector("#flux-overlay button")?.click();
+    return { base, user, generating, fragment, entity };
+  });
+  report.check(
+    "the overlay timeline is a named log with a status announcer",
+    announcements.base.mounted && announcements.base.role === "log" &&
+      announcements.base.live === "off" &&
+      /timeline/i.test(announcements.base.label ?? "") &&
+      announcements.base.announcerRole === "status" &&
+      announcements.base.announcerLive === "polite",
+    JSON.stringify(announcements.base),
+  );
+  report.check(
+    "the overlay never announced the empty initial backlog",
+    announcements.base.announced.trim() === "",
+    JSON.stringify(announcements.base),
+  );
+  report.check(
+    "the overlay announces a live user turn once",
+    announcements.user.includes("overlay user entry"),
+    JSON.stringify(announcements.user),
+  );
+  report.check(
+    "the overlay announces generating state but not fragments",
+    announcements.generating === "Generating reply" &&
+      announcements.fragment === "Generating reply",
+    JSON.stringify([announcements.generating, announcements.fragment]),
+  );
+  report.check(
+    "the overlay announces a completed entity turn once",
+    announcements.entity.includes("overlay entity reply"),
+    JSON.stringify(announcements.entity),
+  );
+
+  // Overlay tool and live-thinking headers are native
+  // buttons with synchronized expanded state and real disclosure targets.
+  const disclosures = await page.evaluate(async () => {
+    const trigger = document.createElement("button");
+    trigger.id = "flux-test-trigger";
+    trigger.className = "state-seg state-flux";
+    trigger.textContent = "Flux ON";
+    document.body.appendChild(trigger);
+    trigger.focus();
+    await Psycheros.startFluxOverlay();
+    for (
+      let i = 0;
+      i < 40 && !document.getElementById("flux-overlay");
+      i++
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    globalThis.__fireOverlay("flux_entry", {
+      kind: "tool_use",
+      id: "overlay-tool-1",
+      source: "shell",
+      content: "printf overlay",
+      timestamp: "2026-11-11T10:00:08.000Z",
+    });
+    globalThis.__fireOverlay("flux_ego_thinking", {
+      fragment: "overlay thought",
+    });
+    const toolHeader = document.querySelector(
+      "#flux-timeline .tool-wrap .tool-header",
+    );
+    const thinkingHeader = document.querySelector(
+      "#flux-timeline .live-ego .thinking-header",
+    );
+    const toolControls = toolHeader?.getAttribute("aria-controls");
+    const thinkingControls = thinkingHeader?.getAttribute("aria-controls");
+    toolHeader?.focus();
+    return {
+      toolTag: toolHeader?.tagName,
+      toolName: toolHeader?.querySelector(".tool-name")?.textContent,
+      toolExpanded: toolHeader?.getAttribute("aria-expanded"),
+      toolResolves: !!(toolControls &&
+        document.getElementById(toolControls)),
+      toolFocused: document.activeElement === toolHeader,
+      thinkingTag: thinkingHeader?.tagName,
+      thinkingExpanded: thinkingHeader?.getAttribute("aria-expanded"),
+      thinkingResolves: !!(thinkingControls &&
+        document.getElementById(thinkingControls)),
+    };
+  });
+  report.check(
+    "overlay tool headers are named buttons with a disclosure target",
+    disclosures.toolTag === "BUTTON" &&
+      disclosures.toolName === "shell" &&
+      disclosures.toolExpanded === "false" &&
+      disclosures.toolResolves && disclosures.toolFocused,
+    JSON.stringify(disclosures),
+  );
+  report.check(
+    "the overlay live thinking header is a button with a disclosure target",
+    disclosures.thinkingTag === "BUTTON" &&
+      disclosures.thinkingExpanded === "true" &&
+      disclosures.thinkingResolves,
+    JSON.stringify(disclosures),
+  );
+
+  await page.keyboard.press("Enter");
+  const toolEnter = await page.evaluate(() => {
+    const header = document.querySelector(
+      "#flux-timeline .tool-wrap .tool-header",
+    );
+    return {
+      expanded: header?.getAttribute("aria-expanded"),
+      cardExpanded: !!header?.closest(".tool")?.classList.contains("expanded"),
+      focused: document.activeElement === header,
+    };
+  });
+  await page.keyboard.press(" ");
+  const toolSpace = await page.evaluate(() => {
+    const header = document.querySelector(
+      "#flux-timeline .tool-wrap .tool-header",
+    );
+    return {
+      expanded: header?.getAttribute("aria-expanded"),
+      focused: document.activeElement === header,
+    };
+  });
+  report.check(
+    "Enter expands and Space collapses the overlay tool card",
+    toolEnter.expanded === "true" && toolEnter.cardExpanded &&
+      toolEnter.focused && toolSpace.expanded === "false" &&
+      toolSpace.focused,
+    JSON.stringify({ toolEnter, toolSpace }),
+  );
+
+  await page.evaluate(() => {
+    document
+      .querySelector("#flux-timeline .live-ego .thinking-header")
+      ?.focus();
+  });
+  await page.keyboard.press("Enter");
+  const thinkingEnter = await page.evaluate(() => {
+    const header = document.querySelector(
+      "#flux-timeline .live-ego .thinking-header",
+    );
+    return {
+      expanded: header?.getAttribute("aria-expanded"),
+      expandedClass: !!header?.closest(".thinking")?.classList.contains(
+        "expanded",
+      ),
+      focused: document.activeElement === header,
+    };
+  });
+  report.check(
+    "Enter collapses the overlay live thinking card and keeps focus",
+    thinkingEnter.expanded === "false" && !thinkingEnter.expandedClass &&
+      thinkingEnter.focused,
+    JSON.stringify(thinkingEnter),
+  );
+  await page.evaluate(() => {
+    document.querySelector("#flux-overlay button")?.click();
+  });
 } finally {
   await browser.close();
 }

@@ -27,6 +27,49 @@ let generatingEl = null;
 let liveEgo = null;
 let stopArmed = false;
 let stopDisarmTimer = null;
+// The timeline is role=log with aria-live="off" (history replay and
+// token-by-token streaming must stay silent), so completed entries are
+// announced here instead: one whole entry per write. Bulk renders
+// (loadTimeline, turn-done convergence) raise suppressAnnounce.
+let suppressAnnounce = false;
+
+function announceFlux(text) {
+  if (suppressAnnounce || !text) return;
+  const announcer = document.getElementById('flux-announcer');
+  if (!announcer) return;
+  const message = String(text).replace(/\s+/g, ' ').trim();
+  if (!message) return;
+  // A repeated status (the same entry rendered twice) is not a fresh
+  // insertion; clear first so the identical text is spoken again.
+  if (announcer.textContent === message) {
+    announcer.textContent = '';
+    requestAnimationFrame(() => {
+      announcer.textContent = message;
+    });
+    return;
+  }
+  announcer.textContent = message;
+}
+
+// Disclosure ids are per-render counters: reloads clear the timeline, so a
+// counter is unique within any live document and never reuses an id.
+let disclosureSeq = 0;
+function nextDisclosureId(prefix) {
+  disclosureSeq += 1;
+  return prefix + '-' + disclosureSeq;
+}
+
+/** Wire a tool card's native header button (Enter/Space arrive as click). */
+function wireToolToggle(container) {
+  const header = container.querySelector('.tool-header');
+  if (!header) return;
+  header.addEventListener('click', function () {
+    const card = header.closest('.tool');
+    const expanded = header.getAttribute('aria-expanded') !== 'true';
+    header.setAttribute('aria-expanded', String(expanded));
+    if (card) card.classList.toggle('expanded', expanded);
+  });
+}
 
 
 // ---------------------------------------------------------------------------
@@ -268,14 +311,26 @@ function wireOverlay(cfg, overlayCfg) {
     // bubble — an unstamped element is skipped by the insert walk and
     // cards land above the live stream.
     el.dataset.ts = String(Date.now());
+    const thinkingId = nextDisclosureId('flux-thinking');
     el.innerHTML =
       '<div class="msg-header"><span>' + escapeHtml(cfg.entityName || 'entity') + '</span><span></span></div>' +
       '<div class="thinking expanded live-thinking">' +
-        '<div class="thinking-header"><span class="thinking-toggle">▼</span><span>Thinking</span></div>' +
-        '<div class="thinking-content"></div>' +
+        '<button type="button" class="thinking-header" aria-expanded="true" aria-controls="' + thinkingId + '">' +
+          '<span class="thinking-toggle" aria-hidden="true">▼</span><span>Thinking</span>' +
+        '</button>' +
+        '<div class="thinking-content" id="' + thinkingId + '"></div>' +
       '</div>' +
       '<div class="msg-content"></div>';
     timeline.appendChild(el);
+    const thinkHeader = el.querySelector('.thinking-header');
+    if (thinkHeader) {
+      thinkHeader.addEventListener('click', function () {
+        const thinking = thinkHeader.closest('.thinking');
+        const expanded = thinkHeader.getAttribute('aria-expanded') !== 'true';
+        thinkHeader.setAttribute('aria-expanded', String(expanded));
+        if (thinking) thinking.classList.toggle('expanded', expanded);
+      });
+    }
     FluxScroll.tick();
     liveEgo = { el, raw: '' };
     return liveEgo;
@@ -303,7 +358,11 @@ function wireOverlay(cfg, overlayCfg) {
       if (c) c.innerHTML = renderMd(live.raw.replace(/<t>[^<]*<\/t>\s*/g, ''));
       // Words arriving = thinking is done; collapse it (classic pattern).
       const th = live.el.querySelector('.live-thinking');
-      if (th) th.classList.remove('expanded');
+      if (th) {
+        th.classList.remove('expanded');
+        th.querySelector('.thinking-header')
+          ?.setAttribute('aria-expanded', 'false');
+      }
       FluxScroll.tick();
     } catch (err) {}
   });
@@ -609,7 +668,14 @@ async function loadTimeline() {
     // here THREW, killing the whole load (the empty-timeline bug).
     var tl = document.getElementById('flux-timeline');
     if (tl) tl.innerHTML = '';
-    merged.slice(-60).forEach(function (m) { m.render(); });
+    // Bulk render: history must not be re-announced (WCAG 4.1.3 covers
+    // live arrivals and state changes, not a view repaint).
+    suppressAnnounce = true;
+    try {
+      merged.slice(-60).forEach(function (m) { m.render(); });
+    } finally {
+      suppressAnnounce = false;
+    }
   } catch (e) {
     console.error('flux timeline load failed', e);
   }
@@ -750,6 +816,7 @@ function showGenerating() {
   generatingEl.innerHTML = '<div class="flux-gen-text"></div>';
   const timeline = document.getElementById('flux-timeline');
   timeline.appendChild(generatingEl);
+  announceFlux('Generating reply');
   FluxScroll.tick();
 }
 function hideGenerating() {
@@ -821,9 +888,15 @@ function appendEntry(entry) {
     : src === 'dream' ? 'Dream'
     : src === 'thalamus' ? 'system'
     : 'Noticing';
+  const speaker = entry.role === 'user'
+    ? (window.__fluxUserName || 'user')
+    : entry.role === 'entity'
+    ? (window.__fluxEntityName || 'entity')
+    : mod;
   div.innerHTML = escapeHtml(entry.content || '') +
     '<div class="meta">' + mod + ' · ' + fmtTime(entry.timestamp) + '</div>';
   addToTimeline(div, entry.timestamp);
+  announceFlux(speaker + ': ' + (entry.content || ''));
   FluxScroll.tick();
 }
 
@@ -832,26 +905,25 @@ function appendSessionEntry(e) {
   const timeline = document.getElementById('flux-timeline');
   const cfg = window.__fluxCfg || {};
   const div = document.createElement('div');
+  let announceText = '';
   if (e.kind === 'tool_use') {
+    announceText = 'Using tool: ' + (e.source || 'tool');
     div.className = 'flux-entry tool-wrap';
     if (e.id) div.dataset.toolCallId = e.id;
+    const contentId = nextDisclosureId('flux-tool-content');
     div.innerHTML =
       '<div class="tool">' +
-        '<div class="tool-header">' +
-          '<span class="tool-icon">&#9881;</span>' +
+        '<button type="button" class="tool-header" aria-expanded="false" aria-controls="' + contentId + '">' +
+          '<span class="tool-icon" aria-hidden="true">&#9881;</span>' +
           '<span class="tool-name">' + escapeHtml(e.source || 'tool') + '</span>' +
-          '<span class="tool-toggle">&#9660;</span>' +
+          '<span class="tool-toggle" aria-hidden="true">&#9660;</span>' +
+        '</button>' +
+        '<div class="tool-disclosure-content" id="' + contentId + '">' +
+          '<div class="tool-args">' + escapeHtml(e.content || '') + '</div>' +
+          '<div class="tool-result"></div>' +
         '</div>' +
-        '<div class="tool-args">' + escapeHtml(e.content || '') + '</div>' +
-        '<div class="tool-result"></div>' +
       '</div>';
-    const header = div.querySelector('.tool-header');
-    if (header) {
-      header.addEventListener('click', function () {
-        const card = this.parentElement;
-        if (card) card.classList.toggle('expanded');
-      });
-    }
+    wireToolToggle(div);
   } else if (e.kind === 'tool_result') {
     // Reload merging: the result entry's id is `<callId>-result` — fill
     // the matching card instead of stacking a second one. A missing
@@ -861,26 +933,27 @@ function appendSessionEntry(e) {
       FluxScroll.tick();
       return;
     }
+    announceText = 'Tool finished' + (e.source ? ': ' + e.source : '');
     div.className = 'flux-entry tool-wrap';
+    const contentId = nextDisclosureId('flux-tool-content');
     div.innerHTML =
       '<div class="tool">' +
-        '<div class="tool-header">' +
-          '<span class="tool-icon">&#9881;</span>' +
+        '<button type="button" class="tool-header" aria-expanded="false" aria-controls="' + contentId + '">' +
+          '<span class="tool-icon" aria-hidden="true">&#9881;</span>' +
           '<span class="tool-name">' + escapeHtml(e.source || 'tool') + ' · result</span>' +
-          '<span class="tool-toggle">&#9660;</span>' +
+          '<span class="tool-toggle" aria-hidden="true">&#9660;</span>' +
+        '</button>' +
+        '<div class="tool-disclosure-content" id="' + contentId + '">' +
+          '<div class="tool-result">' + escapeHtml(e.content || '') + '</div>' +
         '</div>' +
-        '<div class="tool-result">' + escapeHtml(e.content || '') + '</div>' +
       '</div>';
-    const header = div.querySelector('.tool-header');
-    if (header) {
-      header.addEventListener('click', function () {
-        const card = this.parentElement;
-        if (card) card.classList.toggle('expanded');
-      });
-    }
+    wireToolToggle(div);
   } else if (e.kind === 'ego') {
     div.className = 'flux-entry entity';
     const stripped = (e.content || '').replace(/<t>[^<]*<\/t>\s*/g, '');
+    if (stripped.trim()) {
+      announceText = (window.__fluxEntityName || 'entity') + ': ' + stripped;
+    }
     let body = '';
     if (e.thinking) {
       body += '<details class="thinking-details" style="margin-bottom:6px;">' +
@@ -908,6 +981,7 @@ function appendSessionEntry(e) {
       : s.indexOf('reverie') >= 0 ? 'Reverie'
       : s.indexOf('musing') >= 0 ? 'Musing'
       : 'Noticing';
+    announceText = mod + ': ' + (e.content || '');
     let cls = 'flux-entry ambient';
     if (s.indexOf('compaction') === 0) cls += ' compaction';
     else if (s.indexOf('reverie') >= 0) cls += ' reverie';
@@ -918,10 +992,12 @@ function appendSessionEntry(e) {
     div.innerHTML = escapeHtml(e.content) +
       '<div class="meta">' + mod + ' · ' + fmtTime(e.timestamp) + '</div>';
   } else if (e.kind === 'system') {
+    announceText = e.content || '';
     div.className = 'flux-entry ambient';
     div.innerHTML = escapeHtml(e.content) +
       '<div class="meta">system · ' + fmtTime(e.timestamp) + '</div>';
   } else {
+    announceText = (window.__fluxUserName || 'user') + ': ' + (e.content || '');
     div.className = 'flux-entry user';
     div.innerHTML = '<div class="flux-entry-text">' + renderMd(e.content || '') + '</div>' +
       '<div class="meta">' + escapeHtml(window.__fluxUserName || 'user') + ' · ' + fmtTime(e.timestamp) + '</div>';
@@ -932,6 +1008,7 @@ function appendSessionEntry(e) {
     }
   }
   addToTimeline(div, e.timestamp);
+  announceFlux(announceText);
   FluxScroll.tick();
 }
 
@@ -948,26 +1025,24 @@ function appendToolCall(data) {
   // Collapsed by default like classic's persisted cards (space
   // saving, the thinking-block treatment); header
   // click toggles.
+  const contentId = nextDisclosureId('flux-tool-content');
   div.innerHTML =
     '<div class="tool">' +
-      '<div class="tool-header">' +
-        '<span class="tool-icon">&#9881;</span>' +
+      '<button type="button" class="tool-header" aria-expanded="false" aria-controls="' + contentId + '">' +
+        '<span class="tool-icon" aria-hidden="true">&#9881;</span>' +
         '<span class="tool-name">' + escapeHtml(data.name) + '</span>' +
-        '<span class="tool-toggle">&#9660;</span>' +
-      '</div>' +
-      '<div class="tool-args">' + escapeHtml(formattedArgs || '') + '</div>' +
-      '<div class="tool-result' + (data.isError ? ' error' : '') + '">' +
-        escapeHtml(data.result || '') +
+        '<span class="tool-toggle" aria-hidden="true">&#9660;</span>' +
+      '</button>' +
+      '<div class="tool-disclosure-content" id="' + contentId + '">' +
+        '<div class="tool-args">' + escapeHtml(formattedArgs || '') + '</div>' +
+        '<div class="tool-result' + (data.isError ? ' error' : '') + '">' +
+          escapeHtml(data.result || '') +
+        '</div>' +
       '</div>' +
     '</div>';
-  const header = div.querySelector('.tool-header');
-  if (header) {
-    header.addEventListener('click', function () {
-      const card = this.parentElement;
-      if (card) card.classList.toggle('expanded');
-    });
-  }
+  wireToolToggle(div);
   addToTimeline(div, data.timestamp || new Date().toISOString());
+  announceFlux('Tool finished: ' + (data.name || 'tool'));
   FluxScroll.tick();
 }
 
@@ -984,6 +1059,9 @@ function fillToolResult(callId, result, isError) {
     slot.textContent = result || '';
     slot.classList.toggle('error', !!isError);
   }
+  const name = (card.querySelector('.tool-name')?.textContent || '')
+    .replace(/\s*·\s*result\s*$/, '').trim();
+  announceFlux(name ? 'Tool finished: ' + name : 'Tool finished');
   return true;
 }
 

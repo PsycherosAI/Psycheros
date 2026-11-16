@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flux Space — the entity</title>
+  <link rel="stylesheet" href="/css/main.css" />
+  <style>
+    body { margin: 0; background: #0d0f14; color: #e4e6eb; font-family: system-ui, sans-serif; }
+    .flux-shell { display: flex; flex-direction: column; height: 100vh; max-width: 760px; margin: 0 auto; }
+    .flux-header { padding: 16px 20px; border-bottom: 1px solid #23262e; display: flex; justify-content: space-between; align-items: center; }
+    .flux-header a { color: #8b8f99; text-decoration: none; font-size: 14px; }
+    #flux-timeline { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+    .flux-entry { padding: 10px 14px; border-radius: 12px; max-width: 82%; word-wrap: break-word; line-height: 1.5; }
+    .flux-edit-btn { position: absolute; top: -6px; right: -6px; display: none; background: #1c1f26; border: 1px solid #2a2e36; color: #8b8f99; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 11px; z-index: 5; }
+    .flux-entry { position: relative; }
+    .flux-entry:hover .flux-edit-btn { display: inline-block; }
+    .flux-generating { align-self: flex-start; background: #1c1f26; border: 1px solid #2a2e36; color: #8b8f99; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
+    .flux-generating .typing-cursor { display: inline-block; animation: fluxblink 1s steps(1) infinite; }
+    .flux-generating.streaming .typing-cursor { display: none; }
+    .flux-generating.streaming::after { content: '▌'; display: inline-block; animation: fluxblink 1s steps(1) infinite; }
+    .flux-entry.entity .typing-cursor { display: inline-block; animation: fluxblink 1s steps(1) infinite; opacity: 0.6; }
+    .flux-entry.entity .flux-gen-text { white-space: pre-wrap; }
+    .flux-entry.entity .meta { margin-top: 4px; }
+    @keyframes fluxblink { 50% { opacity: 0; } }
+    .flux-entry.user { align-self: flex-end; background: #2563eb; color: #fff; }
+    .flux-entry.entity { align-self: flex-start; background: #1c1f26; border: 1px solid #2a2e36; }
+    .flux-entry.ambient { align-self: flex-start; background: transparent; border: 1px dashed #3a3e46; color: #8b8f99; font-style: italic; font-size: 13px; }
+    /* Module colors: dotted border + colored text when ambient;
+       solid border + tinted background (same color) when promoted. */
+    .flux-entry.ambient.reverie { border: 1px dashed #6b46c1; color: #a78bfa; }
+    .flux-entry.ambient.reverie.escalated { border: 1px solid #6b46c1; background: rgba(107, 70, 193, 0.12); color: #a78bfa; font-style: normal; }
+    .flux-entry.ambient.dream { border: 1px dashed #7c5cbf; color: #b8a5e8; font-style: italic; }
+    .flux-entry.ambient.musing { border: 1px dashed #b45309; color: #fbbf24; font-style: normal; }
+    .flux-entry.ambient.musing.escalated { border: 1px solid #b45309; background: rgba(180, 83, 9, 0.12); color: #fbbf24; }
+    .flux-entry.ambient.escalated { border-style: solid; }
+    .flux-entry.ambient.compaction { border: 1px dashed #3f7f5f; color: #86c7a5; font-style: normal; }
+    .flux-entry.ambient.noticing { border: 1px dashed #64748b; color: #94a3b8; }
+    .flux-entry.ambient.noticing.escalated { border: 1px solid #64748b; background: rgba(100, 116, 139, 0.14); color: #cbd5e1; font-style: normal; }
+    .flux-entry.ambient.thoughtstream { border-color: #0e7490; border-style: solid; border-width: 1px; color: #67e8f9; font-style: normal; }
+    .flux-entry.tool-wrap { align-self: flex-start; background: transparent; border: none; padding: 0; max-width: 90%; }
+    .flux-entry.thinking-wrap { align-self: flex-start; background: transparent; border: none; padding: 0; max-width: 90%; }
+    /* Markdown lists: the app-wide reset zeroes ul/ol padding — restore
+       the bullet indent. */
+    #flux-timeline ul, #flux-timeline ol { margin: 8px 0; padding-left: 24px; list-style-position: outside; }
+    #flux-timeline ul { list-style-type: disc; }
+    #flux-timeline ol { list-style-type: decimal; }
+    #flux-timeline li { margin: 4px 0; display: list-item; }
+    .thinking-card { background: #14161c; border: 1px solid #2a2e36; border-radius: 12px; overflow: hidden; }
+    .thinking-header { padding: 8px 14px; font-size: 12px; color: #8b8f99; cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; }
+    .thinking-header .toggle { transition: transform 0.2s; font-size: 10px; }
+    .thinking-card.open .thinking-header .toggle { transform: rotate(180deg); }
+    .thinking-body { display: none; padding: 4px 14px 12px; font-size: 13px; color: #9ca3af; line-height: 1.55; white-space: pre-wrap; max-height: 320px; overflow-y: auto; border-top: 1px dashed #23262e; }
+    .thinking-card.open .thinking-body { display: block; }
+    .flux-entry .meta { font-size: 11px; opacity: 0.6; margin-top: 4px; }
+    .flux-input-bar { padding: 14px 20px; border-top: 1px solid #23262e; display: flex; gap: 10px; }
+    #flux-input { flex: 1; background: #1c1f26; border: 1px solid #2a2e36; color: #e4e6eb; border-radius: 10px; padding: 10px 14px; font-size: 15px; resize: none; font-family: inherit; max-height: 40vh; overflow-y: auto; }
+    #flux-send { background: #2563eb; color: #fff; border: none; border-radius: 10px; padding: 10px 18px; cursor: pointer; font-size: 15px; }
+    #flux-send:disabled { opacity: 0.5; cursor: default; }
+    #flux-toast { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); background: #1c1f26; border: 1px solid #2563eb; color: #e4e6eb; padding: 12px 18px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: none; max-width: 90vw; cursor: pointer; z-index: 50; }
+    .flux-status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .flux-status-dot.active { background: #22c55e; }
+    .flux-status-dot.inactive { background: #6b7280; }
+    #flux-mood-strip { display: flex; gap: 10px; padding: 10px 20px; border-bottom: 1px solid #23262e; flex-wrap: wrap; }
+    #flux-organ-health { display: flex; gap: 14px; padding: 6px 20px 8px; border-bottom: 1px solid #23262e; flex-wrap: wrap; align-items: center; }
+    #flux-mode-row { display: flex; justify-content: flex-end; padding: 4px 20px 0; }
+    .flux-mode-badge { display: none; font-size: 11px; color: #8b8f99; border: 1px solid #2a2e36; border-radius: 10px; padding: 2px 10px; }
+    .flux-mode-badge.visible { display: inline-block; }
+    .flux-mode-badge.mode-sleep { color: #7c8cf8; border-color: #3d46a8; }
+    .organ-health-item { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #8b8f99; }
+    .organ-health-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .organ-health-dot.green { background: #22c55e; }
+    .organ-health-dot.yellow { background: #eab308; }
+    .organ-health-dot.red { background: #ef4444; }
+    .mood-axis { display: flex; flex-direction: column; gap: 3px; min-width: 110px; }
+    .mood-axis-label { font-size: 11px; color: #8b8f99; text-transform: uppercase; letter-spacing: 0.5px; }
+    .mood-axis-row { display: flex; align-items: center; gap: 6px; }
+    .mood-axis-bar { flex: 1; height: 6px; background: #1c1f26; border-radius: 3px; position: relative; overflow: hidden; }
+    .mood-axis-fill { position: absolute; top: 0; bottom: 0; left: 50%; border-radius: 3px; transition: all 0.5s ease; }
+    .mood-axis-value { font-size: 12px; color: #e4e6eb; min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+    .mood-axis-label-q { font-size: 10px; color: #6b7280; }
+    .flux-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .flux-badge.running { background: #22c55e; color: #fff; }
+    .flux-badge.stopped { background: #ef4444; color: #fff; }
+    .flux-badge.paused { background: #f59e0b; color: #fff; }
+    .flux-controls { display: flex; gap: 8px; align-items: center; }
+    .flux-controls button { background: #1c1f26; border: 1px solid #2a2e36; color: #e4e6eb; border-radius: 8px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
+    .flux-controls button:hover:not(:disabled) { border-color: #3b82f6; }
+    .flux-controls button:disabled { opacity: 0.4; cursor: default; }
+    .flux-controls button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+    .flux-controls a { color: #8b8f99; text-decoration: none; font-size: 13px; padding: 6px 8px; }
+  </style>
+  <script src="/lib/marked.min.js"></script>
+  <script src="/lib/dompurify.min.js"></script>
+</head>
+<body>
+  <div class="flux-shell">
+    <div class="flux-header">
+      <span>
+        <span id="flux-badge" class="flux-badge stopped">Loading…</span>
+        <strong>Flux Space</strong>
+      </span>
+      <div class="flux-controls">
+        <button id="flux-btn-start" class="primary" onclick="fluxControl('start')">Start</button>
+        <button id="flux-btn-pause" onclick="fluxControl('pause')">Pause</button>
+        <button id="flux-btn-stop" onclick="fluxControl('stop')">Stop</button>
+        <button id="flux-btn-clear" onclick="fluxClear()">Clear</button>
+        <a href="/fragments/settings/flux">settings</a>
+        <a href="/">chat</a>
+      </div>
+    </div>
+    <div id="flux-mood-strip"></div>
+    <div id="flux-mode-row"><span id="flux-mode-badge" class="flux-mode-badge"></span></div>
+    <div id="flux-organ-health"></div>
+    <div id="flux-timeline" role="log" aria-live="off" aria-label="Flux Space timeline"></div>
+    <div id="flux-announcer" class="sr-only" role="status" aria-live="polite"></div>
+    <div class="flux-input-bar">
+      <textarea id="flux-input" rows="1" aria-label="Message" placeholder="say something..." autocomplete="off"></textarea>
+      <button id="flux-send">send</button>
+    </div>
+  </div>
+  <div id="flux-toast" role="status" aria-live="polite"></div>
+  <script>
+    var timeline = document.getElementById('flux-timeline');
+    var input = document.getElementById('flux-input');
+    var sendBtn = document.getElementById('flux-send');
+    // The textarea auto-grows with content up to max-height (CSS), then
+    // scrolls — one row tall when empty, like classic chat's input.
+    input.addEventListener('input', function() {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px';
+    });
+    var toast = document.getElementById('flux-toast');
+    var toastTimer = null;
+
+    // The timeline is role=log with aria-live="off" so history replays and
+    // token-by-token streaming stay silent. Completed entries and state
+    // changes are announced one at a time here instead.
+    var suppressAnnounce = false;
+    function announceFlux(text) {
+      if (suppressAnnounce || !text) return;
+      var announcer = document.getElementById('flux-announcer');
+      if (!announcer) return;
+      var message = String(text).replace(/\s+/g, ' ').trim();
+      if (!message) return;
+      if (announcer.textContent === message) {
+        announcer.textContent = '';
+        requestAnimationFrame(function() { announcer.textContent = message; });
+        return;
+      }
+      announcer.textContent = message;
+    }
+
+    function fmtTime(iso) {
+      try { return new Date(iso).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); }
+      catch (e) { return ''; }
+    }
+
+    // Follow-latch: scrolling up to read must never be yanked back
+    // by new entries. Same pattern as the
+    // overlay's FluxScroll — follow only while latched to the bottom;
+    // reading above it leaves the view where the reader put it.
+    var followLatched = true;
+    var tlEl = document.getElementById('flux-timeline');
+    if (tlEl) {
+      tlEl.addEventListener('scroll', function() {
+        followLatched = tlEl.scrollHeight - tlEl.scrollTop - tlEl.clientHeight <= 80;
+      });
+    }
+    function follow() {
+      if (followLatched && tlEl) tlEl.scrollTop = tlEl.scrollHeight;
+    }
+
+    function escapeHtml(s) {
+      var d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    // Markdown for dialogue blocks — same pipeline as classic chat
+    // (marked with breaks+gfm, DOMPurify-sanitized). Thinking stays
+    // plain text (interior monologue, not prose).
+    marked.setOptions({ breaks: true, gfm: true });
+    function renderMd(text) {
+      try {
+        return DOMPurify.sanitize(marked.parse(text || ''));
+      } catch (e) {
+        return escapeHtml(text || '');
+      }
+    }
+
+    var ENTITY_NAME = "the entity";
+    var USER_NAME = "the user";
+    // Disclosure ids are per-render counters: reloads clear the timeline,
+    // so a counter is unique within any live document and never reuses one.
+    var disclosureSeq = 0;
+    function nextDisclosureId(prefix) {
+      disclosureSeq += 1;
+      return prefix + '-' + disclosureSeq;
+    }
+    // Collapsed tool cards (classic persisted shape): the header is a
+    // native button, so Enter/Space arrive as click; aria-expanded follows
+    // the .expanded class and focus stays on the button.
+    function wireToolToggle(container) {
+      var header = container.querySelector('.tool-header');
+      if (!header) return;
+      header.addEventListener('click', function() {
+        var card = this.closest('.tool');
+        var expanded = this.getAttribute('aria-expanded') !== 'true';
+        this.setAttribute('aria-expanded', String(expanded));
+        if (card) card.classList.toggle('expanded', expanded);
+      });
+    }
+
+    function fillToolResult(callId, result, isError, metadata) {
+      var card = document.querySelector(
+        '.tool-wrap[data-tool-call-id="' + (callId || '') + '"]'
+      );
+      if (!card) return false;
+      var slot = card.querySelector('.tool-result');
+      if (slot) {
+        slot.innerHTML =
+          '<div class="tool-result-label">' + (isError ? 'Error' : 'Output') + '</div>' +
+          escapeHtml(result || '');
+        slot.classList.toggle('error', !!isError);
+      }
+      var imgPath = metadata && metadata.image && metadata.image.path;
+      if (imgPath && !card.nextElementSibling?.classList?.contains('generated-image-container')) {
+        var sib = document.createElement('div');
+        sib.className = 'generated-image-container';
+        sib.innerHTML = '<img src="' + escapeHtml(imgPath) + '" alt="generated image" loading="lazy">';
+        card.after(sib);
+      }
+      var toolName = (card.querySelector('.tool-name') || {}).textContent || '';
+      toolName = toolName.replace(/\s*·\s*result\s*$/, '').trim();
+      announceFlux(toolName ? 'Tool finished: ' + toolName : 'Tool finished');
+      return true;
+    }
+
+    function appendSessionEntry(e) {
+      var div = document.createElement('div');
+      var label = USER_NAME;
+      var announceText = '';
+      var contentId;
+      if (e.kind === 'tool_use') {
+        announceText = 'Using tool: ' + (e.source || 'tool');
+        div.className = 'flux-entry tool-wrap';
+        if (e.id) div.dataset.toolCallId = e.id;
+        contentId = nextDisclosureId('flux-tool-content');
+        div.innerHTML =
+          '<div class="tool">' +
+            '<button type="button" class="tool-header" aria-expanded="false" aria-controls="' + contentId + '">' +
+              '<span class="tool-icon" aria-hidden="true">&#9881;</span>' +
+              '<span class="tool-name">' + escapeHtml(e.source || 'tool') + '</span>' +
+              '<span class="tool-toggle" aria-hidden="true">&#9660;</span>' +
+            '</button>' +
+            '<div class="tool-disclosure-content" id="' + contentId + '">' +
+              '<div class="tool-args">' + escapeHtml(e.content || '') + '</div>' +
+              '<div class="tool-result"></div>' +
+            '</div>' +
+          '</div>';
+        wireToolToggle(div);
+      } else if (e.kind === 'tool_result') {
+        // Reload merging: a result entry has the id <callId>-result —
+        // fill the matching card (one card per call, args + result,
+        // classic style); a trimmed-away card still shows a standalone
+        // note. Cards stay collapsed — space saving, the thinking-block
+        // treatment.
+        var callId = (e.id || '').replace(/-result$/, '');
+        if (callId && fillToolResult(callId, e.content, false)) {
+          follow();
+          return;
+        }
+        announceText = 'Tool finished' + (e.source ? ': ' + e.source : '');
+        div.className = 'flux-entry tool-wrap';
+        contentId = nextDisclosureId('flux-tool-content');
+        div.innerHTML =
+          '<div class="tool">' +
+            '<button type="button" class="tool-header" aria-expanded="false" aria-controls="' + contentId + '">' +
+              '<span class="tool-icon" aria-hidden="true">&#9881;</span>' +
+              '<span class="tool-name">' + escapeHtml(e.source || 'tool') + ' · result</span>' +
+              '<span class="tool-toggle" aria-hidden="true">&#9660;</span>' +
+            '</button>' +
+            '<div class="tool-disclosure-content" id="' + contentId + '">' +
+              '<div class="tool-result">' + escapeHtml(e.content || '') + '</div>' +
+            '</div>' +
+          '</div>';
+        wireToolToggle(div);
+      } else if (e.kind === 'ego') {
+        div.className = 'flux-entry entity';
+        // Display-strip <t> stamps (classic chat's stripEntityXml): the
+        // stamp lives in the transcript for the model, never shows to
+        // the user. Same rule as every other surface.
+        var stripped = (e.content || '').replace(/<t>[^<]*<\/t>\s*/g, '');
+        if (stripped.trim()) announceText = ENTITY_NAME + ': ' + stripped;
+        var body = '';
+        if (e.thinking) {
+          body += '<details class="thinking-details" style="margin-bottom:6px;"><summary style="cursor:pointer;color:#8b8f99;font-size:12px;">thinking</summary><div style="color:#9ca3af;font-size:13px;white-space:pre-wrap;border-left:2px solid #2a2e36;padding-left:8px;margin-top:4px;">' + escapeHtml(e.thinking) + '</div></details>';
+        }
+        // Provider misroute (reply routed into reasoning): the message
+        // streamed through the thinking card and the persisted content is
+        // empty — render the entry from the thinking so the turn isn't a
+        // blank bubble. Classic chat has loop-side recovery; until Flux
+        // does, the UI refuses to hide the reply.
+        if (!stripped.trim()) {
+          // Thinking-only entry: the collapsible details above IS the
+          // bubble — no expanded-text fallback.
+        } else {
+          body += renderMd(stripped);
+        }
+        div.innerHTML = body +
+          '<div class="meta">' + ENTITY_NAME + ' · ' + fmtTime(e.timestamp) + '</div>';
+        var btn = document.createElement('button');
+        btn.className = 'flux-edit-btn';
+        btn.textContent = '✎';
+        btn.title = 'Edit this entry';
+        btn.onclick = function(ev) {
+          ev.stopPropagation();
+          editSessionEntry(e, div);
+        };
+        div.appendChild(btn);
+      } else if (e.kind === 'briefing') {
+        var s = e.source || '';
+        var isSystem = s.indexOf('sleep') >= 0 || s.indexOf('posture') >= 0 ||
+          s.indexOf('thalamus') >= 0 || s.indexOf('cycle') >= 0;
+        var mod = s.indexOf('compaction') === 0 ? 'Compaction'
+          : s.indexOf('reverie') >= 0 ? 'Reverie'
+          : s.indexOf('musing') >= 0 ? 'Musing'
+          : s.indexOf('dream') >= 0 ? 'Dream'
+          : isSystem ? 'system'
+          : 'Noticing';
+        announceText = mod + ': ' + (e.content || '');
+        var cls = 'flux-entry ambient';
+        if (s.indexOf('compaction') === 0) {
+          // Textures are working memory, not module output — neutral
+          // style, Compaction label.
+          cls += ' compaction';
+        } else if (s.indexOf('dream') >= 0) cls += ' dream';
+        else if (s.indexOf('reverie') >= 0) cls += ' reverie';
+        else if (s.indexOf('musing') >= 0) cls += ' musing';
+        else cls += ' noticing';
+        if (e.generated) cls += ' escalated';
+        var chain = s.indexOf('compaction:') === 0
+          ? s.slice('compaction:'.length).replace(/^w/, function(c) { return c.toUpperCase(); })
+          : '';
+        div.className = cls;
+        div.innerHTML = escapeHtml(e.content) +
+          '<div class="meta">' + mod + (chain ? ' (' + chain + ')' : '') + ' · ' + fmtTime(e.timestamp) + '</div>';
+      } else if (e.kind === 'system') {
+        announceText = e.content || '';
+        div.className = 'flux-entry ambient';
+        div.innerHTML = escapeHtml(e.content) +
+          '<div class="meta">system · ' + fmtTime(e.timestamp) + '</div>';
+      } else {
+        announceText = USER_NAME + ': ' + (e.content || '');
+        div.className = 'flux-entry user';
+        div.innerHTML = renderMd(e.content || '') +
+          '<div class="meta">' + USER_NAME + ' · ' + fmtTime(e.timestamp) + '</div>';
+        var ubtn = document.createElement('button');
+        ubtn.className = 'flux-edit-btn';
+        ubtn.textContent = '✎';
+        ubtn.title = 'Edit this entry';
+        ubtn.onclick = function(ev) {
+          ev.stopPropagation();
+          editSessionEntry(e, div);
+        };
+        div.appendChild(ubtn);
+      }
+      addToTimeline(div, e.timestamp);
+      announceFlux(announceText);
+      follow();
+    }
+
+    var generatingEl = null;
+    function showGenerating() {
+      hideGenerating();
+      generatingEl = document.createElement('div');
+      generatingEl.className = 'flux-generating';
+      generatingEl.dataset.ts = String(Date.now()); // ordered inserts below it
+      generatingEl.innerHTML = '<span class="flux-gen-text"></span><span class="typing-cursor">▌</span>';
+      timeline.appendChild(generatingEl);
+      announceFlux('Generating reply');
+      follow();
+    }
+    function hideGenerating() {
+      if (generatingEl) { generatingEl.remove(); generatingEl = null; }
+    }
+    function addToTimeline(div, tsIso) {
+      var ts = Date.parse(tsIso || '') || 0;
+      div.dataset.ts = String(ts);
+      var kids = timeline.children;
+      for (var i = kids.length - 1; i >= 0; i--) {
+        var k = Number(kids[i].dataset && kids[i].dataset.ts || 0);
+        if (k && k <= ts) {
+          kids[i].insertAdjacentElement('afterend', div);
+          return;
+        }
+      }
+      timeline.insertBefore(div, timeline.firstChild);
+    }
+
+    function appendEntry(entry) {
+      hideGenerating();
+      var div = document.createElement('div');
+      var organId = entry.metadata && entry.metadata.organId;
+      var isReverie = entry.role === 'ambient' && organId === 'reverie';
+      var isThoughtstream = entry.role === 'ambient' && organId === 'thoughtstream';
+      var isMusing = entry.role === 'ambient' && organId === 'musing';
+      var isDream = entry.role === 'ambient' && organId === 'dream';
+      var escalated = entry.role === 'ambient' && entry.metadata && entry.metadata.escalated;
+      var cls = 'flux-entry ' + entry.role;
+      if (isReverie) cls += ' reverie';
+      if (isMusing) cls += ' musing';
+      if (isDream) cls += ' dream';
+      if (!isReverie && !isMusing && !isThoughtstream && !isDream) cls += ' noticing';
+      if (escalated) cls += ' escalated';
+      if (isThoughtstream) cls += ' thoughtstream';
+      div.className = cls;
+      // Labels name the source plainly — no glyphs, no invented verbs.
+      // Icons/glyphs are reserved for marking significant things.
+      var label = entry.role === 'user' ? USER_NAME
+        : (entry.role === 'entity' ? ENTITY_NAME
+        : (organId === 'thalamus' ? 'system'
+        : (isReverie ? 'Reverie'
+        : (isMusing ? 'Musing'
+        : (isDream ? 'Dream'
+        : (isThoughtstream ? 'Thoughtstream'
+        : 'Noticing'))))));
+      div.innerHTML = escapeHtml(entry.content) +
+        '<div class="meta">' + label + ' · ' + fmtTime(entry.timestamp) + '</div>';
+      if (entry.role === 'user' || entry.role === 'entity') {
+        var btn = document.createElement('button');
+        btn.className = 'flux-edit-btn';
+        btn.textContent = '✎';
+        btn.title = 'Edit this entry';
+        btn.onclick = function(ev) {
+          ev.stopPropagation();
+          editSessionEntry(entry, div);
+        };
+        div.appendChild(btn);
+      }
+      addToTimeline(div, entry.timestamp);
+      announceFlux(label + ': ' + (entry.content || ''));
+      follow();
+    }
+
+    // Edit an Ego session entry (the malformed-timestamp cleanup path —
+    // pause flux via the controls, edit, resume). Talks to
+    // /api/flux/session/edit, which fixes the session log row.
+    function editSessionEntry(entry, div) {
+      if (div.querySelector('textarea')) return;
+      var ta = document.createElement('textarea');
+      ta.value = entry.content;
+      ta.style.cssText = 'width:100%;min-height:60px;background:#14161c;color:#e4e6eb;border:1px solid #2a2e36;border-radius:8px;padding:8px;font-family:inherit;font-size:inherit;';
+      var save = document.createElement('button');
+      save.textContent = 'Save';
+      save.style.cssText = 'margin-top:4px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;';
+      save.onclick = function() {
+        fetch('/api/flux/session/edit', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id: entry.id, content: ta.value})
+        }).then(function(r) {
+          if (r.ok) { location.reload(); }
+          else { save.textContent = 'Failed'; }
+        });
+      };
+      div.innerHTML = '';
+      div.appendChild(ta);
+      div.appendChild(save);
+      ta.focus();
+    }
+
+    function showToast(msg) {
+      toast.style.display = 'block';
+      if (toastTimer) clearTimeout(toastTimer);
+      // #flux-toast is a persistent status region: fill it after the
+      // clear so an identical repeat is a fresh insertion (some ATs skip
+      // a same-text rewrite).
+      toast.textContent = '';
+      requestAnimationFrame(function() { toast.textContent = msg; });
+      toastTimer = setTimeout(function() {
+        toast.style.display = 'none';
+        toast.textContent = '';
+      }, 6000);
+    }
+
+    function sendMessage() {
+      var content = input.value.trim();
+      if (!content) return;
+      sendBtn.disabled = true;
+      fetch('/api/flux/message', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({content: content})
+      }).then(function() {
+        input.value = '';
+        sendBtn.disabled = false;
+        input.focus();
+      }).catch(function() { sendBtn.disabled = false; });
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    // Enter sends, Shift+Enter makes a newline — same convention as
+    // classic chat. (Plain preventDefault on Enter with no send makes
+    // the key do nothing at all.)
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+      // Shift+Enter falls through — the textarea's native newline.
+    });
+    toast.addEventListener('click', function() {
+      toast.style.display = 'none';
+      toast.textContent = '';
+    });
+
+    // Load the timeline: fetch recent entries. The timeline is the MERGE
+    // of the durable timeline (user/ambient) and the Ego session log (ego
+    // speech, tool_use, system gap-notes) — sorted by timestamp. Named so
+    // flux_turn_done can converge the live view on the durable order.
+    function loadTimeline() {
+    Promise.all([
+      fetch('/api/flux/entries?limit=50').then(function(r) { return r.json(); }),
+      fetch('/api/flux/session').then(function(r) { return r.json(); })
+    ]).then(function(results) {
+      var durable = Array.isArray(results[0]) ? results[0] : [];
+      var session = Array.isArray(results[1]) ? results[1] : [];
+      var merged = [];
+      // De-dup across BOTH stores by content prefix, then keep the
+      // newest 60 merged entries. Generated (tinted) session briefings
+      // win over durable twins; ambient twins render from durable.
+      // Fetch-window mismatch (50 durable vs all session) previously
+      // rendered old session copies whose durable twins fell outside
+      // the durable fetch — the mass doubles.
+      // Stamp-aware prefix: session ego rows carry <t> stamps, durable
+      // rows don't — raw prefixes never matched, so stamped twins rendered
+      // twice. Strip before comparing.
+      var stripT = function(s) { return (s || '').replace(/<t>[^<]*<\/t>\s*/g, '').slice(0, 80); };
+      // Storage alignment: dialogue rows from the messages table are the
+      // render of record for user/ego speech. Session copies of the same
+      // words (context copies) skip.
+      var hasMessageDialogue = session.some(function(e) { return e.fromMessages; });
+      var messagePrefixes = {};
+      session.forEach(function(e) {
+        if (e.fromMessages && (e.kind === 'user' || e.kind === 'ego' || e.kind === 'system')) {
+          messagePrefixes[stripT(e.content)] = true;
+        }
+      });
+      var generatedPrefixes = {};
+      session.forEach(function(e) {
+        if (e.kind === 'briefing' && e.generated) {
+          generatedPrefixes[stripT(e.content)] = true;
+        }
+      });
+      var durableContents = {};
+      durable.forEach(function(e) {
+        var pref = stripT(e.content);
+        if (generatedPrefixes[pref]) return; // the tinted twin renders instead
+        // Legacy dialogue (pre-alignment durable user/entity rows) skips
+        // when the messages table is the dialogue record.
+        if (hasMessageDialogue && (e.role === 'user' || e.role === 'entity')) return;
+        durableContents[pref] = true;
+        merged.push({ ts: e.timestamp, render: function() { appendEntry(e); } });
+      });
+      session.forEach(function(e) {
+        if (e.source === 'existing-open') return; // bookkeeping, not visible
+        var pref = stripT(e.content);
+        if (e.kind === 'briefing' && durableContents[pref]) return; // durable twin rendered
+        if (e.kind === 'briefing' && !e.generated && generatedPrefixes[pref]) return;
+        // ONE source of truth per piece, no coverage windows: session
+        // user/system rows are copies (record rows render); session EGO
+        // rows are the timeline's truth — split pieces for new turns,
+        // copies for history — and record ego rows never render here.
+        if (!e.fromMessages && hasMessageDialogue && (e.kind === 'user' || e.kind === 'system')) return;
+        if (e.fromMessages && e.kind === 'ego') return;
+        merged.push({ ts: e.timestamp, render: function() { appendSessionEntry(e); } });
+      });
+      merged.sort(function(a, b) { return a.ts < b.ts ? -1 : 1; });
+      if (merged.length > 60) merged = merged.slice(-60);
+      // Full render, not append — flux_turn_done re-runs this load; an
+      // uncleared timeline doubled every entry per reload.
+      timeline.innerHTML = '';
+      // Bulk render: history must not be re-announced (4.1.3 covers live
+      // arrivals and state changes, not a view repaint).
+      suppressAnnounce = true;
+      try {
+        merged.forEach(function(m) { m.render(); });
+      } finally {
+        suppressAnnounce = false;
+      }
+    }).catch(function(e) { console.error('flux load failed', e); });
+    }
+    loadTimeline();
+
+    // Mode badge: at-a-glance posture —
+    // why the entity behaves a certain way. Initial from status, live
+    // via flux_mode.
+    var modeBadge = document.getElementById('flux-mode-badge');
+    function setModeBadge(mode) {
+      if (!modeBadge) return;
+      if (mode) {
+        modeBadge.textContent = 'mode: ' + mode;
+        modeBadge.className = 'flux-mode-badge visible' +
+          (mode === 'sleep' ? ' mode-sleep' : '');
+      } else {
+        modeBadge.className = 'flux-mode-badge';
+      }
+    }
+    fetch('/api/flux/status').then(function(r) { return r.json(); })
+      .then(function(st) { setModeBadge(st.sensoryMode); })
+      .catch(function() {});
+    // Live updates via the persistent SSE channel.
+    var es = new EventSource('/api/events');
+    es.addEventListener('flux_mode', function(e) {
+      try { setModeBadge(JSON.parse(e.data).mode); } catch (err) {}
+    });
+    // Ego reasoning — fragments stream into one collapsible card per turn.
+    var thinkingCard = null;
+    es.addEventListener('flux_ego_thinking', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        if (!thinkingCard || thinkingCard.closed) {
+          var wrap = document.createElement('div');
+          wrap.className = 'flux-entry thinking-wrap';
+          var thinkingId = nextDisclosureId('flux-thinking');
+          // OPEN while streaming — the stream is meant to be watched
+          // live (classic chat's pattern); the persisted entry's own
+          // block is the collapsed-by-default record afterward.
+          wrap.innerHTML =
+            '<div class="thinking-card open">' +
+              '<button type="button" class="thinking-header" aria-expanded="true" aria-controls="' + thinkingId + '">' +
+                '<span>' + escapeHtml(ENTITY_NAME) + ' · thinking</span>' +
+                '<span class="toggle" aria-hidden="true">&#9660;</span>' +
+              '</button>' +
+              '<div class="thinking-body" id="' + thinkingId + '"></div>' +
+            '</div>';
+          timeline.appendChild(wrap);
+          thinkingCard = wrap.querySelector('.thinking-card');
+          thinkingCard.closed = false;
+          var header = thinkingCard.querySelector('.thinking-header');
+          header.addEventListener('click', function() {
+            thinkingCard.classList.toggle('open');
+            header.setAttribute(
+              'aria-expanded',
+              String(thinkingCard.classList.contains('open')),
+            );
+          });
+          follow();
+        }
+        var body = thinkingCard.querySelector('.thinking-body');
+        body.textContent += data.fragment;
+        // Keep the newest fragment in view while streaming.
+        body.scrollTop = body.scrollHeight;
+        follow();
+        // Close the card when the entity's answer arrives (next entity entry).
+        var closeWatcher = function(entry) {
+          if (entry.role === 'entity') {
+            thinkingCard.closed = true;
+            thinkingCard.querySelector('.thinking-body').style.opacity = '0.7';
+          }
+        };
+        pendingThinkingClose = closeWatcher;
+      } catch (err) {}
+    });
+    // Ego speech — fragments grow a REAL entity bubble, replaced by the
+    // durable entry on arrival. Raw accumulates; the render strips <t>
+    // stamps exactly as appendSessionEntry does (they never show).
+    var streamRaw = '';
+    es.addEventListener('flux_turn_done', function() {
+      // Converge on the durable interleaved order (the split entries
+      // carry per-piece timestamps the live stream can't).
+      try {
+        hideGenerating();
+        loadTimeline();
+      } catch (err) {}
+    });
+    es.addEventListener('flux_ego_stream', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        if (!generatingEl || !generatingEl.classList.contains('entity')) {
+          hideGenerating();
+          generatingEl = document.createElement('div');
+          generatingEl.className = 'flux-entry entity';
+          generatingEl.dataset.ts = String(Date.now()); // ordered inserts below it
+          // One block-level text node — same shape as the durable entry
+          // that replaces it (the two-span shape renders one word per
+          // line during streaming).
+          generatingEl.innerHTML = '<div class="flux-gen-text"></div>';
+          timeline.appendChild(generatingEl);
+        }
+        streamRaw += data.fragment;
+        var txt = generatingEl.querySelector('.flux-gen-text');
+        txt.textContent = streamRaw.replace(/<t>[^<]*<\/t>\s*/g, '');
+        follow();
+      } catch (err) {}
+    });
+    // Hook entry rendering so an entity response finalizes the open thinking card.
+    var pendingThinkingClose = null;
+    var origAppendEntry = appendEntry;
+    appendEntry = function(entry) {
+      origAppendEntry(entry);
+      if (pendingThinkingClose && entry.role === 'entity') {
+        pendingThinkingClose(entry);
+        pendingThinkingClose = null;
+      }
+    };
+    // Retire an open thinking card. Fired on ego replies AND user
+    // messages. The streamed card is EPHEMERAL live-view: once the real
+    // Ego entry arrives it carries the same thinking as its own
+    // collapsible block — keeping the card too double-rendered every
+    // turn, so the card is REMOVED, not dimmed.
+    function finalizeThinkingCard() {
+      if (thinkingCard && !thinkingCard.closed) {
+        thinkingCard.closed = true;
+        var wrap = thinkingCard.closest('.flux-entry');
+        if (wrap) wrap.remove();
+        thinkingCard = null;
+      }
+    }
+    es.addEventListener('flux_entry', function(e) {
+      try {
+        var entry = JSON.parse(e.data);
+        // Durable-timeline rows carry role; dialogue broadcasts carry kind.
+        // Route to the matching renderer.
+        if (entry.kind && !entry.role) {
+          if (entry.kind === 'ego' || entry.kind === 'user') {
+            finalizeThinkingCard();
+            streamRaw = '';
+            hideGenerating();
+          }
+          appendSessionEntry(entry);
+        }
+        else {
+          if (entry.role === 'entity') finalizeThinkingCard();
+          appendEntry(entry);
+        }
+      } catch (err) {}
+    });
+    es.addEventListener('flux_generating', function(e) {
+      try { finalizeThinkingCard(); showGenerating(); } catch (err) {}
+    });
+    es.addEventListener('flux_toast', function(e) {
+      // Toasts disabled: Subconscious escalations read as uninvited
+      // notifications. The broadcast stays on the
+      // wire; re-enabling is restoring this handler.
+      try { JSON.parse(e.data); } catch (err) {}
+    });
+    es.addEventListener('flux_organ_health', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        if (data.organs) renderOrganHealth(data.organs);
+      } catch (err) {}
+    });
+    es.addEventListener('flux_tool_call', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        var div = document.createElement('div');
+        div.className = 'flux-entry tool-wrap';
+        if (data.toolCallId) div.dataset.toolCallId = data.toolCallId;
+        var formattedArgs = data.args;
+        try { formattedArgs = JSON.stringify(JSON.parse(data.args), null, 2); } catch (ex) {}
+        var contentId = nextDisclosureId('flux-tool-content');
+        div.innerHTML =
+          '<div class="tool">' +
+            '<button type="button" class="tool-header" aria-expanded="false" aria-controls="' + contentId + '">' +
+              '<span class="tool-icon" aria-hidden="true">&#9881;</span>' +
+              '<span class="tool-name">' + escapeHtml(data.name) + '</span>' +
+              '<span class="tool-toggle" aria-hidden="true">&#9660;</span>' +
+            '</button>' +
+            '<div class="tool-disclosure-content" id="' + contentId + '">' +
+              '<div class="tool-args">' + escapeHtml(formattedArgs) + '</div>' +
+              '<div class="tool-result' + (data.isError ? ' error' : '') + '">' +
+                '<div class="tool-result-label">' + (data.isError ? 'Error' : 'Output') + '</div>' +
+                escapeHtml(data.result) +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        wireToolToggle(div);
+        addToTimeline(div, data.timestamp || new Date().toISOString());
+        follow();
+      } catch (err) {}
+    });
+    es.addEventListener('flux_tool_result', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        if (fillToolResult(data.toolCallId, data.result, data.isError, data.metadata)) follow();
+      } catch (err) {}
+    });
+
+    // Mood strip — poll the status endpoint and render the four axes live.
+    var moodStrip = document.getElementById('flux-mood-strip');
+    var MOOD_AXES = ['valence', 'arousal', 'dominance'];
+    var MOOD_LABELS = {
+      valence: 'Valence', arousal: 'Arousal', dominance: 'Dominance'
+    };
+    var MOOD_QUAL = {
+      valence: function(v){ return v > 0.1 ? 'positive' : v < -0.1 ? 'negative' : 'neutral'; },
+      arousal: function(v){ return v > 0.1 ? 'alert' : v < -0.1 ? 'calm' : 'neutral'; },
+      dominance: function(v){ return v > 0.1 ? 'in control' : v < -0.1 ? 'adrift' : 'neutral'; }
+    };
+    function moodColor(v) {
+      if (v > 0.05) return '#22c55e';
+      if (v < -0.05) return '#3b82f6';
+      return '#6b7280';
+    }
+    function renderMoodStrip(state) {
+      if (!state) { moodStrip.innerHTML = ''; return; }
+      moodStrip.innerHTML = MOOD_AXES.map(function(axis) {
+        var v = state[axis] || 0;
+        var abs = Math.abs(v);
+        var widthPct = abs * 50;
+        var left = v >= 0 ? '50%' : (50 - widthPct) + '%';
+        return '<div class="mood-axis">' +
+          '<span class="mood-axis-label">' + MOOD_LABELS[axis] + '</span>' +
+          '<div class="mood-axis-row">' +
+            '<div class="mood-axis-bar">' +
+              '<div class="mood-axis-fill" style="left:' + left + '; width:' + widthPct + '%; background:' + moodColor(v) + ';"></div>' +
+            '</div>' +
+            '<span class="mood-axis-value">' + (v >= 0 ? '+' : '') + v.toFixed(2) + '</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+    // Sensory Organ health strip — check-engine dots under the PAD
+    // meters. Green = known good, red = known dead (endpoint refuses),
+    // yellow = evidence something's off, verdict unknown (server up but
+    // stream silent, or degraded). Rendered from the status poll AND
+    // the flux_organ_health SSE event (30s monitor ticks).
+    var organHealthEl = document.getElementById('flux-organ-health');
+    function renderOrganHealth(organs) {
+      if (!organHealthEl) return;
+      if (!organs || !organs.length) { organHealthEl.innerHTML = ''; return; }
+      organHealthEl.innerHTML = organs.map(function(o) {
+        var st = o.health && o.health.state ? o.health.state : 'green';
+        var title = o.health && o.health.detail ? o.organId + ' — ' + o.health.detail : o.organId;
+        return '<span class="organ-health-item" title="' + escapeHtml(title) + '">' +
+          '<span class="organ-health-dot ' + st + '"></span>' +
+          escapeHtml(o.organId) +
+        '</span>';
+      }).join('');
+    }
+
+    function fetchMood() {
+      fetch('/api/flux/status').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.moodState) renderMoodStrip(d.moodState);
+        if (d.organHealth) renderOrganHealth(d.organHealth);
+        var state = d.state || (d.active ? 'running' : 'stopped');
+        var badge = document.getElementById('flux-badge');
+        if (badge) {
+          badge.textContent = state === 'running' ? 'Running' : state === 'paused' ? 'Paused' : 'Stopped';
+          badge.className = 'flux-badge ' + state;
+        }
+        var btnStart = document.getElementById('flux-btn-start');
+        var btnPause = document.getElementById('flux-btn-pause');
+        var btnStop = document.getElementById('flux-btn-stop');
+        if (btnStart) {
+          btnStart.disabled = state === 'running';
+          btnStart.textContent = state === 'paused' ? 'Resume' : 'Start';
+        }
+        if (btnPause) btnPause.disabled = state !== 'running';
+        if (btnStop) btnStop.disabled = state === 'stopped';
+      }).catch(function() {});
+    }
+    async function fluxControl(action) {
+      try {
+        var res = await fetch('/api/flux/' + action, { method: 'POST' });
+        var data = await res.json();
+        // Immediate UI update, then the poll will confirm.
+        fetchMood();
+      } catch (e) {
+        console.error('flux control failed', e);
+      }
+    }
+    async function fluxClear() {
+      if (!confirm('Clear the workspace? This wipes all observations, the timeline, and texture summaries. My dialogue memory and mood are preserved.')) return;
+      try {
+        await fetch('/api/flux/clear', { method: 'POST' });
+        // Wipe the visible timeline immediately.
+        timeline.innerHTML = '';
+        showToast('workspace cleared — fresh slate');
+      } catch (e) {
+        console.error('flux clear failed', e);
+      }
+    }
+    fetchMood();
+    setInterval(fetchMood, 4000);
+  </script>
+</body>
+</html>
