@@ -18,6 +18,8 @@ const POLL_INTERVAL_MS = 15_000; // 15 seconds — frequent enough for active se
 
 let pollTimer = null;
 let lastStatus = null;
+let workspaceListOpener = null;
+let workspaceListKeydown = null;
 
 // Workspace queries that arrived during an active voice call. Surfacing
 // toasts mid-call would interrupt the user; queue them and drain when the
@@ -153,9 +155,13 @@ async function openWorkspaceList() {
   // If dropdown already open, close it.
   const existing = document.querySelector(".workspace-list-dropdown");
   if (existing) {
-    existing.remove();
+    closeWorkspaceList({ restoreFocus: true });
     return;
   }
+  // Remember where focus was so Escape can put it back (FAB or state segment).
+  workspaceListOpener = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
 
   // Fetch sessions (active + recent) AND pending queries in parallel — the
   // query list drives the recovery section (per plan §14 #4: dropdown is
@@ -186,7 +192,10 @@ async function openWorkspaceList() {
 
   const dropdown = document.createElement("div");
   dropdown.className = "workspace-list-dropdown";
-  dropdown.setAttribute("role", "menu");
+  // A named group, not a menu: rows are links and buttons with their native
+  // keyboard behavior, not an arrow-key menu.
+  dropdown.setAttribute("role", "group");
+  dropdown.setAttribute("aria-label", "Workspace sessions and questions");
   dropdown.tabIndex = -1;
 
   // Pending questions section — surfaces when sessions are suspended
@@ -201,20 +210,21 @@ async function openWorkspaceList() {
     dropdown.appendChild(qHeader);
 
     for (const query of pendingQueries) {
-      const row = document.createElement("div");
+      const row = document.createElement("button");
+      row.type = "button";
       row.className = "query-row";
       row.setAttribute("data-query-id", query.id);
-      row.tabIndex = 0;
 
       const icon = document.createElement("span");
       icon.className = "query-icon";
       icon.textContent = "?";
+      icon.setAttribute("aria-hidden", "true");
       row.appendChild(icon);
 
-      const body = document.createElement("div");
+      const body = document.createElement("span");
       body.className = "query-body";
 
-      const qText = document.createElement("div");
+      const qText = document.createElement("span");
       qText.className = "query-text";
       qText.textContent = query.question;
       body.appendChild(qText);
@@ -222,7 +232,7 @@ async function openWorkspaceList() {
       // Disambiguation: which workspace asked?
       const session = sessions.find((s) => s.id === query.sessionId);
       if (session) {
-        const goal = document.createElement("div");
+        const goal = document.createElement("span");
         goal.className = "query-goal";
         goal.textContent =
           `from: ${session.briefing?.goal || session.goal || "(no goal)"}`;
@@ -248,12 +258,6 @@ async function openWorkspaceList() {
         showQueryToast(query);
       };
       row.addEventListener("click", reopen);
-      row.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          reopen();
-        }
-      });
 
       dropdown.appendChild(row);
     }
@@ -282,29 +286,34 @@ async function openWorkspaceList() {
     dropdown.appendChild(header);
 
     for (const session of sessions) {
-      const row = document.createElement("a");
+      const row = document.createElement("div");
       row.className = "session-row";
-      row.href = `/c/${session.conversationId}`;
       row.setAttribute("data-session-id", session.id);
+
+      // The link is the row's action; the Cancel button is a sibling so it is
+      // never nested inside a link (invalid interaction nesting).
+      const link = document.createElement("a");
+      link.className = "session-link";
+      link.href = `/c/${session.conversationId}`;
 
       const status = document.createElement("span");
       status.className = `session-status ${session.status}`;
-      row.appendChild(status);
+      link.appendChild(status);
 
       const goal = document.createElement("div");
       goal.className = "session-goal";
       goal.textContent = session.briefing?.goal || session.goal ||
         "(no goal recorded)";
-      row.appendChild(goal);
+      link.appendChild(goal);
 
       const meta = document.createElement("div");
       meta.className = "session-meta";
       const mode = session.mode ?? "sync";
       // Partyhard badge suppressed — mode is disabled server-side.
       meta.textContent = `${mode} · ${session.status}`;
-      row.appendChild(meta);
+      link.appendChild(meta);
 
-      row.addEventListener("click", (e) => {
+      link.addEventListener("click", (e) => {
         e.preventDefault();
         // Suspended sessions have a pending question — don't navigate to the
         // (visually blank) workspace conversation. Re-open the toast in the
@@ -342,6 +351,7 @@ async function openWorkspaceList() {
         closeWorkspaceList();
         window.location.href = `/c/${session.conversationId}`;
       });
+      row.appendChild(link);
 
       // Cancel button — user killswitch. Stops on click, doesn't navigate.
       if (session.status === "running" || session.status === "pending") {
@@ -379,7 +389,17 @@ async function openWorkspaceList() {
   }
 
   document.body.appendChild(dropdown);
-  dropdown.focus();
+  const first = dropdown.querySelector(
+    ".query-row, .session-link, .session-row",
+  );
+  (first || dropdown).focus();
+
+  workspaceListKeydown = (e) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    closeWorkspaceList({ restoreFocus: true });
+  };
+  document.addEventListener("keydown", workspaceListKeydown);
 
   // Click outside to close.
   setTimeout(() => {
@@ -389,9 +409,24 @@ async function openWorkspaceList() {
   }, 0);
 }
 
-function closeWorkspaceList() {
+function closeWorkspaceList({ restoreFocus = false } = {}) {
   const dropdown = document.querySelector(".workspace-list-dropdown");
   if (dropdown) dropdown.remove();
+  if (workspaceListKeydown) {
+    document.removeEventListener("keydown", workspaceListKeydown);
+    workspaceListKeydown = null;
+  }
+  const opener = workspaceListOpener;
+  workspaceListOpener = null;
+  if (!restoreFocus) return;
+  const target = opener && opener !== document.body && opener.isConnected &&
+      typeof opener.focus === "function"
+    ? opener
+    : document.getElementById("workspace-btn") ||
+      document.querySelector('.state-seg[onclick*="openWorkspaceList"]') ||
+      document.getElementById("message-input") ||
+      document.getElementById("main");
+  if (target) target.focus();
 }
 
 function closeWorkspaceListOnOutside(e) {
@@ -938,6 +973,7 @@ function showQueryToast(query) {
   input.type = "text";
   input.className = "toast-input";
   input.placeholder = "Your answer...";
+  input.setAttribute("aria-label", "Your answer to the workspace question");
   form.appendChild(input);
 
   const submitBtn = document.createElement("button");

@@ -42,9 +42,9 @@ Each Psycheros package has its own semver lineage. The five packages release ind
 <table>
   <thead>
     <tr>
-      <th>Package</th>
-      <th>Current version</th>
-      <th>Notes</th>
+      <th scope="col">Package</th>
+      <th scope="col">Current version</th>
+      <th scope="col">Notes</th>
     </tr>
   </thead>
   <tbody>
@@ -55,14 +55,14 @@ Each Psycheros package has its own semver lineage. The five packages release ind
           <div style={{ color: "var(--sl-color-gray-3)", fontSize: "0.85em", marginTop: "4px" }}>{pkg.description}</div>
         </td>
         <td>
-          <a href={`https://github.com/PsycherosAI/Psycheros/releases/tag/${pkg.name}-v${pkg.version}`}>
+          <a aria-label={`${pkg.name} v${pkg.version} release`} href={`https://github.com/PsycherosAI/Psycheros/releases/tag/${pkg.name}-v${pkg.version}`}>
             <code>v{pkg.version}</code>
           </a>
         </td>
         <td>
-          <a href={`https://github.com/PsycherosAI/Psycheros/blob/main/packages/${pkg.name}/CHANGELOG.md`}>CHANGELOG</a>
+          <a aria-label={`CHANGELOG for ${pkg.name}`} href={`https://github.com/PsycherosAI/Psycheros/blob/main/packages/${pkg.name}/CHANGELOG.md`}>CHANGELOG</a>
           {" · "}
-          <a href={`https://github.com/PsycherosAI/Psycheros/releases?q=${pkg.name}-v`}>all releases</a>
+          <a aria-label={`All releases for ${pkg.name}`} href={`https://github.com/PsycherosAI/Psycheros/releases?q=${pkg.name}-v`}>all releases</a>
         </td>
       </tr>
     ))}

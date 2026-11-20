@@ -122,7 +122,7 @@ see the server listening message, you're ready.
 
 ### 5. Open the web UI
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open the [Psycheros web interface](http://localhost:3000) in your browser.
 
 On first visit, Psycheros runs you through a quick setup:
 

@@ -380,21 +380,21 @@ message 111222333 saying "That's funny! @Alice you always make me laugh"
 
 Standard emoji names are mapped to Unicode:
 
-| Name       | Emoji |
-| ---------- | ----- |
-| thumbsup   | 👍    |
-| thumbsdown | 👎    |
-| heart      | ❤️    |
-| laugh      | 😂    |
-| rofl       | 🤣    |
-| fire       | 🔥    |
-| eyes       | 👀    |
-| think      | 🤔    |
-| wave       | 👋    |
-| pray       | 🙏    |
-| onehundred | 💯    |
-| check      | ✅    |
-| x          | ❌    |
+| Name       | Emoji            |
+| ---------- | ---------------- |
+| thumbsup   | 👍 thumbs up     |
+| thumbsdown | 👎 thumbs down   |
+| heart      | ❤️ heart         |
+| laugh      | 😂 laugh         |
+| rofl       | 🤣 rolling laugh |
+| fire       | 🔥 fire          |
+| eyes       | 👀 eyes          |
+| think      | 🤔 thinking      |
+| wave       | 👋 wave          |
+| pray       | 🙏 folded hands  |
+| onehundred | 💯 one hundred   |
+| check      | ✅ check         |
+| x          | ❌ cross         |
 
 Custom emoji use Discord's `:name:id` format (e.g.
 `::react 123456 :rofl:123456789`).
@@ -623,7 +623,9 @@ independent model selection.
 
 Identity files are versioned markdown stored in the `identity/` directory:
 
-```
+The identity files are arranged in this directory tree:
+
+```text
 identity/
 ├── self/               # Entity identity
 │   ├── base_instructions.md   # Core system prompt (loaded first, editable via UI)

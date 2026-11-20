@@ -86,7 +86,7 @@ export function renderAdminHub(): string {
   <script src="/js/admin.js"></script>
   <div class="settings-header">
     <div class="settings-header-row">
-      <a class="settings-back-btn"
+      <a href="/fragments/settings" class="settings-back-btn"
         hx-get="/fragments/settings"
         hx-target="#chat"
         hx-swap="innerHTML">

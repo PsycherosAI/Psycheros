@@ -9626,7 +9626,7 @@ function renderVaultView(
           <span>${date}</span>
         </div>
         <div class="vault-card-actions">
-          <a class="btn btn--sm" hx-get="/fragments/settings/vault/${d.id}">
+          <a href="/fragments/settings/vault/${d.id}" class="btn btn--sm" hx-get="/fragments/settings/vault/${d.id}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             View/Edit
           </a>
@@ -9647,7 +9647,7 @@ function renderVaultView(
   return `<div class="settings-view">
   <div class="settings-header">
     <div class="settings-header-row">
-      <a class="settings-back-btn"
+      <a href="/fragments/settings" class="settings-back-btn"
         hx-get="/fragments/settings"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -9668,15 +9668,15 @@ function renderVaultView(
       <form hx-post="/api/vault" hx-encoding="multipart/form-data" hx-target="#chat" hx-swap="innerHTML">
         <div class="form-row">
           <div class="form-group" style="flex:0 0 auto;">
-            <label>Document</label>
+            <label for="vault-file-input">Document</label>
             <label class="btn btn--sm" style="position:relative;overflow:hidden;cursor:pointer;">
               Choose File
               <input type="file" id="vault-file-input" name="document" accept=".md,.txt,.pdf,.docx,.xlsx" required style="position:absolute;inset:0;opacity:0;cursor:pointer;" />
             </label>
           </div>
           <div class="form-group">
-            <label>Title (optional)</label>
-            <input type="text" name="title" placeholder="Auto-detected from filename" />
+            <label for="vault-doc-title">Title (optional)</label>
+            <input type="text" id="vault-doc-title" name="title" placeholder="Auto-detected from filename" />
           </div>
           <div class="form-group" style="flex:0;align-items:flex-end">
             <button type="submit" class="btn btn--primary">Upload</button>
@@ -9701,7 +9701,7 @@ async function renderVaultDetailView(
     return `<div class="settings-view">
       <div class="settings-header">
         <div class="settings-header-row">
-          <a class="settings-back-btn"
+          <a href="/fragments/settings/vault" class="settings-back-btn"
             hx-get="/fragments/settings/vault"
             hx-target="#chat"
             hx-swap="innerHTML">
@@ -9746,7 +9746,7 @@ async function renderVaultDetailView(
   return `<div class="settings-view">
   <div class="settings-header">
     <div class="settings-header-row">
-      <a class="settings-back-btn"
+      <a href="/fragments/settings/vault" class="settings-back-btn"
         hx-get="/fragments/settings/vault"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -9794,20 +9794,22 @@ async function renderVaultDetailView(
       <div id="vault-edit-mode" class="vault-edit-content" style="display:none">
         <form hx-put="/api/vault/${doc.id}" hx-target="#vault-editor-status" hx-swap="innerHTML">
           <div class="form-group" style="margin-bottom:var(--sp-3)">
-            <label>Title</label>
-            <input type="text" name="title" value="${escapeHtml(doc.title)}" />
+            <label for="vault-edit-title">Title</label>
+            <input type="text" id="vault-edit-title" name="title" value="${
+    escapeHtml(doc.title)
+  }" />
           </div>
           <div class="form-group">
-            <label>Content</label>
-            <textarea name="content" class="settings-textarea" rows="20">${
+            <label for="vault-edit-content">Content</label>
+            <textarea id="vault-edit-content" name="content" class="settings-textarea" rows="20">${
     escapeHtml(contentText)
   }</textarea>
           </div>
           <div class="settings-editor-actions">
             <button type="submit" class="btn btn--primary">Save Changes</button>
-            <a class="btn btn--ghost" hx-get="/fragments/settings/vault" hx-target="#chat" hx-swap="innerHTML">Cancel</a>
+            <a href="/fragments/settings/vault" class="btn btn--ghost" hx-get="/fragments/settings/vault" hx-target="#chat" hx-swap="innerHTML">Cancel</a>
           </div>
-          <div id="vault-editor-status" class="settings-editor-status"></div>
+          <div id="vault-editor-status" class="settings-editor-status" role="status" aria-live="polite"></div>
         </form>
       </div>
     </div>

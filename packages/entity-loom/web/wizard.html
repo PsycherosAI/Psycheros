@@ -76,6 +76,32 @@
       height: 100vh;
     }
 
+    .sr-only,
+    .file-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .skip-link {
+      position: absolute;
+      left: var(--sp-2);
+      top: var(--sp-2);
+      z-index: 10000;
+      transform: translateY(-200%);
+      padding: var(--sp-2) var(--sp-3);
+      background: var(--bg-raised);
+      color: var(--fg);
+    }
+    .skip-link:focus {
+      transform: none;
+    }
+
     /* ─── App Shell ─────────────────────────────────────────────────────── */
 
     .wiz {
@@ -147,6 +173,10 @@
       border-radius: var(--radius-sm);
       transition: background var(--transition);
       white-space: nowrap;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
     }
     .wiz-step:hover {
       background: var(--accent-subtle);
@@ -278,6 +308,7 @@
     .wiz-panel-desc {
       font-size: var(--font-size-sm);
       color: var(--fg-muted);
+      line-height: var(--line-height);
       margin-bottom: var(--sp-6);
       max-width: 520px;
     }
@@ -318,7 +349,8 @@
     .wiz-field:last-child {
       margin-bottom: 0;
     }
-    .wiz-field label {
+    .wiz-field label,
+    .wiz-field-label {
       display: block;
       font-size: var(--font-size-xs);
       font-family: var(--font-mono);
@@ -368,6 +400,14 @@
     }
     .wiz-field--stacked {
       margin-bottom: var(--sp-3);
+    }
+    .wiz-field-error {
+      margin-top: var(--sp-1);
+      color: var(--error);
+      font-size: var(--font-size-xs);
+    }
+    .wiz-field-error:empty {
+      display: none;
     }
 
     /* ─── Buttons ──────────────────────────────────────────────────────── */
@@ -513,6 +553,7 @@
     /* ─── Upload Zone ──────────────────────────────────────────────────── */
 
     .wiz-upload {
+      display: block;
       border: 2px dashed var(--border-strong);
       border-radius: var(--radius-md);
       padding: var(--sp-10) var(--sp-6);
@@ -527,12 +568,18 @@
       border-color: var(--accent);
       background: var(--accent-subtle);
     }
+    .file-input:focus-visible + .wiz-upload {
+      border-color: var(--accent);
+      background: var(--accent-subtle);
+    }
     .wiz-upload-icon {
+      display: block;
       font-size: 28px;
       margin-bottom: var(--sp-3);
       opacity: 0.5;
     }
     .wiz-upload-text {
+      display: block;
       font-size: var(--font-size-sm);
       color: var(--fg-muted);
     }
@@ -540,6 +587,7 @@
       color: var(--accent);
     }
     .wiz-upload-hint {
+      display: block;
       font-size: var(--font-size-xs);
       color: var(--fg-subtle);
       margin-top: var(--sp-1);
@@ -567,6 +615,7 @@
       margin-top: var(--sp-2);
     }
     .wiz-platform {
+      appearance: none;
       display: flex;
       align-items: center;
       gap: var(--sp-2);
@@ -576,8 +625,10 @@
       cursor: pointer;
       font-size: var(--font-size-sm);
       color: var(--fg-muted);
+      line-height: var(--line-height);
       transition: all var(--transition);
       background: transparent;
+      font-family: inherit;
     }
     .wiz-platform:hover {
       border-color: var(--accent);
@@ -859,6 +910,20 @@
       cursor: pointer;
       gap: var(--sp-2);
     }
+    .wiz-memory-toggle {
+      display: flex;
+      align-items: center;
+      flex: 1;
+      min-width: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      line-height: var(--line-height);
+      cursor: pointer;
+    }
     .wiz-memory-name {
       font-family: var(--font-mono);
       font-size: var(--font-size-xs);
@@ -940,6 +1005,7 @@
     /* ─── Log Panel ────────────────────────────────────────────────────── */
 
     .wiz-log-toggle {
+      appearance: none;
       display: flex;
       align-items: center;
       gap: var(--sp-2);
@@ -949,10 +1015,16 @@
       cursor: pointer;
       font-size: var(--font-size-xs);
       font-family: var(--font-mono);
+      line-height: var(--line-height);
       color: var(--fg-muted);
       flex-shrink: 0;
       transition: color var(--transition);
       user-select: none;
+      width: 100%;
+      border-right: 0;
+      border-bottom: 0;
+      border-left: 0;
+      text-align: left;
     }
     .wiz-log-toggle:hover {
       color: var(--fg);
@@ -1230,6 +1302,14 @@
       min-width: 0;
     }
     .wiz-staging-item-title {
+      display: block;
+      width: 100%;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      font: inherit;
+      text-align: left;
+      line-height: var(--line-height);
       font-weight: var(--font-weight-medium);
       white-space: nowrap;
       overflow: hidden;
@@ -1254,6 +1334,7 @@
       margin-top: 2px;
     }
     .wiz-staging-tag {
+      appearance: none;
       display: inline-flex;
       align-items: center;
       gap: 3px;
@@ -1262,6 +1343,9 @@
       font-size: 10px;
       font-family: var(--font-mono);
       cursor: pointer;
+      line-height: var(--line-height);
+      border: 0;
+      color: inherit;
     }
     .wiz-staging-tag:hover {
       filter: brightness(1.3);
@@ -1292,6 +1376,7 @@
       margin-bottom: var(--sp-2);
     }
     .wiz-staging-palette-chip {
+      appearance: none;
       display: inline-flex;
       align-items: center;
       gap: 4px;
@@ -1301,6 +1386,9 @@
       cursor: pointer;
       border: 1px solid transparent;
       transition: border-color 0.15s;
+      color: inherit;
+      font-family: inherit;
+      line-height: var(--line-height);
     }
     .wiz-staging-palette-chip:hover {
       border-color: var(--fg-muted);
@@ -1314,6 +1402,18 @@
       border-radius: 50%;
       flex-shrink: 0;
     }
+    .wiz-staging-palette-chip-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      line-height: var(--line-height);
+    }
     .wiz-staging-palette-chip-count {
       font-size: 9px;
       opacity: 0.6;
@@ -1324,6 +1424,12 @@
       font-size: 9px;
       cursor: pointer;
       margin-left: 2px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font-family: inherit;
+      line-height: var(--line-height);
     }
     .wiz-staging-palette-chip:hover .wiz-staging-palette-chip-remove {
       opacity: 0.5;
@@ -1354,12 +1460,14 @@
       gap: 3px;
     }
     .wiz-staging-color-swatch {
+      appearance: none;
       width: 16px;
       height: 16px;
       border-radius: 50%;
       cursor: pointer;
       border: 2px solid transparent;
       transition: border-color 0.15s;
+      padding: 0;
     }
     .wiz-staging-color-swatch:hover {
       transform: scale(1.2);
@@ -1421,10 +1529,21 @@
     .wiz-staging-messages {
       position: fixed;
       inset: 0;
+      width: auto;
+      height: auto;
+      max-width: none;
+      max-height: none;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      color: inherit;
       background: var(--bg);
       z-index: 100;
       display: flex;
       flex-direction: column;
+    }
+    .wiz-staging-messages:not([open]) {
+      display: none;
     }
     .wiz-staging-messages-header {
       display: flex;
@@ -1515,13 +1634,14 @@
     </style>
   </head>
   <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
     <div class="wiz">
       <!-- Header -->
-      <div class="wiz-header">
+      <header class="wiz-header">
         <div class="wiz-header-left">
           <div class="wiz-logo">E</div>
           <div>
-            <div class="wiz-title">entity-loom wizard</div>
+            <h1 class="wiz-title">entity-loom wizard</h1>
           </div>
         </div>
         <div class="wiz-header-right">
@@ -1529,17 +1649,30 @@
             class="btn btn--sm btn--ghost"
             onclick="toggleLog()"
             id="log-toggle-btn"
+            aria-expanded="false"
+            aria-controls="log-panel"
           >
             <span style="font-size: 16px">&#x2328;</span> Log
           </button>
         </div>
-      </div>
+      </header>
 
       <!-- Stepper -->
-      <div class="wiz-stepper" id="stepper"></div>
+      <nav
+        class="wiz-stepper"
+        id="stepper"
+        aria-label="Wizard progress"
+      ></nav>
+
+      <div
+        id="wizard-stage-status"
+        class="sr-only"
+        role="status"
+        aria-atomic="true"
+      ></div>
 
       <!-- Content -->
-      <div class="wiz-content" id="content">
+      <main class="wiz-content" id="main-content" tabindex="-1">
         <!-- Panel 1: Setup -->
         <div class="wiz-panel wiz-panel--active" data-panel="setup">
           <div class="wiz-panel-nav">
@@ -1553,7 +1686,7 @@
               style="font-size: var(--font-size-xs); color: var(--fg-subtle)"
             >Step 1 of 5</span>
           </div>
-          <div class="wiz-panel-title">Setup</div>
+          <h2 class="wiz-panel-title" tabindex="-1">Setup</h2>
           <div class="wiz-panel-desc">
             Configure the entity identity, relationship context, and LLM
             provider for this import.
@@ -1561,33 +1694,39 @@
 
           <!-- Resume -->
           <div class="wiz-resume" id="resume-section" style="display: none">
-            <div class="wiz-section-title">Existing Packages</div>
+            <h3 class="wiz-section-title">Existing Packages</h3>
             <div class="wiz-resume-list" id="resume-list"></div>
           </div>
 
           <div class="wiz-section">
-            <div class="wiz-section-title">Identity</div>
+            <h3 class="wiz-section-title">Identity</h3>
             <div class="wiz-grid">
               <div class="wiz-field">
-                <label>Entity Name</label>
+                <label for="setup-entity">Entity Name</label>
                 <input
                   type="text"
                   id="setup-entity"
+                  aria-required="true"
+                  aria-describedby="setup-entity-error"
                   placeholder="e.g. Aria"
                   autocomplete="off"
                 >
+                <div class="wiz-field-error" id="setup-entity-error"></div>
               </div>
               <div class="wiz-field">
-                <label>User Name</label>
+                <label for="setup-user">User Name</label>
                 <input
                   type="text"
                   id="setup-user"
+                  aria-required="true"
+                  aria-describedby="setup-user-error"
                   placeholder="e.g. Jordan"
                   autocomplete="off"
                 >
+                <div class="wiz-field-error" id="setup-user-error"></div>
               </div>
               <div class="wiz-field">
-                <label>Entity Pronouns</label>
+                <label for="setup-entity-pronouns">Entity Pronouns</label>
                 <input
                   type="text"
                   id="setup-entity-pronouns"
@@ -1596,7 +1735,7 @@
                 >
               </div>
               <div class="wiz-field">
-                <label>User Pronouns</label>
+                <label for="setup-user-pronouns">User Pronouns</label>
                 <input
                   type="text"
                   id="setup-user-pronouns"
@@ -1605,7 +1744,7 @@
                 >
               </div>
               <div class="wiz-field wiz-field--full">
-                <label>Relationship</label>
+                <label for="setup-relationship">Relationship</label>
                 <input
                   type="text"
                   id="setup-relationship"
@@ -1619,7 +1758,7 @@
                 </div>
               </div>
               <div class="wiz-field wiz-field--full">
-                <label>Context Notes</label>
+                <label for="setup-context">Context Notes</label>
                 <textarea
                   id="setup-context"
                   rows="2"
@@ -1637,10 +1776,10 @@
           </div>
 
           <div class="wiz-section">
-            <div class="wiz-section-title">LLM Provider</div>
+            <h3 class="wiz-section-title">LLM Provider</h3>
             <div class="wiz-grid">
               <div class="wiz-field wiz-field--full">
-                <label>Base URL</label>
+                <label for="setup-baseurl">Base URL</label>
                 <input
                   type="url"
                   id="setup-baseurl"
@@ -1648,7 +1787,7 @@
                 >
               </div>
               <div class="wiz-field wiz-field--full">
-                <label>API Key</label>
+                <label for="setup-apikey">API Key</label>
                 <input
                   type="password"
                   id="setup-apikey"
@@ -1656,7 +1795,7 @@
                 >
               </div>
               <div class="wiz-field wiz-field--full">
-                <label>Model</label>
+                <label for="setup-model">Model</label>
                 <input
                   type="text"
                   id="setup-model"
@@ -1673,7 +1812,10 @@
                 Test Connection
               </button>
             </div>
-            <div id="test-result"></div>
+            <div id="test-result" role="status" aria-atomic="true">
+              <div id="test-result-summary"></div>
+              <div id="test-result-meta"></div>
+            </div>
           </div>
 
           <div class="wiz-actions">
@@ -1700,7 +1842,7 @@
               Next &rarr;
             </button>
           </div>
-          <div class="wiz-panel-title">Convert</div>
+          <h2 class="wiz-panel-title" tabindex="-1">Convert</h2>
           <div class="wiz-panel-desc">
             Upload chat export files, select the platform for each, then convert
             them all. After converting, use the Staging Area to review, tag, and
@@ -1714,34 +1856,34 @@
           ></div>
 
           <div class="wiz-section">
-            <div class="wiz-section-title">Upload</div>
-            <div
-              class="wiz-upload"
-              id="upload-zone"
-              onclick='document.getElementById("file-input").click()'
-            >
-              <div class="wiz-upload-icon">&#x21E5;</div>
-              <div class="wiz-upload-text">
-                <strong>Click to upload</strong> or drag files here
-              </div>
-              <div class="wiz-upload-hint">
-                Platform is auto-detected. Change it in the queue below if
-                needed.
-              </div>
-            </div>
+            <h3 class="wiz-section-title">Upload</h3>
             <input
               type="file"
               id="file-input"
+              class="file-input"
               multiple
-              style="display: none"
               onchange="handleUploads(this.files)"
             >
+            <label
+              class="wiz-upload"
+              id="upload-zone"
+              for="file-input"
+            >
+              <span class="wiz-upload-icon" aria-hidden="true">&#x21E5;</span>
+              <span class="wiz-upload-text">
+                <strong>Click to upload</strong> or drag files here
+              </span>
+              <span class="wiz-upload-hint">
+                Platform is auto-detected. Change it in the queue below if
+                needed.
+              </span>
+            </label>
           </div>
 
           <div class="wiz-section" id="queue-section" style="display: none">
-            <div class="wiz-section-title">
+            <h3 class="wiz-section-title">
               Upload Queue (<span id="queue-count">0</span> files)
-            </div>
+            </h3>
             <div class="wiz-upload-queue" id="upload-queue"></div>
             <div class="wiz-actions">
               <button
@@ -1755,10 +1897,10 @@
           </div>
 
           <div class="wiz-section" id="preview-section" style="display: none">
-            <div class="wiz-section-title">Preview</div>
+            <h3 class="wiz-section-title">Preview</h3>
             <div class="wiz-stats-grid" id="preview-stats"></div>
             <div class="wiz-field" id="bar-chart-section" style="display: none">
-              <label>Conversations by Month</label>
+              <h3 class="wiz-field-label">Conversations by Month</h3>
               <div class="wiz-bar-chart" id="bar-chart"></div>
               <div style="height: 20px"></div>
             </div>
@@ -1779,7 +1921,7 @@
           <!-- Staging Area -->
           <div id="staging-section" style="display: none">
             <div class="wiz-section">
-              <div class="wiz-section-title">Staging Area</div>
+              <h3 class="wiz-section-title">Staging Area</h3>
               <div class="wiz-panel-desc" style="margin-bottom: var(--sp-2)">
                 Review parsed conversations before committing them. Toggle
                 inclusion, organize with tags, and compare against your existing
@@ -1790,7 +1932,7 @@
 
             <!-- Psycheros Compare -->
             <div class="wiz-section" style="margin-bottom: var(--sp-2)">
-              <div class="wiz-section-title">Psycheros Comparison</div>
+              <h3 class="wiz-section-title">Psycheros Comparison</h3>
               <div
                 style="font-size: var(--font-size-xs); color: var(--fg-subtle); margin-bottom: var(--sp-2)"
               >
@@ -1799,7 +1941,7 @@
                 is on this machine.
               </div>
               <div class="wiz-field">
-                <label>Psycheros Database</label>
+                <label for="psycheros-db-path">Psycheros Database</label>
                 <div
                   id="psycheros-autodetect"
                   style="margin-bottom: var(--sp-2)"
@@ -1839,6 +1981,7 @@
                 <input
                   type="text"
                   id="new-tag-name"
+                  aria-label="Tag name"
                   placeholder="Tag name..."
                   onkeydown='if (event.key === "Enter") createTagFromPalette()'
                   maxlength="30"
@@ -1914,6 +2057,7 @@
               <div class="wiz-staging-filters">
                 <select
                   id="staging-filter-platform"
+                  aria-label="Filter by platform"
                   class="wiz-select"
                   onchange="loadStagingConversations()"
                 >
@@ -1921,6 +2065,7 @@
                 </select>
                 <select
                   id="staging-filter-status"
+                  aria-label="Filter by inclusion status"
                   class="wiz-select"
                   onchange="loadStagingConversations()"
                 >
@@ -1966,11 +2111,16 @@
                 <input
                   type="text"
                   id="staging-search-input"
+                  aria-label="Search conversations and messages"
                   placeholder="Search conversations and messages..."
                   class="wiz-staging-search-input"
                   onkeydown='if (event.key === "Enter") performStagingSearch()'
                 >
-                <select id="staging-search-scope" class="wiz-select">
+                <select
+                  id="staging-search-scope"
+                  class="wiz-select"
+                  aria-label="Search scope"
+                >
                   <option value="all">All</option>
                   <option value="titles">Titles only</option>
                   <option value="messages">Messages only</option>
@@ -2012,10 +2162,10 @@
           </div>
 
           <!-- Message viewer overlay -->
-          <div
+          <dialog
             class="wiz-staging-messages"
             id="staging-messages-panel"
-            style="display: none"
+            onclose="restoreStagingMessageFocus()"
           >
             <div class="wiz-staging-messages-header">
               <button
@@ -2035,7 +2185,7 @@
               class="wiz-staging-messages-pagination"
               id="staging-messages-pagination"
             ></div>
-          </div>
+          </dialog>
         </div>
 
         <!-- Panel 3: Significant -->
@@ -2058,7 +2208,9 @@
               Next &rarr;
             </button>
           </div>
-          <div class="wiz-panel-title">Significant Memories</div>
+          <h2 class="wiz-panel-title" tabindex="-1">
+            Significant Memories
+          </h2>
           <div class="wiz-panel-desc">
             Extract significant events from raw conversations. These are
             journal-entry memories for truly exceptional moments.
@@ -2071,7 +2223,7 @@
           ></div>
 
           <div class="wiz-section">
-            <div class="wiz-section-title">Cost Estimate</div>
+            <h3 class="wiz-section-title">Cost Estimate</h3>
             <div id="significant-cost"></div>
             <button
               class="btn btn--ghost btn--sm"
@@ -2088,10 +2240,18 @@
           >
             <div class="wiz-progress">
               <div class="wiz-progress-header">
-                <span class="wiz-progress-label">Processing conversations</span>
+                <span class="wiz-progress-label" id="significant-progress-label"
+                >Processing conversations</span>
                 <span class="wiz-progress-pct" id="significant-pct">0%</span>
               </div>
-              <div class="wiz-progress-bar">
+              <div
+                class="wiz-progress-bar"
+                role="progressbar"
+                aria-labelledby="significant-progress-label"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="0"
+              >
                 <div
                   class="wiz-progress-fill"
                   id="significant-fill"
@@ -2163,7 +2323,7 @@
               Next &rarr;
             </button>
           </div>
-          <div class="wiz-panel-title">Daily Memories</div>
+          <h2 class="wiz-panel-title" tabindex="-1">Daily Memories</h2>
           <div class="wiz-panel-desc">
             Generate daily bullet-point memory summaries from stored
             conversations.
@@ -2176,34 +2336,47 @@
           ></div>
 
           <div class="wiz-section">
-            <div class="wiz-section-title">Time Window</div>
-            <div class="wiz-platforms" id="daily-window-selector">
-              <div
+            <h3 class="wiz-section-title" id="daily-window-heading">
+              Time Window
+            </h3>
+            <div
+              class="wiz-platforms"
+              id="daily-window-selector"
+              role="group"
+              aria-labelledby="daily-window-heading"
+            >
+              <button
+                type="button"
                 class="wiz-platform wiz-platform--selected"
                 data-window="all"
+                aria-pressed="true"
                 onclick='selectWindow("all")'
               >
-                <div class="wiz-platform-dot"></div>All
-              </div>
-              <div
+                <span class="wiz-platform-dot"></span>All
+              </button>
+              <button
+                type="button"
                 class="wiz-platform"
                 data-window="week"
+                aria-pressed="false"
                 onclick='selectWindow("week")'
               >
-                <div class="wiz-platform-dot"></div>Last Week
-              </div>
-              <div
+                <span class="wiz-platform-dot"></span>Last Week
+              </button>
+              <button
+                type="button"
                 class="wiz-platform"
                 data-window="month"
+                aria-pressed="false"
                 onclick='selectWindow("month")'
               >
-                <div class="wiz-platform-dot"></div>Last Month
-              </div>
+                <span class="wiz-platform-dot"></span>Last Month
+              </button>
             </div>
           </div>
 
           <div class="wiz-section">
-            <div class="wiz-section-title">Cost Estimate</div>
+            <h3 class="wiz-section-title">Cost Estimate</h3>
             <div id="daily-cost"></div>
             <button
               class="btn btn--ghost btn--sm"
@@ -2220,10 +2393,18 @@
           >
             <div class="wiz-progress">
               <div class="wiz-progress-header">
-                <span class="wiz-progress-label">Processing dates</span>
+                <span class="wiz-progress-label" id="daily-progress-label"
+                >Processing dates</span>
                 <span class="wiz-progress-pct" id="daily-pct">0%</span>
               </div>
-              <div class="wiz-progress-bar">
+              <div
+                class="wiz-progress-bar"
+                role="progressbar"
+                aria-labelledby="daily-progress-label"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="0"
+              >
                 <div
                   class="wiz-progress-fill"
                   id="daily-fill"
@@ -2294,9 +2475,13 @@
                 Next &rarr;
               </button></span>
           </div>
-          <div class="wiz-panel-title" id="graph-panel-title">
+          <h2
+            class="wiz-panel-title"
+            id="graph-panel-title"
+            tabindex="-1"
+          >
             Knowledge Graph
-          </div>
+          </h2>
           <div class="wiz-panel-desc" id="graph-panel-desc">
             Populate the knowledge graph from generated memory files. Extracts
             entities and relationships.
@@ -2309,7 +2494,7 @@
           ></div>
 
           <div class="wiz-section">
-            <div class="wiz-section-title">Cost Estimate</div>
+            <h3 class="wiz-section-title">Cost Estimate</h3>
             <div id="graph-cost"></div>
             <button
               class="btn btn--ghost btn--sm"
@@ -2326,10 +2511,18 @@
           >
             <div class="wiz-progress">
               <div class="wiz-progress-header">
-                <span class="wiz-progress-label">Processing memories</span>
+                <span class="wiz-progress-label" id="graph-progress-label"
+                >Processing memories</span>
                 <span class="wiz-progress-pct" id="graph-pct">0%</span>
               </div>
-              <div class="wiz-progress-bar">
+              <div
+                class="wiz-progress-bar"
+                role="progressbar"
+                aria-labelledby="graph-progress-label"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="0"
+              >
                 <div
                   class="wiz-progress-fill"
                   id="graph-fill"
@@ -2419,18 +2612,37 @@
             >Download ZIP</a>
           </div>
         </div>
-      </div>
+      </main>
 
       <!-- Log Toggle -->
-      <div class="wiz-log-toggle" id="log-toggle" onclick="toggleLog()">
+      <button
+        type="button"
+        class="wiz-log-toggle"
+        id="log-toggle"
+        aria-expanded="false"
+        aria-controls="log-panel"
+        onclick="toggleLog()"
+      >
         <span class="wiz-log-toggle-icon">&#x25BC;</span> Log Output
-      </div>
+    </button>
       <div class="wiz-log" id="log-panel">
-        <div class="wiz-log-inner" id="log-entries"></div>
+        <div
+          class="wiz-log-inner"
+          id="log-entries"
+          role="log"
+          aria-label="Processing log"
+          aria-live="off"
+        ></div>
       </div>
     </div>
 
-    <div id="wiz-toast-container"></div>
+    <div
+      id="wiz-toast-container"
+      role="status"
+      aria-live="polite"
+      aria-atomic="false"
+      aria-relevant="additions"
+    ></div>
 
     <script>
     // ─── State ────────────────────────────────────────────────────────────────
@@ -2531,6 +2743,9 @@
           `${stage}: started (${data?.totalItems || "?"} items)`,
         );
         if (!logOpen) toggleLog();
+        announceStageStatus(
+          `${STAGE_LABELS[stage] || stage} processing started`,
+        );
         loadState();
         return;
       }
@@ -2566,6 +2781,9 @@
 
       if (type === "stage_completed") {
         addLogEntry("info", `${stage}: stage completed`);
+        announceStageStatus(
+          `${STAGE_LABELS[stage] || stage} processing complete`,
+        );
         // Don't auto-navigate — update state but keep user on current stage
         const res = await fetch("/api/status");
         if (res.ok) {
@@ -2591,6 +2809,7 @@
             if (fillEl) {
               fillEl.style.width = "100%";
               fillEl.classList.add("wiz-progress-fill--complete");
+              fillEl.parentElement.setAttribute("aria-valuenow", "100");
             }
           }
         }
@@ -2616,6 +2835,12 @@
         loadState();
         return;
       }
+    }
+
+    function announceStageStatus(message) {
+      const status = document.getElementById("wizard-stage-status");
+      status.textContent = "";
+      requestAnimationFrame(() => status.textContent = message);
     }
 
     // ─── State Loading ───────────────────────────────────────────────────────
@@ -2685,12 +2910,14 @@
         }
 
         const canNavigate = isCompleted || isActive;
-        html += `<div class="wiz-step ${dotClass}${
+        html += `<button type="button" class="wiz-step ${dotClass}${
           !canNavigate ? " wiz-step--disabled" : ""
-        }" onclick="${canNavigate ? `goToStage('${stage}')` : ""}">
-        <div class="wiz-step-dot">${isCompleted ? "&#x2713;" : (i + 1)}</div>
+        }" ${canNavigate ? `onclick="goToStage('${stage}')"` : "disabled"}${
+          isActive ? ' aria-current="step"' : ""
+        }>
+        <span class="wiz-step-dot">${isCompleted ? "&#x2713;" : (i + 1)}</span>
         <span class="wiz-step-label">${STAGE_LABELS[stage]}</span>
-      </div>`;
+      </button>`;
       });
 
       el.innerHTML = html;
@@ -2700,6 +2927,10 @@
       currentStage = stage;
       renderStepper();
       updatePanelVisibility();
+      const panelTitle = document.querySelector(
+        `.wiz-panel[data-panel="${stage}"] .wiz-panel-title`,
+      );
+      panelTitle?.focus();
 
       // Load stage-specific data
       if (stage === "convert") checkStagingData();
@@ -2816,8 +3047,21 @@
         llmModel: document.getElementById("setup-model").value.trim(),
       };
 
-      if (!config.entityName || !config.userName) {
-        showToast("Entity name and user name are required");
+      const requiredFields = [
+        ["setup-entity", "setup-entity-error", "Entity name is required"],
+        ["setup-user", "setup-user-error", "User name is required"],
+      ];
+      let firstInvalid = null;
+      for (const [fieldId, errorId, message] of requiredFields) {
+        const field = document.getElementById(fieldId);
+        const error = document.getElementById(errorId);
+        const invalid = !field.value.trim();
+        field.setAttribute("aria-invalid", String(invalid));
+        error.textContent = invalid ? message : "";
+        if (invalid && !firstInvalid) firstInvalid = field;
+      }
+      if (firstInvalid) {
+        firstInvalid.focus();
         return;
       }
 
@@ -2829,9 +3073,7 @@
         }
         showToast("Setup saved");
         await loadState();
-        currentStage = "convert";
-        renderStepper();
-        updatePanelVisibility();
+        goToStage("convert");
       } catch (e) {
         showToast("Setup failed: " + e.message);
       }
@@ -2934,10 +3176,14 @@
 
     async function testLLM() {
       const btn = document.getElementById("btn-test-llm");
-      const resultEl = document.getElementById("test-result");
+      const summaryEl = document.getElementById("test-result-summary");
+      const metaEl = document.getElementById("test-result-meta");
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span> Testing...';
-      resultEl.innerHTML = "";
+      summaryEl.className = "";
+      summaryEl.textContent = "";
+      metaEl.className = "";
+      metaEl.textContent = "";
 
       try {
         const config = {
@@ -2949,20 +3195,21 @@
         const res = await api("POST", "/api/setup/test-llm", config);
 
         if (res.ok) {
-          resultEl.innerHTML = `
-          <div class="wiz-test-result wiz-test-result--ok">&#x2713; Connected</div>
-          <div class="wiz-test-meta">Model: ${
-            esc(res.model)
-          } &middot; Latency: ${res.latencyMs}ms</div>`;
+          summaryEl.className = "wiz-test-result wiz-test-result--ok";
+          summaryEl.textContent = "✓ Connected";
+          metaEl.className = "wiz-test-meta";
+          metaEl.textContent = `Model: ${res.model} · Latency: ${res.latencyMs}ms`;
         } else {
-          resultEl.innerHTML = `
-          <div class="wiz-test-result wiz-test-result--fail">&#x2717; Failed</div>
-          <div class="wiz-test-meta">${esc(res.error || "Unknown error")}</div>`;
+          summaryEl.className = "wiz-test-result wiz-test-result--fail";
+          summaryEl.textContent = "✗ Failed";
+          metaEl.className = "wiz-test-meta";
+          metaEl.textContent = res.error || "Unknown error";
         }
       } catch (e) {
-        resultEl.innerHTML = `
-        <div class="wiz-test-result wiz-test-result--fail">&#x2717; Error</div>
-        <div class="wiz-test-meta">${esc(e.message)}</div>`;
+        summaryEl.className = "wiz-test-result wiz-test-result--fail";
+        summaryEl.textContent = "✗ Error";
+        metaEl.className = "wiz-test-meta";
+        metaEl.textContent = e.message;
       } finally {
         btn.disabled = false;
         btn.textContent = "Test Connection";
@@ -3007,12 +3254,22 @@
           else if (btn.dataset.action === "purge") purgePackage(dir, name);
         });
       }
+
+      for (const fieldId of ["setup-entity", "setup-user"]) {
+        const field = document.getElementById(fieldId);
+        field.addEventListener("input", () => {
+          if (!field.value.trim()) return;
+          field.removeAttribute("aria-invalid");
+          document.getElementById(`${fieldId}-error`).textContent = "";
+        });
+      }
     });
 
     async function handleUploads(files) {
       const fileArray = Array.from(files);
       if (!fileArray.length) return;
       let uploaded = 0, failed = 0;
+      const failures = [];
       for (const file of fileArray) {
         try {
           const formData = new FormData();
@@ -3024,13 +3281,15 @@
             true,
           );
           if (res.error) {
-            showToast(`Failed: ${file.name} — ${res.error}`);
+            showToast(`Failed: ${file.name} — ${res.error}`, false);
+            failures.push(`${file.name}: ${res.error}`);
             failed++;
             continue;
           }
           uploaded++;
         } catch (e) {
-          showToast(`Failed: ${file.name} — ${e.message}`);
+          showToast(`Failed: ${file.name} — ${e.message}`, false);
+          failures.push(`${file.name}: ${e.message}`);
           failed++;
         }
       }
@@ -3038,11 +3297,21 @@
       if (uploaded > 0) {
         showToast(
           `Uploaded ${uploaded} file${uploaded > 1 ? "s" : ""}${
-            failed > 0 ? ` (${failed} failed)` : ""
+            failed > 0 ? `. ${uploadFailureSummary(failures)}` : ""
           }`,
         );
+      } else if (failed > 0) {
+        showToast(uploadFailureSummary(failures));
       }
       await loadUploadQueue();
+    }
+
+    function uploadFailureSummary(failures) {
+      const details = failures.slice(0, 3).join("; ");
+      const remaining = failures.length - 3;
+      return `Upload failed: ${details}${
+        remaining > 0 ? `; and ${remaining} more` : ""
+      }`;
     }
 
     async function loadUploadQueue() {
@@ -3098,18 +3367,20 @@
               platformLabel(p)
             }</option>`
           ).join("");
-          platformHtml = `<select class="wiz-upload-queue-select" data-filename="${
-            esc(entry.filename)
-          }">${opts}</select>`;
+          platformHtml =
+            `<select class="wiz-upload-queue-select" aria-label="Platform for ${
+              escAttr(entry.filename)
+            }" data-filename="${escAttr(entry.filename)}">${opts}</select>`;
           // For Loom Standard, show an origin platform input so the user
           // can specify where the chats came from (ChatGPT, Replika, etc.).
           // This is a fallback — the file's own originPlatform (set by the
           // conversion agent) takes precedence at parse time.
           if (entry.platform === "loom-standard") {
             platformHtml += `<input type="text" class="wiz-upload-queue-origin" ` +
+              `aria-label="Origin platform for ${escAttr(entry.filename)}" ` +
               `placeholder="Origin (e.g. ChatGPT)" ` +
-              `data-filename="${esc(entry.filename)}" ` +
-              `value="${esc(entry.originPlatform || "")}" ` +
+              `data-filename="${escAttr(entry.filename)}" ` +
+              `value="${escAttr(entry.originPlatform || "")}" ` +
               `style="margin-top:4px;font-size:11px;width:100%;` +
               `background:var(--bg-elevated);border:1px solid var(--border);` +
               `border-radius:4px;padding:2px 6px;color:var(--fg)" />`;
@@ -3451,6 +3722,7 @@
       const pct = data?.percent || 0;
       pctEl.textContent = pct + "%";
       fillEl.style.width = pct + "%";
+      fillEl.parentElement.setAttribute("aria-valuenow", String(pct));
 
       if (pct >= 100) {
         fillEl.classList.add("wiz-progress-fill--complete");
@@ -3481,14 +3753,16 @@
           ? "Significant Memories"
           : "Daily Memories";
         listEl.innerHTML = `
-        <div class="wiz-section-title" style="margin-top:var(--sp-6);margin-bottom:var(--sp-3)">${sectionTitle} (${files.length})</div>
+        <h3 class="wiz-section-title" style="margin-top:var(--sp-6);margin-bottom:var(--sp-3)">${sectionTitle} (${files.length})</h3>
         ${
           files.map((f) => `
-          <div class="wiz-memory-item" data-file="${esc(f)}" id="mem-${type}-${f}">
-            <div class="wiz-memory-header" onclick="toggleMemory('${type}','${
-            esc(f)
-          }')">
+        <div class="wiz-memory-item" data-file="${esc(f)}" id="mem-${type}-${f}">
+            <div class="wiz-memory-header">
+              <button type="button" class="wiz-memory-toggle" aria-expanded="false" aria-controls="mem-body-${
+            escAttr(type)
+          }-${escAttr(f)}" onclick="toggleMemory('${type}','${esc(f)}')">
               <span class="wiz-memory-name">${esc(f)}</span>
+              </button>
               <div class="wiz-memory-actions">
                 <button class="btn btn--sm btn--ghost" onclick="event.stopPropagation();openMemoryEdit('${type}','${
             esc(f)
@@ -3512,6 +3786,10 @@
       const item = document.getElementById(`mem-${type}-${filename}`);
       if (!item) return;
       const isOpen = item.classList.toggle("wiz-memory-item--open");
+      item.querySelector(".wiz-memory-toggle")?.setAttribute(
+        "aria-expanded",
+        String(isOpen),
+      );
 
       if (isOpen) {
         try {
@@ -3568,9 +3846,9 @@
       );
       if (!bodyEl) return;
       bodyEl.innerHTML = `
-        <textarea id="mem-edit-${type}-${filename}" class="wiz-memory-edit">${
-        esc(res.content || "")
-      }</textarea>
+        <textarea id="mem-edit-${type}-${filename}" class="wiz-memory-edit" aria-label="Edit ${
+        escAttr(filename)
+      }">${esc(res.content || "")}</textarea>
         <div class="wiz-actions" style="border:none;margin:0">
           <button class="btn btn--sm btn--primary" onclick="saveMemoryEdit('${type}','${
         esc(filename)
@@ -3645,6 +3923,7 @@
           "wiz-platform--selected",
           el.dataset.window === w,
         );
+        el.setAttribute("aria-pressed", String(el.dataset.window === w));
       });
       estimateCost("daily");
     }
@@ -3660,6 +3939,14 @@
       document.getElementById("log-toggle").classList.toggle(
         "wiz-log-toggle--open",
         logOpen,
+      );
+      document.getElementById("log-toggle").setAttribute(
+        "aria-expanded",
+        String(logOpen),
+      );
+      document.getElementById("log-toggle-btn").setAttribute(
+        "aria-expanded",
+        String(logOpen),
       );
     }
 
@@ -3728,7 +4015,7 @@
       return (bytes / (1024 * 1024)).toFixed(1) + " MB";
     }
 
-    function showToast(msg) {
+    function showToast(msg, announce = true) {
       let c = document.getElementById("wiz-toast-container");
       if (!c) {
         c = document.createElement("div");
@@ -3738,6 +4025,7 @@
       const t = document.createElement("div");
       t.className = "wiz-toast";
       t.textContent = msg;
+      if (!announce) t.setAttribute("aria-hidden", "true");
       c.appendChild(t);
       requestAnimationFrame(() => t.classList.add("wiz-toast--visible"));
       setTimeout(() => {
@@ -3759,6 +4047,8 @@
       searchOffset: 0,
       searchTotal: 0,
     };
+    let stagingMessageOpener = null;
+    let stagingMessageOpenerLocation = null;
     const TAG_COLORS = [
       "#ef4444",
       "#f97316",
@@ -3799,14 +4089,18 @@
         const isActive = stagingState.activeFilterTag === name;
         return `<span class="wiz-staging-palette-chip${
           isActive ? " wiz-staging-palette-chip--active" : ""
-        }" style="background:${color}22;color:${color}" onclick="togglePaletteFilter('${
+        }" style="background:${color}22;color:${color}">
+        <button type="button" class="wiz-staging-palette-chip-action" aria-pressed="${
+          String(isActive)
+        }" data-tag="${escAttr(name)}" onclick="togglePaletteFilter('${
           esc(name)
         }')">
         <span class="wiz-staging-palette-chip-dot" style="background:${color}"></span>
         ${esc(name)}
-        <span class="wiz-staging-palette-chip-remove" onclick="event.stopPropagation();deletePaletteTag('${
-          esc(name)
-        }')">&times;</span>
+        </button>
+        <button type="button" class="wiz-staging-palette-chip-remove" aria-label="Delete tag ${
+          escAttr(name)
+        }" onclick="deletePaletteTag('${esc(name)}')">&times;</button>
       </span>`;
       }).join("");
     }
@@ -3823,12 +4117,12 @@
         '<span style="font-size:10px;color:var(--fg-subtle);margin-right:4px">Tag:</span>' +
         names.map((name) => {
           const color = stagingState.palette[name];
-          return `<span class="wiz-staging-palette-chip" style="background:${color}22;color:${color}" onclick="applyTagToSelectedFromPalette('${
+          return `<button type="button" class="wiz-staging-palette-chip" style="background:${color}22;color:${color}" onclick="applyTagToSelectedFromPalette('${
             esc(name)
           }')">
           <span class="wiz-staging-palette-chip-dot" style="background:${color}"></span>
           ${esc(name)}
-        </span>`;
+        </button>`;
         }).join("");
     }
 
@@ -3838,9 +4132,11 @@
       stagingState.selectedColor = TAG_COLORS[0];
       const colorsEl = document.getElementById("new-tag-colors");
       colorsEl.innerHTML = TAG_COLORS.map((c, i) =>
-        `<span class="wiz-staging-color-swatch${
+        `<button type="button" class="wiz-staging-color-swatch${
           i === 0 ? " wiz-staging-color-swatch--active" : ""
-        }" style="background:${c}" onclick="selectTagColor('${c}', this)"></span>`
+        }" style="background:${c}" aria-label="Use ${c} for the tag" aria-pressed="${
+          String(i === 0)
+        }" onclick="selectTagColor('${c}', this)"></button>`
       ).join("");
       document.getElementById("new-tag-name").value = "";
       document.getElementById("new-tag-name").focus();
@@ -3849,14 +4145,19 @@
     function cancelNewTag() {
       document.getElementById("new-tag-form").style.display = "none";
       document.getElementById("btn-new-tag").style.display = "";
+      document.getElementById("btn-new-tag").focus();
     }
 
     function selectTagColor(color, el) {
       stagingState.selectedColor = color;
       document.querySelectorAll(".wiz-staging-color-swatch").forEach(
-        (s) => s.classList.remove("wiz-staging-color-swatch--active"),
+        (s) => {
+          s.classList.remove("wiz-staging-color-swatch--active");
+          s.setAttribute("aria-pressed", "false");
+        },
       );
       el.classList.add("wiz-staging-color-swatch--active");
+      el.setAttribute("aria-pressed", "true");
     }
 
     async function createTagFromPalette() {
@@ -3888,6 +4189,8 @@
           "DELETE",
           `/api/staging/tag-palette/${encodeURIComponent(name)}`,
         );
+        const names = Object.keys(stagingState.palette);
+        const deletedIndex = names.indexOf(name);
         delete stagingState.palette[name];
         if (stagingState.activeFilterTag === name) {
           stagingState.activeFilterTag = null;
@@ -3895,6 +4198,11 @@
         renderPaletteChips();
         renderPaletteApplyBar();
         loadStagingConversations();
+        const remaining = Array.from(
+          document.querySelectorAll(".wiz-staging-palette-chip-action"),
+        );
+        (remaining[Math.min(deletedIndex, remaining.length - 1)] ||
+          document.getElementById("btn-new-tag")).focus();
       } catch (e) {
         showToast("Failed to delete tag: " + e.message);
       }
@@ -3906,6 +4214,9 @@
         : name;
       renderPaletteChips();
       loadStagingConversations();
+      Array.from(
+        document.querySelectorAll(".wiz-staging-palette-chip-action"),
+      ).find((button) => button.dataset.tag === name)?.focus();
     }
 
     async function applyTagToSelectedFromPalette(name) {
@@ -4042,21 +4353,25 @@
           : "";
         const tags = (c.tags || []).map((t) => {
           const color = getTagColor(t);
-          return `<span class="wiz-staging-tag" style="background:${color}22;color:${color}" onclick="event.stopPropagation();removeTagFromConv('${c.id}','${t}')">
+          return `<button type="button" class="wiz-staging-tag" aria-label="Remove tag ${
+            escAttr(t)
+          }" style="background:${color}22;color:${color}" onclick="event.stopPropagation();removeTagFromConv('${c.id}','${t}')">
           <span class="wiz-staging-tag-dot" style="background:${color}"></span>${
             esc(t)
-          }<span class="wiz-staging-tag-remove">&times;</span>
-        </span>`;
+          }<span class="wiz-staging-tag-remove" aria-hidden="true">&times;</span>
+        </button>`;
         }).join("");
         return `<div class="wiz-staging-item${excl}" data-id="${esc(c.id)}">
-        <div class="wiz-staging-item-check"><input type="checkbox" ${
+        <div class="wiz-staging-item-check"><input type="checkbox" aria-label="Select ${
+          escAttr(c.title || "Untitled")
+        }" ${
           c.included ? "checked" : ""
         } onchange="toggleConvIncluded('${c.id}', this.checked)"></div>
         <div class="wiz-staging-item-info">
-          <div class="wiz-staging-item-title" onclick="openStagingMessages('${c.id}', ${
+          <button type="button" class="wiz-staging-item-title" onclick="openStagingMessages('${c.id}', ${
           JSON.stringify(JSON.stringify(c.title || "Untitled"))
             .replace(/"/g, "&quot;")
-        })">${esc(c.title || "Untitled")}</div>
+        }, this)">${esc(c.title || "Untitled")}</button>
           <div class="wiz-staging-item-meta">
             <span>${c.platform}</span>
             <span>${c.messageCount} msgs</span>
@@ -4126,14 +4441,20 @@
       loadStagingStats();
     }
 
-    async function openStagingMessages(convId, title) {
+    async function openStagingMessages(convId, title, opener) {
       stagingState.messageView = {
         conversationId: convId,
         offset: 0,
       };
+      stagingMessageOpener = opener;
+      stagingMessageOpenerLocation = {
+        containerId: opener.closest(".wiz-staging-list")?.id,
+        conversationId: convId,
+      };
       const panel = document.getElementById("staging-messages-panel");
-      panel.style.display = "flex";
+      panel.showModal();
       document.getElementById("staging-messages-title").textContent = title;
+      panel.querySelector("button").focus();
       await loadStagingMessages();
     }
 
@@ -4200,9 +4521,21 @@
     }
 
     function closeStagingMessages() {
-      document.getElementById("staging-messages-panel").style
-        .display = "none";
+      document.getElementById("staging-messages-panel").close();
+    }
+
+    function restoreStagingMessageFocus() {
       stagingState.messageView = null;
+      if (stagingMessageOpener?.isConnected) {
+        stagingMessageOpener.focus();
+      } else if (stagingMessageOpenerLocation?.containerId) {
+        focusConversationTitle(
+          stagingMessageOpenerLocation.containerId,
+          stagingMessageOpenerLocation.conversationId,
+        );
+      }
+      stagingMessageOpener = null;
+      stagingMessageOpenerLocation = null;
     }
 
     async function editStagingMessage(msgId, convId) {
@@ -4238,10 +4571,18 @@
           "DELETE",
           `/api/staging/conversations/${convId}/tags/${encodeURIComponent(tag)}`,
         );
-        loadStagingConversations();
+        await loadStagingConversations();
+        focusConversationTitle("staging-conversation-list", convId);
       } catch (e) {
         showToast("Failed to remove tag: " + e.message);
       }
+    }
+
+    function focusConversationTitle(containerId, convId) {
+      const item = Array.from(
+        document.querySelectorAll(`#${containerId} .wiz-staging-item`),
+      ).find((candidate) => candidate.dataset.id === convId);
+      item?.querySelector(".wiz-staging-item-title")?.focus();
     }
 
     async function loadPlatformFilter() {
@@ -4311,19 +4652,23 @@
           : "?";
         const tags = (c.tags || []).map((t) => {
           const color = getTagColor(t);
-          return `<span class="wiz-staging-tag" style="background:${color}22;color:${color}" onclick="event.stopPropagation();removeTagFromSearchResult('${c.id}','${t}')">
+          return `<button type="button" class="wiz-staging-tag" aria-label="Remove tag ${
+            escAttr(t)
+          }" style="background:${color}22;color:${color}" onclick="event.stopPropagation();removeTagFromSearchResult('${c.id}','${t}')">
           <span class="wiz-staging-tag-dot" style="background:${color}"></span>${
             esc(t)
-          }<span class="wiz-staging-tag-remove">&times;</span>
-        </span>`;
+          }<span class="wiz-staging-tag-remove" aria-hidden="true">&times;</span>
+        </button>`;
         }).join("");
         return `<div class="wiz-staging-item" data-id="${esc(c.id)}">
-        <div class="wiz-staging-item-check"><input type="checkbox" onchange="updateSearchCount()"></div>
+        <div class="wiz-staging-item-check"><input type="checkbox" aria-label="Select ${
+          escAttr(c.title || "Untitled")
+        }" onchange="updateSearchCount()"></div>
         <div class="wiz-staging-item-info">
-          <div class="wiz-staging-item-title" onclick="openStagingMessages('${c.id}', ${
+          <button type="button" class="wiz-staging-item-title" onclick="openStagingMessages('${c.id}', ${
           JSON.stringify(JSON.stringify(c.title || "Untitled"))
             .replace(/"/g, "&quot;")
-        })">${esc(c.title || "Untitled")}</div>
+        }, this)">${esc(c.title || "Untitled")}</button>
           <div class="wiz-staging-item-meta">
             <span>${c.platform}</span>
             <span>${c.messageCount} msgs</span>
@@ -4405,12 +4750,12 @@
         '<span style="font-size:10px;color:var(--fg-subtle);margin-right:4px">Tag:</span>' +
         names.map((name) => {
           const color = stagingState.palette[name];
-          return `<span class="wiz-staging-palette-chip" style="background:${color}22;color:${color}" onclick="applyTagToSearchResults('${
+          return `<button type="button" class="wiz-staging-palette-chip" style="background:${color}22;color:${color}" onclick="applyTagToSearchResults('${
             esc(name)
           }')">
           <span class="wiz-staging-palette-chip-dot" style="background:${color}"></span>
           ${esc(name)}
-        </span>`;
+        </button>`;
         }).join("");
     }
 
@@ -4419,7 +4764,8 @@
         "DELETE",
         `/api/staging/conversations/${convId}/tags/${encodeURIComponent(tag)}`,
       );
-      performStagingSearchPage();
+      await performStagingSearchPage();
+      focusConversationTitle("staging-search-results", convId);
     }
 
     async function applyTagToSearchResults(name) {
@@ -4470,7 +4816,7 @@
             }>${esc(name)}</option>`;
           }).join("");
           el.innerHTML =
-            `<select class="wiz-select" onchange="document.getElementById('psycheros-db-path').value=this.value"><option value="">-- detected databases --</option>${labels}</select>`;
+            `<select class="wiz-select" aria-label="Detected Psycheros database" onchange="document.getElementById('psycheros-db-path').value=this.value"><option value="">-- detected databases --</option>${labels}</select>`;
         } else {
           el.innerHTML =
             '<span style="font-size:var(--font-size-xs);color:var(--fg-subtle)">No Psycheros databases found automatically. Enter the path manually.</span>';
