@@ -230,6 +230,12 @@
   border-bottom: 1px solid var(--c-wash);
 }
 
+.discord-message:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: -2px;
+  box-shadow: var(--glow-accent);
+}
+
 .discord-msg-role {
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
@@ -356,7 +362,8 @@
 }
 
 /* Discord settings page: input labels more prominent, hints stay small & muted */
-.discord-settings-page .llm-field label {
+.discord-settings-page .llm-field label,
+.discord-settings-page .llm-field .llm-field-heading {
   font-size: var(--font-size-sm);
   color: var(--c-fg);
   font-weight: var(--font-weight-medium);
@@ -655,7 +662,7 @@
 }
 
 .discord-msg-edit-btn {
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: 24px;
@@ -667,12 +674,9 @@
   cursor: pointer;
   margin-left: auto;
   opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
   transition: opacity var(--transition), color var(--transition);
-}
-
-.discord-message:hover .discord-msg-edit-btn {
-  display: flex;
-  opacity: 1;
 }
 
 .discord-msg-edit-btn:hover {
@@ -680,9 +684,9 @@
 }
 
 /* Discord message action buttons (delete + flag-glitched, plan §9f).
- * Same hover-reveal pattern as .discord-msg-edit-btn. */
+ * Same reveal pattern as .discord-msg-edit-btn. */
 .discord-msg-action-btn {
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: 24px;
@@ -693,12 +697,30 @@
   color: var(--c-fg-muted);
   cursor: pointer;
   opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
   transition: opacity var(--transition), color var(--transition);
 }
 
-.discord-message:hover .discord-msg-action-btn {
-  display: flex;
+.discord-message:hover .discord-msg-edit-btn,
+.discord-message:focus-within .discord-msg-edit-btn,
+.discord-message:hover .discord-msg-action-btn,
+.discord-message:focus-within .discord-msg-action-btn {
   opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* A row can be focused with the keyboard before any of its hidden actions
+ * can receive focus. Coarse-pointer devices have no hover to reveal them, so
+ * keep the controls plainly available there. */
+@media (hover: none) {
+  .discord-message .discord-msg-edit-btn,
+  .discord-message .discord-msg-action-btn {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
 }
 
 .discord-msg-action-btn:hover {

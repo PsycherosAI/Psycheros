@@ -36,6 +36,11 @@ function showError(message) {
   if (!e) return;
   e.textContent = String(message);
   e.classList.add("visible");
+  const announcer = document.getElementById("launcher-error-announcer");
+  if (announcer) {
+    announcer.textContent = "";
+    requestAnimationFrame(() => announcer.textContent = String(message));
+  }
 }
 
 function clearError() {
@@ -43,6 +48,8 @@ function clearError() {
   if (!e) return;
   e.classList.remove("visible");
   e.textContent = "";
+  const announcer = document.getElementById("launcher-error-announcer");
+  if (announcer) announcer.textContent = "";
 }
 
 function showProgress(text) {

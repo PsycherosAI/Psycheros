@@ -18,6 +18,7 @@
     "dev": "deno run --watch --watch-exclude=identity/ -A src/main.ts",
     "start": "deno run -A src/main.ts",
     "stop": "pkill -INT -f 'deno.*main.ts' || true",
+    "test:e2e": "node e2e/run.mjs",
     "check:flux-page": "deno run -A scripts/check-flux-page.ts"
   },
   "lint": {

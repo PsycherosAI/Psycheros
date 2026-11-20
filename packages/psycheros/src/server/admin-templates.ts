@@ -86,7 +86,7 @@ export function renderAdminHub(): string {
   <script src="/js/admin.js"></script>
   <div class="settings-header">
     <div class="settings-header-row">
-      <a class="settings-back-btn"
+      <a href="/fragments/settings" class="settings-back-btn"
         hx-get="/fragments/settings"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -801,11 +801,12 @@ export function renderAdminEntityData(): string {
           Full Overwrite Import
         </button>
         <div class="import-progress" id="admin-entity-import-progress" style="display:none">
-          <div class="import-progress-bar">
+          <div class="import-progress-bar" role="progressbar" aria-label="Entity data import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
             <div class="import-progress-fill" id="admin-entity-import-fill"></div>
           </div>
           <div class="import-progress-text" id="admin-entity-import-text">Preparing...</div>
         </div>
+        <div class="sr-only" id="admin-entity-import-status" role="status" aria-live="polite"></div>
         <div class="import-blocking-overlay" id="admin-entity-import-overlay" style="display:none">
           <div class="import-blocking-text">Importing entity data...</div>
           <div class="import-blocking-subtext">Do not close this page. The import will continue in the background.</div>
@@ -836,11 +837,12 @@ export function renderAdminEntityData(): string {
         </button>
       </div>
       <div class="import-progress" id="admin-restore-conv-progress" style="display:none">
-        <div class="import-progress-bar">
+        <div class="import-progress-bar" role="progressbar" aria-label="Conversation restore progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div class="import-progress-fill" id="admin-restore-conv-fill"></div>
         </div>
         <div class="import-progress-text" id="admin-restore-conv-text">Preparing...</div>
       </div>
+      <div class="sr-only" id="admin-restore-conv-status" role="status" aria-live="polite"></div>
       <div class="admin-migration-output" id="admin-restore-conv-output" style="display:none"></div>
     </div>
   </div>
@@ -877,6 +879,7 @@ export function renderAdminEntityData(): string {
         </button>
       </div>
       <div class="admin-migration-output" id="admin-migration-sig-output" style="display:none"></div>
+      <div class="sr-only" id="admin-migration-sig-status" role="status" aria-live="polite"></div>
     </div>
 
     <div class="admin-section">
@@ -901,6 +904,7 @@ export function renderAdminEntityData(): string {
         </button>
       </div>
       <div class="admin-migration-output" id="admin-migration-daily-output" style="display:none"></div>
+      <div class="sr-only" id="admin-migration-daily-status" role="status" aria-live="polite"></div>
     </div>
 
     <div class="admin-section">
@@ -929,11 +933,12 @@ export function renderAdminEntityData(): string {
         </button>
       </div>
       <div class="import-progress" id="admin-migration-chat-progress" style="display:none">
-        <div class="import-progress-bar">
+        <div class="import-progress-bar" role="progressbar" aria-label="Chat import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div class="import-progress-fill" id="admin-migration-chat-fill"></div>
         </div>
         <div class="import-progress-text" id="admin-migration-chat-text">Preparing...</div>
       </div>
+      <div class="sr-only" id="admin-migration-chat-status" role="status" aria-live="polite"></div>
       <div class="admin-migration-output" id="admin-migration-chat-output" style="display:none"></div>
     </div>
 
@@ -964,11 +969,12 @@ export function renderAdminEntityData(): string {
         </button>
       </div>
       <div class="import-progress" id="admin-migration-graph-progress" style="display:none">
-        <div class="import-progress-bar">
+        <div class="import-progress-bar" role="progressbar" aria-label="Knowledge graph import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div class="import-progress-fill" id="admin-migration-graph-fill"></div>
         </div>
         <div class="import-progress-text" id="admin-migration-graph-text">Preparing...</div>
       </div>
+      <div class="sr-only" id="admin-migration-graph-status" role="status" aria-live="polite"></div>
       <div class="import-blocking-overlay" id="admin-migration-graph-overlay" style="display:none">
         <div class="import-blocking-text">Importing knowledge graph...</div>
         <div class="import-blocking-subtext">Entity-core is temporarily stopped. Please wait.</div>

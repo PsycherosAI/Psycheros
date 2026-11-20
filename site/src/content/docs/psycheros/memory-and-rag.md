@@ -51,7 +51,9 @@ tomorrow are the same "day"). Without a configured timezone, it falls back to
 consolidation runs in entity-core via its own cron jobs, independently of
 whether any Psycheros instance is connected.
 
-```
+The memory files are organized by period:
+
+```text
 entity-core/data/memories/        (canonical storage — managed by entity-core)
 ├── daily/           # Daily summaries (auto-generated, per-instance)
 │   └── 2026-02-22_psycheros.md

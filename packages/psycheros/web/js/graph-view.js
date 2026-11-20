@@ -1,12 +1,97 @@
 /**
  * Knowledge Graph — List Editor + Network Graph Toggle
  *
- * Mobile-first card list with virtual scrolling, optional vis-network graph,
+ * Mobile-first card list with an optional vis-network graph,
  * proper edge creation modal, and delete confirmation modal.
  * No prompt(), confirm(), or confidence fields.
  */
 
 // ─── Color Utilities (reused from graph view) ─────────────────────────────────
+
+// ─── Dialog plumbing ─────────────────────────────────────────────────────────
+// The four graph dialogs are opened and closed by class changes in a dozen
+// handlers. Focus, Escape and the Tab trap are wired once here rather than at
+// every call site, and the CSS keeps a closed dialog out of the tab order.
+const GRAPH_MODAL_FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
+let graphFocusOutside = null;
+
+/** The topmost open dialog — later in DOM order wins when one stacks on another. */
+function openGraphModal() {
+  const open = document.querySelectorAll(".gv-modal.gv-modal-open");
+  return open.length ? open[open.length - 1] : null;
+}
+
+document.addEventListener("focusin", (e) => {
+  if (!e.target.closest(".gv-modal")) graphFocusOutside = e.target;
+});
+
+document.addEventListener("keydown", (e) => {
+  const modal = openGraphModal();
+  if (!modal) return;
+
+  if (e.key === "Escape") {
+    e.preventDefault();
+    modal.classList.remove("gv-modal-open");
+    return;
+  }
+  if (e.key !== "Tab") return;
+
+  const items = [...modal.querySelectorAll(GRAPH_MODAL_FOCUSABLE)];
+  if (items.length === 0) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  const active = document.activeElement;
+
+  if (!modal.contains(active)) {
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus();
+  } else if (e.shiftKey && active === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && active === last) {
+    e.preventDefault();
+    first.focus();
+  }
+});
+
+// Opening a dialog moves focus into it; closing it hands focus back to whatever
+// the user was on before (the row or button that opened it). Re-observed on
+// every initGraph because the dialogs are re-rendered with the fragment.
+//
+// A closed dialog is taken out of the tab order with inert, not with
+// visibility:hidden: a child inherits a visibility flip two to four frames
+// late, so focus() into a just-opened dialog is a silent no-op and focus stayed
+// on the card behind it (Playwright probe, 2026-09-28). inert is read straight
+// off the DOM, so moving focus in works in the same task.
+const graphModalObserver = new MutationObserver((records) => {
+  for (const record of records) {
+    const modal = record.target;
+    const open = modal.classList.contains("gv-modal-open");
+    modal.inert = !open;
+    if (!open) {
+      if (graphFocusOutside?.isConnected) graphFocusOutside.focus();
+      continue;
+    }
+    if (!modal.contains(document.activeElement)) {
+      modal.querySelector(GRAPH_MODAL_FOCUSABLE)?.focus();
+    }
+  }
+});
+
+function watchGraphModals() {
+  // The dialogs are re-rendered with the fragment, so drop the previous set
+  // before observing the new one.
+  graphModalObserver.disconnect();
+  for (const modal of document.querySelectorAll(".gv-modal")) {
+    modal.inert = !modal.classList.contains("gv-modal-open");
+    graphModalObserver.observe(modal, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }
+}
 
 function getNodeTypeConfig() {
   return {
@@ -83,9 +168,6 @@ let initialized = false;
 let deleteTargetNodeId = null;
 let eventListenersAbort = null;
 
-const CARD_HEIGHT_EST = 56;
-const VISIBLE_BUFFER = 10;
-
 const NODE_LIMIT_STORAGE_KEY = 'psycheros:graphNodeLimit';
 const DEFAULT_NODE_LIMIT = 500;
 
@@ -104,7 +186,7 @@ function applyStoredNodeLimit() {
   if (Number.isInteger(saved) && saved >= 1) el.value = String(saved);
 }
 
-function updateShownHint() {
+function updateShownHint(announce) {
   const countEl = document.getElementById('gv-shown-count');
   if (!countEl) return;
   const total = graphData.stats?.totalNodes ?? 0;
@@ -117,6 +199,18 @@ function updateShownHint() {
   document.querySelectorAll('.gv-shown-row').forEach((el) => {
     el.classList.toggle('gv-hidden', !truncated);
   });
+  if (!announce) return;
+  // The visible hint collapses to display:none unless the load is truncated,
+  // so speak the result through the shared persistent status region instead.
+  let message;
+  if (total === 0) {
+    message = 'The knowledge graph is empty.';
+  } else if (truncated) {
+    message = `Showing ${shown} of ${total} nodes. Raise Max to load more.`;
+  } else {
+    message = `Showing all ${total} nodes.`;
+  }
+  globalThis.announceStatus?.(message);
 }
 
 // ─── Initialization ──────────────────────────────────────────────────────────
@@ -131,11 +225,12 @@ async function initGraph() {
   applyStoredNodeLimit();
   await loadGraphData();
   setupEventListeners();
+  watchGraphModals();
 }
 
 // ─── Data Loading ────────────────────────────────────────────────────────────
 
-async function loadGraphData() {
+async function loadGraphData({ announce = false } = {}) {
   const listView = document.getElementById('gv-list-view');
   const graphView = document.getElementById('gv-graph-view');
 
@@ -147,7 +242,7 @@ async function loadGraphData() {
     buildConnectionCounts();
     populateTypeFilter();
     getFilteredNodes();
-    updateShownHint();
+    updateShownHint(announce);
 
     if (!graphData.nodes || graphData.nodes.length === 0) {
       const emptyHtml = `
@@ -216,9 +311,7 @@ function getFilteredNodes() {
   return filteredNodes;
 }
 
-// ─── List View — Virtual Scroll ───────────────────────────────────────────────
-
-let scrollListenerAttached = false;
+// ─── List View ────────────────────────────────────────────────────────────────
 
 function renderListView() {
   const container = document.getElementById('gv-list-view');
@@ -233,77 +326,30 @@ function renderListView() {
     return;
   }
 
-  renderVisibleCards(container);
-
-  if (!scrollListenerAttached) {
-    container.addEventListener('scroll', () => renderVisibleCards(container));
-    scrollListenerAttached = true;
-  }
-}
-
-function renderVisibleCards(container) {
-  const scrollTop = container.scrollTop;
-  const viewHeight = container.clientHeight;
-
-  let startIdx = 0;
-  let y = 0;
-  for (let i = 0; i < filteredNodes.length; i++) {
-    const isExpanded = filteredNodes[i].id === expandedNodeId;
-    const h = isExpanded ? estimateExpandedHeight(filteredNodes[i]) : CARD_HEIGHT_EST;
-    if (y + h > scrollTop - CARD_HEIGHT_EST * VISIBLE_BUFFER) { startIdx = i; break; }
-    y += h;
-  }
-
-  // Collect visible nodes with their y positions
-  const visibleCards = [];
-  let curY = y;
-  for (let i = startIdx; i < filteredNodes.length && curY < scrollTop + viewHeight + CARD_HEIGHT_EST * VISIBLE_BUFFER; i++) {
-    const node = filteredNodes[i];
-    const isExpanded = node.id === expandedNodeId;
-    const h = isExpanded ? estimateExpandedHeight(node) : CARD_HEIGHT_EST;
-    visibleCards.push({ node, y: curY, height: h, isExpanded });
-    curY += h;
-  }
-
-  // Calculate total height
-  let totalHeight = 0;
-  for (const node of filteredNodes) {
-    totalHeight += node.id === expandedNodeId ? estimateExpandedHeight(node) : CARD_HEIGHT_EST;
-  }
-
-  const topPad = visibleCards.length > 0 ? visibleCards[0].y : 0;
-  const bottomPad = totalHeight - (visibleCards.length > 0 ? visibleCards[visibleCards.length - 1].y + visibleCards[visibleCards.length - 1].height : 0);
-
-  let html = `<div class="gv-list-spacer" style="height:${topPad}px"></div>`;
-  for (const { node, isExpanded } of visibleCards) {
-    html += isExpanded ? renderNodeDetail(node) : renderNodeCard(node);
-  }
-  html += `<div class="gv-list-spacer" style="height:${Math.max(0, bottomPad)}px"></div>`;
-  html += `<div class="gv-list-spacer" style="height:${viewHeight + 200}px"></div>`;
-
-  container.innerHTML = html;
-}
-
-function estimateExpandedHeight(node) {
-  const edges = graphData.edges.filter(e => e.fromId === node.id || e.toId === node.id);
-  const base = 130; // header + desc + buttons
-  const connLines = edges.length * 28;
-  return base + connLines;
+  container.innerHTML = filteredNodes.map(renderNodeCard).join('');
 }
 
 // ─── Card Rendering ───────────────────────────────────────────────────────────
 
+// Flex containers drop whitespace-only text nodes, so badge + label + conn
+// count would be announced as one run ("Selfme2 conns"). A real character in
+// an sr-only span restores the boundaries.
+const SPEECH_SEP = '<span class="sr-only">, </span>';
+
 function renderNodeCard(node) {
+  if (node.id === expandedNodeId) return renderNodeDetail(node);
   const config = getNodeTypeConfig();
   const typeInfo = config[node.type] || config.default;
   const conns = connectionCounts.get(node.id) || 0;
+  const detailId = nodeDetailId(node.id);
 
-  return `<div class="gv-card" data-node-id="${escapeHtml(node.id)}" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
-    <div class="gv-card-header">
+  return `<div class="gv-card" data-node-id="${escapeHtml(node.id)}">
+    <button type="button" class="gv-card-header" aria-expanded="false" aria-controls="${detailId}" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
       <span class="gv-badge" style="background:${hslColor(typeInfo.hue, 55, 35)};color:${hslColor(typeInfo.hue, 55, 70)}">${escapeHtml(typeInfo.label)}</span>
-      <span class="gv-card-label">${escapeHtml(node.label)}</span>
-      <span class="gv-card-conns">${conns > 0 ? conns + ' conn' + (conns > 1 ? 's' : '') : ''}</span>
-    </div>
+      <span class="gv-card-label">${SPEECH_SEP}${escapeHtml(node.label)}</span>
+      <span class="gv-card-conns">${conns > 0 ? SPEECH_SEP + conns + ' conn' + (conns > 1 ? 's' : '') : ''}</span>
+    </button>
+    <div class="gv-card-detail" id="${detailId}" hidden></div>
   </div>`;
 }
 
@@ -311,6 +357,7 @@ function renderNodeDetail(node) {
   const config = getNodeTypeConfig();
   const typeInfo = config[node.type] || config.default;
   const conns = connectionCounts.get(node.id) || 0;
+  const detailId = nodeDetailId(node.id);
 
   const edges = graphData.edges.filter(e => e.fromId === node.id || e.toId === node.id);
   const connHtml = edges.map(edge => {
@@ -322,12 +369,12 @@ function renderNodeDetail(node) {
   }).join('');
 
   return `<div class="gv-card gv-card--expanded" data-node-id="${escapeHtml(node.id)}">
-    <div class="gv-card-header" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
+    <button type="button" class="gv-card-header" aria-expanded="true" aria-controls="${detailId}" onclick="toggleNodeCard('${escapeHtml(node.id)}')">
       <span class="gv-badge" style="background:${hslColor(typeInfo.hue, 55, 35)};color:${hslColor(typeInfo.hue, 55, 70)}">${escapeHtml(typeInfo.label)}</span>
-      <span class="gv-card-label">${escapeHtml(node.label)}</span>
-      <span class="gv-card-conns">${conns} conn${conns !== 1 ? 's' : ''}</span>
-    </div>
-    <div class="gv-card-detail">
+      <span class="gv-card-label">${SPEECH_SEP}${escapeHtml(node.label)}</span>
+      <span class="gv-card-conns">${SPEECH_SEP}${conns} conn${conns !== 1 ? 's' : ''}</span>
+    </button>
+    <div class="gv-card-detail" id="${detailId}">
       ${node.description ? `<div class="gv-card-desc">${escapeHtml(node.description)}</div>` : ''}
       ${connHtml ? `
         <div class="gv-card-section">
@@ -343,10 +390,23 @@ function renderNodeDetail(node) {
   </div>`;
 }
 
+function nodeDetailId(nodeId) {
+  return `gv-node-detail-${encodeURIComponent(nodeId)}`;
+}
+
+function focusNodeHeader(nodeId) {
+  const container = document.getElementById('gv-list-view');
+  if (!container) return;
+  const header = [...container.querySelectorAll('.gv-card-header')]
+    .find(button => button.closest('.gv-card')?.dataset.nodeId === nodeId);
+  if (header) header.focus({ preventScroll: true });
+  else document.getElementById('graph-search')?.focus();
+}
+
 function toggleNodeCard(nodeId) {
   expandedNodeId = expandedNodeId === nodeId ? null : nodeId;
-  const container = document.getElementById('gv-list-view');
-  if (container) renderListView();
+  renderListView();
+  focusNodeHeader(nodeId);
 }
 
 // ─── View Toggle ──────────────────────────────────────────────────────────────
@@ -362,7 +422,9 @@ async function toggleView(view) {
   // Update toggle buttons
   if (toggle) {
     toggle.querySelectorAll('.gv-view-toggle-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.view === view);
+      const active = btn.dataset.view === view;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', String(active));
     });
   }
 
@@ -455,13 +517,23 @@ function renderGraph() {
       dragView: true,
       multiselect: true,
       navigationButtons: false,
-      keyboard: false
+      keyboard: {
+        enabled: true,
+        bindToWindow: false,
+        autoFocus: false
+      }
     },
     nodes: { shape: 'dot', size: 18, scaling: { min: 12, max: 28 } },
     edges: { arrows: { to: { enabled: true, scaleFactor: 0.6 } }, smooth: { enabled: true, type: 'continuous' } }
   };
 
   network = new vis.Network(container, { nodes, edges }, options);
+  const surface = container.querySelector('.vis-network');
+  if (surface) {
+    surface.setAttribute('role', 'group');
+    surface.setAttribute('aria-label', 'Knowledge graph network');
+    surface.setAttribute('aria-describedby', 'graph-network-help');
+  }
   network.on('click', handleNetworkClick);
   network.on('doubleClick', handleNetworkDoubleClick);
   network.on('stabilizationIterationsDone', () => {
@@ -535,10 +607,15 @@ function showNodePanel(nodeId) {
     </div>`;
 
   panel.classList.add('gv-panel-open');
+  // A closed panel is translated off-canvas but still in the DOM, so without
+  // this its buttons stay tabbable (audit: off-canvas but focusable).
+  panel.inert = false;
 }
 
 function hideNodePanel() {
-  document.getElementById('graph-node-panel')?.classList.remove('gv-panel-open');
+  const panel = document.getElementById('graph-node-panel');
+  panel?.classList.remove('gv-panel-open');
+  if (panel) panel.inert = true;
 }
 
 // ─── Type Filter ──────────────────────────────────────────────────────────────
@@ -629,6 +706,7 @@ function setupEdgeModalListeners(opts) {
         form.reset();
         showToast('Connection created');
         await loadGraphData();
+        focusNodeHeader(fromId);
       } else {
         showToast('Failed: ' + (result.error || 'unknown error'));
       }
@@ -809,6 +887,10 @@ function setupDeleteModalListeners(opts) {
         expandedNodeId = null;
         showToast('Node deleted');
         await loadGraphData();
+        // loadGraphData() re-renders the list, which takes the card and its
+        // Delete button with it, so the focus the dialog observer restored is
+        // gone by now. Hand it to a control that outlives the re-render.
+        document.getElementById('gv-add-node')?.focus();
       } else {
         showToast('Failed: ' + (result.error || 'unknown error'));
       }
@@ -886,11 +968,11 @@ function setupEventListeners() {
     const el = document.getElementById('graph-node-limit');
     if (el) el.value = String(limit);
     localStorage.setItem(NODE_LIMIT_STORAGE_KEY, String(limit));
-    loadGraphData();
+    loadGraphData({ announce: true });
   }, opts);
 
   // Refresh
-  document.getElementById('graph-refresh')?.addEventListener('click', () => loadGraphData(), opts);
+  document.getElementById('graph-refresh')?.addEventListener('click', () => loadGraphData({ announce: true }), opts);
 
   // Add node button
   document.getElementById('gv-add-node')?.addEventListener('click', () => {
@@ -916,6 +998,11 @@ function setupEventListeners() {
       label: form.label.value,
       description: form.description.value,
     };
+    if (!data.label.trim()) {
+      showToast('Label is required');
+      form.label.focus();
+      return;
+    }
     try {
       const response = await fetch('/api/graph/nodes', {
         method: 'POST',
@@ -956,6 +1043,11 @@ function setupEventListeners() {
       label: document.getElementById('edit-node-label').value,
       description: document.getElementById('edit-node-description').value,
     };
+    if (!data.label.trim()) {
+      showToast('Label is required');
+      document.getElementById('edit-node-label').focus();
+      return;
+    }
     try {
       const response = await fetch(`/api/graph/nodes/${nodeId}`, {
         method: 'PUT',
@@ -967,6 +1059,7 @@ function setupEventListeners() {
         document.getElementById('graph-edit-modal').classList.remove('gv-modal-open');
         showToast('Node updated');
         await loadGraphData();
+        focusNodeHeader(nodeId);
       } else {
         showToast('Failed to update node: ' + result.error);
       }
@@ -994,8 +1087,17 @@ function showToast(msg) {
   }
   const toast = document.createElement('div');
   toast.className = 'gv-toast';
-  toast.textContent = msg;
+  // role=status is the whole reason the message is announced at all, and a
+  // region that arrives already populated is not announced either, so it goes
+  // in empty and is filled on the next tick - the same
+  // contract as the app's toast in psycheros.js. This is a separate function
+  // from that one because the graph panel is also rendered in the launcher,
+  // where the app toast does not exist.
+  toast.setAttribute('role', 'status');
   container.appendChild(toast);
+  setTimeout(() => {
+    toast.textContent = msg;
+  }, 50);
   requestAnimationFrame(() => toast.classList.add('gv-toast-visible'));
   setTimeout(() => {
     toast.classList.remove('gv-toast-visible');
@@ -1020,4 +1122,6 @@ globalThis.toggleNodeCard = toggleNodeCard;
 globalThis.openEdgeModal = openEdgeModal;
 globalThis.openEdgeModalFromNode = openEdgeModalFromNode;
 globalThis.renderDeleteConfirmModal = renderDeleteConfirmModal;
-globalThis.showToast = showToast;
+// showToast deliberately stays local: assigning it here shadowed the app's
+// role=status toast in psycheros.js for every other caller on the page
+// (reindex-banner.js and the discord inline handler go through the global).
