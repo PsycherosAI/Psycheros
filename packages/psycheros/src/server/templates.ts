@@ -1615,7 +1615,7 @@ async function saveGeneralSettings() {
     if (data.success) {
       el.className = 'settings-status visible success';
       el.textContent = 'Settings saved successfully';
-      setTimeout(() => { el.className = 'settings-status'; }, 3000);
+      setTimeout(() => hideSettingsStatus(el), 3000);
       if (window.PsycherosSettings) {
         window.PsycherosSettings.entityName = entityName || 'Assistant';
         window.PsycherosSettings.userName = userName || 'You';
@@ -1640,7 +1640,7 @@ function showAppearanceStatus(type, message) {
   el.className = 'settings-status visible ' + type;
   el.textContent = message;
   if (type !== 'error') {
-    setTimeout(() => { el.className = 'settings-status'; }, 3000);
+    setTimeout(() => hideSettingsStatus(el), 3000);
   }
 }
 

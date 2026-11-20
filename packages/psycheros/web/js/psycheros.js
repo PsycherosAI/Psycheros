@@ -49,6 +49,19 @@ function announceStatus(text) {
 // Exposed for modules outside this file's scope (reindex-banner.js, LazyLoader).
 globalThis.announceStatus = announceStatus;
 
+/**
+ * Retire a transient settings status.
+ *
+ * The region itself stays rendered so screen readers keep announcing later
+ * updates, but the finished message must not linger as visible text.
+ */
+function hideSettingsStatus(el) {
+  if (!el) return;
+  el.className = 'settings-status';
+  el.textContent = '';
+}
+globalThis.hideSettingsStatus = hideSettingsStatus;
+
 function announceTranscript(messageEl) {
   if (!messageEl) return;
   const author = messageEl.querySelector('.msg-author')?.textContent?.trim() ||
@@ -7836,18 +7849,18 @@ async function saveSASettings() {
     if (data.success) {
       el.className = 'settings-status visible success';
       el.textContent = 'Settings saved successfully';
-      setTimeout(function() { el.className = 'settings-status'; }, 3000);
+      setTimeout(function() { hideSettingsStatus(el); }, 3000);
     } else {
       el.className = 'settings-status visible error';
       el.textContent = data.error || 'Failed to save settings';
-      setTimeout(function() { el.className = 'settings-status'; }, 3000);
+      setTimeout(function() { hideSettingsStatus(el); }, 3000);
     }
   } catch (e) {
     var el = document.getElementById('sa-settings-status');
     if (el) {
       el.className = 'settings-status visible error';
       el.textContent = 'Failed to save settings';
-      setTimeout(function() { el.className = 'settings-status'; }, 3000);
+      setTimeout(function() { hideSettingsStatus(el); }, 3000);
     }
   }
 }
@@ -7984,7 +7997,7 @@ async function saveFluxSettings() {
     statusEl.className = 'settings-status visible error';
     statusEl.textContent = 'Failed to save';
   }
-  setTimeout(function(){ statusEl.className = 'settings-status'; }, 5000);
+  setTimeout(function(){ hideSettingsStatus(statusEl); }, 5000);
 }
 
 // Flux settings tabs: General | Hookups | Sensory. Lives
@@ -8152,7 +8165,7 @@ async function fluxAction(action) {
       statusEl.textContent = action + ' failed';
     }
   }
-  if (statusEl) setTimeout(function(){ statusEl.className = 'settings-status'; }, 4000);
+  if (statusEl) setTimeout(function(){ hideSettingsStatus(statusEl); }, 4000);
 }
 globalThis.saveFluxSettings = saveFluxSettings;
 globalThis.fluxAction = fluxAction;
@@ -8225,7 +8238,7 @@ async function saveEventRules() {
       if (statusEl) {
         statusEl.className = 'settings-status visible error';
         statusEl.textContent = 'All fields are required for each webhook rule';
-        setTimeout(function() { statusEl.className = 'settings-status'; }, 3000);
+        setTimeout(function() { hideSettingsStatus(statusEl); }, 3000);
       }
       return;
     }
@@ -8257,7 +8270,7 @@ async function saveEventRules() {
         if (statusEl) {
           statusEl.className = 'settings-status visible error';
           statusEl.textContent = data.error || 'Failed to save webhook';
-          setTimeout(function() { statusEl.className = 'settings-status'; }, 3000);
+          setTimeout(function() { hideSettingsStatus(statusEl); }, 3000);
         }
         return;
       }
@@ -8269,7 +8282,7 @@ async function saveEventRules() {
       if (statusEl) {
         statusEl.className = 'settings-status visible error';
         statusEl.textContent = 'Failed to save webhook';
-        setTimeout(function() { statusEl.className = 'settings-status'; }, 3000);
+        setTimeout(function() { hideSettingsStatus(statusEl); }, 3000);
       }
       return;
     }
@@ -8278,7 +8291,7 @@ async function saveEventRules() {
   if (statusEl) {
     statusEl.className = 'settings-status visible success';
     statusEl.textContent = 'Webhooks saved successfully';
-    setTimeout(function() { statusEl.className = 'settings-status'; }, 3000);
+    setTimeout(function() { hideSettingsStatus(statusEl); }, 3000);
   }
 }
 
