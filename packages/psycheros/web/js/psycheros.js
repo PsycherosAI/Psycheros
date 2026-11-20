@@ -5767,6 +5767,12 @@ function getCurrentConversationId() {
   // Prefer the URL (canonical): /c/<id>
   const m = window.location.pathname.match(/^\/c\/([^/?#]+)/);
   if (m) return decodeURIComponent(m[1]);
+  // The Discord channel view is a fragment at its own URL, and its message
+  // list has no conversation id; the enclosing view owns it.
+  const discordView = document.querySelector(
+    '.discord-channel-view[data-conversation-id]',
+  );
+  if (discordView) return discordView.dataset.conversationId || null;
   // Fall back to data attribute on the messages container (set by some views)
   const msgs = document.getElementById('messages');
   return msgs?.dataset.conversationId || null;

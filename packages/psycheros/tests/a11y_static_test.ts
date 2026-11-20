@@ -124,6 +124,14 @@ Deno.test("Discord actions are reachable from a focused message row", async () =
   );
 });
 
+Deno.test("Discord message actions resolve their enclosing conversation", async () => {
+  const js = await read("../web/js/psycheros.js");
+  assert(
+    /\.discord-channel-view\[data-conversation-id\]/.test(js),
+    "Discord fragments do not use /c/<id>, so the view must supply the conversation id",
+  );
+});
+
 Deno.test("forced-colors focus outranks the per-component outline:none", async () => {
   // textareas and spin buttons set `outline: none` on themselves, and those
   // rules load after base.css at equal specificity.
