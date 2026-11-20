@@ -37,6 +37,7 @@ let previousWalkieState = null;
 let isMuted = false;
 let isDeafened = false;
 let activeConversationId = null;
+let voiceCallOpener = null;
 let wakeLock = null;
 // Silent audio loop element. Kept playing during voice calls (and during
 // keybind capture) for two reasons:
@@ -82,6 +83,38 @@ function voiceDebug(category, message) {
   }
 }
 
+function announceVoiceStatus(text) {
+  const announcer = document.getElementById('voice-announcer');
+  if (!announcer || !text) return;
+  if (announcer.textContent === text) {
+    announcer.textContent = '';
+    requestAnimationFrame(() => {
+      announcer.textContent = text;
+    });
+    return;
+  }
+  announcer.textContent = text;
+}
+
+function trapVoiceDialogFocus(event) {
+  if (event.key !== 'Tab') return;
+  const dialog = event.currentTarget;
+  const controls = [...dialog.querySelectorAll(
+    'button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )].filter((element) => element.offsetParent !== null);
+  if (controls.length === 0) return;
+  const first = controls[0];
+  const last = controls[controls.length - 1];
+  const active = document.activeElement;
+  if (event.shiftKey && (active === first || !controls.includes(active))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 const PCM_FRAME_SIZE = 640; // 20ms of 16kHz mono Int16
 const SAMPLE_RATE = 16000;
 const RESAMPLE_RATIO = 48000 / SAMPLE_RATE;
@@ -103,12 +136,13 @@ const VAD_CHECK_INTERVAL_MS = 100;
 /**
  * Open the voice call overlay for a conversation.
  */
-async function openVoiceChat(conversationId) {
+async function openVoiceChat(conversationId, opener = document.activeElement) {
   if (activeConversationId) {
     showToast('A voice call is already active');
     return;
   }
 
+  voiceCallOpener = opener;
   activeConversationId = conversationId;
 
   // Load the voice call overlay fragment FIRST so we can read the embedded
@@ -325,6 +359,17 @@ async function openVoiceChat(conversationId) {
     }
   }
 
+  const overlay = document.getElementById('voice-overlay');
+  if (overlay) {
+    overlay.addEventListener('keydown', trapVoiceDialogFocus);
+    overlay.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      endVoiceChat();
+    });
+    overlay.showModal();
+    document.getElementById('voice-call-title')?.focus();
+  }
+
   // Read config embedded by the server
   const cfg = document.getElementById('voice-status-cfg');
   if (cfg) {
@@ -392,7 +437,10 @@ async function openVoiceChat(conversationId) {
   if (pttEnabled) {
     const toggleBtn = document.getElementById('voice-btn-ptt-toggle');
     const holdCircle = document.getElementById('voice-hold-circle');
-    if (toggleBtn) toggleBtn.classList.add('voice-btn--active');
+    if (toggleBtn) {
+      toggleBtn.classList.add('voice-btn--active');
+      toggleBtn.setAttribute('aria-pressed', 'true');
+    }
     if (holdCircle) holdCircle.style.display = 'flex';
   }
 
@@ -609,6 +657,7 @@ function cleanup() {
   // path: a reopened call must never flash a stale glow.
   if (overlay) {
     overlay.classList.remove('flux-live');
+    if (overlay.open) overlay.close();
     overlay.remove();
   }
 
@@ -624,12 +673,24 @@ function cleanup() {
   // Otherwise the user has to manually reload to see what was said.
   // Captured before clearing activeConversationId below.
   const conversationToRefresh = activeConversationId;
+  const restoreVoiceCallFocus = () => {
+    voiceCallOpener?.focus();
+    voiceCallOpener = null;
+  };
   if (conversationToRefresh && globalThis.Psycheros?.selectConversation) {
     try {
-      globalThis.Psycheros.selectConversation(conversationToRefresh);
+      const refresh = globalThis.Psycheros.selectConversation(
+        conversationToRefresh,
+        { moveFocus: false },
+      );
+      if (refresh?.finally) refresh.finally(restoreVoiceCallFocus);
+      else restoreVoiceCallFocus();
     } catch (err) {
       console.warn('[Voice] Failed to refresh conversation after call:', err);
+      restoreVoiceCallFocus();
     }
+  } else {
+    restoreVoiceCallFocus();
   }
 
   isMuted = false;
@@ -1281,18 +1342,20 @@ function togglePTTMode() {
   pttEnabled = !pttEnabled;
   const toggleBtn = document.getElementById('voice-btn-ptt-toggle');
   const holdCircle = document.getElementById('voice-hold-circle');
-  if (toggleBtn) toggleBtn.classList.toggle('voice-btn--active', pttEnabled);
+  if (toggleBtn) {
+    toggleBtn.classList.toggle('voice-btn--active', pttEnabled);
+    // Expose the on/off state: without aria-pressed the toggle is
+    // indistinguishable before and after activation (WCAG 4.1.2).
+    toggleBtn.setAttribute('aria-pressed', String(pttEnabled));
+  }
   if (holdCircle) holdCircle.style.display = pttEnabled ? 'flex' : 'none';
+  announceVoiceStatus(
+    pttEnabled ? 'Push-to-talk on' : 'Push-to-talk off',
+  );
   // Notify server of PTT mode change
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ event: 'ptt_mode_changed', pttMode: pttEnabled }));
   }
-  // Blur the button so subsequent key presses (especially the configured
-  // PTT keybind like Space) don't fall through to "activate focused
-  // button" browser default behavior and re-toggle PTT. Same fix needed
-  // on every button in the overlay — see also toggleYinYangMode and the
-  // hold-to-talk button below.
-  if (toggleBtn) toggleBtn.blur();
   if (pttEnabled) {
     // Entering PTT mode — stop continuous STT and cancel any pending
     // silence timer. The detector's check() loop also bails on pttEnabled,
@@ -1338,6 +1401,20 @@ async function savePTTSetting() {
   }
 }
 
+/**
+ * Keyboard activation of the hold circle is a toggle, not a hold: a screen
+ * reader or switch user activates a control once, it cannot press and hold.
+ * Space/Enter start capture, the next Space/Enter sends. Auto-repeat is
+ * ignored so one press is one toggle (WCAG 2.1.1).
+ */
+function handleHoldKey(e) {
+  if (e.key !== ' ' && e.key !== 'Enter') return;
+  if (e.repeat) return;
+  e.preventDefault();
+  if (pttHolding) endPTT();
+  else startPTT();
+}
+
 function startPTT() {
   if (!pttEnabled) return;
   if (!voiceWs || voiceWs.readyState !== WebSocket.OPEN) return;
@@ -1345,7 +1422,11 @@ function startPTT() {
   voiceWs.send(JSON.stringify({ type: 'ptt_start' }));
   pttHolding = true;
   const btn = document.getElementById('voice-hold-btn');
-  if (btn) btn.classList.add('voice-hold-circle--active');
+  if (btn) {
+    btn.classList.add('voice-hold-circle--active');
+    btn.setAttribute('aria-label', 'Recording, activate to stop and send');
+  }
+  announceVoiceStatus('Recording');
   // Browser STT mode: start recognition on PTT hold. In server-side STT
   // mode, audio is already flowing — the server clears its buffer on
   // ptt_start so only audio between ptt_start and ptt_end gets transcribed.
@@ -1362,7 +1443,11 @@ function endPTT() {
   voiceWs.send(JSON.stringify({ type: 'ptt_end' }));
   pttHolding = false;
   const btn = document.getElementById('voice-hold-btn');
-  if (btn) btn.classList.remove('voice-hold-circle--active');
+  if (btn) {
+    btn.classList.remove('voice-hold-circle--active');
+    btn.setAttribute('aria-label', 'Hold to talk');
+  }
+  announceVoiceStatus('Sent');
   // Browser STT mode: stop recognition on release. Chrome emits any
   // pending final result(s) BEFORE onend fires — so we must defer the
   // flush until onend, otherwise the last phrase gets split into a
@@ -1880,23 +1965,27 @@ let pulseToastEl = null;
 // The Pulse heartbeat/ECG-line icon. Matches the icon used in text chat
 // (pulseIconSvg in src/pulse/templates.ts) so the visual language is
 // consistent across modes.
-const PULSE_ICON_SVG = `<svg class="voice-pulse-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`;
+const PULSE_ICON_SVG = `<svg class="voice-pulse-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`;
 
 function showPulseToast(name) {
   if (!pulseToastEl) {
     pulseToastEl = document.createElement('div');
     pulseToastEl.className = 'voice-pulse-toast';
+    pulseToastEl.setAttribute('aria-hidden', 'true');
     document.getElementById('voice-overlay')?.appendChild(pulseToastEl);
   }
   // No "Pulse:" prefix — the icon conveys the type. Just show the name,
   // like text chat's renderPulseMessage does.
   pulseToastEl.innerHTML = `${PULSE_ICON_SVG}<span class="voice-pulse-name">${escapeHtmlAttr(name)}</span>`;
+  pulseToastEl.setAttribute('aria-hidden', 'false');
   pulseToastEl.classList.add('voice-pulse-toast--visible');
+  announceVoiceStatus(`Pulse: ${name}`);
 }
 
 function hidePulseToast() {
   if (pulseToastEl) {
     pulseToastEl.classList.remove('voice-pulse-toast--visible');
+    pulseToastEl.setAttribute('aria-hidden', 'true');
   }
 }
 
@@ -1992,7 +2081,7 @@ const TOOL_MIN_DISPLAY_MS = 3000;
 
 // Wrench/tool icon — distinct from the Pulse heartbeat-line icon so the
 // two toasts are visually distinguishable even at a glance.
-const TOOL_ICON_SVG = `<svg class="voice-tool-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`;
+const TOOL_ICON_SVG = `<svg class="voice-tool-icon" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`;
 
 function ensureToolToast() {
   if (!toolToastEl) {
@@ -2016,10 +2105,13 @@ function addToolChip(toolCallId, toolName) {
   toolChips.set(toolCallId, chip);
   toolChipAddedAt.set(toolCallId, Date.now());
   toast.classList.add('voice-tool-toast--visible');
+  announceVoiceStatus(`Using tool: ${toolName}`);
 }
 
 function removeToolChip(toolCallId) {
   const chip = toolChips.get(toolCallId);
+  const call = chip?.closest('#voice-overlay');
+  const toolName = chip?.querySelector('span')?.textContent?.trim();
   const addedAt = toolChipAddedAt.get(toolCallId);
   const elapsed = addedAt ? Date.now() - addedAt : Infinity;
   const doRemove = () => {
@@ -2028,6 +2120,9 @@ function removeToolChip(toolCallId) {
     toolChipAddedAt.delete(toolCallId);
     if (toolToastEl && toolToastEl.children.length === 0) {
       toolToastEl.classList.remove('voice-tool-toast--visible');
+    }
+    if (call?.isConnected && toolName) {
+      announceVoiceStatus(`Tool finished: ${toolName}`);
     }
   };
   // If the tool completed too quickly, defer removal so the user has time
@@ -2101,13 +2196,11 @@ let yinYangMode = false;
 function toggleYinYangMode() {
   yinYangMode = !yinYangMode;
   const btn = document.getElementById('voice-btn-yinyang');
-  if (btn) btn.classList.toggle('voice-btn--active', yinYangMode);
+  if (btn) {
+    btn.classList.toggle('voice-btn--active', yinYangMode);
+    btn.setAttribute('aria-pressed', String(yinYangMode));
+  }
   const textArea = document.getElementById('voice-text-input-area');
-  // Blur the toggle button so subsequent spacebar presses don't fall
-  // through to "activate focused button" browser default behavior.
-  // Without this, the PTT keybind (often Space) would re-toggle Yin
-  // Yang mode instead of doing hold-to-talk.
-  if (btn) btn.blur();
   if (yinYangMode) {
     // Entering Yin Yang mode — show text input, stop listening via
     // mic/STT (no point if user can't talk).
@@ -2171,7 +2264,10 @@ function toggleYinYangMode() {
         console.warn('[Voice] Failed to re-acquire mic after leaving Yin Yang mode:', err);
         showVoiceToast('Could not re-enable microphone — staying in text mode');
         yinYangMode = true;
-        if (btn) btn.classList.add('voice-btn--active');
+        if (btn) {
+          btn.classList.add('voice-btn--active');
+          btn.setAttribute('aria-pressed', 'true');
+        }
       });
     }
   }
@@ -2251,6 +2347,7 @@ function showVoiceToast(message) {
   toast.className = 'voice-toast';
   toast.textContent = message;
   overlay.appendChild(toast);
+  announceVoiceStatus(message);
   setTimeout(() => toast.remove(), 3000);
 }
 
@@ -2273,11 +2370,17 @@ function showVoiceBanner(visible) {
 // =============================================================================
 
 function voiceKeyHandler(e) {
-  // Skip when typing in inputs so the PTT key doesn't hijack text entry.
-  const tag = e.target?.tagName;
-  const isInputLike = tag === 'INPUT' || tag === 'TEXTAREA' ||
-    e.target?.isContentEditable;
-  if (pttEnabled && !isInputLike && pttKeys.includes(e.code)) {
+  // Escape belongs to the native dialog, even if an old setting bound it
+  // to push-to-talk.
+  if (e.code === 'Escape') return;
+  // The hold circle owns Space/Enter while it has focus — it toggles capture
+  // there (handleHoldKey), so the document-level hold shortcut must not also
+  // consume the same press and undo the toggle (WCAG 2.1.1).
+  if (e.target?.id === 'voice-hold-btn') return;
+  // Native controls own Space/Enter; the global PTT shortcut must not
+  // activate alongside a focused button, link, or field.
+  if (e.target?.closest?.('button, input, textarea, select, a[href], [contenteditable]')) return;
+  if (pttEnabled && pttKeys.includes(e.code)) {
     if (e.type === 'keydown' && !e.repeat) {
       e.preventDefault();
       startPTT();
@@ -2288,10 +2391,6 @@ function voiceKeyHandler(e) {
     return;
   }
 
-  // Escape = end call
-  if (e.type === 'keydown' && e.code === 'Escape') {
-    endVoiceChat();
-  }
 }
 
 // Mouse button PTT handler — supports bindings like "Mouse3" (back) / "Mouse4" (forward)
@@ -2371,6 +2470,7 @@ globalThis.handleVoiceTextInputKey = handleVoiceTextInputKey;
 globalThis.sendVoiceTextInput = sendVoiceTextInput;
 globalThis.startPTT = startPTT;
 globalThis.endPTT = endPTT;
+globalThis.handleHoldKey = handleHoldKey;
 globalThis.buildVoiceEffectChain = buildVoiceEffectChain;
 globalThis.testVoiceEffect = testVoiceEffect;
 

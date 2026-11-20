@@ -9675,8 +9675,8 @@ function renderVaultView(
             </label>
           </div>
           <div class="form-group">
-            <label>Title (optional)</label>
-            <input type="text" name="title" placeholder="Auto-detected from filename" />
+            <label for="vault-doc-title">Title (optional)</label>
+            <input type="text" id="vault-doc-title" name="title" placeholder="Auto-detected from filename" />
           </div>
           <div class="form-group" style="flex:0;align-items:flex-end">
             <button type="submit" class="btn btn--primary">Upload</button>
@@ -9807,7 +9807,7 @@ async function renderVaultDetailView(
             <button type="submit" class="btn btn--primary">Save Changes</button>
             <a class="btn btn--ghost" hx-get="/fragments/settings/vault" hx-target="#chat" hx-swap="innerHTML">Cancel</a>
           </div>
-          <div id="vault-editor-status" class="settings-editor-status"></div>
+          <div id="vault-editor-status" class="settings-editor-status" role="status" aria-live="polite"></div>
         </form>
       </div>
     </div>

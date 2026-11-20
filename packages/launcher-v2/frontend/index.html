@@ -12,6 +12,17 @@
       justify-content: center;
       padding: var(--sp-8);
     }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
     .card {
       width: 100%;
       max-width: 560px;
@@ -220,7 +231,9 @@
       margin: 0 0 var(--sp-3) 0;
       color: var(--c-fg-strong);
     }
-    .modal-card p {
+    .modal-card p,
+    #typed-confirm-modal-instruction {
+      display: block;
       font-size: var(--font-size-sm);
       line-height: 1.55;
       color: var(--c-fg);
@@ -746,6 +759,12 @@
     </style>
   </head>
   <body data-state="unknown">
+    <div
+      id="launcher-error-announcer"
+      class="sr-only"
+      role="alert"
+      aria-atomic="true"
+    ></div>
     <!-- Welcome wizard: first-run only. Hidden by default; first-run.js
          reveals it when `needs_first_run` returns true. -->
     <main class="card" id="card-wizard" hidden>
@@ -1126,12 +1145,15 @@
       <div class="modal-card modal-card--wide">
         <h2 id="typed-confirm-modal-title">This can't be undone.</h2>
         <p id="typed-confirm-modal-body"></p>
-        <p>
+        <label
+          id="typed-confirm-modal-instruction"
+          for="typed-confirm-modal-input"
+        >
           Type
           <span class="typed-confirm__phrase" id="typed-confirm-modal-phrase"
           >CONFIRM</span>
           below to enable the button.
-        </p>
+        </label>
         <input
           type="text"
           id="typed-confirm-modal-input"

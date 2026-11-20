@@ -13,9 +13,75 @@
  * which is jarring after message streaming completes or on navigation.
  */
 function focusInputWhenReady() {
-  if (!('ontouchstart' in window || navigator.maxTouchPoints > 0)) {
+  // Judge the input in use, not the hardware: a touchscreen laptop with a
+  // keyboard reports maxTouchPoints > 0, and the old test then skipped the
+  // composer on exactly the machines a JAWS user is on (finding 21).
+  if (!globalThis.matchMedia('(pointer: coarse)').matches) {
     document.getElementById('message-input')?.focus();
   }
+}
+
+/**
+ * WCAG 4.1.3 Status Messages (accessibility audit finding 21, iOS follow-up).
+ *
+ * #messages holds the whole conversation, so it is never a live region:
+ * any announcement of it reads the history from the top, and iOS VoiceOver
+ * does exactly that the moment the region is armed. Announce a new reply
+ * through the separate #transcript-announcer status region instead — it only
+ * ever holds the message that just arrived. announceStatus is that region's
+ * writer, shared with other one-line status messages (lazy-load, re-index).
+ */
+function announceStatus(text) {
+  const announcer = document.getElementById('transcript-announcer');
+  if (!announcer || !text) return;
+  // Screen readers ignore a rewrite of the thread's existing text, so a
+  // repeated status (e.g. "Copied x" twice) would go unspoken. Clear first,
+  // then set on the next frame so the identical text is a fresh insertion.
+  if (announcer.textContent === text) {
+    announcer.textContent = '';
+    requestAnimationFrame(() => {
+      announcer.textContent = text;
+    });
+    return;
+  }
+  announcer.textContent = text;
+}
+// Exposed for modules outside this file's scope (reindex-banner.js, LazyLoader).
+globalThis.announceStatus = announceStatus;
+
+function announceTranscript(messageEl) {
+  if (!messageEl) return;
+  const author = messageEl.querySelector('.msg-author')?.textContent?.trim() ||
+    '';
+  const body = (messageEl.querySelector('.msg-content')?.innerText || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!body) return;
+  announceStatus(author ? `${author}: ${body}` : body);
+}
+
+/**
+ * WCAG 2.4.2 Page Titled / 2.4.3 Focus Order (accessibility audit finding 21).
+ *
+ * A swapped view must name itself in the window title, and focus must not be
+ * left stranded on the old trigger. Focus only moves when it would otherwise
+ * sit outside the new view, so a swap that already focused its own control
+ * keeps it. Background refreshes pass moveFocus: false.
+ */
+function syncViewTitleAndFocus(moveFocus = true) {
+  const header = document.getElementById('header-title');
+  const name = header ? header.textContent.trim() : '';
+  document.title = !name || name === 'Psycheros'
+    ? 'Psycheros'
+    : `${name} — Psycheros`;
+
+  if (!moveFocus) return;
+  const view = document.getElementById('chat');
+  if (!view || view.contains(document.activeElement)) return;
+  const heading = view.querySelector('h1');
+  if (!heading) return;
+  heading.tabIndex = -1;
+  heading.focus({ preventScroll: true });
 }
 
 // =============================================================================
@@ -276,6 +342,11 @@ function initPersistentSSE() {
         if (update.target === '#messages') {
           AutoScroll.streamTick();
         }
+        // A renamed or auto-titled conversation must retitle the window too
+        // (finding 21). No focus move: this is a background update.
+        if (update.target === '#header-title') {
+          syncViewTitleAndFocus(false);
+        }
       }
     } catch (e) {
       console.error('Failed to handle dom_update:', e);
@@ -353,7 +424,7 @@ function initPersistentSSE() {
             errorEl.className = 'msg msg--assistant';
             errorEl.innerHTML = `
               <div class="msg-header">
-                <span>${globalThis.PsycherosSettings.entityName || 'Assistant'}</span>
+                <span class="msg-meta"><span class="msg-author">${globalThis.PsycherosSettings.entityName || 'Assistant'}</span></span>
               </div>
               <div class="msg-content"></div>
             `;
@@ -366,6 +437,9 @@ function initPersistentSSE() {
               errorText.appendChild(statusDiv);
             }
             messages.appendChild(errorEl);
+            // The transcript is not a live region, so a background error that
+            // lands as a new bubble still needs an explicit announcement.
+            announceTranscript(errorEl);
             AutoScroll.jumpToBottom();
           }
         }
@@ -395,6 +469,7 @@ function initPersistentSSE() {
         return;
       }
       handleSSEEvent('done', event.data, pulseStreamState);
+      announceTranscript(pulseStreamState.currentBubble());
       // Reset pulse streaming state (keep pulseStreamed so pulse_complete
       // knows we received the stream and doesn't unnecessarily reload)
       pulseStreamState = null;
@@ -436,7 +511,15 @@ function initPersistentSSE() {
       const viewingSettings = document.getElementById('settings-content') !== null;
       if (!pulseStreamed && !pulseStreamState && conversationId === currentConversationId && !viewingSettings) {
         // Streaming was missed entirely — reload the conversation to show the response
-        loadConversationFromUrl(conversationId, { silent: true });
+        loadConversationFromUrl(conversationId, { silent: true, moveFocus: false })
+          .then(() => {
+            // The reply is now in the reloaded transcript; announce it since
+            // #messages is not a live region. It is the last assistant message.
+            const replies = document.querySelectorAll(
+              '#messages .msg--assistant',
+            );
+            announceTranscript(replies[replies.length - 1]);
+          });
       }
       pulseStreamed = false;
     } catch (e) {
@@ -615,7 +698,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // handle catching up once connectivity returns.
       if (!navigator.onLine) return;
 
-      loadConversationFromUrl(currentConversationId, { silent: true });
+      loadConversationFromUrl(currentConversationId, { silent: true, moveFocus: false });
     }, 1500);
   });
 
@@ -682,14 +765,39 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ESC key exits selection mode or closes modal
+  // Escape closes the delete dialog, Tab stays inside it, and Escape falls
+  // back to leaving selection mode (audit finding 15). The dialog is
+  // aria-modal, but the browser does not trap Tab for us, so background
+  // controls stay reachable until we wrap focus here.
   document.addEventListener('keydown', (e) => {
+    const backdrop = document.getElementById('modal-backdrop');
+    const modalOpen = backdrop?.classList.contains('visible');
+
     if (e.key === 'Escape') {
-      if (document.querySelector('.modal-backdrop.visible')) {
+      if (modalOpen) {
         closeDeleteModal();
       } else if (selectionMode) {
         exitSelectionMode();
       }
+      return;
+    }
+    if (!modalOpen || e.key !== 'Tab') return;
+
+    const items = backdrop.querySelectorAll('button');
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+
+    if (!backdrop.contains(active)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    } else if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
     }
   });
 
@@ -728,6 +836,8 @@ document.addEventListener('DOMContentLoaded', () => {
       // saved draft would be lost. saveDraft on every keystroke keeps
       // localStorage current; we don't need a matching beforeSwap save.
       restoreDraft();
+      // Finding 21: the new view must name itself and hold focus.
+      syncViewTitleAndFocus();
     }
 
     // Initialize graph view if present in chat or settings-content
@@ -827,25 +937,36 @@ window.requestNotificationPermission = async function() {
   return permission;
 };
 
-function toggleSidebar() {
+/**
+ * Open or close the sidebar.
+ *
+ * A closed sidebar is only translated off-screen, so its conversation links
+ * stay in the tab order and in the reading order (audit finding 23). `inert`
+ * takes the whole panel out of both, and the toggle reports its own state.
+ */
+function setSidebarOpen(open) {
   const sidebar = document.getElementById('sidebar');
   const overlay = document.querySelector('.sidebar-overlay');
 
-  sidebar?.classList.toggle('open');
-  overlay?.classList.toggle('open');
+  sidebar?.classList.toggle('open', open);
+  overlay?.classList.toggle('open', open);
+  if (sidebar) sidebar.inert = !open;
+  document.querySelector('.logo-btn')?.setAttribute(
+    'aria-expanded',
+    String(open),
+  );
+}
+
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  setSidebarOpen(!sidebar?.classList.contains('open'));
 }
 
 /**
  * Close sidebar after navigation (for settings links).
  */
 function closeSidebarAfterNav() {
-  const sidebar = document.getElementById('sidebar');
-  const overlay = document.querySelector('.sidebar-overlay');
-
-  if (sidebar?.classList.contains('open')) {
-    sidebar.classList.remove('open');
-    overlay?.classList.remove('open');
-  }
+  setSidebarOpen(false);
 }
 
 // =============================================================================
@@ -856,7 +977,10 @@ function closeSidebarAfterNav() {
  * Load a conversation from URL on initial page load.
  * Called when user navigates directly to /c/:id
  */
-async function loadConversationFromUrl(conversationId, { silent = false } = {}) {
+async function loadConversationFromUrl(
+  conversationId,
+  { silent = false, moveFocus = true } = {},
+) {
   currentConversationId = conversationId;
 
   // Clear context inspector state for the new conversation
@@ -920,8 +1044,10 @@ async function loadConversationFromUrl(conversationId, { silent = false } = {}) 
       });
     }, 500);
 
-    // Focus input
-    focusInputWhenReady();
+    // Focus input unless a caller is preserving focus across a background
+    // refresh (for example, when a modal closes).
+    if (moveFocus) focusInputWhenReady();
+    syncViewTitleAndFocus(moveFocus);
 
     // Restore any saved draft for this conversation (Discord-style persistence)
     restoreDraft();
@@ -969,9 +1095,9 @@ async function newConversation() {
     const chat = document.getElementById('chat');
     if (chat) {
       chat.innerHTML = `
-        <div class="messages" id="messages">
+        <div class="messages" id="messages" role="log" aria-live="off">
           <div class="empty-state" id="empty-state">
-            <div class="empty-title">Psycheros</div>
+            <h1 class="empty-title">Psycheros</h1>
             <p class="empty-text">What's on your mind?</p>
           </div>
         </div>
@@ -990,10 +1116,11 @@ async function newConversation() {
               id="message-input"
               placeholder="Type your message..."
               rows="1"
+              aria-label="Message"
               onkeydown="Psycheros.handleKeyDown(event)"
               oninput="Psycheros.autoResize(this)"
             ></textarea>
-            <button class="send-btn" id="send-btn" onclick="Psycheros.sendMessage()">
+            <button class="send-btn" id="send-btn" aria-label="Send message" onclick="Psycheros.sendMessage()">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
             </button>
           </div>
@@ -1009,15 +1136,11 @@ async function newConversation() {
     history.pushState({}, '', `/c/${conversation.id}`);
 
     // Close sidebar
-    const sidebar = document.getElementById('sidebar');
-    const overlay = document.querySelector('.sidebar-overlay');
-    if (sidebar?.classList.contains('open')) {
-      sidebar.classList.remove('open');
-      overlay?.classList.remove('open');
-    }
+    setSidebarOpen(false);
 
     // Focus input
     focusInputWhenReady();
+    syncViewTitleAndFocus();
 
   } catch (error) {
     console.error('Failed to create conversation:', error);
@@ -1025,7 +1148,7 @@ async function newConversation() {
   }
 }
 
-function selectConversation(id) {
+function selectConversation(id, { moveFocus = true } = {}) {
   // Don't abort in-progress generation — let it continue in the background
   // so the full response is persisted on the server. We just detach the
   // UI state from the old conversation's stream.
@@ -1074,7 +1197,7 @@ function selectConversation(id) {
   }
 
   // Load chat content (handles both initial load and returning from settings/views)
-  loadConversationFromUrl(id);
+  const load = loadConversationFromUrl(id, { moveFocus });
 
   // Update URL to reflect the selected conversation
   history.pushState({}, '', `/c/${id}`);
@@ -1085,6 +1208,7 @@ function selectConversation(id) {
   // Re-evaluate the hosted-conversation composer guard for the newly
   // selected conversation immediately (the 8s poll would lag a switch).
   updateFluxButtonVisibility();
+  return load;
 }
 
 // =============================================================================
@@ -1425,8 +1549,7 @@ async function sendMessage() {
     messages.insertAdjacentHTML('beforeend', `
       <div class="msg msg--user">
         <div class="msg-header">
-          <span class="msg-timestamp">${userTime}</span>
-          <span>${globalThis.PsycherosSettings.userName || 'You'}</span>
+          <span class="msg-meta"><span class="msg-timestamp">${userTime}<span class="sr-only">, </span></span><span class="msg-author">${globalThis.PsycherosSettings.userName || 'You'}</span></span>
         </div>
         <div class="msg-content user-text">${attachmentHtml}${userHtml}</div>
       </div>
@@ -1578,6 +1701,9 @@ async function sendMessage() {
         el.classList.remove('streaming-active');
       });
     }
+
+    // Announce the completed reply; #messages itself is never a live region.
+    announceTranscript(assistantEl);
 
     // Clear state
     pendingToolCalls.clear();
@@ -1738,6 +1864,9 @@ async function retryFailedTurn(failedAssistantEl) {
       });
     }
 
+    // Announce the completed reply; #messages itself is never a live region.
+    announceTranscript(failedAssistantEl);
+
     pendingToolCalls.clear();
     currentAbortController = null;
     streamingConversationId = null;
@@ -1778,6 +1907,8 @@ async function startVoiceCall() {
     showToast('Wait for the current response to finish');
     return;
   }
+  // The Voice row leaves with the drawer; return focus to the trigger.
+  const opener = document.getElementById('action-menu-btn');
   try {
     const resp = await fetch('/api/voice/status');
     const status = await resp.json();
@@ -1794,7 +1925,7 @@ async function startVoiceCall() {
     showToast('Select a conversation first');
     return;
   }
-  openVoiceChat(convId);
+  openVoiceChat(convId, opener);
 }
 
 async function testTTSConnection() {
@@ -2212,6 +2343,10 @@ function handlePTTKeyCapture(e) {
   if (!pttKeyCaptureActive) return;
   e.preventDefault();
   e.stopPropagation();
+  if (e.code === 'Escape') {
+    cancelPTTKeyCapture();
+    return;
+  }
   var key = e.code;
   addPTTKeyBinding(key);
   cancelPTTKeyCapture();
@@ -2280,9 +2415,9 @@ function addPronunciationEntry() {
   row.className = 'pronunciation-row';
   row.dataset.idx = idx;
   row.innerHTML =
-    '<input type="text" class="input-field llm-input" placeholder="Written (e.g. Psycheros)">' +
+    '<input type="text" class="input-field llm-input" aria-label="Written form" placeholder="Written (e.g. Psycheros)">' +
     '<span style="color: var(--c-fg-muted);">&rarr;</span>' +
-    '<input type="text" class="input-field llm-input" placeholder="Spoken (e.g. sy-KEH-ros)">' +
+    '<input type="text" class="input-field llm-input" aria-label="Spoken form" placeholder="Spoken (e.g. sy-KEH-ros)">' +
     '<button class="btn btn--ghost btn--sm" onclick="removePronunciationEntry(this)" title="Remove">&times;</button>';
   list.appendChild(row);
 }
@@ -2298,9 +2433,9 @@ function addSTTCorrectionEntry() {
   var row = document.createElement('div');
   row.className = 'pronunciation-row stt-correction-row';
   row.innerHTML =
-    '<input type="text" class="input-field llm-input" placeholder="Misheard (e.g. sih keh ros)">' +
+    '<input type="text" class="input-field llm-input" aria-label="Misheard form" placeholder="Misheard (e.g. sih keh ros)">' +
     '<span style="color: var(--c-fg-muted);">&rarr;</span>' +
-    '<input type="text" class="input-field llm-input" placeholder="Correct (e.g. Psycheros)">' +
+    '<input type="text" class="input-field llm-input" aria-label="Correct form" placeholder="Correct (e.g. Psycheros)">' +
     '<button class="btn btn--ghost btn--sm" onclick="removeSTTCorrectionEntry(this)" title="Remove">&times;</button>';
   list.appendChild(row);
 }
@@ -2569,14 +2704,15 @@ function handleSSEEvent(eventType, data, state) {
       const retryThink = contentContainer.querySelector('.status-retry');
       if (retryThink) retryThink.remove();
       if (!state.getThinking()) {
+        const contentId = nextDisclosureId('thinking-content');
         const thinkingSection = document.createElement('div');
         thinkingSection.className = 'thinking expanded';
         thinkingSection.innerHTML = `
-          <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-            <span class="thinking-toggle">&#9660;</span>
+          <button type="button" class="thinking-header" aria-expanded="true" aria-controls="${contentId}" onclick="Psycheros.toggleDisclosure(this)">
+            <span class="thinking-toggle" aria-hidden="true">&#9660;</span>
             <span>Thinking</span>
-          </div>
-          <div class="thinking-content"></div>
+          </button>
+          <div class="thinking-content" id="${contentId}"></div>
         `;
         contentContainer.insertBefore(thinkingSection, contentContainer.firstChild);
         state.setThinking(thinkingSection.querySelector('.thinking-content'));
@@ -2608,14 +2744,15 @@ function handleSSEEvent(eventType, data, state) {
         }
 
         if (correction.thinking) {
+          const contentId = nextDisclosureId('thinking-content');
           const residual = document.createElement('div');
           residual.className = 'thinking';
           residual.innerHTML = `
-            <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-              <span class="thinking-toggle">&#9660;</span>
+            <button type="button" class="thinking-header" aria-expanded="false" aria-controls="${contentId}" onclick="Psycheros.toggleDisclosure(this)">
+              <span class="thinking-toggle" aria-hidden="true">&#9660;</span>
               <span>Thinking</span>
-            </div>
-            <div class="thinking-content"></div>
+            </button>
+            <div class="thinking-content" id="${contentId}"></div>
           `;
           residual.querySelector('.thinking-content').textContent = correction.thinking;
           contentContainer.insertBefore(residual, contentContainer.firstChild);
@@ -2689,7 +2826,7 @@ function handleSSEEvent(eventType, data, state) {
           // collapsed it while tools were still executing). The image (if
           // any) renders as a sibling via the separate image_generated
           // event, so we don't need to keep this card pinned open.
-          toolCard.classList.add('expanded');
+          setDisclosureExpanded(toolCard.querySelector('.tool-header'), true);
           pendingToolCalls.delete(result.toolCallId);
           AutoScroll.streamTick();
         }
@@ -2708,7 +2845,7 @@ function handleSSEEvent(eventType, data, state) {
         // payload; the toggle uses toolCallId as a stable anchor so it
         // survives HTMX swaps of the surrounding content.
         const captionHtml = img.description && img.toolCallId
-          ? `<div class="generated-image-caption-toggle" onclick="Psycheros.toggleImageCaption('${escapeHtml(img.toolCallId)}')">▸ Show caption</div>
+          ? `<button type="button" class="generated-image-caption-toggle" aria-expanded="false" aria-controls="caption-${escapeHtml(img.toolCallId)}" onclick="Psycheros.toggleImageCaption('${escapeHtml(img.toolCallId)}')"><span aria-hidden="true">▸</span> <span>Show caption</span></button>
              <div class="generated-image-caption" id="caption-${escapeHtml(img.toolCallId)}" hidden>${escapeHtml(img.description)}</div>`
           : '';
         container.innerHTML = `
@@ -2735,6 +2872,10 @@ function handleSSEEvent(eventType, data, state) {
             target.innerHTML = '';
           } else {
             htmx.swap(target, update.html, { swapStyle: update.swap || 'innerHTML' });
+          }
+          // Auto-titling arrives mid-turn as a header-title update (finding 21).
+          if (update.target === '#header-title') {
+            syncViewTitleAndFocus(false);
           }
         }
       } catch (e) {
@@ -2822,8 +2963,8 @@ function handleSSEEvent(eventType, data, state) {
     case 'done': {
       if (!messageEl) return;
       // Collapse all thinking and tool sections after streaming completes.
-      contentContainer.querySelectorAll('.thinking.expanded, .tool.expanded').forEach(el => {
-        el.classList.remove('expanded');
+      contentContainer.querySelectorAll('.thinking.expanded > .thinking-header, .tool.expanded > .tool-header').forEach(button => {
+        setDisclosureExpanded(button, false);
       });
 
       // Final render of the last content segment
@@ -2883,6 +3024,23 @@ function handleSSEEvent(eventType, data, state) {
 // DOM Helpers
 // =============================================================================
 
+let disclosureId = 0;
+
+function nextDisclosureId(prefix) {
+  disclosureId += 1;
+  return `${prefix}-${disclosureId}`;
+}
+
+function setDisclosureExpanded(button, expanded) {
+  if (!button) return;
+  button.parentElement?.classList.toggle('expanded', expanded);
+  button.setAttribute('aria-expanded', String(expanded));
+}
+
+function toggleDisclosure(button) {
+  setDisclosureExpanded(button, button.getAttribute('aria-expanded') !== 'true');
+}
+
 function createToolCard(toolCall) {
   const card = document.createElement('div');
   card.className = 'tool expanded';
@@ -2914,14 +3072,17 @@ function createToolCard(toolCall) {
     // Keep as-is
   }
 
+  const contentId = `tool-content-${escapeHtml(toolCall.id)}`;
   card.innerHTML = `
-    <div class="tool-header" onclick="this.parentElement.classList.toggle('expanded')">
-      <span class="tool-icon">&#9881;</span>
+    <button type="button" class="tool-header" aria-expanded="true" aria-controls="${contentId}" onclick="Psycheros.toggleDisclosure(this)">
+      <span class="tool-icon" aria-hidden="true">&#9881;</span>
       <span class="tool-name">${escapeHtml(name)}</span>
       ${summary ? `<span class="tool-summary">${escapeHtml(summary)}</span>` : ''}
-      <span class="tool-toggle">&#9660;</span>
+      <span class="tool-toggle" aria-hidden="true">&#9660;</span>
+    </button>
+    <div class="tool-disclosure-content" id="${contentId}">
+      <div class="tool-args">${escapeHtml(args)}</div>
     </div>
-    <div class="tool-args">${escapeHtml(args)}</div>
   `;
 
   return card;
@@ -2947,7 +3108,7 @@ function addToolResult(card, result) {
     ${escapeHtml(displayContent)}
   `;
 
-  card.appendChild(resultEl);
+  card.querySelector('.tool-disclosure-content')?.appendChild(resultEl);
 }
 
 /**
@@ -2960,12 +3121,18 @@ function toggleImageCaption(toolCallId) {
   if (!caption) return;
   const toggle = caption.previousElementSibling;
   const isHidden = caption.hasAttribute('hidden');
+  const icon = toggle?.querySelector('[aria-hidden="true"]');
+  const label = toggle?.lastElementChild;
   if (isHidden) {
     caption.removeAttribute('hidden');
-    if (toggle) toggle.textContent = '▾ Hide caption';
+    toggle?.setAttribute('aria-expanded', 'true');
+    if (icon) icon.textContent = '▾';
+    if (label) label.textContent = 'Hide caption';
   } else {
     caption.setAttribute('hidden', '');
-    if (toggle) toggle.textContent = '▸ Show caption';
+    toggle?.setAttribute('aria-expanded', 'false');
+    if (icon) icon.textContent = '▸';
+    if (label) label.textContent = 'Show caption';
   }
 }
 
@@ -3234,6 +3401,10 @@ const LazyLoader = (() => {
       const addedHeight = messages.scrollHeight - prevScrollHeight;
       messages.scrollTop = prevScrollTop + addedHeight;
 
+      // Content is prepended above the reading position, so say how much
+      // arrived rather than leaving it to be discovered by scrolling back.
+      announceStatus(`Loaded ${nodes.length} earlier messages`);
+
       // Update cursor for next fetch
       if (oldestCreatedAt) {
         sentinel.dataset.oldestCreatedAt = oldestCreatedAt;
@@ -3309,8 +3480,17 @@ function showToast(message, variant) {
 
   const toast = document.createElement('div');
   toast.className = variant === 'warning' ? 'toast toast-warning' : 'toast';
-  toast.textContent = message;
+  // role=status is the whole reason a toast is announced at all (WCAG 4.1.3);
+  // the div is inert to a screen reader without it. Inserting the region with
+  // its text already in place is still not announced - the change has to
+  // happen after the region is in the tree - so it arrives empty and is
+  // filled on the next tick (JAWS stayed silent on "Node created" without
+  // this, audit finding 22).
+  toast.setAttribute('role', 'status');
   document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.textContent = message;
+  }, 50);
 
   setTimeout(() => toast.remove(), 5000);
 }
@@ -3494,8 +3674,8 @@ function createMetricsIndicator(metrics) {
   }).join('');
 
   indicator.innerHTML = `
-    <span class="metrics-indicator-icon">&#9201;</span>
-    <span class="metrics-indicator-summary">${summary}</span>
+    <span class="metrics-indicator-icon" aria-hidden="true">&#9201;</span>
+    <span class="metrics-indicator-summary"><span class="sr-only">, </span>${summary}</span>
     <div class="metrics-tooltip">${tooltipRows}</div>
   `;
 
@@ -3532,8 +3712,8 @@ function createUIContainers() {
       if (e.target === backdrop) closeDeleteModal();
     };
     backdrop.innerHTML = `
-      <div class="modal" onclick="event.stopPropagation()">
-        <div class="modal-title">Delete Conversation</div>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" onclick="event.stopPropagation()">
+        <div class="modal-title" id="modal-title">Delete Conversation</div>
         <div class="modal-message" id="modal-message">Are you sure you want to delete this conversation?</div>
         <div class="modal-actions">
           <button class="btn btn--ghost" onclick="Psycheros.closeDeleteModal()">Cancel</button>
@@ -3766,11 +3946,27 @@ function deleteSelected() {
 // Delete Modal
 // =============================================================================
 
+// Where focus was before the dialog opened, so it can be handed back.
+let deleteModalOpener = null;
+let deleteModalOpenerBlurCleanup = null;
+
 /**
  * Show the delete confirmation modal.
+ *
+ * Focus moves to Cancel on open and back to whatever opened the dialog on
+ * close, so a screen reader announces the dialog and the user does not have
+ * to hunt for the next control (audit finding 15).
  */
 function showDeleteModal(ids) {
   if (!ids || ids.length === 0) return;
+
+  // A previous close leaves a one-shot blur handler on its opener so the row
+  // action can hide itself after focus moves away. If the dialog is reopened
+  // while that opener still has focus, remove the old handler before pinning it
+  // visible again; otherwise its blur clears the new pin as focus enters this
+  // dialog.
+  deleteModalOpenerBlurCleanup?.();
+  deleteModalOpenerBlurCleanup = null;
 
   pendingDeleteIds = ids;
 
@@ -3785,6 +3981,15 @@ function showDeleteModal(ids) {
   }
 
   backdrop?.classList.add('visible');
+  deleteModalOpener = document.activeElement;
+  // A row action is visibility:hidden until its row is hovered or focused, and
+  // a visibility flip is a frame or two late, so focus() into one silently
+  // fails. Keep the opener visible while the dialog is open so focus can return
+  // to it on close. The graph pins its dialogs with inert for the same reason.
+  if (deleteModalOpener?.closest?.('.conv-actions')) {
+    deleteModalOpener.style.visibility = 'visible';
+  }
+  backdrop?.querySelector('.modal-actions button')?.focus();
 }
 
 /**
@@ -3793,6 +3998,33 @@ function showDeleteModal(ids) {
 function closeDeleteModal() {
   pendingDeleteIds = null;
   document.getElementById('modal-backdrop')?.classList.remove('visible');
+
+  const opener = deleteModalOpener;
+  deleteModalOpener = null;
+  if (!opener?.isConnected) return;
+
+  opener.focus();
+  if (document.activeElement === opener) {
+    // Now that the row holds focus again, let its own :focus-within rule own
+    // visibility once focus leaves the control.
+    const clearVisibilityOnBlur = () => {
+      opener.style.visibility = '';
+      deleteModalOpenerBlurCleanup = null;
+    };
+    opener.addEventListener(
+      'blur',
+      clearVisibilityOnBlur,
+      { once: true },
+    );
+    deleteModalOpenerBlurCleanup = () =>
+      opener.removeEventListener('blur', clearVisibilityOnBlur);
+    return;
+  }
+
+  // The opener could not take focus (deleted row, or a hidden control we could
+  // not pin). Settle on the row link rather than dropping focus on <body>.
+  opener.style.visibility = '';
+  opener.closest?.('.conv-item-wrapper')?.querySelector('.conv-item')?.focus();
 }
 
 /**
@@ -3868,9 +4100,9 @@ async function confirmDelete() {
       const chat = document.getElementById('chat');
       if (chat) {
         chat.innerHTML = `
-          <div class="messages" id="messages">
+          <div class="messages" id="messages" role="log" aria-live="off">
             <div class="empty-state" id="empty-state">
-              <div class="empty-title">Psycheros</div>
+              <h1 class="empty-title">Psycheros</h1>
               <p class="empty-text">Start a new conversation or select one from the sidebar.</p>
             </div>
           </div>
@@ -3889,10 +4121,11 @@ async function confirmDelete() {
                 id="message-input"
                 placeholder="Type your message..."
                 rows="1"
+                aria-label="Message"
                 onkeydown="Psycheros.handleKeyDown(event)"
                 oninput="Psycheros.autoResize(this)"
               ></textarea>
-              <button class="send-btn" id="send-btn" onclick="Psycheros.sendMessage()">
+              <button class="send-btn" id="send-btn" aria-label="Send message" onclick="Psycheros.sendMessage()">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
               </button>
             </div>
@@ -3900,6 +4133,11 @@ async function confirmDelete() {
           </div>
         `;
       }
+      // The composer is the only control left on the empty state, so hand it
+      // focus rather than leaving focus on a row that no longer exists. The
+      // window title still has to name the view we just swapped to.
+      syncViewTitleAndFocus(false);
+      focusInputWhenReady();
     }
 
     showToast(`Deleted ${ids.length} conversation${ids.length > 1 ? 's' : ''}`);
@@ -4036,7 +4274,17 @@ function showContextInspector() {
 
   backdrop?.classList.add('visible');
   viewer?.classList.add('visible');
+  setContextToggleExpanded(true);
   loadContextSnapshots();
+}
+
+/**
+ * Mirror the context panel's open state onto its toggle (WCAG 4.1.2).
+ */
+function setContextToggleExpanded(open) {
+  document.querySelectorAll('.context-toggle').forEach((btn) => {
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
 }
 
 /**
@@ -4046,6 +4294,7 @@ function hideContextViewer() {
   contextInspectorOpen = false;
   document.getElementById('context-viewer')?.classList.remove('visible');
   document.getElementById('context-viewer-backdrop')?.classList.remove('visible');
+  setContextToggleExpanded(false);
 }
 
 /**
@@ -4116,6 +4365,7 @@ function createContextInspector() {
     </div>
     <div class="context-search-bar">
       <input type="text" class="context-search" id="context-search-input"
+             aria-label="Search context"
              placeholder="Search context..." oninput="Psycheros.searchContext(this.value)">
     </div>
     <div class="context-viewer-tabs">
@@ -4230,21 +4480,27 @@ function highlightSearch(text) {
 /**
  * Render a collapsible section.
  */
+function renderContextDisclosure(headerHtml, contentHtml, expanded = false) {
+  const contentId = nextDisclosureId('context-section-content');
+  return `
+    <div class="context-section${expanded ? ' expanded' : ''}">
+      <button type="button" class="context-section-header" aria-expanded="${expanded}" aria-controls="${contentId}" onclick="Psycheros.toggleDisclosure(this)">
+        ${headerHtml}
+        <span class="context-section-toggle" aria-hidden="true">&#9660;</span>
+      </button>
+      <div class="context-section-content" id="${contentId}">${contentHtml}</div>
+    </div>
+  `;
+}
+
 function renderContextSection(title, text, expanded) {
   const badge = formatSizeBadge(text);
   const content = text ? highlightSearch(text) : '<span class="context-dim">Not available</span>';
-  return `
-    <div class="context-section${expanded && text ? ' expanded' : ''}">
-      <div class="context-section-header" onclick="this.parentElement.classList.toggle('expanded')">
-        <span>${escapeHtml(title)}</span>
-        <span class="context-size-badge">${badge}</span>
-        <span class="context-section-toggle">&#9660;</span>
-      </div>
-      <div class="context-section-content">
-        <pre>${content}</pre>
-      </div>
-    </div>
-  `;
+  return renderContextDisclosure(
+    `<span>${escapeHtml(title)}</span><span class="context-size-badge" aria-hidden="true">${badge}</span>`,
+    `<pre>${content}</pre>`,
+    !!(expanded && text),
+  );
 }
 
 /**
@@ -4310,15 +4566,10 @@ function renderMessagesTab(snap) {
           <span class="context-message-index">#${i + 1}</span>
           <span class="context-size-badge">${charCount.toLocaleString()} chars</span>
         </div>
-        <div class="context-section">
-          <div class="context-section-header" onclick="this.parentElement.classList.toggle('expanded')">
-            <span>Content</span>
-            <span class="context-section-toggle">&#9660;</span>
-          </div>
-          <div class="context-section-content">
-            <pre class="context-message-content">${highlightSearch(contentText)}</pre>
-          </div>
-        </div>
+        ${renderContextDisclosure(
+          '<span>Content</span>',
+          `<pre class="context-message-content">${highlightSearch(contentText)}</pre>`,
+        )}
         ${msg.toolCalls && msg.toolCalls.length > 0 ? `<div class="context-tool-calls">Tool Calls: ${msg.toolCalls.length}</div>` : ''}
       </div>
     `;
@@ -4351,16 +4602,10 @@ function renderToolsTab(snap) {
     const desc = fn.description || '';
     const params = fn.parameters ? JSON.stringify(fn.parameters, null, 2) : '{}';
     html += `
-      <div class="context-section">
-        <div class="context-section-header" onclick="this.parentElement.classList.toggle('expanded')">
-          <span>${escapeHtml(name)}</span>
-          <span class="context-section-toggle">&#9660;</span>
-        </div>
-        <div class="context-section-content">
-          <p class="tool-description">${escapeHtml(desc)}</p>
-          <pre>${highlightSearch(params)}</pre>
-        </div>
-      </div>
+      ${renderContextDisclosure(
+        `<span>${escapeHtml(name)}</span>`,
+        `<p class="tool-description">${escapeHtml(desc)}</p><pre>${highlightSearch(params)}</pre>`,
+      )}
     `;
   });
 
@@ -4529,16 +4774,11 @@ function renderPluginsTab(snap) {
       ? highlightSearch(h.output)
       : '<span class="context-dim">No output captured</span>';
     html += `
-      <div class="context-section${h.output ? ' expanded' : ''}">
-        <div class="context-section-header" onclick="this.parentElement.classList.toggle('expanded')">
-          <span>${escapeHtml(h.hookName || 'unnamed')} ${statusBadge}</span>
-          <span class="context-size-badge">${meta}</span>
-          <span class="context-section-toggle">&#9660;</span>
-        </div>
-        <div class="context-section-content">
-          <pre>${output}</pre>
-        </div>
-      </div>
+      ${renderContextDisclosure(
+        `<span>${escapeHtml(h.hookName || 'unnamed')} ${statusBadge}</span><span class="context-size-badge" aria-hidden="true">${meta}</span>`,
+        `<pre>${output}</pre>`,
+        !!h.output,
+      )}
     `;
   }
 
@@ -5368,6 +5608,7 @@ async function confirmDeleteMessage(messageId) {
     template.innerHTML = html.trim();
     const newEl = template.content.firstElementChild;
     if (newEl) msgElement.replaceWith(newEl);
+    announceStatus('Message deleted');
   } catch (err) {
     showToast(`Network error: ${err.message}`);
   }
@@ -5409,6 +5650,7 @@ async function confirmFlagGlitched(messageId) {
     template.innerHTML = html.trim();
     const newEl = template.content.firstElementChild;
     if (newEl) msgElement.replaceWith(newEl);
+    announceStatus('Message flagged as corrupted');
   } catch (err) {
     showToast(`Network error: ${err.message}`);
   }
@@ -5443,6 +5685,7 @@ async function restoreDeletedMessage(messageId) {
     template.innerHTML = html.trim();
     const newEl = template.content.firstElementChild;
     if (newEl) msgElement.replaceWith(newEl);
+    announceStatus('Message restored');
   } catch (err) {
     showToast(`Network error: ${err.message}`);
   }
@@ -5477,6 +5720,7 @@ async function clearGlitchedFlag(messageId) {
     template.innerHTML = html.trim();
     const newEl = template.content.firstElementChild;
     if (newEl) msgElement.replaceWith(newEl);
+    announceStatus('Glitched flag cleared');
   } catch (err) {
     showToast(`Network error: ${err.message}`);
   }
@@ -5575,7 +5819,7 @@ function goBack() {
     const chat = document.getElementById('chat');
     if (chat) {
       chat.innerHTML = `
-        <div class="messages" id="messages"><div class="empty-state" id="empty-state"><div class="empty-title">Psycheros</div><p class="empty-text">What's on your mind?</p></div></div>
+        <div class="messages" id="messages" role="log" aria-live="off"><div class="empty-state" id="empty-state"><h1 class="empty-title">Psycheros</h1><p class="empty-text">What's on your mind?</p></div></div>
         <div class="input-area"><div class="input-container">
           <button class="attach-btn" onclick="document.getElementById('attach-input').click()" title="Attach image">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -5583,12 +5827,13 @@ function goBack() {
             </svg>
           </button>
           <input type="file" id="attach-input" accept="image/*" style="display:none" onchange="Psycheros.handleAttachment(this)">
-          <textarea class="input-field" id="message-input" placeholder="Type your message..." rows="1" onkeydown="Psycheros.handleKeyDown(event)" oninput="Psycheros.autoResize(this); Psycheros.saveDraft()"></textarea>
-          <button class="send-btn" id="send-btn" onclick="Psycheros.sendMessage()">
+          <textarea class="input-field" id="message-input" placeholder="Type your message..." rows="1" aria-label="Message" onkeydown="Psycheros.handleKeyDown(event)" oninput="Psycheros.autoResize(this); Psycheros.saveDraft()"></textarea>
+          <button class="send-btn" id="send-btn" aria-label="Send message" onclick="Psycheros.sendMessage()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>
         </div><div id="attachment-preview" class="attachment-preview" style="display:none;"></div></div>`;
       restoreDraft();
+      syncViewTitleAndFocus();
     }
   }
 }
@@ -5630,6 +5875,7 @@ globalThis.Psycheros = {
   restoreDeletedMessage,
   clearGlitchedFlag,
   // Tool card image caption toggle
+  toggleDisclosure,
   toggleImageCaption,
   // Context inspector
   toggleContextViewer,
@@ -6379,6 +6625,7 @@ function inConversationView() {
   return document.getElementById('messages') !== null;
 }
 
+var lastHeldSkills = null;
 async function refreshActionState() {
   var inConv = inConversationView();
   var fetches = [
@@ -6417,6 +6664,14 @@ async function refreshActionState() {
     actionState.skills = [];
   }
 
+  var skills = actionState.skills;
+  var key = skills.join('\n');
+  if (key !== lastHeldSkills) {
+    if (lastHeldSkills !== null && skills.length) {
+      announceStatus('Skills held: ' + skills.join(', '));
+    }
+    lastHeldSkills = key;
+  }
   renderStateSubBar();
   renderActionDrawerRows(inConv);
 
@@ -6868,6 +7123,7 @@ async function loadGallery(offset) {
 globalThis.copyFilename = async function(filename, btn) {
   try {
     await navigator.clipboard.writeText(filename);
+    showToast('Copied ' + filename);
     btn.classList.add('copied');
     btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
     setTimeout(function() {
