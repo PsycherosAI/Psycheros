@@ -460,6 +460,11 @@
   z-index: 200;
   opacity: 0;
   pointer-events: none;
+  /* opacity:0 alone leaves the modal's buttons in the tab order and in the
+     accessibility tree, so JAWS reads a closed Create/Edit/Delete form (audit
+     finding 22). The closed dialog is taken out with the inert attribute
+     instead of visibility:hidden: a child inherits a visibility flip a frame
+     or two late, which makes focus() into a just-opened dialog a silent no-op. */
   transition: opacity 0.15s ease;
   padding: var(--sp-4);
 }
