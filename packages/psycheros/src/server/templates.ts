@@ -2679,10 +2679,15 @@ function renderMessageActionButtons(
   const editCls = prefix === "discord-msg"
     ? "discord-msg-edit-btn"
     : "msg-edit-btn";
+  // Discord rows expose these controls from a focusable group; regular
+  // messages keep their existing markup.
+  const editA11y = prefix === "discord-msg"
+    ? ' type="button" aria-label="Edit message"'
+    : "";
   // Delete + flag are Discord-view-only; regular conversations keep the
   // header to Edit alone.
   const manageButtons = prefix === "discord-msg"
-    ? `<button class="discord-msg-action-btn" onclick="Psycheros.confirmDeleteMessage('${id}')" title="Delete message">
+    ? `<button type="button" class="discord-msg-action-btn" aria-label="Delete message" onclick="Psycheros.confirmDeleteMessage('${id}')" title="Delete message">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="3 6 5 6 21 6"/>
           <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/>
@@ -2690,7 +2695,7 @@ function renderMessageActionButtons(
           <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/>
         </svg>
       </button>
-      <button class="discord-msg-action-btn" onclick="Psycheros.confirmFlagGlitched('${id}')" title="Mark as corrupted">
+      <button type="button" class="discord-msg-action-btn" aria-label="Mark as corrupted" onclick="Psycheros.confirmFlagGlitched('${id}')" title="Mark as corrupted">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
           <line x1="12" y1="9" x2="12" y2="13"/>
@@ -2698,7 +2703,7 @@ function renderMessageActionButtons(
         </svg>
       </button>`
     : "";
-  return `<button class="${editCls}" onclick="Psycheros.startMessageEdit('${id}')" title="Edit message">
+  return `<button${editA11y} class="${editCls}" onclick="Psycheros.startMessageEdit('${id}')" title="Edit message">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
           <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
@@ -10074,6 +10079,12 @@ export function renderDiscordChannelView(
       minute: "2-digit",
       hour12: true,
     });
+    const authorName = isUser ? "Discord" : (entityName || "Entity");
+    const focusAttrs = isSystem
+      ? ""
+      : ` role="group" tabindex="0" aria-label="Message from ${
+        escapeHtml(authorName)
+      } at ${escapeHtml(timeStr)}"`;
     const editedIndicator = msg.editedAt
       ? `<span class="msg-edited-indicator">(edited)</span>`
       : "";
@@ -10103,13 +10114,11 @@ export function renderDiscordChannelView(
       }">${formatDiscordMessageContent(msg.content)}</div>`;
     }
 
-    return `<div class="discord-message ${className}" data-message-id="${
+    return `<div class="discord-message ${className}"${focusAttrs} data-message-id="${
       escapeHtml(msg.id)
     }" data-conversation-id="${escapeHtml(convId)}">
       <div class="discord-msg-header">
-        <span class="discord-msg-role">${
-      isUser ? "Discord" : escapeHtml(entityName || "Entity")
-    }</span>
+        <span class="discord-msg-role">${escapeHtml(authorName)}</span>
         <span class="discord-msg-time">${timeStr}</span>
         ${editedIndicator}
         ${actionButtons}

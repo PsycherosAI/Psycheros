@@ -16,6 +16,7 @@ import {
   renderChatView,
   renderConversationItem,
   renderCorePromptsSettings,
+  renderDiscordChannelView,
   renderEmptyState,
   renderEntityCoreHub,
   renderFluxOverlayView,
@@ -36,7 +37,7 @@ import {
 import { getDefaultFluxSettings } from "../../entity-flux/src/mod.ts";
 import { getDefaultImageGenSettings } from "../src/llm/image-gen-settings.ts";
 import { renderPulseSettings } from "../src/pulse/templates.ts";
-import type { Conversation, PulseStats } from "../src/types.ts";
+import type { Conversation, Message, PulseStats } from "../src/types.ts";
 import type { VoiceProfile } from "../src/llm/voice-settings.ts";
 
 function makeConversation(): Conversation {
@@ -126,6 +127,78 @@ Deno.test("chat view exposes a heading and a muted live region", () => {
   // Muted on render and never armed, so the history inside is not announced as
   // a whole; new replies go through #transcript-announcer (announceTranscript).
   assertStringIncludes(html, 'aria-live="off"');
+});
+
+Deno.test("Discord message actions are named controls on focusable rows", () => {
+  const messages: Message[] = [
+    {
+      id: "discord-user",
+      role: "user",
+      content: "Hello from Discord",
+      createdAt: new Date("2026-01-01T12:14:00Z"),
+    },
+    {
+      id: "discord-entity",
+      role: "assistant",
+      content: "Hello back",
+      createdAt: new Date("2026-01-01T12:15:00Z"),
+    },
+    {
+      id: "discord-tool",
+      role: "tool",
+      content: "Tool result",
+      createdAt: new Date("2026-01-01T12:16:00Z"),
+    },
+    {
+      id: "discord-system",
+      role: "system",
+      content: "System notice",
+      createdAt: new Date("2026-01-01T12:17:00Z"),
+    },
+  ];
+  const html = renderDiscordChannelView(
+    { ...makeConversation(), sourceType: "discord" },
+    messages,
+    "Entity",
+  );
+
+  const row = (id: string) =>
+    html.match(
+      new RegExp(
+        `<div class="discord-message[^"]*"[^>]*data-message-id="${id}"[\\s\\S]*?<\\/div>`,
+      ),
+    )?.[0] ?? "";
+  const userRow = row("discord-user");
+  const entityRow = row("discord-entity");
+  const toolRow = row("discord-tool");
+  const systemRow = row("discord-system");
+
+  assertStringIncludes(userRow, 'role="group"');
+  assertStringIncludes(userRow, 'tabindex="0"');
+  assertStringIncludes(userRow, 'aria-label="Message from Discord at ');
+  assertStringIncludes(entityRow, 'aria-label="Message from Entity at ');
+  assertStringIncludes(toolRow, 'class="discord-message discord-msg-tool"');
+  assertEquals(toolRow.includes('tabindex="0"'), false);
+  assertEquals(systemRow.includes('tabindex="0"'), false);
+
+  const buttons = userRow.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? [];
+  assertEquals(
+    buttons.length,
+    3,
+    "Discord user row should expose three actions",
+  );
+  for (
+    const [index, label] of [
+      "Edit message",
+      "Delete message",
+      "Mark as corrupted",
+    ].entries()
+  ) {
+    const button = buttons[index] ?? "";
+    assertStringIncludes(button, 'type="button"');
+    assertStringIncludes(button, `aria-label="${label}"`);
+    assertStringIncludes(button, `title="${label}"`);
+  }
 });
 
 Deno.test("empty state has a heading and a muted live region", () => {

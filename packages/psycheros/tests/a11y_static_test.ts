@@ -84,6 +84,46 @@ Deno.test("clipped context disclosures keep an inset focus indicator", async () 
   );
 });
 
+Deno.test("Discord actions are reachable from a focused message row", async () => {
+  const css = await read("../web/css/discord.css");
+  const rule = (selector: string) => {
+    const start = css.indexOf(selector + " {");
+    assert(start >= 0, `${selector} has no rule`);
+    return css.slice(start, css.indexOf("}", start) + 1);
+  };
+
+  for (const selector of [".discord-msg-edit-btn", ".discord-msg-action-btn"]) {
+    const block = rule(selector);
+    assert(
+      /visibility:\s*hidden/.test(block) &&
+        /pointer-events:\s*none/.test(block),
+      `${selector} must stay out of the tab order until its row is focused`,
+    );
+    assert(
+      !/display:\s*none/.test(block),
+      `${selector} cannot be display:none or focus can never reach it`,
+    );
+    assertStringIncludes(css, `.discord-message:focus-within ${selector}`);
+  }
+
+  assertStringIncludes(css, ".discord-message:hover .discord-msg-edit-btn");
+  assertStringIncludes(css, ".discord-message:hover .discord-msg-action-btn");
+  assert(
+    /@media \(hover: none\)[\s\S]*\.discord-message .discord-msg-edit-btn[\s\S]*\.discord-message .discord-msg-action-btn[\s\S]*visibility:\s*visible/
+      .test(
+        css,
+      ),
+    "touch devices need permanently visible message actions",
+  );
+
+  const focus = rule(".discord-message:focus-visible");
+  assert(
+    /outline:\s*2px solid var\(--c-accent\)/.test(focus) &&
+      /outline-offset:\s*-2px/.test(focus),
+    `Discord row focus ring must stay inside the row: ${focus}`,
+  );
+});
+
 Deno.test("forced-colors focus outranks the per-component outline:none", async () => {
   // textareas and spin buttons set `outline: none` on themselves, and those
   // rules load after base.css at equal specificity.
