@@ -84,6 +84,36 @@ Deno.test("clipped context disclosures keep an inset focus indicator", async () 
   );
 });
 
+Deno.test("forced-colors focus outranks the per-component outline:none", async () => {
+  // textareas and spin buttons set `outline: none` on themselves, and those
+  // rules load after base.css at equal specificity.
+  const css = await read("../web/css/base.css");
+  const block =
+    css.match(/@media \(forced-colors: active\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert(
+    /outline:\s*2px solid CanvasText\s*!important/.test(block),
+    `forced-colors outline must override component rules: ${block}`,
+  );
+});
+
+Deno.test("clipped rows and the attach proxy keep an inset focus indicator", async () => {
+  const css = await read("../web/css/components.css");
+  for (
+    const selector of [
+      ".conv-item-wrapper .conv-item:focus-visible",
+      "label.attach-btn:focus-within",
+    ]
+  ) {
+    const start = css.indexOf(selector + " {");
+    assert(start >= 0, `${selector} has no focus rule`);
+    const rule = css.slice(start, css.indexOf("}", start) + 1);
+    assert(
+      /outline-offset:\s*-/.test(rule),
+      `${selector} ring will be clipped: ${rule}`,
+    );
+  }
+});
+
 Deno.test("no positive tabindex in the templates", async () => {
   const tmpl = await read("../src/server/templates.ts");
   const positive = [...tmpl.matchAll(/tabindex="[1-9]\d*"/g)].map((m) => m[0]);

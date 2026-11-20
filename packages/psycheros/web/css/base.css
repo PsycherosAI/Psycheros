@@ -33,7 +33,10 @@ body {
    Draw a real outline there instead. */
 @media (forced-colors: active) {
   :focus-visible {
-    outline: 2px solid CanvasText;
+    /* Component rules below set `outline: none` on their inputs, and they
+       outrank this selector on source order, so the fallback needs to win
+       regardless of which stylesheet loads last. */
+    outline: 2px solid CanvasText !important;
     outline-offset: 2px;
     box-shadow: none;
   }

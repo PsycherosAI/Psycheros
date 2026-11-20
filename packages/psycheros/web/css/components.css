@@ -1630,6 +1630,14 @@ body[data-decor="stamp"] .msg--user .msg-content,
   margin-bottom: 0;
 }
 
+/* The swipe wrapper clips with overflow: hidden, which also clips the row's
+   outer focus ring (and the forced-colors outline). Keep the indicator inside
+   the row, the same way the context section headers do. */
+.conv-item-wrapper .conv-item:focus-visible {
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px var(--c-accent), var(--glow-accent);
+}
+
 /* Desktop hover actions - positioned absolutely to prevent layout shift */
 .conv-actions {
   position: absolute;
@@ -2553,6 +2561,21 @@ body[data-decor="stamp"] .msg--user .msg-content,
 .attach-btn:hover {
   color: var(--c-fg);
   background: var(--c-bg-hover);
+}
+
+/* The composer ships the file input transparent inside this label with
+   overflow: hidden, so neither the input's ring nor an outer ring shows.
+   Draw the indicator on the label, inside the clipped box. */
+label.attach-btn:focus-within {
+  outline: 2px solid var(--c-accent);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px var(--c-accent), var(--glow-accent);
+}
+
+@media (forced-colors: active) {
+  label.attach-btn:focus-within {
+    outline-color: CanvasText;
+  }
 }
 
 .attachment-preview {
