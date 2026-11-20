@@ -1,0 +1,115 @@
+<dialog
+  class="voice-overlay"
+  id="voice-overlay"
+  aria-labelledby="voice-call-title"
+>
+  <div class="voice-call">
+    <h2 class="sr-only" id="voice-call-title" tabindex="-1">Voice call</h2>
+    <div class="voice-status" id="voice-status">
+      <span
+        class="voice-status-dot voice-status-dot--connecting"
+        id="voice-status-dot"
+      ></span>
+      <span id="voice-status-text" role="status" aria-live="polite"
+      >Connecting...</span>
+      <button
+        class="btn btn--ghost"
+        id="voice-test-tts-btn"
+        onclick="testTTSConnection(this)"
+      >
+        Test TTS
+      </button>
+    </div>
+    <div id="voice-announcer" class="sr-only" role="status"
+      aria-live="polite"></div>
+    <div class="voice-transcript" id="voice-transcript"
+      aria-live="polite"></div>
+    <div
+      class="voice-text-input-area"
+      id="voice-text-input-area"
+      style="display: none"
+    >
+      <textarea
+        class="voice-text-input"
+        id="voice-text-input"
+        aria-label="Voice message"
+        placeholder="Type a message..."
+        rows="2"
+        onkeydown="handleVoiceTextInputKey(event)"
+      ></textarea>
+      <button
+        class="voice-btn voice-text-send-btn"
+        id="voice-text-send-btn"
+        onclick="sendVoiceTextInput()"
+        aria-label="Send"
+      >
+        Send
+      </button>
+    </div>
+    <div class="voice-controls">
+      <button
+        class="voice-btn"
+        id="voice-btn-yinyang"
+        onclick="toggleYinYangMode()"
+        aria-pressed="false"
+        aria-label="Toggle Yin Yang mode (type instead of speak)"
+      >
+        Text
+      </button>
+      <button
+        class="voice-btn"
+        id="voice-btn-ptt-toggle"
+        onclick="togglePTTMode()"
+        aria-pressed="false"
+        aria-label="Toggle push-to-talk"
+      >
+        PTT
+      </button>
+      <button
+        class="voice-btn voice-btn--end"
+        onclick="endVoiceChat()"
+        aria-label="End voice call"
+      >
+        End
+      </button>
+    </div>
+    <div
+      class="voice-hold-circle-container"
+      id="voice-hold-circle"
+      style="display: none"
+    >
+      <button
+        class="voice-hold-circle"
+        id="voice-hold-btn"
+        onmousedown="startPTT()"
+        ontouchstart="startPTT()"
+        onmouseup="endPTT()"
+        ontouchend="endPTT()"
+        onkeydown="handleHoldKey(event)"
+        onclick="handleHoldClick(event)"
+        aria-label="Hold to talk"
+        title="Hold to talk"
+      >
+        <span>HOLD<br>TO<br>TALK</span>
+      </button>
+    </div>
+    <div class="voice-tools" id="voice-tools"></div>
+  </div>
+  <script type="application/json" id="voice-config">
+  { "conversationId": "a11y-probe" }
+  </script>
+  <script type="application/json" id="voice-status-cfg">
+  {
+    "wsUrl": "/api/voice/ws?conversationId=a11y-probe",
+    "sttProvider": "browser",
+    "pttKeys": ["Escape"],
+    "endOfTurnSilence": 1.5,
+    "vadThreshold": 0.5,
+    "phraseDebounceMs": 1200,
+    "sttDebug": false,
+    "voiceChatDebug": false,
+    "sttLanguage": "",
+    "voiceEffect": "none"
+  }
+  </script>
+</dialog>

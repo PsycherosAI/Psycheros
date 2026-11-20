@@ -28,6 +28,17 @@ body {
   outline: none;
 }
 
+/* The glow above is a box-shadow, which forced-colors mode drops, so Windows
+   High Contrast users would lose the focus indicator entirely (WCAG 2.4.7).
+   Draw a real outline there instead. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+    box-shadow: none;
+  }
+}
+
 /* Selection - phosphor green */
 ::selection {
   background-color: var(--c-accent);
@@ -81,4 +92,39 @@ pre {
 input,
 textarea {
   caret-color: var(--c-accent);
+}
+
+/* ==========================================================================
+   Accessibility utilities
+   ========================================================================== */
+
+/* Available to screen readers, invisible on screen */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip link: off-screen until focused */
+.skip-link {
+  position: absolute;
+  left: var(--sp-3);
+  top: -100px;
+  z-index: 1000;
+  padding: var(--sp-2) var(--sp-3);
+  background-color: var(--c-bg-raised);
+  color: var(--c-accent);
+  border: 1px solid var(--c-accent);
+  border-radius: 6px;
+  transition: top var(--transition);
+}
+
+.skip-link:focus {
+  top: var(--sp-3);
 }
