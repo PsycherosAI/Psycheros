@@ -5779,6 +5779,21 @@ function getCurrentConversationId() {
 }
 
 /**
+ * Keep keyboard context after a message is replaced by its tombstone or
+ * glitched rendering. The replacement's own control is the next useful stop.
+ */
+function focusMessageReplacement(element) {
+  if (!(element instanceof HTMLElement)) return;
+  const next = element.querySelector('.tombstone-restore-btn, .glitched-clear-btn');
+  if (next instanceof HTMLElement) {
+    next.focus();
+    return;
+  }
+  element.setAttribute('tabindex', '-1');
+  element.focus();
+}
+
+/**
  * Confirm + soft-delete a message. Re-renders the message as a tombstone via
  * the HTMX-swap response.
  */
@@ -5814,7 +5829,10 @@ async function confirmDeleteMessage(messageId) {
     const template = document.createElement('template');
     template.innerHTML = html.trim();
     const newEl = template.content.firstElementChild;
-    if (newEl) msgElement.replaceWith(newEl);
+    if (newEl) {
+      msgElement.replaceWith(newEl);
+      focusMessageReplacement(newEl);
+    }
     announceStatus('Message deleted');
   } catch (err) {
     showToast(`Network error: ${err.message}`);
@@ -5856,7 +5874,10 @@ async function confirmFlagGlitched(messageId) {
     const template = document.createElement('template');
     template.innerHTML = html.trim();
     const newEl = template.content.firstElementChild;
-    if (newEl) msgElement.replaceWith(newEl);
+    if (newEl) {
+      msgElement.replaceWith(newEl);
+      focusMessageReplacement(newEl);
+    }
     announceStatus('Message flagged as corrupted');
   } catch (err) {
     showToast(`Network error: ${err.message}`);
