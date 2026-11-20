@@ -14,17 +14,10 @@ hero:
     - text: Run from source
       link: /Psycheros/psycheros/install-from-source/
       icon: right-arrow
-    - text: Source on GitHub
+    - text: Source on GitHub (opens GitHub)
       link: https://github.com/PsycherosAI/Psycheros
       icon: external
 ---
-
-import { CardGrid, LinkCard } from '@astrojs/starlight/components';
-
-{/* Hand-written hrefs must include the `/Psycheros` base prefix explicitly —
-    Starlight only auto-prepends `base` for its own sidebar/nav components,
-    not LinkCard or content-level components. Keep these in sync with `base`
-    in astro.config.mjs if it ever changes. */}
 
 Psycheros runs an AI entity — not a chat thread. The entity has files
 describing who it is, a memory hierarchy that summarizes its conversations
@@ -73,28 +66,11 @@ Psycheros directly from source with Deno — no launcher needed. See the
 
 ## What's in the box
 
-<CardGrid>
-	<LinkCard
-		title="Launcher"
-		href="/Psycheros/launcher/user-guide/"
-		description="Desktop app that installs Psycheros as a persistent OS service and opens a window to chat with your entity."
-	/>
-	<LinkCard
-		title="Psycheros"
-		href="/Psycheros/psycheros/configuration/"
-		description="The harness — web UI, chat loop, tools, RAG. The interface your entity runs inside."
-	/>
-	<LinkCard
-		title="entity-core"
-		href="/Psycheros/entity-core/sync-and-memory/"
-		description="The canonical-self MCP server. Identity files, hierarchical memory, knowledge graph. Sync target for every embodiment."
-	/>
-	<LinkCard
-		title="entity-loom"
-		href="/Psycheros/entity-loom/user-guide/"
-		description="One-shot import wizard. Convert chat exports from ChatGPT, Claude, SillyTavern, Kindroid, or Letta into a package the entity can absorb."
-	/>
-</CardGrid>
+The four packages are [Launcher](/Psycheros/launcher/user-guide/), a desktop
+installer and service manager; [Psycheros](/Psycheros/psycheros/configuration/),
+the chat interface and tool harness; [entity-core](/Psycheros/entity-core/sync-and-memory/),
+the identity and memory server; and [entity-loom](/Psycheros/entity-loom/user-guide/),
+the chat-history import wizard.
 
 ## What makes it interesting
 

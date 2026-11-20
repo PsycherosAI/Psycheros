@@ -92,4 +92,37 @@ describe("wizard: first-run form is interactive and pre-populated", function () 
     const value = await input.getValue();
     assert.equal(value, "Lumi");
   });
+
+  it("names the typed confirmation field from its visible instruction", async () => {
+    const association = await browser.execute(() => {
+      const input = document.getElementById("typed-confirm-modal-input");
+      const label = document.querySelector(
+        'label[for="typed-confirm-modal-input"]',
+      );
+      return {
+        labelId: label?.id,
+        labelText: label?.textContent?.trim(),
+      };
+    });
+
+    assert.equal(association.labelId, "typed-confirm-modal-instruction");
+    assert.match(association.labelText, /Type\s+CONFIRM\s+below/);
+  });
+
+  it("keeps a persistent alert available for card errors", async () => {
+    const alert = await browser.execute(() => {
+      const el = document.getElementById("launcher-error-announcer");
+      return el && {
+        role: el.getAttribute("role"),
+        atomic: el.getAttribute("aria-atomic"),
+        hiddenByCard: Boolean(el.closest("[hidden]")),
+      };
+    });
+
+    assert.deepEqual(alert, {
+      role: "alert",
+      atomic: "true",
+      hiddenByCard: false,
+    });
+  });
 });

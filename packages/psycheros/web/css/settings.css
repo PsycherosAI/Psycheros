@@ -1141,6 +1141,20 @@
   object-fit: cover;
 }
 
+.bg-gallery-item .bg-gallery-select {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.bg-gallery-item:focus-within .delete-btn {
+  opacity: 1;
+}
+
 .bg-gallery-item .delete-btn {
   position: absolute;
   top: 4px;
@@ -1282,7 +1296,8 @@
   gap: var(--sp-1);
 }
 
-.llm-field label {
+.llm-field label,
+.llm-field .llm-field-heading {
   font-size: var(--font-size-sm);
   color: var(--c-fg-muted);
   font-weight: var(--font-weight-medium);
@@ -1523,16 +1538,21 @@
    Inline Status Messages (shared pattern)
    ========================================================================== */
 .settings-status {
-  margin-top: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
+  margin-top: 0;
+  padding: 0;
   border-radius: var(--radius-md);
   font-size: var(--font-size-sm);
   font-family: var(--font-mono);
-  display: none;
+  /* Kept in the accessibility tree while empty: NVDA only announces updates
+     to a live region it already knows about, and display:none removed the
+     region until the same task inserted its text, so status messages were
+     silent. With no margin, padding, or border the empty box takes no space. */
+  display: block;
 }
 
 .settings-status.visible {
-  display: block;
+  margin-top: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
 }
 
 .settings-status.success {

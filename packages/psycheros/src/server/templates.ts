@@ -87,6 +87,13 @@ export function escapeHtml(text: string): string {
     .replace(/'/g, "&#039;");
 }
 
+let disclosureId = 0;
+
+function nextDisclosureId(prefix: string): string {
+  disclosureId += 1;
+  return `${prefix}-${disclosureId}`;
+}
+
 /**
  * Safely parse JSON with a fallback value.
  * Returns the fallback if parsing fails.
@@ -356,26 +363,29 @@ export function renderAppShell(
   ${pluginHeadHtml}
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="bg-layer"></div>
   <div class="bg-overlay"></div>
   <div class="app">
     ${renderHeader()}
-    <div class="main">
-      <div class="sidebar-overlay" onclick="Psycheros.toggleSidebar()"></div>
+    <div class="main" role="main" id="main" tabindex="-1">
+      <!-- App-shell status and actions sit at the TOP of the DOM, next to
+           the header trigger. Absolute positioning keeps them visually over
+           the conversation; this placement keeps tab order matching the
+           visual order (DOM order is tab order). -->
+      <div id="state-sub-bar" class="state-sub-bar" hidden></div>
+      <nav id="action-drawer" class="action-drawer" aria-label="Actions"></nav>
+      <div class="sidebar-overlay" aria-hidden="true" onclick="Psycheros.toggleSidebar()"></div>
       ${renderSidebar([])}
       <div id="reindex-banner" class="reindex-banner" hidden></div>
       <div class="chat" id="chat">
         ${renderEmptyState()}
         ${renderInputArea()}
       </div>
-      <!-- The state sub-bar: one line, subprocess+state segments
-           (Flux ON | Workspace (2) | Voice ON), tappable, hidden when
-           nothing is active. -->
-      <div id="state-sub-bar" class="state-sub-bar" hidden></div>
-      <!-- The action drawer: the kebab in the
-           header opens this; it hangs from the state sub-bar. App-shell
-           elements — HTMX-swap survivors, like the FABs they replace. -->
-      <nav id="action-drawer" class="action-drawer" aria-label="Actions"></nav>
+      <!-- No aria-atomic: JAWS on Firefox stays silent on live regions that carry
+           aria-atomic="true" (FreedomScientific/standards-support#876), and this
+           region only ever holds one text node, so each rewrite is atomic anyway. -->
+      <div id="transcript-announcer" class="sr-only" role="status" aria-live="polite"></div>
     </div>
   </div>
   <script src="/js/color.js"></script>
@@ -522,7 +532,8 @@ function renderBrandMark(
 export function renderHeader(): string {
   return `<header class="header">
   <div class="header-left">
-    <button class="logo-btn" onclick="Psycheros.toggleSidebar()" aria-label="Toggle sidebar">
+    <button class="logo-btn" onclick="Psycheros.toggleSidebar()" aria-label="Toggle sidebar"
+      aria-controls="sidebar" aria-expanded="false">
       <div class="logo-icon">
         ${renderBrandMark("logo-grad")}
       </div>
@@ -535,7 +546,7 @@ export function renderHeader(): string {
         <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
       </svg>
     </button>
-    <button class="header-icon" id="action-menu-btn" onclick="Psycheros.toggleActionDrawer()" aria-label="Open action menu" title="Actions">
+    <button class="header-icon" id="action-menu-btn" onclick="Psycheros.toggleActionDrawer()" aria-label="Actions" title="Actions" aria-expanded="false" aria-controls="action-drawer">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none">
         <circle cx="12" cy="5" r="2"></circle>
         <circle cx="12" cy="12" r="2"></circle>
@@ -565,7 +576,7 @@ export function renderSettingsBackButton(
     : href === "/fragments/settings"
     ? "Settings"
     : "Back";
-  return `<a class="settings-back-btn"
+  return `<a href="${escapeHtml(href)}" class="settings-back-btn"
     hx-get="${escapeHtml(href)}"
     hx-target="#chat"
     hx-swap="innerHTML">
@@ -587,7 +598,7 @@ export function renderSettingsHub(): string {
   </div>
   <div class="settings-content" id="settings-content">
     <div class="settings-hub-grid">
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/general" class="settings-hub-card"
         hx-get="/fragments/settings/general"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -612,7 +623,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/core-prompts" class="settings-hub-card"
         hx-get="/fragments/settings/core-prompts"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -630,7 +641,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/memories" class="settings-hub-card"
         hx-get="/fragments/settings/memories"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -649,7 +660,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/vault" class="settings-hub-card"
         hx-get="/fragments/settings/vault"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -668,7 +679,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/lorebooks" class="settings-hub-card"
         hx-get="/fragments/settings/lorebooks"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -686,7 +697,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/vision" class="settings-hub-card"
         hx-get="/fragments/settings/vision"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -704,7 +715,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/voice" class="settings-hub-card"
         hx-get="/fragments/settings/voice"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -721,7 +732,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/pulse" class="settings-hub-card"
         hx-get="/fragments/settings/pulse"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -738,7 +749,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/sa" class="settings-hub-card"
         hx-get="/fragments/settings/sa"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -759,7 +770,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/connections" class="settings-hub-card"
         hx-get="/fragments/settings/connections"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -778,7 +789,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/entity-core" class="settings-hub-card"
         hx-get="/fragments/settings/entity-core"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -799,7 +810,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/tools" class="settings-hub-card"
         hx-get="/fragments/settings/tools"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -816,7 +827,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/plugins" class="settings-hub-card"
         hx-get="/fragments/settings/plugins"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -834,7 +845,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/flux" class="settings-hub-card"
         hx-get="/fragments/settings/flux"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -853,7 +864,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/workspace" class="settings-hub-card"
         hx-get="/fragments/settings/workspace"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -872,7 +883,7 @@ export function renderSettingsHub(): string {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </a>
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/llm" class="settings-hub-card"
         hx-get="/fragments/settings/llm"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -892,7 +903,7 @@ export function renderSettingsHub(): string {
         </svg>
       </a>
 
-      <a class="settings-hub-card"
+      <a href="/fragments/admin" class="settings-hub-card"
         hx-get="/fragments/admin"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -1271,12 +1282,12 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
   </div>
   <div class="settings-content" id="settings-content">
 
-    <div class="settings-tabs">
-      <button class="settings-tab active" data-tab="general" onclick="switchGeneralTab('general')">General</button>
-      <button class="settings-tab" data-tab="theme" onclick="switchGeneralTab('theme')">Theme</button>
+    <div class="settings-tabs" role="tablist" aria-label="General settings">
+      <button class="settings-tab active" id="general-tab-btn-general" role="tab" aria-selected="true" aria-controls="general-tab-general" tabindex="0" data-tab="general" onclick="switchGeneralTab('general')" onkeydown="settingsTablistKeydown(event)">General</button>
+      <button class="settings-tab" id="general-tab-btn-theme" role="tab" aria-selected="false" aria-controls="general-tab-theme" tabindex="-1" data-tab="theme" onclick="switchGeneralTab('theme')" onkeydown="settingsTablistKeydown(event)">Theme</button>
     </div>
 
-    <div id="general-tab-general" class="general-tab-panel">
+    <div id="general-tab-general" class="general-tab-panel" role="tabpanel" aria-labelledby="general-tab-btn-general">
 
     <section class="theme-section">
       <h3 class="theme-section-title">Display Names</h3>
@@ -1432,11 +1443,11 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
     </div>
 
     <!-- Status messages -->
-    <div id="general-settings-status" class="settings-status"></div>
+    <div id="general-settings-status" class="settings-status" role="status" aria-live="polite"></div>
 
     </div>
 
-    <div id="general-tab-theme" class="general-tab-panel" style="display:none;">
+    <div id="general-tab-theme" class="general-tab-panel" role="tabpanel" aria-labelledby="general-tab-btn-theme" style="display:none;">
 
     <!-- Theme Studio Section -->
     <section class="theme-section">
@@ -1499,7 +1510,7 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
 
       <div class="bg-controls">
         <div class="bg-url-input">
-          <input type="url" id="bg-url" class="input-field" placeholder="Enter image URL...">
+          <input type="url" id="bg-url" class="input-field" aria-label="Background image URL" placeholder="Enter image URL...">
           <button class="btn btn--primary btn--sm" onclick="applyBackgroundUrl()">Apply URL</button>
         </div>
 
@@ -1564,7 +1575,7 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
     </section>
 
     <!-- Status messages -->
-    <div id="appearance-status" class="settings-status"></div>
+    <div id="appearance-status" class="settings-status" role="status" aria-live="polite"></div>
 
     </div>
 
@@ -1573,7 +1584,12 @@ export function renderGeneralSettings(settings: GeneralSettings): string {
 
 <script>
 function switchGeneralTab(tab) {
-  document.querySelectorAll('#settings-content .settings-tab[data-tab]').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('#settings-content .settings-tab[data-tab]').forEach(t => {
+    var on = t.dataset.tab === tab;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+    t.tabIndex = on ? 0 : -1;
+  });
   document.querySelectorAll('.general-tab-panel').forEach(p => p.style.display = p.id === 'general-tab-' + tab ? '' : 'none');
 }
 
@@ -1602,7 +1618,7 @@ async function saveGeneralSettings() {
     if (data.success) {
       el.className = 'settings-status visible success';
       el.textContent = 'Settings saved successfully';
-      setTimeout(() => { el.className = 'settings-status'; }, 3000);
+      setTimeout(() => hideSettingsStatus(el), 3000);
       if (window.PsycherosSettings) {
         window.PsycherosSettings.entityName = entityName || 'Assistant';
         window.PsycherosSettings.userName = userName || 'You';
@@ -1627,7 +1643,7 @@ function showAppearanceStatus(type, message) {
   el.className = 'settings-status visible ' + type;
   el.textContent = message;
   if (type !== 'error') {
-    setTimeout(() => { el.className = 'settings-status'; }, 3000);
+    setTimeout(() => hideSettingsStatus(el), 3000);
   }
 }
 
@@ -1955,9 +1971,11 @@ async function loadBackgroundGallery() {
   const currentTheme = Theme.get();
 
   gallery.innerHTML = backgrounds.map(bg => \`
-    <div class="bg-gallery-item \${currentTheme.bgImage === bg.url ? 'active' : ''}" onclick="selectBackground('\${escapeAttr(bg.url)}')">
-      <img src="\${escapeAttr(bg.url)}" alt="\${escapeAttr(bg.filename)}">
-      <button class="delete-btn" onclick="event.stopPropagation(); deleteBackground('\${escapeAttr(bg.filename)}')" title="Delete">×</button>
+    <div class="bg-gallery-item \${currentTheme.bgImage === bg.url ? 'active' : ''}">
+      <button type="button" class="bg-gallery-select" aria-pressed="\${currentTheme.bgImage === bg.url}" aria-label="Use background \${escapeAttr(bg.filename)}" onclick="selectBackground('\${escapeAttr(bg.url)}')">
+        <img src="\${escapeAttr(bg.url)}" alt="">
+      </button>
+      <button type="button" class="delete-btn" aria-label="Delete \${escapeAttr(bg.filename)}" onclick="deleteBackground('\${escapeAttr(bg.filename)}')">×</button>
     </div>
   \`).join('');
 }
@@ -1965,7 +1983,11 @@ async function loadBackgroundGallery() {
 function selectBackground(url) {
   Theme.setBackground(url);
   document.querySelectorAll('.bg-gallery-item').forEach(el => {
-    el.classList.toggle('active', el.querySelector('img').src === url);
+    // bg.url is root-relative; img.src resolves to an absolute URL, so
+    // compare the serialized attribute to keep aria-pressed in sync.
+    const active = el.querySelector('img').getAttribute('src') === url;
+    el.classList.toggle('active', active);
+    el.querySelector('.bg-gallery-select')?.setAttribute('aria-pressed', String(active));
   });
 }
 
@@ -1987,7 +2009,10 @@ async function deleteBackground(filename) {
 function clearBackground() {
   Theme.setBackground(null);
   document.getElementById('bg-url').value = '';
-  document.querySelectorAll('.bg-gallery-item').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.bg-gallery-item').forEach(el => {
+    el.classList.remove('active');
+    el.querySelector('.bg-gallery-select')?.setAttribute('aria-pressed', 'false');
+  });
 }
 </script>`;
 }
@@ -2035,7 +2060,7 @@ export function renderSASettings(
         return `<div class="llm-field" style="margin-bottom:12px;" data-device-id="${
           escapeHtml(device.id)
         }">
-            <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <div class="llm-field-heading" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
               <span style="font-weight:500;">${
           escapeHtml(device.name || device.id)
         }</span>
@@ -2044,7 +2069,7 @@ export function renderSASettings(
             ? "background:var(--c-success-subtle);color:var(--c-success);"
             : "background:var(--c-wash-strong);color:var(--c-fg-muted);"
         }">${isConnected ? "Connected" : "Disconnected"}</span>
-            </label>
+            </div>
             ${
           Object.entries(device.streams ?? {}).map(([streamId, config]) =>
             `<div style="display:flex;align-items:center;gap:8px;padding:4px 0 4px 12px;">
@@ -2117,19 +2142,19 @@ export function renderSASettings(
         <p class="theme-section-desc">Built-in signal feeds currently providing data to the entity</p>
         <div class="llm-fields">
           <div class="llm-field">
-            <label>Current Conversation</label>
+            <div class="llm-field-heading">Current Conversation</div>
             <div class="sa-signal-desc">Tells the entity which conversation they are currently processing, including the conversation ID and title.</div>
           </div>
           <div class="llm-field">
-            <label>Last User Interaction</label>
+            <div class="llm-field-heading">Last User Interaction</div>
             <div class="sa-signal-desc">Tracks the most recent human message across all threads, excluding automated Pulse messages. The entity sees the timestamp and which thread the message was sent in.</div>
           </div>
           <div class="llm-field">
-            <label>Device Detection</label>
+            <div class="llm-field-heading">Device Detection</div>
             <div class="sa-signal-desc">Detects whether you're on desktop or mobile when sending a message. The entity receives this as a simple desktop/mobile indicator.</div>
           </div>
           <div class="llm-field">
-            <label>Connected Devices</label>
+            <div class="llm-field-heading">Connected Devices</div>
             <div class="sa-signal-desc">Shows which Lovense toys, Intiface devices, and home smart devices are currently connected. Refreshed every 30 seconds.</div>
           </div>
         </div>
@@ -2144,9 +2169,11 @@ export function renderSASettings(
         <div id="event-rules-list">
           ${webhooksRulesList}
         </div>
-        <div style="margin-top: 12px;">
+        <div style="margin-top: 12px; display: flex; gap: 8px;">
           <button class="btn btn--primary" onclick="addEventRule()">Add Webhook</button>
+          <button class="btn" onclick="saveEventRules()">Save Webhooks</button>
         </div>
+        <div id="event-rules-status" class="settings-status" role="status" aria-live="polite"></div>
       </section>
       <template id="event-rule-blank-row">
         <div class="event-rule-card" data-rule-id="" style="border:1px solid var(--c-border);border-radius:8px;padding:12px;margin-bottom:8px;">
@@ -2155,7 +2182,7 @@ export function renderSASettings(
               <input type="checkbox" data-rule-enabled role="switch" checked>
               <span class="toggle-slider"></span>
             </label>
-            <input type="text" data-rule-name placeholder="Rule name"
+            <input type="text" data-rule-name aria-label="Rule name" placeholder="Rule name"
               style="flex:1;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:6px 8px;font-size:14px;">
             <button class="btn" onclick="deleteEventRule(this)" title="Delete rule"
               style="padding:4px 8px;color:var(--c-fg-muted);">
@@ -2163,7 +2190,7 @@ export function renderSASettings(
             </button>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;">
-            <label style="font-size:12px;color:var(--c-fg-muted);">IF</label>
+            <span style="font-size:12px;color:var(--c-fg-muted);">IF</span>
             <select data-cond-stream style="background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
               ${streamOptions}
             </select>
@@ -2172,20 +2199,20 @@ export function renderSASettings(
               <option value="goes_above">goes above</option>
               <option value="goes_below">goes below</option>
             </select>
-            <input type="text" data-cond-value placeholder="value"
+            <input type="text" data-cond-value aria-label="Value" placeholder="value"
               style="width:60px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
-            <input type="number" data-cond-sustained placeholder="sustain min" min="0"
-              style="width:80px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;" title="Sustained: condition must hold for this many minutes before firing">
+            <input type="number" data-cond-sustained aria-label="Sustain minutes" placeholder="sustain min" min="0"
+              style="width:80px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;">
-            <label style="font-size:12px;color:var(--c-fg-muted);">THEN</label>
+            <span style="font-size:12px;color:var(--c-fg-muted);">THEN</span>
             <span style="font-size:13px;">Run Pulse:</span>
             <select data-action-pulse style="background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
               ${pulseOptions}
             </select>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
-            <label style="font-size:13px;color:var(--c-fg-muted);">Cooldown:</label>
+            <span style="font-size:13px;color:var(--c-fg-muted);">Cooldown:</span>
             <input type="number" data-rule-cooldown value="5" min="0"
               style="width:50px;background:var(--c-bg-raised);color:var(--c-fg);border:1px solid var(--c-border);border-radius:4px;padding:4px 6px;font-size:13px;">
             <span style="font-size:12px;color:var(--c-fg-muted);">min</span>
@@ -2198,7 +2225,7 @@ export function renderSASettings(
       <button class="btn btn--primary" onclick="saveSASettings()">Save Changes</button>
     </div>
 
-    <div id="sa-settings-status" class="settings-status"></div>
+    <div id="sa-settings-status" class="settings-status" role="status" aria-live="polite"></div>
 
   </div>
 </div>
@@ -2267,10 +2294,12 @@ function renderEventRuleCard(
  * Render the sidebar with conversation list.
  */
 export function renderSidebar(conversations: Conversation[]): string {
-  return `<aside class="sidebar" id="sidebar">
+  // inert while closed: a translated-off-screen panel must stay out of the tab
+  // and reading order. setSidebarOpen() toggles it.
+  return `<aside class="sidebar" id="sidebar" inert>
   <div class="sidebar-header">
     <span class="sidebar-title">Conversations</span>
-    <button class="btn btn--primary btn--sm" onclick="Psycheros.newConversation()">+ New</button>
+    <button class="btn btn--primary btn--sm" onclick="Psycheros.newConversation()" aria-label="New conversation"><span><span aria-hidden="true">+</span> New</span></button>
   </div>
   <nav class="conv-list" id="conv-list" hx-get="/fragments/conv-list" hx-trigger="load" hx-swap="innerHTML">
     ${renderConversationList(conversations)}
@@ -2326,6 +2355,15 @@ export function renderConversationList(
 }
 
 /**
+ * Visually hidden separator for adjacent inline spans.
+ *
+ * Flex containers drop whitespace-only text nodes, so a row title + date or a
+ * message author + timestamp are announced as one run ("Universe!06:37 PM",
+ * "ASSISTANT6:37 PM"). A real character between them restores the boundary.
+ */
+const SPEECH_SEP = `<span class="sr-only">, </span>`;
+
+/**
  * Render a single conversation list item with swipe actions.
  */
 export function renderConversationItem(
@@ -2341,7 +2379,10 @@ export function renderConversationItem(
     ? `<svg class="pulse-indicator" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" title="Active Pulse"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`
     : "";
 
-  // Swipe wrapper structure with edit action (delete removed - too easy to lose conversations)
+  // Swipe wrapper structure with edit action (delete removed - too easy to lose conversations).
+  // The anchor carries no hx-get: selectConversation() owns the swap (draft
+  // save, SSE reconnect, focus, context reset), and hx-get on the same anchor
+  // made every sidebar click swap #chat twice.
   return `<div class="conv-item-wrapper" data-conv-id="${escapedId}">
   <div class="conv-swipe-action conv-swipe-action--edit" data-action="edit">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2349,30 +2390,27 @@ export function renderConversationItem(
       <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
     </svg>
   </div>
+  <input type="checkbox" class="conv-select-checkbox" data-conv-id="${escapedId}" aria-label="Select ${title}">
   <a class="conv-item${isActive ? " active" : ""}"
     data-conv-id="${escapedId}"
-    hx-get="/fragments/chat/${encodedId}"
-    hx-target="#chat"
-    hx-swap="innerHTML"
-    hx-push-url="/c/${encodedId}">
-    <input type="checkbox" class="conv-select-checkbox" data-conv-id="${escapedId}" onclick="event.stopPropagation()">
+    href="/c/${encodedId}">
     <span class="conv-title">${pulseIndicator}${title}</span>
-    <span class="conv-date">${date}</span>
-    <div class="conv-actions">
-      <button class="conv-action-btn conv-action-btn--edit" data-action="edit" title="Edit title" onclick="event.preventDefault(); event.stopPropagation(); Psycheros.startTitleEdit('${escapedId}')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-        </svg>
-      </button>
-      <button class="conv-action-btn conv-action-btn--delete" data-action="delete" title="Delete" onclick="event.preventDefault(); event.stopPropagation(); Psycheros.showDeleteModal(['${escapedId}'])">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="3,6 5,6 21,6"/>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-        </svg>
-      </button>
-    </div>
+    <span class="conv-date">${SPEECH_SEP}${date}</span>
   </a>
+  <div class="conv-actions">
+    <button class="conv-action-btn conv-action-btn--edit" data-action="edit" aria-label="Edit title: ${title}" onclick="event.stopPropagation(); Psycheros.startTitleEdit('${escapedId}')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+      </svg>
+    </button>
+    <button class="conv-action-btn conv-action-btn--delete" data-action="delete" aria-label="Delete conversation: ${title}" onclick="event.stopPropagation(); Psycheros.showDeleteModal(['${escapedId}'])">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3,6 5,6 21,6"/>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+      </svg>
+    </button>
+  </div>
 </div>`;
 }
 
@@ -2410,7 +2448,11 @@ export function renderChatView(
     <div class="load-earlier-spinner"></div>
   </div>`
     : "";
-  return `<div class="messages" id="messages">
+  // The transcript holds the whole history, so it is never a live region —
+  // announcing it reads the conversation from the top. New replies go through
+  // #transcript-announcer instead (see announceTranscript in psycheros.js).
+  return `<h1 class="sr-only">Conversation</h1>
+<div class="messages" id="messages" role="log" aria-live="off">
   ${sentinel}${
     messages.length === 0
       ? ""
@@ -2683,7 +2725,7 @@ function renderTombstoneMessage(msg: Message): string {
     ? ` — reason: ${escapeHtml(tombstoneMeta.reason)}`
     : "";
   const id = escapeHtml(msg.id);
-  return `<div class="message tombstone" data-message-id="${id}" role="status">
+  return `<div class="message tombstone" data-message-id="${id}">
     <div class="tombstone-marker">✕</div>
     <div class="tombstone-content">
       <div class="tombstone-notice">${escapeHtml(tombstoneNotice)}</div>
@@ -2703,7 +2745,7 @@ function renderTombstoneMessage(msg: Message): string {
  */
 function renderGlitchedMessage(msg: Message): string {
   const id = escapeHtml(msg.id);
-  return `<div class="message glitched" data-message-id="${id}" role="alert">
+  return `<div class="message glitched" data-message-id="${id}">
     <div class="glitched-marker">⚠</div>
     <div class="glitched-content">
       <div class="glitched-placeholder">▒▒▒ MESSAGE CORRUPTED ▒▒▒</div>
@@ -2738,7 +2780,7 @@ export function renderUserMessage(
     : "";
   const timeStr = createdAt ? formatMessageTime(createdAt) : "";
   const timeEl = timeStr
-    ? `<span class="msg-timestamp">${escapeHtml(timeStr)}</span>`
+    ? `<span class="msg-timestamp">${escapeHtml(timeStr)}${SPEECH_SEP}</span>`
     : "";
   const displayName = escapeHtml(userName || "You");
 
@@ -2762,9 +2804,7 @@ export function renderUserMessage(
 
   return `<div class="msg msg--user" ${dataAttr}>
   <div class="msg-header">
-    ${timeEl}
-    <span>${displayName}</span>
-    ${editedIndicator}
+    <span class="msg-meta">${timeEl}<span class="msg-author">${displayName}</span>${editedIndicator}</span>
     ${actionButtons}
   </div>
   <div class="msg-content user-text" data-raw-content="${
@@ -2780,7 +2820,7 @@ function renderPulseMessage(msg: Message): string {
   const dataAttr = msg.id ? `data-message-id="${escapeHtml(msg.id)}"` : "";
   const timeStr = msg.createdAt ? formatMessageTime(msg.createdAt) : "";
   const timeEl = timeStr
-    ? `<span class="msg-timestamp">${escapeHtml(timeStr)}</span>`
+    ? `<span class="msg-timestamp">${SPEECH_SEP}${escapeHtml(timeStr)}</span>`
     : "";
   const pulseName = escapeHtml(msg.pulseName || "Pulse");
   const icon = pulseIconSvg(14);
@@ -2789,8 +2829,7 @@ function renderPulseMessage(msg: Message): string {
   return `<div class="msg msg--pulse" ${dataAttr}>
   <div class="msg-header">
     <span class="pulse-header-icon">${icon}</span>
-    <span>${pulseName}</span>
-    ${timeEl}
+    <span class="msg-meta"><span class="msg-author">${pulseName}</span>${timeEl}</span>
     ${actionButtons}
   </div>
   <div class="msg-content" data-raw-content="${escapeHtml(msg.content)}">${
@@ -2815,7 +2854,7 @@ export function renderAssistantMessage(
 
   const timeStr = msg.createdAt ? formatMessageTime(msg.createdAt) : "";
   const timeEl = timeStr
-    ? `<span class="msg-timestamp">${escapeHtml(timeStr)}</span>`
+    ? `<span class="msg-timestamp">${SPEECH_SEP}${escapeHtml(timeStr)}</span>`
     : "";
   const displayName = escapeHtml(entityName || "Assistant");
 
@@ -2823,9 +2862,7 @@ export function renderAssistantMessage(
     escapeHtml(msg.id)
   }">
   <div class="msg-header">
-    <span>${displayName}</span>
-    ${timeEl}
-    ${editedIndicator}
+    <span class="msg-meta"><span class="msg-author">${displayName}</span>${timeEl}${editedIndicator}</span>
     ${metrics ? renderMetricsIndicator(metrics) : ""}
     ${actionButtons}
   </div>
@@ -2972,8 +3009,8 @@ export function renderMetricsIndicator(metrics: TurnMetrics): string {
     .join("");
 
   return `<div class="metrics-indicator">
-    <span class="metrics-indicator-icon">&#9201;</span>
-    <span class="metrics-indicator-summary">${summary}</span>
+    <span class="metrics-indicator-icon" aria-hidden="true">&#9201;</span>
+    <span class="metrics-indicator-summary"><span class="sr-only">, </span>${summary}</span>
     <div class="metrics-tooltip">${tooltipRows}</div>
   </div>`;
 }
@@ -2982,12 +3019,12 @@ export function renderMetricsIndicator(metrics: TurnMetrics): string {
  * Render the empty state when no conversation is selected.
  */
 export function renderEmptyState(): string {
-  return `<div class="messages" id="messages">
+  return `<div class="messages" id="messages" role="log" aria-live="off">
   <div class="empty-state" id="empty-state">
     <div class="empty-logo">
       ${renderBrandMark("empty-logo-grad", 120, "Psycheros")}
     </div>
-    <div class="empty-title">Psycheros</div>
+    <h1 class="empty-title">Psycheros</h1>
     <div class="empty-tagline">seize the means of companionship</div>
     <p class="empty-text">Start a new conversation or select one from the sidebar.</p>
   </div>
@@ -3001,7 +3038,7 @@ export function renderInputArea(): string {
   return `<div class="input-area">
   <div class="input-container">
     <label class="attach-btn" title="Attach image" style="position:relative;overflow:hidden;cursor:pointer;">
-      <input type="file" id="attach-input" accept="image/*" style="position:absolute;inset:0;opacity:0;cursor:pointer;" onchange="Psycheros.handleAttachment(this)" />
+      <input type="file" id="attach-input" aria-label="Attach image" accept="image/*" style="position:absolute;inset:0;opacity:0;cursor:pointer;" onchange="Psycheros.handleAttachment(this)" />
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
         <circle cx="8.5" cy="8.5" r="1.5"/>
@@ -3013,10 +3050,11 @@ export function renderInputArea(): string {
       id="message-input"
       placeholder="Type your message..."
       rows="1"
+      aria-label="Message"
       onkeydown="Psycheros.handleKeyDown(event)"
       oninput="Psycheros.autoResize(this); Psycheros.saveDraft()"
     ></textarea>
-    <button class="send-btn" id="send-btn" onclick="Psycheros.sendMessage()">
+    <button class="send-btn" id="send-btn" aria-label="Send message" onclick="Psycheros.sendMessage()">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
     </button>
   </div>
@@ -3033,12 +3071,13 @@ export function renderInputArea(): string {
  * Collapsed by default; toggle 'expanded' class to show content.
  */
 export function renderThinkingSection(content: string): string {
+  const contentId = nextDisclosureId("rendered-thinking-content");
   return `<div class="thinking">
-  <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-    <span class="thinking-toggle">&#9660;</span>
+  <button type="button" class="thinking-header" aria-expanded="false" aria-controls="${contentId}" onclick="Psycheros.toggleDisclosure(this)">
+    <span class="thinking-toggle" aria-hidden="true">&#9660;</span>
     <span>Thinking</span>
-  </div>
-  <div class="thinking-content">${escapeHtml(content)}</div>
+  </button>
+  <div class="thinking-content" id="${contentId}">${escapeHtml(content)}</div>
 </div>`;
 }
 
@@ -3068,20 +3107,23 @@ export function renderToolCard(
     args = JSON.stringify(parsedForFormat, null, 2);
   }
 
-  let html = `<div class="tool" data-tool-call-id="${toolCall.id}">
-  <div class="tool-header" onclick="this.parentElement.classList.toggle('expanded')">
-    <span class="tool-icon">&#9881;</span>
+  const contentId = `tool-content-${escapeHtml(toolCall.id)}`;
+  let html = `<div class="tool" data-tool-call-id="${escapeHtml(toolCall.id)}">
+  <button type="button" class="tool-header" aria-expanded="false" aria-controls="${contentId}" onclick="Psycheros.toggleDisclosure(this)">
+    <span class="tool-icon" aria-hidden="true">&#9881;</span>
     <span class="tool-name">${name}</span>
     ${summary ? `<span class="tool-summary">${escapeHtml(summary)}</span>` : ""}
-    <span class="tool-toggle">&#9660;</span>
-  </div>
-  <div class="tool-args">${escapeHtml(args)}</div>`;
+    <span class="tool-toggle" aria-hidden="true">&#9660;</span>
+  </button>
+  <div class="tool-disclosure-content" id="${contentId}">
+    <div class="tool-args">${escapeHtml(args)}</div>`;
 
   if (result) {
     html += renderToolResult(result);
   }
 
-  html += `</div>`;
+  html += `</div>
+</div>`;
   return html;
 }
 
@@ -3095,9 +3137,11 @@ function renderGeneratedImageSibling(
   toolCallId: string,
 ): string {
   const captionHtml = image.description
-    ? `<div class="generated-image-caption-toggle" onclick="Psycheros.toggleImageCaption('${
+    ? `<button type="button" class="generated-image-caption-toggle" aria-expanded="false" aria-controls="caption-${
       escapeHtml(toolCallId)
-    }')">▸ Show caption</div>
+    }" onclick="Psycheros.toggleImageCaption('${
+      escapeHtml(toolCallId)
+    }')"><span aria-hidden="true">▸</span> <span>Show caption</span></button>
   <div class="generated-image-caption" id="caption-${
       escapeHtml(toolCallId)
     }" hidden>${escapeHtml(image.description)}</div>`
@@ -3199,6 +3243,11 @@ export function renderCorePromptsSettings(
     const isActive = tab.id === activeDir;
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="/fragments/settings/core-prompts/${tab.id}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -3216,10 +3265,10 @@ export function renderCorePromptsSettings(
       </div>
     </div>
   </div>
-  <div class="settings-tabs">
+  <div class="settings-tabs" role="tablist" aria-label="Core prompt directories">
     ${tabsHtml}
   </div>
-  <div class="settings-content" id="settings-content"
+  <div class="settings-content" id="settings-content" role="tabpanel" aria-labelledby="tab-${activeDir}"
     hx-get="/fragments/settings/core-prompts/${activeDir}"
     hx-trigger="load"
     hx-swap="innerHTML">
@@ -3248,6 +3297,7 @@ export function renderFileList(
           type="text"
           class="settings-create-file-input"
           id="custom-filename-input"
+          aria-label="File name"
           placeholder="New file name (e.g., my_context.md)"
           pattern="[a-zA-Z0-9_]+\\.md"
         />
@@ -3269,11 +3319,13 @@ export function renderFileList(
           type="text"
           class="settings-create-file-input"
           id="upload-filename-input"
+          aria-label="File name"
           placeholder="File name (e.g., base_instructions.md)"
           style="padding: 8px; border: 1px solid var(--c-border); border-radius: 6px; background: var(--c-bg-raised); color: var(--c-fg); font-family: inherit; font-size: 13px;"
         />
         <textarea
           id="upload-content-input"
+          aria-label="File content"
           placeholder="Paste file content here..."
           rows="5"
           style="padding: 8px; border: 1px solid var(--c-border); border-radius: 6px; background: var(--c-bg-raised); color: var(--c-fg); resize: vertical; font-family: inherit; font-size: 13px;"
@@ -3351,6 +3403,11 @@ function renderTabActiveState(
       : `/fragments/settings/core-prompts/${dir}`;
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="${url}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -3402,7 +3459,7 @@ export function renderFileEditor(
       hx-target="#prompt-label-status"
       hx-swap="innerHTML"
     />
-    <div id="prompt-label-status" class="settings-prompt-label-status"></div>
+    <div id="prompt-label-status" class="settings-prompt-label-status" role="status" aria-live="polite"></div>
   </div>
   <form
     class="settings-editor-form"
@@ -3414,6 +3471,7 @@ export function renderFileEditor(
       class="settings-textarea"
       name="content"
       data-tokenize
+      aria-label="Prompt content"
       placeholder="Enter prompt content..."
       rows="20"
     >${safeContent}</textarea>
@@ -3427,7 +3485,7 @@ export function renderFileEditor(
       >Cancel</button>
       <button type="submit" class="btn btn--primary">Save</button>
     </div>
-    <div id="settings-editor-status" class="settings-editor-status"></div>
+    <div id="settings-editor-status" class="settings-editor-status" role="status" aria-live="polite"></div>
   </form>
 </div>`;
 }
@@ -3681,7 +3739,7 @@ function renderMemoryFilterBar(
       <form class="memory-search-form" hx-get="/fragments/settings/memories/search"
             hx-target="#settings-content" hx-swap="innerHTML"
             hx-trigger="submit">
-        <input type="search" name="q" class="memory-search-input"
+        <input type="search" name="q" class="memory-search-input" aria-label="Search memories"
                placeholder="Search all memories..."
                autocomplete="off" />
       </form>
@@ -3732,6 +3790,11 @@ export function renderMemoriesView(
     const isActive = tab.id === activeGranularity;
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="/fragments/settings/memories/${tab.id}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -3752,11 +3815,11 @@ export function renderMemoriesView(
       </div>
     </div>
   </div>
-  <div class="settings-tabs">
+  <div class="settings-tabs" role="tablist" aria-label="Memory views">
     ${tabsHtml}
   </div>
   ${filterBarHtml}
-  <div class="settings-content" id="settings-content"
+  <div class="settings-content" id="settings-content" role="tabpanel" aria-labelledby="memtab-${activeGranularity}"
     hx-get="/fragments/settings/memories/${activeGranularity}"
     hx-trigger="load"
     hx-swap="innerHTML">
@@ -3779,6 +3842,11 @@ function renderMemoryTabActiveState(activeGranularity: string): string {
       : g.charAt(0).toUpperCase() + g.slice(1);
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="/fragments/settings/memories/${g}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -3818,6 +3886,7 @@ export function renderMemoryList(
           type="text"
           class="settings-create-file-input"
           id="significant-title-input"
+          aria-label="Memory title"
           placeholder="Memory title..."
           style="flex: 1 1 100%; padding: 8px; border: 1px solid var(--c-border); border-radius: 6px; background: var(--c-bg-raised); color: var(--c-fg); font-family: inherit; font-size: 13px;"
         />
@@ -3829,6 +3898,7 @@ export function renderMemoryList(
         />
         <textarea
           id="significant-content-input"
+          aria-label="Memory content"
           placeholder="Memory content..."
           rows="2"
           style="flex: 1 1 100%; padding: 8px; border: 1px solid var(--c-border); border-radius: 6px; background: var(--c-bg-raised); color: var(--c-fg); resize: vertical; font-family: inherit; font-size: 13px;"
@@ -4033,6 +4103,7 @@ export function renderMemoryEditor(
       class="settings-textarea"
       name="content"
       data-tokenize
+      aria-label="Memory content"
       placeholder="Memory content..."
       rows="20"
     >${safeContent}</textarea>
@@ -4046,7 +4117,7 @@ export function renderMemoryEditor(
       >Cancel</button>
       <button type="submit" class="btn btn--primary">Save</button>
     </div>
-    <div id="settings-editor-status" class="settings-editor-status"></div>
+    <div id="settings-editor-status" class="settings-editor-status" role="status" aria-live="polite"></div>
   </form>
 </div>`;
 }
@@ -4512,6 +4583,11 @@ export function renderEntityCoreHub(activeTab: string = "overview"): string {
     const isActive = tab.id === activeTab;
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="/fragments/settings/entity-core/${tab.id}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -4530,10 +4606,10 @@ export function renderEntityCoreHub(activeTab: string = "overview"): string {
       </div>
     </div>
   </div>
-  <div class="settings-tabs">
+  <div class="settings-tabs" role="tablist" aria-label="Entity Core sections">
     ${tabsHtml}
   </div>
-  <div class="settings-content" id="settings-content"
+  <div class="settings-content" id="settings-content" role="tabpanel" aria-labelledby="ectab-${activeTab}"
     hx-get="/fragments/settings/entity-core/${activeTab}"
     hx-trigger="load"
     hx-swap="innerHTML">
@@ -4559,6 +4635,11 @@ function renderEntityCoreTabActiveState(activeTab: string): string {
     const label = tab.charAt(0).toUpperCase() + tab.slice(1);
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="/fragments/settings/entity-core/${tab}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -4601,7 +4682,7 @@ export function renderEntityCoreOverview(data: EntityCoreOverviewData): string {
     </div>
     <p>Entity-core is not connected. Enable MCP in your environment with
       <code>PSYCHEROS_MCP_ENABLED=true</code> to manage identity, memories, and knowledge graph.</p>
-    <a class="btn btn--primary"
+    <a href="/fragments/settings/connections" class="btn btn--primary"
       hx-get="/fragments/settings/connections"
       hx-target="#chat"
       hx-swap="innerHTML">
@@ -5056,9 +5137,9 @@ export function renderEntityCoreGraph(
       </div>
     </div>
     <div class="gv-header-actions">
-      <div class="gv-view-toggle" id="gv-view-toggle">
-        <button class="gv-view-toggle-btn active" data-view="list">List</button>
-        <button class="gv-view-toggle-btn" data-view="graph">Network</button>
+      <div class="gv-view-toggle" id="gv-view-toggle" role="group" aria-label="Knowledge graph view">
+        <button type="button" class="gv-view-toggle-btn active" data-view="list" aria-pressed="true" aria-controls="gv-list-view">List</button>
+        <button type="button" class="gv-view-toggle-btn" data-view="graph" aria-pressed="false" aria-controls="gv-graph-view">Network</button>
       </div>
       <button id="graph-refresh" class="btn btn--ghost btn--sm" title="Refresh">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -5070,7 +5151,7 @@ export function renderEntityCoreGraph(
   </div>
 
   <div class="gv-toolbar">
-    <input type="text" id="graph-search" placeholder="Search nodes..." class="gv-search" />
+    <input type="text" id="graph-search" aria-label="Search nodes" placeholder="Search nodes..." class="gv-search" />
     <select id="graph-filter-type" class="gv-filter">
       <option value="">All types</option>
     </select>
@@ -5091,26 +5172,27 @@ export function renderEntityCoreGraph(
   </div>
 
   <div id="gv-graph-view" class="gv-hidden">
-    <div id="graph-container" class="gv-canvas">
+    <p id="graph-network-help" class="sr-only">Use arrow keys to pan and plus or minus to zoom. Switch to List for node names, relationships, and actions.</p>
+    <div id="graph-container" class="gv-canvas" role="region" aria-label="Knowledge graph network" aria-describedby="graph-network-help">
       <div class="gv-loading"><div class="gv-spinner"></div></div>
     </div>
-    <div id="graph-node-panel" class="gv-panel">
+    <div id="graph-node-panel" class="gv-panel" inert>
       <div class="gv-panel-header">
         <h3 id="panel-node-label">Node</h3>
-        <button id="panel-close" class="btn btn--ghost btn--sm">&times;</button>
+        <button id="panel-close" class="btn btn--ghost btn--sm" aria-label="Close node panel">&times;</button>
       </div>
       <div class="gv-panel-body" id="panel-content"></div>
     </div>
   </div>
 
   <!-- Create Node Modal -->
-  <div id="graph-create-modal" class="gv-modal">
+  <div id="graph-create-modal" class="gv-modal" role="dialog" aria-modal="true" aria-labelledby="graph-create-title">
     <div class="gv-modal-box">
-      <h3>Create Node</h3>
+      <h3 id="graph-create-title">Create Node</h3>
       <form id="create-node-form">
         <div class="gv-field">
           <label for="node-type">Type</label>
-          <select id="node-type" name="type" required>
+          <select id="node-type" name="type" aria-required="true">
             <option value="person">Person</option>
             <option value="emotion">Emotion</option>
             <option value="topic" selected>Topic</option>
@@ -5125,7 +5207,7 @@ export function renderEntityCoreGraph(
         </div>
         <div class="gv-field">
           <label for="node-label">Label</label>
-          <input type="text" id="node-label" name="label" required placeholder="e.g. hiking, my partner, anxiety" />
+          <input type="text" id="node-label" name="label" aria-required="true" placeholder="e.g. hiking, my partner, anxiety" />
         </div>
         <div class="gv-field">
           <label for="node-description">Description</label>
@@ -5140,14 +5222,14 @@ export function renderEntityCoreGraph(
   </div>
 
   <!-- Edit Node Modal -->
-  <div id="graph-edit-modal" class="gv-modal">
+  <div id="graph-edit-modal" class="gv-modal" role="dialog" aria-modal="true" aria-labelledby="graph-edit-title">
     <div class="gv-modal-box gv-modal-box--wide">
-      <h3>Edit Node</h3>
+      <h3 id="graph-edit-title">Edit Node</h3>
       <form id="edit-node-form">
         <input type="hidden" id="edit-node-id" />
         <div class="gv-field">
           <label for="edit-node-type">Type</label>
-          <select id="edit-node-type" name="type" required>
+          <select id="edit-node-type" name="type" aria-required="true">
             <option value="person">Person</option>
             <option value="emotion">Emotion</option>
             <option value="topic">Topic</option>
@@ -5162,16 +5244,16 @@ export function renderEntityCoreGraph(
         </div>
         <div class="gv-field">
           <label for="edit-node-label">Label</label>
-          <input type="text" id="edit-node-label" required />
+          <input type="text" id="edit-node-label" aria-required="true" />
         </div>
         <div class="gv-field">
           <label for="edit-node-description">Description</label>
           <textarea id="edit-node-description" rows="2"></textarea>
         </div>
         <div class="gv-field" id="edit-connections-field" style="display:none">
-          <label>Connections</label>
+          <div class="gv-field-heading">Connections</div>
           <div id="edit-connections-list" class="gv-edit-conns"></div>
-          <button type="button" class="btn btn--ghost btn--sm" id="edit-add-conn">+ Add Connection</button>
+          <button type="button" class="btn btn--ghost btn--sm" id="edit-add-conn"><span><span aria-hidden="true">+</span> Add Connection</span></button>
         </div>
         <div class="gv-modal-actions">
           <button type="button" class="btn btn--ghost" id="cancel-edit">Cancel</button>
@@ -5182,29 +5264,29 @@ export function renderEntityCoreGraph(
   </div>
 
   <!-- Edge Creation Modal -->
-  <div id="graph-edge-modal" class="gv-modal">
+  <div id="graph-edge-modal" class="gv-modal" role="dialog" aria-modal="true" aria-labelledby="graph-edge-title">
     <div class="gv-modal-box">
-      <h3>Connect Nodes</h3>
+      <h3 id="graph-edge-title">Connect Nodes</h3>
       <form id="edge-create-form">
         <div class="gv-field">
-          <label>From</label>
+          <label for="edge-from-search">From</label>
           <div class="gv-node-picker" id="edge-from-picker">
-            <input type="text" class="gv-node-search-input" placeholder="Search nodes..." autocomplete="off" />
+            <input type="text" id="edge-from-search" class="gv-node-search-input" placeholder="Search nodes..." autocomplete="off" />
             <div class="gv-node-search-results" id="edge-from-results"></div>
-            <input type="hidden" id="edge-from" name="fromId" required />
+            <input type="hidden" id="edge-from" name="fromId" />
           </div>
         </div>
         <div class="gv-field">
-          <label>To</label>
+          <label for="edge-to-search">To</label>
           <div class="gv-node-picker" id="edge-to-picker">
-            <input type="text" class="gv-node-search-input" placeholder="Search nodes..." autocomplete="off" />
+            <input type="text" id="edge-to-search" class="gv-node-search-input" placeholder="Search nodes..." autocomplete="off" />
             <div class="gv-node-search-results" id="edge-to-results"></div>
-            <input type="hidden" id="edge-to" name="toId" required />
+            <input type="hidden" id="edge-to" name="toId" />
           </div>
         </div>
         <div class="gv-field">
           <label for="edge-type">Relationship</label>
-          <input type="text" id="edge-type" name="type" list="edge-type-suggestions" required placeholder="e.g. loves, works_with, values" />
+          <input type="text" id="edge-type" name="type" list="edge-type-suggestions" aria-required="true" placeholder="e.g. loves, works_with, values" />
           <datalist id="edge-type-suggestions">
             <option value="loves"><option value="close_to"><option value="friend_of">
             <option value="works_with"><option value="values"><option value="believes_in">
@@ -5228,9 +5310,10 @@ export function renderEntityCoreGraph(
   </div>
 
   <!-- Delete Confirmation Modal -->
-  <div id="graph-delete-modal" class="gv-modal">
+  <div id="graph-delete-modal" class="gv-modal" role="dialog" aria-modal="true"
+    aria-labelledby="graph-delete-title" aria-describedby="delete-confirm-msg">
     <div class="gv-modal-box gv-delete-confirm">
-      <h3>Delete Node</h3>
+      <h3 id="graph-delete-title">Delete Node</h3>
       <p id="delete-confirm-msg" class="gv-delete-msg">Are you sure?</p>
       <div class="gv-modal-actions">
         <button type="button" class="btn btn--ghost" id="cancel-delete">Cancel</button>
@@ -5746,7 +5829,9 @@ export function renderLLMProfileHub(settings: LLMProfileSettings): string {
     const isActive = p.id === settings.activeProfileId;
     const preset = LLM_PROVIDER_PRESETS[p.provider];
     return `
-    <a class="settings-hub-card ${isActive ? "settings-hub-card--active" : ""}"
+    <a href="/fragments/settings/llm/${
+      escapeHtml(p.id)
+    }" class="settings-hub-card ${isActive ? "settings-hub-card--active" : ""}"
        hx-get="/fragments/settings/llm/${escapeHtml(p.id)}"
        hx-target="#chat"
        hx-swap="innerHTML">
@@ -5820,6 +5905,11 @@ export function renderModelSettingsShell(
       : "/fragments/settings/llm/embeddings";
     return `<button
       class="settings-tab${isActive ? " active" : ""}"
+      role="tab"
+      aria-selected="${isActive}"
+      aria-controls="settings-content"
+      tabindex="${isActive ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="${path}"
       hx-target="#chat"
       hx-swap="innerHTML"
@@ -5843,10 +5933,10 @@ export function renderModelSettingsShell(
       </div>
     </div>
   </div>
-  <div class="settings-tabs">
+  <div class="settings-tabs" role="tablist" aria-label="Model settings">
     ${tabsHtml}
   </div>
-  <div class="settings-content" id="settings-content">
+  <div class="settings-content" id="settings-content" role="tabpanel" aria-labelledby="model-tab-${activeTab}">
     ${contentHtml}
   </div>
 </div>`;
@@ -5949,7 +6039,7 @@ export function renderEmbeddingsTab(
     escapeHtml(activePreset?.label ?? settings.modelRepoId)
   }</span>${activePreset ? ` (${activePreset.downloadSizeMb}MB)` : ""}
         </button>
-        <span id="embedding-download-status" class="theme-section-desc" style="margin-left:8px;"></span>
+        <span id="embedding-download-status" class="theme-section-desc" role="status" aria-live="polite" style="margin-left:8px;"></span>
       </div>
       <div id="embedding-downloaded-badge" class="theme-section-desc" style="${
     activeDownloaded ? "" : "display:none;"
@@ -5993,7 +6083,7 @@ export function renderEmbeddingsTab(
 
     <div style="margin-top: 16px;">
       <button id="embedding-save-btn" class="btn btn--primary" onclick="globalThis.saveEmbeddingSettings()">Save & Re-embed</button>
-      <span id="embedding-save-status" class="theme-section-desc" style="margin-left:12px;"></span>
+      <span id="embedding-save-status" class="theme-section-desc" role="status" aria-live="polite" style="margin-left:12px;"></span>
     </div>
 
     <div id="embedding-reembed-progress" class="import-progress" style="display:none;margin-top:16px;">
@@ -6097,7 +6187,7 @@ export function renderLLMProfileEdit(
             <input type="password" id="llm-api-key" class="input-field llm-input" value="${
     escapeHtml(maskedKey)
   }" placeholder="Enter API key...">
-            <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleApiKeyVisibility()" title="Show/hide key">
+            <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show LLM API key" title="Show LLM API key" data-key-label="LLM API key" onclick="toggleApiKeyVisibility(this)">
               <svg id="eye-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                 <circle cx="12" cy="12" r="3"/>
@@ -6295,7 +6385,7 @@ export function renderLLMProfileEdit(
     </div>
 
     <!-- Status -->
-    <div id="llm-status" class="llm-status" style="display:none;"></div>
+    <div id="llm-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
   </div>
 </div>
@@ -6352,7 +6442,7 @@ export function renderLLMSettings(_settings: LLMSettings): string {
     </div>
   </div>
   <div class="settings-content" id="settings-content">
-    <div class="llm-status" style="display:block;">This settings page has been updated. Please refresh.</div>
+    <div class="llm-status" role="status" aria-live="polite" style="display:block;">This settings page has been updated. Please refresh.</div>
   </div>
 </div>`;
 }
@@ -6667,7 +6757,7 @@ export function renderConnectionsSettings(
     </div>
 
     <!-- Status -->
-    <div id="ws-status" class="llm-status" style="display:none;"></div>
+    <div id="ws-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
     </div>
 
@@ -6734,7 +6824,7 @@ export function renderConnectionsSettings(
           </button>
           <button class="btn btn--primary btn--xs" onclick="saveBLEDevices()">Save Devices</button>
         </div>
-        <div id="ble-devices-status" style="margin-top:8px;display:none;" class="llm-status"></div>
+        <div id="ble-devices-status" style="margin-top:8px;display:none;" class="llm-status" role="status" aria-live="polite"></div>
       </section>
       <template id="ble-blank-device-row">${renderBLEDeviceRow()}</template>
     </div>
@@ -6761,7 +6851,7 @@ export function renderConnectionsSettings(
 function renderChannelsTab(settings: DiscordSettings): string {
   return `<div class="settings-hub-grid">
 
-      <a class="settings-hub-card"
+      <a href="/fragments/settings/connections/discord" class="settings-hub-card"
         hx-get="/fragments/settings/connections/discord"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -6881,7 +6971,7 @@ export function renderConnectionsDiscordSettings(
       <hr class="settings-divider">
       <div class="llm-fields" style="margin-top:var(--sp-4);">
         <div class="llm-field">
-          <label class="settings-label">DM Whitelist</label>
+          <div class="settings-label llm-field-heading">DM Whitelist</div>
           <span class="field-hint">Only whitelisted users can DM the entity. Add users by their Discord user ID.</span>
           <div id="dm-whitelist" class="dm-whitelist">
             ${
@@ -6906,7 +6996,7 @@ export function renderConnectionsDiscordSettings(
           }</span>`
           : ""
       }
-                  <input class="settings-input dm-wl-edit-notes" value="${
+                  <input class="settings-input dm-wl-edit-notes" aria-label="Notes" value="${
         escapeHtml(e.notes)
       }" style="display:none;font-size:var(--font-size-sm);flex:1;" placeholder="Notes">
                 </div>
@@ -6963,15 +7053,15 @@ export function renderConnectionsDiscordSettings(
     settings.gatewayEnabled ? "" : "display:none;"
   }">
           <div class="llm-field">
-            <label class="settings-label">Global Instructions</label>
-            <textarea class="settings-textarea" id="discord-global-instructions" rows="3"
+            <label class="settings-label" for="discord-global-instructions">Global Instructions</label>
+            <textarea class="settings-textarea" id="discord-global-instructions" rows="3" aria-label="Global Instructions"
               placeholder="Instructions that apply to all Discord channels...">${
     escapeHtml(settings.globalInstructions)
   }</textarea>
             <span class="field-hint">Write from the entity's perspective, in first-person</span>
           </div>
           <div class="llm-field">
-            <label class="settings-label">LLM Profile for Server Channels</label>
+            <div class="settings-label llm-field-heading">LLM Profile for Server Channels</div>
             ${llmProfileDropdown}
             <span class="field-hint">Used for server-channel responses — e.g. an economical model for chatter. Direct messages and private chat always use the active profile.</span>
           </div>
@@ -6986,18 +7076,18 @@ export function renderConnectionsDiscordSettings(
             <span class="field-hint">Summarize Discord activity into daily memories (pre-summarized, not raw messages)</span>
           </div>
           <div class="llm-field" id="discord-memory-instructions-field">
-            <label class="settings-label">Memory Writer Instructions</label>
-            <textarea class="settings-textarea" id="discord-memory-instructions" rows="3"
+            <label class="settings-label" for="discord-memory-instructions">Memory Writer Instructions</label>
+            <textarea class="settings-textarea" id="discord-memory-instructions" rows="3" aria-label="Memory Writer Instructions"
               placeholder="e.g. @superdog420 is James — write memories about him as James">${
     escapeHtml(gc?.memoryInstructions ?? "")
   }</textarea>
             <span class="field-hint">Write from the entity's perspective, in first-person. e.g. "@superdog420 is James — when I write memories about him, use his real name"</span>
           </div>
           <div class="llm-field">
-            <label class="settings-label">Servers & Channels</label>
+            <div class="settings-label llm-field-heading">Servers & Channels</div>
             <p class="settings-note">
               Configure servers and channels from the
-              <a hx-get="/fragments/discord" hx-target="#chat" hx-swap="innerHTML"
+              <a href="/fragments/discord" hx-get="/fragments/discord" hx-target="#chat" hx-swap="innerHTML"
                  style="color:var(--c-accent);cursor:pointer;">Discord Hub</a>.
             </p>
           </div>
@@ -7011,7 +7101,7 @@ export function renderConnectionsDiscordSettings(
             </label>
           </div>
           <div class="llm-field">
-            <label class="settings-label">Allowed Tools (comma-separated)</label>
+            <label class="settings-label" for="discord-allowed-tools">Allowed Tools (comma-separated)</label>
             <input class="settings-input" id="discord-allowed-tools"
               value="${
     gc?.allowedTools.join(", ") ??
@@ -7021,19 +7111,19 @@ export function renderConnectionsDiscordSettings(
           </div>
           <div class="llm-field-row" style="display:flex;gap:var(--sp-4);">
             <div class="llm-field inline" style="flex:1;">
-              <label class="settings-label">Blocked Bot IDs</label>
+              <label class="settings-label" for="discord-blocked-bots">Blocked Bot IDs</label>
               <input class="settings-input" id="discord-blocked-bots"
                 value="${gc?.blockedBotIds.join(", ") ?? ""}">
               <span class="field-hint">Comma-separated bot user IDs to ignore</span>
             </div>
             <div class="llm-field inline" style="flex:1;">
-              <label class="settings-label">Debounce (ms)</label>
+              <label class="settings-label" for="discord-debounce">Debounce (ms)</label>
               <input class="settings-input" type="number" id="discord-debounce"
                 value="${gc?.debounceWindowMs ?? 5000}" min="1000" max="30000">
               <span class="field-hint">Wait time before responding (default: 5000)</span>
             </div>
             <div class="llm-field inline" style="flex:1;">
-              <label class="settings-label">Max Buffer</label>
+              <label class="settings-label" for="discord-max-buffer">Max Buffer</label>
               <input class="settings-input" type="number" id="discord-max-buffer"
                 value="${gc?.maxBufferSize ?? 50}" min="5" max="200">
               <span class="field-hint">Max messages before forced response (default: 50)</span>
@@ -7053,7 +7143,7 @@ export function renderConnectionsDiscordSettings(
       <button class="btn btn--ghost" onclick="resetDiscordDefaults(event)">Reset to Defaults</button>
     </div>
 
-    <div id="discord-status" class="llm-status" style="display:none;"></div>
+    <div id="discord-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
   </div>
 </div>
@@ -7073,7 +7163,7 @@ function renderDmWhitelistUI() {
   if (!container) return;
   fetch('/api/discord/dm-whitelist').then(r => r.json()).then(data => {
     if (data.entries.length > 0) {
-      container.innerHTML = data.entries.map(e => '<div class="dm-whitelist-entry" data-user-id="' + e.userId + '"><div class="dm-whitelist-info"><strong class="dm-wl-display">' + e.username + '</strong><input class="settings-input dm-wl-edit-username" value="' + e.username + '" style="display:none;font-size:var(--font-size-sm);"><span class="dm-wl-display dm-whitelist-meta">' + e.userId + '</span>' + (e.notes ? '<span class="dm-wl-display dm-whitelist-notes">' + e.notes + '</span>' : '') + '<input class="settings-input dm-wl-edit-notes" value="' + (e.notes || '') + '" style="display:none;font-size:var(--font-size-sm);flex:1;" placeholder="Notes"></div><div class="dm-whitelist-actions"><button class="btn btn--ghost btn--sm dm-whitelist-edit" data-user-id="' + e.userId + '" title="Edit">edit</button><button class="btn btn--ghost btn--sm dm-whitelist-save" data-user-id="' + e.userId + '" style="display:none;" title="Save">save</button><button class="btn btn--ghost btn--sm dm-whitelist-remove" data-user-id="' + e.userId + '" title="Remove">&times;</button></div></div>').join("");
+      container.innerHTML = data.entries.map(e => '<div class="dm-whitelist-entry" data-user-id="' + e.userId + '"><div class="dm-whitelist-info"><strong class="dm-wl-display">' + e.username + '</strong><input class="settings-input dm-wl-edit-username" value="' + e.username + '" style="display:none;font-size:var(--font-size-sm);"><span class="dm-wl-display dm-whitelist-meta">' + e.userId + '</span>' + (e.notes ? '<span class="dm-wl-display dm-whitelist-notes">' + e.notes + '</span>' : '') + '<input class="settings-input dm-wl-edit-notes" aria-label="Notes" value="' + (e.notes || '') + '" style="display:none;font-size:var(--font-size-sm);flex:1;" placeholder="Notes"></div><div class="dm-whitelist-actions"><button class="btn btn--ghost btn--sm dm-whitelist-edit" data-user-id="' + e.userId + '" title="Edit">edit</button><button class="btn btn--ghost btn--sm dm-whitelist-save" data-user-id="' + e.userId + '" style="display:none;" title="Save">save</button><button class="btn btn--ghost btn--sm dm-whitelist-remove" data-user-id="' + e.userId + '" title="Remove">&times;</button></div></div>').join("");
       container.querySelectorAll('.dm-whitelist-remove').forEach(btn => {
         btn.addEventListener('click', () => removeDmWhitelistEntry(btn.dataset.userId));
       });
@@ -7362,7 +7452,7 @@ function renderLovenseTab(
       <h3 class="theme-section-title">Test Connection</h3>
       <p class="theme-section-desc">Verify the connection to Lovense Connect and discover connected toys</p>
       <button class="btn btn--secondary" id="lovense-test-btn" onclick="testLovenseConnection()">Test Connection</button>
-      <div id="lovense-test-status" class="llm-status" style="display:none; margin-top: var(--sp-2);"></div>
+      <div id="lovense-test-status" class="llm-status" role="status" aria-live="polite" style="display:none; margin-top: var(--sp-2);"></div>
       <div id="lovense-toys-list" style="display:none; margin-top: var(--sp-2);">
         <div class="lovense-toys-grid"></div>
       </div>
@@ -7378,7 +7468,7 @@ function renderLovenseTab(
       <p class="theme-section-desc">Instructions for me when I'm using connected Lovense devices. Only included in my context when a device is connected.</p>
       <div class="llm-fields">
         <div class="llm-field">
-          <textarea id="lovense-custom-instructions" class="input-field llm-input" rows="4" placeholder="e.g. Start slow, ramp up gradually, prefer pattern mode...">${
+          <textarea id="lovense-custom-instructions" class="input-field llm-input" rows="4" aria-label="Custom instructions" placeholder="e.g. Start slow, ramp up gradually, prefer pattern mode...">${
     escapeHtml(settings.customInstructions ?? "")
   }</textarea>
         </div>
@@ -7393,7 +7483,7 @@ function renderLovenseTab(
     </div>
 
     <!-- Status -->
-    <div id="lovense-status" class="llm-status" style="display:none;"></div>
+    <div id="lovense-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
     <style>
       .lovense-toys-grid { display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -7601,7 +7691,7 @@ function renderButtplugTab(
       <h3 class="theme-section-title">Test Connection</h3>
       <p class="theme-section-desc">Verify the connection to Intiface Central and discover connected devices</p>
       <button class="btn btn--secondary" id="buttplug-test-btn" onclick="testButtplugConnection()">Test Connection</button>
-      <div id="buttplug-test-status" class="llm-status" style="display:none; margin-top: var(--sp-2);"></div>
+      <div id="buttplug-test-status" class="llm-status" role="status" aria-live="polite" style="display:none; margin-top: var(--sp-2);"></div>
       <div id="buttplug-devices-list" style="display:none; margin-top: var(--sp-2);">
         <div class="buttplug-devices-grid"></div>
       </div>
@@ -7613,7 +7703,7 @@ function renderButtplugTab(
       <p class="theme-section-desc">Instructions for me when I'm using connected Intiface devices. Only included in my context when a device is connected.</p>
       <div class="llm-fields">
         <div class="llm-field">
-          <textarea id="buttplug-custom-instructions" class="input-field llm-input" rows="4" placeholder="e.g. Start slow, prefer vibration over rotation...">${
+          <textarea id="buttplug-custom-instructions" class="input-field llm-input" rows="4" aria-label="Custom instructions" placeholder="e.g. Start slow, prefer vibration over rotation...">${
     escapeHtml(settings.customInstructions ?? "")
   }</textarea>
         </div>
@@ -7628,7 +7718,7 @@ function renderButtplugTab(
     </div>
 
     <!-- Status -->
-    <div id="buttplug-status" class="llm-status" style="display:none;"></div>
+    <div id="buttplug-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
     <style>
       .intimacy-section-header { margin: var(--sp-8) 0 var(--sp-4) 0; padding-bottom: var(--sp-3); border-bottom: 1px solid var(--c-border); }
@@ -7900,7 +7990,7 @@ function renderHomeSettingsContent(
       <button class="btn btn--primary" onclick="saveHomeSettings(event)">Save Settings</button>
     </div>
 
-    <div id="home-status" class="llm-status" style="display:none;"></div>
+    <div id="home-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
   <style>
     .home-device-list { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
@@ -8176,10 +8266,10 @@ export function renderSkillsListSection(skills: SkillMeta[]): string {
       : "";
     return `<div class="custom-tool-row" style="display:flex;align-items:flex-start;gap:var(--sp-2);">
   <div style="flex:1;min-width:0;">
-    <label class="tool-item">
+    <div class="tool-item">
       <span class="tool-item-name">${escapeHtml(skill.name)}${badge}</span>
       <span class="tool-item-desc">${escapeHtml(skill.description)}</span>
-    </label>
+    </div>
   </div>
   <button class="btn btn--xs" onclick="psycherosSkillsEdit('${
       escapeHtml(skill.name)
@@ -8388,7 +8478,7 @@ export function renderToolsSettings(
     </div>
 
     <!-- Status -->
-    <div id="tools-status" class="llm-status" style="display:none;"></div>
+    <div id="tools-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
 
   </div>
 
@@ -8700,6 +8790,7 @@ export function renderInstructionsTab(settings: MemorySettings): string {
           class="settings-textarea"
           name="dailyInstructions"
           rows="8"
+          aria-label="Custom daily memory instructions"
           placeholder="e.g. I do not include vitamin reminders in my daily memories. I always mention how I felt about creative projects. When I remember conversations about music, I name specific songs or artists that came up."
         >${escapeHtml(settings.dailyInstructions)}</textarea>
       </div>
@@ -8727,7 +8818,7 @@ export function renderInstructionsTab(settings: MemorySettings): string {
         <button class="btn btn--primary" type="submit">
           Save
         </button>
-        <span id="instructions-save-status"></span>
+        <span id="instructions-save-status" role="status" aria-live="polite"></span>
       </div>
     </form>
   </div>
@@ -8758,7 +8849,7 @@ export function renderVisionSettings(
     </div>
   </div>
   ${renderVisionTabs("generators")}
-  <div class="settings-content" id="settings-content"
+  <div class="settings-content" id="settings-content" role="tabpanel" aria-labelledby="visiontab-generators"
     hx-get="/fragments/settings/vision/generators"
     hx-trigger="load"
     hx-swap="innerHTML">
@@ -8777,11 +8868,16 @@ function renderVisionTabs(activeTab: string): string {
     { id: "gallery", label: "Gallery" },
   ];
 
-  return `<div class="settings-tabs">
+  return `<div class="settings-tabs" role="tablist" aria-label="Vision settings">
     ${
     tabs.map((tab) =>
       `<button
         class="settings-tab${tab.id === activeTab ? " active" : ""}"
+        role="tab"
+        aria-selected="${tab.id === activeTab}"
+        aria-controls="settings-content"
+        tabindex="${tab.id === activeTab ? "0" : "-1"}"
+        onkeydown="settingsTablistKeydown(event)"
         hx-get="/fragments/settings/vision/${tab.id}"
         hx-target="#settings-content"
         hx-swap="innerHTML"
@@ -8800,6 +8896,11 @@ function renderVisionTabActiveState(activeTab: string): string {
   return tabs.map((tab) =>
     `<button
       class="settings-tab${tab === activeTab ? " active" : ""}"
+      role="tab"
+      aria-selected="${tab === activeTab}"
+      aria-controls="settings-content"
+      tabindex="${tab === activeTab ? "0" : "-1"}"
+      onkeydown="settingsTablistKeydown(event)"
       hx-get="/fragments/settings/vision/${tab}"
       hx-target="#settings-content"
       hx-swap="innerHTML"
@@ -8814,7 +8915,9 @@ function renderVisionTabActiveState(activeTab: string): string {
  */
 export function renderVisionGeneratorsTab(settings: ImageGenSettings): string {
   const cards = settings.generators.map((g) => `
-    <a class="settings-hub-card"
+    <a href="/fragments/settings/vision/image-gen/${
+    escapeHtml(g.id)
+  }" class="settings-hub-card"
       hx-get="/fragments/settings/vision/image-gen/${escapeHtml(g.id)}"
       hx-target="#chat"
       hx-swap="innerHTML">
@@ -9026,10 +9129,10 @@ export function renderVisionAnchorsTab(
     escapeHtml(a.label)
   }" loading="lazy"/>
       <div class="anchor-info">
-        <input type="text" class="input-field anchor-label" value="${
+        <input type="text" class="input-field anchor-label" aria-label="Anchor label" value="${
     escapeHtml(a.label)
   }" placeholder="Label" style="font-size:var(--font-size-sm);padding:var(--sp-1) var(--sp-2);margin-bottom:var(--sp-1);">
-        <input type="text" class="input-field anchor-desc" value="${
+        <input type="text" class="input-field anchor-desc" aria-label="Anchor description" value="${
     escapeHtml(a.description)
   }" placeholder="Description" style="font-size:var(--font-size-xs);padding:var(--sp-1) var(--sp-2);color:var(--c-fg-muted);">
         <div class="anchor-meta">${(a.file_size / 1024).toFixed(1)} KB</div>
@@ -9068,7 +9171,7 @@ export function renderVisionAnchorsTab(
     <h3 style="font-size:var(--font-size-sm);color:var(--c-fg-muted);">Upload Anchor Image</h3>
     <form id="anchor-upload-form" style="display:flex;gap:var(--sp-3);align-items:end;flex-wrap:wrap;">
       <div class="llm-field" style="flex:0 0 auto;">
-        <label>File</label>
+        <div class="llm-field-heading">File</div>
         <label class="btn btn--sm" style="position:relative;overflow:hidden;cursor:pointer;">
           Choose File
           <input type="file" id="anchor-file" accept="image/*" style="position:absolute;inset:0;opacity:0;cursor:pointer;" onchange="document.getElementById('anchor-file-name').textContent = this.files[0]?.name || ''" />
@@ -9179,7 +9282,9 @@ export function renderVisionGalleryTab(data: {
         escapeHtml(img.category)
       }"${promptAttr}>
       <div class="gallery-thumb-wrap">
-        <img src="${escapedThumb}" class="gallery-thumb" loading="lazy" onclick="openLightbox('${escapedUrl}','${escapedFilename}')"/>
+        <button type="button" class="gallery-thumb-btn" aria-label="Open image ${escapedFilename}" onclick="openLightbox('${escapedUrl}','${escapedFilename}',this)">
+        <img src="${escapedThumb}" class="gallery-thumb" loading="lazy" alt=""/>
+        </button>
         <span class="gallery-badge ${categoryClass}">${categoryLabel}</span>
       </div>
       <div class="gallery-meta">
@@ -9211,7 +9316,9 @@ export function renderVisionGalleryTab(data: {
     .gallery-card { border: 1px solid var(--c-border); border-radius: var(--radius-md); overflow: hidden; background: var(--c-bg); transition: border-color var(--transition); }
     .gallery-card:hover { border-color: var(--c-accent); }
     .gallery-thumb-wrap { position: relative; }
-    .gallery-thumb { width: 100%; aspect-ratio: 1; object-fit: cover; cursor: pointer; display: block; }
+    .gallery-thumb-btn { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+    .gallery-thumb-btn:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+    .gallery-thumb { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
     .gallery-badge { position: absolute; top: 6px; left: 6px; font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: var(--radius-sm); pointer-events: none; text-transform: uppercase; letter-spacing: 0.3px; }
     .gallery-badge--generated { background: var(--c-scrim-strong); color: #fff; }
     .gallery-badge--user { background: var(--c-fg); color: var(--c-bg); }
@@ -9230,7 +9337,7 @@ export function renderVisionGalleryTab(data: {
       .gallery-lightbox-close { top: 8px; right: 8px; width: 40px; height: 40px; }
       .gallery-lightbox-info { padding: 0 12px; }
     }
-    .gallery-lightbox-info { color: #ccc; font-size: var(--font-size-sm); font-family: var(--font-mono, monospace); text-align: center; max-width: 90vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .gallery-lightbox-info { color: #ccc; font-size: var(--font-size-sm); font-family: var(--font-mono, monospace); text-align: center; max-width: 90vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
     .gallery-lightbox-close { position: absolute; top: var(--sp-4); right: var(--sp-4); background: rgba(255,255,255,0.1); border: none; color: #fff; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; }
     .gallery-lightbox-close:hover { background: rgba(255,255,255,0.2); }
   </style>
@@ -9273,7 +9380,7 @@ export function renderImageGenSlotSettings(
   return `<div class="settings-view">
   <div class="settings-header">
     <div class="settings-header-row">
-      <a class="settings-back-btn"
+      <a href="/fragments/settings/vision" class="settings-back-btn"
         hx-get="/fragments/settings/vision"
         hx-target="#chat"
         hx-swap="innerHTML">
@@ -9625,7 +9732,7 @@ export function renderDiscordHub(data: DiscordHubData): string {
   );
 
   const renderConversationItem = (c: typeof data.conversations[0]) => `
-    <a class="discord-conversation-item"
+    <a href="/fragments/discord/channel/${c.sourceChannelId}" class="discord-conversation-item"
        hx-get="/fragments/discord/channel/${c.sourceChannelId}"
        hx-target="#chat"
        hx-swap="innerHTML">
@@ -9702,7 +9809,7 @@ export function renderDiscordHub(data: DiscordHubData): string {
           hx-target="#chat"
           hx-swap="innerHTML">Settings</button>
       </div>
-      <div id="discord-hub-status" class="llm-status" style="display:none;"></div>
+      <div id="discord-hub-status" class="llm-status" role="status" aria-live="polite" style="display:none;"></div>
     `
       : `
       <div class="discord-info-bar">
@@ -9782,7 +9889,7 @@ async function loadDiscordChannelPicker() {
         html += '<option value="lurk"' + (mode === 'lurk' ? ' selected' : '') + '>Lurk</option>';
         html += '<option value="strict"' + (mode === 'strict' ? ' selected' : '') + '>Strict</option>';
         html += '</select>';
-        html += '<input type="text" class="settings-input discord-picker-instructions" placeholder="Instructions" value="' + instr.replace(/"/g, '&quot;') + '" style="flex:1;min-width:0;">';
+        html += '<input type="text" class="settings-input discord-picker-instructions" aria-label="Instructions" placeholder="Instructions" value="' + instr.replace(/"/g, '&quot;') + '" style="flex:1;min-width:0;">';
         html += '</div>';
       });
       html += '</div></div>';
@@ -10158,7 +10265,9 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
       s.value === p.providerSettings.stt.provider
     )?.label || p.providerSettings.stt.provider;
     return `
-    <a class="settings-hub-card ${isActive ? "settings-hub-card--active" : ""}"
+    <a href="/fragments/settings/voice/${
+      escapeHtml(p.id)
+    }" class="settings-hub-card ${isActive ? "settings-hub-card--active" : ""}"
        hx-get="/fragments/settings/voice/${escapeHtml(p.id)}"
        hx-target="#chat"
        hx-swap="innerHTML">
@@ -10239,15 +10348,17 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
     (settings.pttKeys ?? ["Space"]).map((key, i) =>
       `<span class="ptt-key-chip" data-index="${i}">
               <span>${escapeHtml(formatPTTKey(key))}</span>
-              <button type="button" onclick="removePTTKeyBinding(${i})" style="background: none; border: none; color: var(--c-fg-subtle); cursor: pointer; padding: 0 0 0 4px; font-size: var(--font-size-xs);">&times;</button>
+              <button type="button" onclick="removePTTKeyBinding(${i})" aria-label="Remove ${
+        escapeHtml(formatPTTKey(key))
+      } binding" style="background: none; border: none; color: var(--c-fg-subtle); cursor: pointer; padding: 0 0 0 4px; font-size: var(--font-size-xs);">&times;</button>
             </span>`
     ).join("")
   }
-          <button type="button" class="btn btn--ghost btn--sm" id="ptt-add-key-btn" onclick="capturePTTKey()" style="font-size: var(--font-size-xs);">+ Add binding</button>
+          <button type="button" class="btn btn--ghost btn--sm" id="ptt-add-key-btn" onclick="capturePTTKey()" aria-disabled="false" style="font-size: var(--font-size-xs);"><span><span aria-hidden="true">+</span> Add binding</span></button>
         </div>
-        <div id="ptt-capture-hint" style="display: none; margin-top: var(--sp-2); font-size: var(--font-size-xs); color: var(--c-accent);">
-          Press any key or mouse button...
-          <button type="button" class="btn btn--ghost btn--sm" onclick="cancelPTTKeyCapture()" style="margin-left: var(--sp-2);">Cancel</button>
+        <div id="ptt-capture-hint" style="margin-top: 0; font-size: var(--font-size-xs); color: var(--c-accent);">
+          <span id="ptt-capture-status" role="status" aria-live="polite"></span>
+          <button type="button" class="btn btn--ghost btn--sm" onclick="cancelPTTKeyCapture()" hidden style="margin-left: var(--sp-2);">Cancel</button>
         </div>
       </div>
     </div>
@@ -10270,7 +10381,7 @@ export function renderVoiceProfileHub(settings: VoiceSettings): string {
       <div id="voice-chat-debug-panel" style="${
     settings.voiceChatDebug ? "" : "display: none;"
   }">
-        <textarea id="voice-chat-debug-log" readonly rows="8" class="input-field" style="font-family: monospace; font-size: 11px; white-space: pre; resize: vertical; width: 100%; box-sizing: border-box;" placeholder="Click 'Run test' to capture diagnostic info, or start a voice call — events will appear here."></textarea>
+      <textarea id="voice-chat-debug-log" readonly rows="8" class="input-field" aria-label="Voice chat debug log" style="font-family: monospace; font-size: 11px; white-space: pre; resize: vertical; width: 100%; box-sizing: border-box;" placeholder="Click 'Run test' to capture diagnostic info, or start a voice call — events will appear here."></textarea>
         <div style="display: flex; gap: var(--sp-2); margin-top: var(--sp-2); flex-wrap: wrap;">
           <button type="button" class="btn btn--ghost btn--sm" onclick="runVoiceChatTest()">Run test</button>
           <button type="button" class="btn btn--ghost btn--sm" onclick="copyVoiceChatDebugLog(this)">Copy</button>
@@ -10316,14 +10427,14 @@ export function renderVoiceProfileEdit(
     if (!p?.pronunciation?.length) return "";
     return p.pronunciation.map((entry, idx) => `
       <div class="pronunciation-row" data-idx="${idx}">
-        <input type="text" class="input-field llm-input" value="${
+        <input type="text" class="input-field llm-input" aria-label="Written form" value="${
       escapeHtml(entry.written)
     }" placeholder="Written (e.g. Psycheros)">
         <span style="color: var(--c-fg-muted);">&rarr;</span>
-        <input type="text" class="input-field llm-input" value="${
+        <input type="text" class="input-field llm-input" aria-label="Spoken form" value="${
       escapeHtml(entry.spoken)
     }" placeholder="Spoken (e.g. sy-KEH-ros)">
-        <button class="btn btn--ghost btn--sm" onclick="removePronunciationEntry(${idx})" title="Remove">&times;</button>
+        <button class="btn btn--ghost btn--sm" onclick="removePronunciationEntry(this)" aria-label="Remove pronunciation entry">&times;</button>
       </div>
     `).join("");
   }
@@ -10332,14 +10443,14 @@ export function renderVoiceProfileEdit(
     if (!p?.sttCorrections?.length) return "";
     return p.sttCorrections.map((entry, idx) => `
       <div class="pronunciation-row stt-correction-row" data-idx="${idx}">
-        <input type="text" class="input-field llm-input" value="${
+        <input type="text" class="input-field llm-input" aria-label="Misheard form" value="${
       escapeHtml(entry.misheard)
     }" placeholder="Misheard (e.g. sih keh ros)">
         <span style="color: var(--c-fg-muted);">&rarr;</span>
-        <input type="text" class="input-field llm-input" value="${
+        <input type="text" class="input-field llm-input" aria-label="Correct form" value="${
       escapeHtml(entry.correct)
     }" placeholder="Correct (e.g. Psycheros)">
-        <button class="btn btn--ghost btn--sm" onclick="removeSTTCorrectionEntry(${idx})" title="Remove">&times;</button>
+        <button class="btn btn--ghost btn--sm" onclick="removeSTTCorrectionEntry(this)" aria-label="Remove STT correction">&times;</button>
       </div>
     `).join("");
   }
@@ -10413,7 +10524,7 @@ export function renderVoiceProfileEdit(
                 <input type="password" id="tts-minimax-api-key" class="input-field llm-input" value="${
     tts?.provider === "minimax" ? escapeHtml(tts.minimax?.apiKey || "") : ""
   }" placeholder="Minimax API key">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('tts-minimax-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show Minimax API key" title="Show Minimax API key" data-key-label="Minimax API key" onclick="toggleVoiceFieldVisibility('tts-minimax-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10454,7 +10565,7 @@ export function renderVoiceProfileEdit(
       ? escapeHtml(tts.elevenlabs?.apiKey || "")
       : ""
   }" placeholder="ElevenLabs API key">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('tts-elevenlabs-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show ElevenLabs API key" title="Show ElevenLabs API key" data-key-label="ElevenLabs API key" onclick="toggleVoiceFieldVisibility('tts-elevenlabs-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10489,7 +10600,7 @@ export function renderVoiceProfileEdit(
                 <input type="password" id="tts-openai-api-key" class="input-field llm-input" value="${
     tts?.provider === "openai" ? escapeHtml(tts.openai?.apiKey || "") : ""
   }" placeholder="OpenAI API key">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('tts-openai-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show TTS OpenAI API key" title="Show TTS OpenAI API key" data-key-label="TTS OpenAI API key" onclick="toggleVoiceFieldVisibility('tts-openai-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10535,7 +10646,7 @@ export function renderVoiceProfileEdit(
                 <input type="password" id="tts-custom-api-key" class="input-field llm-input" value="${
     tts?.provider === "custom" ? escapeHtml(tts.custom?.apiKey || "") : ""
   }" placeholder="Optional">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('tts-custom-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show custom TTS API key" title="Show custom TTS API key" data-key-label="custom TTS API key" onclick="toggleVoiceFieldVisibility('tts-custom-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10594,7 +10705,7 @@ export function renderVoiceProfileEdit(
                 <input type="password" id="stt-deepgram-api-key" class="input-field llm-input" value="${
     stt?.provider === "deepgram" ? escapeHtml(stt.deepgram?.apiKey || "") : ""
   }" placeholder="Deepgram API key">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('stt-deepgram-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show Deepgram API key" title="Show Deepgram API key" data-key-label="Deepgram API key" onclick="toggleVoiceFieldVisibility('stt-deepgram-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10629,7 +10740,7 @@ export function renderVoiceProfileEdit(
                 <input type="password" id="stt-openai-api-key" class="input-field llm-input" value="${
     stt?.provider === "openai" ? escapeHtml(stt.openai?.apiKey || "") : ""
   }" placeholder="OpenAI API key">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('stt-openai-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show STT OpenAI API key" title="Show STT OpenAI API key" data-key-label="STT OpenAI API key" onclick="toggleVoiceFieldVisibility('stt-openai-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10669,7 +10780,7 @@ export function renderVoiceProfileEdit(
                 <input type="password" id="stt-custom-api-key" class="input-field llm-input" value="${
     stt?.provider === "custom" ? escapeHtml(stt.custom?.apiKey || "") : ""
   }" placeholder="Optional">
-                <button class="btn btn--ghost btn--sm llm-toggle-key" onclick="toggleVoiceFieldVisibility('stt-custom-api-key')" title="Show/hide key">
+                <button type="button" class="btn btn--ghost btn--sm llm-toggle-key" aria-pressed="false" aria-label="Show custom STT API key" title="Show custom STT API key" data-key-label="custom STT API key" onclick="toggleVoiceFieldVisibility('stt-custom-api-key', this)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
@@ -10770,7 +10881,7 @@ export function renderVoiceProfileEdit(
     p?.voiceEffect === "cavern" ? "selected" : ""
   }>Cavern &mdash; distant space</option>
             </select>
-            <button type="button" class="btn btn--ghost btn--sm" onclick="testVoiceEffect()" style="margin-top: var(--sp-1);">Test Effect</button>
+            <button type="button" class="btn btn--ghost btn--sm" id="voice-test-effect-btn" onclick="testVoiceEffect(this)" style="margin-top: var(--sp-1);">Test Effect</button>
             <span class="llm-field-hint">Adds character to TTS playback.</span>
           </div>
           <div class="llm-field">
@@ -10810,7 +10921,7 @@ export function renderVoiceProfileEdit(
         <div id="pronunciation-list">
           ${pronunciationRows()}
         </div>
-        <button class="btn btn--ghost btn--sm" onclick="addPronunciationEntry()" style="margin-top: var(--sp-2);">+ Add Entry</button>
+        <button class="btn btn--ghost btn--sm" id="add-pronunciation-btn" onclick="addPronunciationEntry()" style="margin-top: var(--sp-2);" aria-label="Add Entry: pronunciation"><span><span aria-hidden="true">+</span> Add Entry</span></button>
       </section>
 
       <!-- STT Corrections -->
@@ -10820,14 +10931,15 @@ export function renderVoiceProfileEdit(
         <div id="stt-corrections-list">
           ${sttCorrectionRows()}
         </div>
-        <button class="btn btn--ghost btn--sm" onclick="addSTTCorrectionEntry()" style="margin-top: var(--sp-2);">+ Add Entry</button>
+        <button class="btn btn--ghost btn--sm" id="add-stt-correction-btn" onclick="addSTTCorrectionEntry()" style="margin-top: var(--sp-2);" aria-label="Add Entry: corrections"><span><span aria-hidden="true">+</span> Add Entry</span></button>
       </section>
 
       <!-- Action Bar -->
       <div class="llm-actions">
         <div class="llm-actions-left">
           <button class="btn btn--primary" onclick="saveVoiceProfile(event)">Save Profile</button>
-          <button class="btn btn--ghost" onclick="testTTSConnection()" id="test-tts-btn">Test TTS</button>
+          <button class="btn btn--ghost" onclick="testTTSConnection(this)" id="profile-test-tts-btn">Test TTS</button>
+          <span id="voice-test-status" class="voice-test-status" role="status" aria-live="polite"></span>
           ${
     !isNew && !isActive
       ? `<button class="btn btn--ghost" onclick="setActiveVoiceProfile('${
@@ -10859,37 +10971,45 @@ export function renderVoiceCallView(
   voiceChatDebug: boolean,
 ): string {
   const sttProvider = profile.providerSettings.stt.provider;
-  return `<div class="voice-overlay" id="voice-overlay">
+  // The transcript blurb is visual-only: the entity reply also streams as
+  // TTS audio, so a live region here would make a screen reader speak the
+  // reply a second time. #voice-status-text and #voice-announcer remain the
+  // live channels for connection and transient state.
+  return `<dialog class="voice-overlay" id="voice-overlay" aria-labelledby="voice-call-title">
   <div class="voice-call">
+    <h2 class="sr-only" id="voice-call-title" tabindex="-1">Voice call</h2>
     <div class="voice-status" id="voice-status">
       <span class="voice-status-dot voice-status-dot--connecting" id="voice-status-dot"></span>
-      <span id="voice-status-text">Connecting...</span>
-      <button class="btn btn--ghost" id="test-tts-btn" onclick="testTTSConnection()" style="margin-left: auto; font-size: var(--font-size-xs);">Test TTS</button>
+      <span id="voice-status-text" role="status" aria-live="polite">Connecting...</span>
+      <button class="btn btn--ghost" id="voice-test-tts-btn" onclick="testTTSConnection(this)" style="margin-left: auto; font-size: var(--font-size-xs);">Test TTS</button>
     </div>
 
-    <div class="voice-transcript" id="voice-transcript" aria-live="polite"></div>
+    <div id="voice-announcer" class="sr-only" role="status" aria-live="polite"></div>
+
+    <div class="voice-transcript" id="voice-transcript"></div>
 
     <div class="voice-text-input-area" id="voice-text-input-area" style="display: none;">
       <textarea
         class="voice-text-input"
         id="voice-text-input"
+        aria-label="Voice message"
         placeholder="Type a message..."
         rows="2"
         onkeydown="handleVoiceTextInputKey(event)"
       ></textarea>
-      <button class="voice-btn voice-text-send-btn" id="voice-text-send-btn" onclick="sendVoiceTextInput()" aria-label="Send" title="Send">
+      <button class="voice-btn voice-text-send-btn" id="voice-text-send-btn" onclick="sendVoiceTextInput()" aria-label="Send">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
       </button>
     </div>
 
     <div class="voice-controls">
-      <button class="voice-btn" id="voice-btn-yinyang" onclick="toggleYinYangMode()" aria-label="Toggle Yin Yang mode" title="Yin Yang mode (type instead of speak)">
+      <button class="voice-btn" id="voice-btn-yinyang" onclick="toggleYinYangMode()" aria-pressed="false" aria-label="Toggle Yin Yang mode (type instead of speak)">
         ☯
       </button>
-      <button class="voice-btn" id="voice-btn-ptt-toggle" onclick="togglePTTMode()" aria-label="Toggle push-to-talk" title="Push to talk">
+      <button class="voice-btn" id="voice-btn-ptt-toggle" onclick="togglePTTMode()" aria-pressed="false" aria-label="Toggle push-to-talk">
         🎙️
       </button>
-      <button class="voice-btn voice-btn--end" onclick="endVoiceChat()" aria-label="End voice call" title="End call">
+      <button class="voice-btn voice-btn--end" onclick="endVoiceChat()" aria-label="End voice call">
         📞
       </button>
     </div>
@@ -10898,6 +11018,8 @@ export function renderVoiceCallView(
       <button class="voice-hold-circle" id="voice-hold-btn"
         onmousedown="startPTT()" ontouchstart="startPTT()"
         onmouseup="endPTT()" ontouchend="endPTT()"
+        onkeydown="handleHoldKey(event)"
+        onclick="handleHoldClick(event)"
         aria-label="Hold to talk" title="Hold to talk">
         <span>HOLD<br>TO<br>TALK</span>
       </button>
@@ -10905,7 +11027,6 @@ export function renderVoiceCallView(
 
     <div class="voice-tools" id="voice-tools"></div>
   </div>
-</div>
 
 <script type="application/json" id="voice-config">${
     escapeHtml(
@@ -10927,7 +11048,8 @@ export function renderVoiceCallView(
         voiceEffect: profile.voiceEffect ?? "none",
       }),
     )
-  }</script>`;
+  }</script>
+</dialog>`;
 }
 
 /**
@@ -10957,14 +11079,14 @@ export function renderFluxOverlayView(
       | null;
   },
 ): string {
-  return `<div class="flux-overlay" id="flux-overlay">
+  return `<div class="flux-overlay" id="flux-overlay" role="region" aria-labelledby="flux-overlay-title">
   <div class="flux-overlay-shell">
     <div class="flux-overlay-header">
       <span>
         <span id="flux-badge" class="flux-badge ${initialState.state}">${
     initialState.state.charAt(0).toUpperCase() + initialState.state.slice(1)
   }</span>
-        <strong>Flux</strong>
+        <h2 class="flux-overlay-title" id="flux-overlay-title">Flux</h2>
       </span>
       <div class="flux-overlay-controls">
         <button onclick="closeFluxOverlay()">Close</button>
@@ -10974,9 +11096,10 @@ export function renderFluxOverlayView(
     <div id="flux-mood-strip"></div>
     <div id="flux-mode-row"><span id="flux-mode-badge" class="flux-mode-badge"></span></div>
     <div id="flux-organ-health"></div>
-    <div id="flux-timeline"></div>
+    <div id="flux-timeline" role="log" aria-live="off" aria-label="Flux timeline"></div>
+    <div id="flux-announcer" class="sr-only" role="status" aria-live="polite"></div>
     <div class="flux-input-bar">
-      <textarea id="flux-input" rows="1" placeholder="say something..." autocomplete="off"></textarea>
+      <textarea id="flux-input" rows="1" aria-label="Message" placeholder="say something..." autocomplete="off"></textarea>
       <button id="flux-send">send</button>
     </div>
   </div>
@@ -11029,11 +11152,16 @@ export function renderFluxSpacePage(
     .flux-shell { display: flex; flex-direction: column; height: 100vh; max-width: 760px; margin: 0 auto; }
     .flux-header { padding: 16px 20px; border-bottom: 1px solid #23262e; display: flex; justify-content: space-between; align-items: center; }
     .flux-header a { color: #8b8f99; text-decoration: none; font-size: 14px; }
+    .flux-header h1 { display: inline; font-size: inherit; font-weight: 700; margin: 0; }
+    .flux-shell > main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
     #flux-timeline { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
     .flux-entry { padding: 10px 14px; border-radius: 12px; max-width: 82%; word-wrap: break-word; line-height: 1.5; }
-    .flux-edit-btn { position: absolute; top: -6px; right: -6px; display: none; background: #1c1f26; border: 1px solid #2a2e36; color: #8b8f99; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 11px; z-index: 5; }
+    .flux-edit-btn { position: absolute; top: -6px; right: -6px; opacity: 0; background: #1c1f26; border: 1px solid #2a2e36; color: #8b8f99; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 11px; z-index: 5; }
     .flux-entry { position: relative; }
-    .flux-entry:hover .flux-edit-btn { display: inline-block; }
+    /* opacity, not display:none: the control must stay in the tab order. */
+    .flux-entry:hover .flux-edit-btn,
+    .flux-entry:focus-within .flux-edit-btn,
+    .flux-edit-btn:focus { opacity: 1; }
     .flux-generating { align-self: flex-start; background: #1c1f26; border: 1px solid #2a2e36; color: #8b8f99; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
     .flux-generating .typing-cursor { display: inline-block; animation: fluxblink 1s steps(1) infinite; }
     .flux-generating.streaming .typing-cursor { display: none; }
@@ -11114,10 +11242,10 @@ export function renderFluxSpacePage(
 </head>
 <body>
   <div class="flux-shell">
-    <div class="flux-header">
+    <header class="flux-header">
       <span>
         <span id="flux-badge" class="flux-badge stopped">Loading…</span>
-        <strong>Flux Space</strong>
+        <h1 id="flux-space-title">Flux Space</h1>
       </span>
       <div class="flux-controls">
         <button id="flux-btn-start" class="primary" onclick="fluxControl('start')">Start</button>
@@ -11127,17 +11255,20 @@ export function renderFluxSpacePage(
         <a href="/fragments/settings/flux">settings</a>
         <a href="/">chat</a>
       </div>
-    </div>
+    </header>
     <div id="flux-mood-strip"></div>
     <div id="flux-mode-row"><span id="flux-mode-badge" class="flux-mode-badge"></span></div>
     <div id="flux-organ-health"></div>
-    <div id="flux-timeline"></div>
-    <div class="flux-input-bar">
-      <textarea id="flux-input" rows="1" placeholder="say something..." autocomplete="off"></textarea>
-      <button id="flux-send">send</button>
-    </div>
+    <main aria-labelledby="flux-space-title">
+      <div id="flux-timeline" role="log" aria-live="off" aria-label="Flux Space timeline"></div>
+      <div id="flux-announcer" class="sr-only" role="status" aria-live="polite"></div>
+      <div class="flux-input-bar">
+        <textarea id="flux-input" rows="1" aria-label="Message" placeholder="say something..." autocomplete="off"></textarea>
+        <button id="flux-send">send</button>
+      </div>
+    </main>
   </div>
-  <div id="flux-toast"></div>
+  <div id="flux-toast" role="status" aria-live="polite"></div>
   <script>
     var timeline = document.getElementById('flux-timeline');
     var input = document.getElementById('flux-input');
@@ -11150,6 +11281,24 @@ export function renderFluxSpacePage(
     });
     var toast = document.getElementById('flux-toast');
     var toastTimer = null;
+
+    // The timeline is role=log with aria-live="off" so history replays and
+    // token-by-token streaming stay silent. Completed entries and state
+    // changes are announced one at a time here instead.
+    var suppressAnnounce = false;
+    function announceFlux(text) {
+      if (suppressAnnounce || !text) return;
+      var announcer = document.getElementById('flux-announcer');
+      if (!announcer) return;
+      var message = String(text).replace(/\\s+/g, ' ').trim();
+      if (!message) return;
+      if (announcer.textContent === message) {
+        announcer.textContent = '';
+        requestAnimationFrame(function() { announcer.textContent = message; });
+        return;
+      }
+      announcer.textContent = message;
+    }
 
     function fmtTime(iso) {
       try { return new Date(iso).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); }
@@ -11191,16 +11340,25 @@ export function renderFluxSpacePage(
 
     var ENTITY_NAME = ${JSON.stringify(entityName)};
     var USER_NAME = ${JSON.stringify(userName)};
-    // Collapsed tool cards (classic persisted shape): header click
-    // toggles args/result visibility.
+    // Disclosure ids are per-render counters: reloads clear the timeline,
+    // so a counter is unique within any live document and never reuses one.
+    var disclosureSeq = 0;
+    function nextDisclosureId(prefix) {
+      disclosureSeq += 1;
+      return prefix + '-' + disclosureSeq;
+    }
+    // Collapsed tool cards (classic persisted shape): the header is a
+    // native button, so Enter/Space arrive as click; aria-expanded follows
+    // the .expanded class and focus stays on the button.
     function wireToolToggle(container) {
       var header = container.querySelector('.tool-header');
-      if (header) {
-        header.addEventListener('click', function() {
-          var card = this.parentElement;
-          if (card) card.classList.toggle('expanded');
-        });
-      }
+      if (!header) return;
+      header.addEventListener('click', function() {
+        var card = this.closest('.tool');
+        var expanded = this.getAttribute('aria-expanded') !== 'true';
+        this.setAttribute('aria-expanded', String(expanded));
+        if (card) card.classList.toggle('expanded', expanded);
+      });
     }
 
     function fillToolResult(callId, result, isError, metadata) {
@@ -11222,24 +11380,33 @@ export function renderFluxSpacePage(
         sib.innerHTML = '<img src="' + escapeHtml(imgPath) + '" alt="generated image" loading="lazy">';
         card.after(sib);
       }
+      var toolName = (card.querySelector('.tool-name') || {}).textContent || '';
+      toolName = toolName.replace(/\\s*·\\s*result\\s*$/, '').trim();
+      announceFlux(toolName ? 'Tool finished: ' + toolName : 'Tool finished');
       return true;
     }
 
     function appendSessionEntry(e) {
       var div = document.createElement('div');
       var label = USER_NAME;
+      var announceText = '';
+      var contentId;
       if (e.kind === 'tool_use') {
+        announceText = 'Using tool: ' + (e.source || 'tool');
         div.className = 'flux-entry tool-wrap';
         if (e.id) div.dataset.toolCallId = e.id;
+        contentId = nextDisclosureId('flux-tool-content');
         div.innerHTML =
           '<div class="tool">' +
-            '<div class="tool-header">' +
-              '<span class="tool-icon">&#9881;</span>' +
+            '<button type="button" class="tool-header" aria-expanded="false" aria-controls="' + contentId + '">' +
+              '<span class="tool-icon" aria-hidden="true">&#9881;</span>' +
               '<span class="tool-name">' + escapeHtml(e.source || 'tool') + '</span>' +
-              '<span class="tool-toggle">&#9660;</span>' +
+              '<span class="tool-toggle" aria-hidden="true">&#9660;</span>' +
+            '</button>' +
+            '<div class="tool-disclosure-content" id="' + contentId + '">' +
+              '<div class="tool-args">' + escapeHtml(e.content || '') + '</div>' +
+              '<div class="tool-result"></div>' +
             '</div>' +
-            '<div class="tool-args">' + escapeHtml(e.content || '') + '</div>' +
-            '<div class="tool-result"></div>' +
           '</div>';
         wireToolToggle(div);
       } else if (e.kind === 'tool_result') {
@@ -11253,15 +11420,19 @@ export function renderFluxSpacePage(
           follow();
           return;
         }
+        announceText = 'Tool finished' + (e.source ? ': ' + e.source : '');
         div.className = 'flux-entry tool-wrap';
+        contentId = nextDisclosureId('flux-tool-content');
         div.innerHTML =
           '<div class="tool">' +
-            '<div class="tool-header">' +
-              '<span class="tool-icon">&#9881;</span>' +
+            '<button type="button" class="tool-header" aria-expanded="false" aria-controls="' + contentId + '">' +
+              '<span class="tool-icon" aria-hidden="true">&#9881;</span>' +
               '<span class="tool-name">' + escapeHtml(e.source || 'tool') + ' · result</span>' +
-              '<span class="tool-toggle">&#9660;</span>' +
+              '<span class="tool-toggle" aria-hidden="true">&#9660;</span>' +
+            '</button>' +
+            '<div class="tool-disclosure-content" id="' + contentId + '">' +
+              '<div class="tool-result">' + escapeHtml(e.content || '') + '</div>' +
             '</div>' +
-            '<div class="tool-result">' + escapeHtml(e.content || '') + '</div>' +
           '</div>';
         wireToolToggle(div);
       } else if (e.kind === 'ego') {
@@ -11270,6 +11441,7 @@ export function renderFluxSpacePage(
         // stamp lives in the transcript for the model, never shows to
         // the user. Same rule as every other surface.
         var stripped = (e.content || '').replace(/<t>[^<]*<\\/t>\\s*/g, '');
+        if (stripped.trim()) announceText = ENTITY_NAME + ': ' + stripped;
         var body = '';
         if (e.thinking) {
           body += '<details class="thinking-details" style="margin-bottom:6px;"><summary style="cursor:pointer;color:#8b8f99;font-size:12px;">thinking</summary><div style="color:#9ca3af;font-size:13px;white-space:pre-wrap;border-left:2px solid #2a2e36;padding-left:8px;margin-top:4px;">' + escapeHtml(e.thinking) + '</div></details>';
@@ -11291,6 +11463,7 @@ export function renderFluxSpacePage(
         btn.className = 'flux-edit-btn';
         btn.textContent = '\u270E';
         btn.title = 'Edit this entry';
+        btn.setAttribute('aria-label', 'Edit entity entry');
         btn.onclick = function(ev) {
           ev.stopPropagation();
           editSessionEntry(e, div);
@@ -11306,6 +11479,7 @@ export function renderFluxSpacePage(
           : s.indexOf('dream') >= 0 ? 'Dream'
           : isSystem ? 'system'
           : 'Noticing';
+        announceText = mod + ': ' + (e.content || '');
         var cls = 'flux-entry ambient';
         if (s.indexOf('compaction') === 0) {
           // Textures are working memory, not module output — neutral
@@ -11323,10 +11497,12 @@ export function renderFluxSpacePage(
         div.innerHTML = escapeHtml(e.content) +
           '<div class="meta">' + mod + (chain ? ' (' + chain + ')' : '') + ' · ' + fmtTime(e.timestamp) + '</div>';
       } else if (e.kind === 'system') {
+        announceText = e.content || '';
         div.className = 'flux-entry ambient';
         div.innerHTML = escapeHtml(e.content) +
           '<div class="meta">system · ' + fmtTime(e.timestamp) + '</div>';
       } else {
+        announceText = USER_NAME + ': ' + (e.content || '');
         div.className = 'flux-entry user';
         div.innerHTML = renderMd(e.content || '') +
           '<div class="meta">' + USER_NAME + ' · ' + fmtTime(e.timestamp) + '</div>';
@@ -11334,13 +11510,15 @@ export function renderFluxSpacePage(
         ubtn.className = 'flux-edit-btn';
         ubtn.textContent = '\u270E';
         ubtn.title = 'Edit this entry';
+        ubtn.setAttribute('aria-label', 'Edit your entry');
         ubtn.onclick = function(ev) {
           ev.stopPropagation();
           editSessionEntry(e, div);
         };
         div.appendChild(ubtn);
       }
-      addToTimeline(div, entry.timestamp);
+      addToTimeline(div, e.timestamp);
+      announceFlux(announceText);
       follow();
     }
 
@@ -11352,6 +11530,7 @@ export function renderFluxSpacePage(
       generatingEl.dataset.ts = String(Date.now()); // ordered inserts below it
       generatingEl.innerHTML = '<span class="flux-gen-text"></span><span class="typing-cursor">\u258C</span>';
       timeline.appendChild(generatingEl);
+      announceFlux('Generating reply');
       follow();
     }
     function hideGenerating() {
@@ -11405,13 +11584,16 @@ export function renderFluxSpacePage(
         btn.className = 'flux-edit-btn';
         btn.textContent = '✎';
         btn.title = 'Edit this entry';
+        btn.setAttribute('aria-label',
+          entry.role === 'user' ? 'Edit your entry' : 'Edit entity entry');
         btn.onclick = function(ev) {
           ev.stopPropagation();
           editSessionEntry(entry, div);
         };
         div.appendChild(btn);
       }
-      addToTimeline(div, e.timestamp);
+      addToTimeline(div, entry.timestamp);
+      announceFlux(label + ': ' + (entry.content || ''));
       follow();
     }
 
@@ -11443,10 +11625,17 @@ export function renderFluxSpacePage(
     }
 
     function showToast(msg) {
-      toast.textContent = msg;
       toast.style.display = 'block';
       if (toastTimer) clearTimeout(toastTimer);
-      toastTimer = setTimeout(function() { toast.style.display = 'none'; }, 6000);
+      // #flux-toast is a persistent status region: fill it after the
+      // clear so an identical repeat is a fresh insertion (some ATs skip
+      // a same-text rewrite).
+      toast.textContent = '';
+      requestAnimationFrame(function() { toast.textContent = msg; });
+      toastTimer = setTimeout(function() {
+        toast.style.display = 'none';
+        toast.textContent = '';
+      }, 6000);
     }
 
     function sendMessage() {
@@ -11475,7 +11664,10 @@ export function renderFluxSpacePage(
       }
       // Shift+Enter falls through — the textarea's native newline.
     });
-    toast.addEventListener('click', function() { toast.style.display = 'none'; });
+    toast.addEventListener('click', function() {
+      toast.style.display = 'none';
+      toast.textContent = '';
+    });
 
     // Load the timeline: fetch recent entries. The timeline is the MERGE
     // of the durable timeline (user/ambient) and the Ego session log (ego
@@ -11543,7 +11735,14 @@ export function renderFluxSpacePage(
       // Full render, not append — flux_turn_done re-runs this load; an
       // uncleared timeline doubled every entry per reload.
       timeline.innerHTML = '';
-      merged.forEach(function(m) { m.render(); });
+      // Bulk render: history must not be re-announced (4.1.3 covers live
+      // arrivals and state changes, not a view repaint).
+      suppressAnnounce = true;
+      try {
+        merged.forEach(function(m) { m.render(); });
+      } finally {
+        suppressAnnounce = false;
+      }
     }).catch(function(e) { console.error('flux load failed', e); });
     }
     loadTimeline();
@@ -11578,16 +11777,17 @@ export function renderFluxSpacePage(
         if (!thinkingCard || thinkingCard.closed) {
           var wrap = document.createElement('div');
           wrap.className = 'flux-entry thinking-wrap';
+          var thinkingId = nextDisclosureId('flux-thinking');
           // OPEN while streaming — the stream is meant to be watched
           // live (classic chat's pattern); the persisted entry's own
           // block is the collapsed-by-default record afterward.
           wrap.innerHTML =
             '<div class="thinking-card open">' +
-              '<div class="thinking-header">' +
+              '<button type="button" class="thinking-header" aria-expanded="true" aria-controls="' + thinkingId + '">' +
                 '<span>' + escapeHtml(ENTITY_NAME) + ' · thinking</span>' +
-                '<span class="toggle">&#9660;</span>' +
-              '</div>' +
-              '<div class="thinking-body"></div>' +
+                '<span class="toggle" aria-hidden="true">&#9660;</span>' +
+              '</button>' +
+              '<div class="thinking-body" id="' + thinkingId + '"></div>' +
             '</div>';
           timeline.appendChild(wrap);
           thinkingCard = wrap.querySelector('.thinking-card');
@@ -11595,6 +11795,10 @@ export function renderFluxSpacePage(
           var header = thinkingCard.querySelector('.thinking-header');
           header.addEventListener('click', function() {
             thinkingCard.classList.toggle('open');
+            header.setAttribute(
+              'aria-expanded',
+              String(thinkingCard.classList.contains('open')),
+            );
           });
           follow();
         }
@@ -11710,17 +11914,20 @@ export function renderFluxSpacePage(
         if (data.toolCallId) div.dataset.toolCallId = data.toolCallId;
         var formattedArgs = data.args;
         try { formattedArgs = JSON.stringify(JSON.parse(data.args), null, 2); } catch (ex) {}
+        var contentId = nextDisclosureId('flux-tool-content');
         div.innerHTML =
           '<div class="tool">' +
-            '<div class="tool-header">' +
-              '<span class="tool-icon">&#9881;</span>' +
+            '<button type="button" class="tool-header" aria-expanded="false" aria-controls="' + contentId + '">' +
+              '<span class="tool-icon" aria-hidden="true">&#9881;</span>' +
               '<span class="tool-name">' + escapeHtml(data.name) + '</span>' +
-              '<span class="tool-toggle">&#9660;</span>' +
-            '</div>' +
-            '<div class="tool-args">' + escapeHtml(formattedArgs) + '</div>' +
-            '<div class="tool-result' + (data.isError ? ' error' : '') + '">' +
-              '<div class="tool-result-label">' + (data.isError ? 'Error' : 'Output') + '</div>' +
-              escapeHtml(data.result) +
+              '<span class="tool-toggle" aria-hidden="true">&#9660;</span>' +
+            '</button>' +
+            '<div class="tool-disclosure-content" id="' + contentId + '">' +
+              '<div class="tool-args">' + escapeHtml(formattedArgs) + '</div>' +
+              '<div class="tool-result' + (data.isError ? ' error' : '') + '">' +
+                '<div class="tool-result-label">' + (data.isError ? 'Error' : 'Output') + '</div>' +
+                escapeHtml(data.result) +
+              '</div>' +
             '</div>' +
           '</div>';
         wireToolToggle(div);
@@ -11884,32 +12091,34 @@ function renderFluxHookupCard(
   const num = (field: string) =>
     (h?.params?.[field as "temperature"] as number | undefined) ?? "";
   return `<div class="llm-fields flux-hookup-card" style="border:1px solid var(--c-border);border-radius:8px;padding:12px;margin-bottom:12px;">
-    <div class="theme-section-title" style="font-size:0.95em;">${
+    <h3 class="theme-section-title" style="font-size:0.95em;">${
     escapeHtml(job)
-  }</div>
+  }</h3>
     <p class="theme-section-desc">${
     escapeHtml(FLUX_JOB_DESCRIPTIONS[job] ?? "")
   }</p>
     <div class="llm-fields">
       <div class="llm-field">
-        <label>Endpoint URL</label>
-        <input type="text" ${
+        <label for="flux-hookup-${escapeHtml(job)}-url">Endpoint URL</label>
+        <input type="text" id="flux-hookup-${escapeHtml(job)}-url" ${
     attr("url")
   } class="input-field llm-input" placeholder="http://localhost:8080/v1/chat/completions" value="${
     escapeHtml(String(val("url")))
   }">
       </div>
       <div class="llm-field">
-        <label>Model</label>
-        <input type="text" ${
+        <label for="flux-hookup-${escapeHtml(job)}-model">Model</label>
+        <input type="text" id="flux-hookup-${escapeHtml(job)}-model" ${
     attr("model")
   } class="input-field llm-input" placeholder="gemma-4-31b-it" value="${
     escapeHtml(String(val("model")))
   }">
       </div>
       <div class="llm-field">
-        <label>API key <span class="theme-section-desc">(optional — local servers don\'t need one; masked after save)</span></label>
-        <input type="text" ${
+        <label for="flux-hookup-${
+    escapeHtml(job)
+  }-apiKey">API key <span class="theme-section-desc">(optional — local servers don\'t need one; masked after save)</span></label>
+        <input type="text" id="flux-hookup-${escapeHtml(job)}-apiKey" ${
     attr("apiKey")
   } class="input-field llm-input" autocomplete="off" value="${
     escapeHtml(h?.apiKey ? maskApiKey(h.apiKey) : "")
@@ -11921,30 +12130,36 @@ function renderFluxHookupCard(
   } style="margin-top:8px;"><summary class="theme-section-desc" style="cursor:pointer;font-size:12px;">Sampling &amp; thinking</summary>
       <div class="llm-fields" style="margin-top:8px;">
         <div class="llm-field">
-          <label>Temperature</label>
-          <input type="number" ${
+          <label for="flux-hookup-${
+    escapeHtml(job)
+  }-temperature">Temperature</label>
+          <input type="number" id="flux-hookup-${
+    escapeHtml(job)
+  }-temperature" ${
     attr("temperature")
   } class="input-field llm-input" min="0" max="2" step="0.05" value="${
     num("temperature")
   }">
         </div>
         <div class="llm-field">
-          <label>top_p</label>
-          <input type="number" ${
+          <label for="flux-hookup-${escapeHtml(job)}-top_p">top_p</label>
+          <input type="number" id="flux-hookup-${escapeHtml(job)}-top_p" ${
     attr("top_p")
   } class="input-field llm-input" min="0" max="1" step="0.05" value="${
     num("top_p")
   }">
         </div>
         <div class="llm-field">
-          <label>top_k</label>
-          <input type="number" ${
+          <label for="flux-hookup-${escapeHtml(job)}-top_k">top_k</label>
+          <input type="number" id="flux-hookup-${escapeHtml(job)}-top_k" ${
     attr("top_k")
   } class="input-field llm-input" min="0" step="1" value="${num("top_k")}">
         </div>
         <div class="llm-field">
-          <label>Max tokens</label>
-          <input type="number" ${
+          <label for="flux-hookup-${
+    escapeHtml(job)
+  }-max_tokens">Max tokens</label>
+          <input type="number" id="flux-hookup-${escapeHtml(job)}-max_tokens" ${
     attr("max_tokens")
   } class="input-field llm-input" min="16" step="16" value="${
     num("max_tokens")
@@ -12005,7 +12220,10 @@ function renderFluxSensoryCards(
     values: Record<string, unknown>,
   ) => {
     const value = values[f.key] ?? f.default ?? "";
-    const attr = `data-so-setting="${escapeHtml(id)}.${escapeHtml(f.key)}"`;
+    const controlId = `flux-organ-${escapeHtml(id)}-${escapeHtml(f.key)}`;
+    const attr = `id="${controlId}" data-so-setting="${escapeHtml(id)}.${
+      escapeHtml(f.key)
+    }"`;
     let control = "";
     if (f.type === "toggle") {
       control =
@@ -12039,7 +12257,7 @@ function renderFluxSensoryCards(
     return `<div class="llm-field">${
       f.type === "toggle"
         ? control
-        : `<label>${escapeHtml(f.label)}</label>${control}`
+        : `<label for="${controlId}">${escapeHtml(f.label)}</label>${control}`
     }${
       f.help ? `<span class="llm-field-hint">${escapeHtml(f.help)}</span>` : ""
     }</div>`;
@@ -12157,17 +12375,17 @@ export function renderFluxSettings(
   </div>
   <div class="settings-content" id="settings-content">
 
-    <div class="settings-tabs">
-      <button class="settings-tab active" data-flux-tab="general" onclick="switchFluxSettingsTab('general')">General</button>
-      <button class="settings-tab" data-flux-tab="hookups" onclick="switchFluxSettingsTab('hookups')">Hookups</button>
-      <button class="settings-tab" data-flux-tab="sensory" onclick="switchFluxSettingsTab('sensory')">Sensory</button>
+    <div class="settings-tabs" role="tablist" aria-label="Flux settings">
+      <button class="settings-tab active" id="flux-tab-btn-general" role="tab" aria-selected="true" aria-controls="flux-tab-general" tabindex="0" data-flux-tab="general" onclick="switchFluxSettingsTab('general')" onkeydown="settingsTablistKeydown(event)">General</button>
+      <button class="settings-tab" id="flux-tab-btn-hookups" role="tab" aria-selected="false" aria-controls="flux-tab-hookups" tabindex="-1" data-flux-tab="hookups" onclick="switchFluxSettingsTab('hookups')" onkeydown="settingsTablistKeydown(event)">Hookups</button>
+      <button class="settings-tab" id="flux-tab-btn-sensory" role="tab" aria-selected="false" aria-controls="flux-tab-sensory" tabindex="-1" data-flux-tab="sensory" onclick="switchFluxSettingsTab('sensory')" onkeydown="settingsTablistKeydown(event)">Sensory</button>
     </div>
 
-    <div id="flux-tab-general">
+    <div id="flux-tab-general" role="tabpanel" aria-labelledby="flux-tab-btn-general">
 
 
     <section class="theme-section">
-      <div class="theme-section-title">Enable</div>
+      <h2 class="theme-section-title">Enable</h2>
       <p class="theme-section-desc">When off, Psycheros behaves exactly as before — no senses run, no driver ticks, no Flux Space. The whole subsystem is opt-in.</p>
       <label class="toggle-label">
         <input type="checkbox" id="flux-enabled" role="switch" aria-label="Enable Flux" ${checked}>
@@ -12177,7 +12395,7 @@ export function renderFluxSettings(
     </section>
 
     <section class="theme-section">
-      <div class="theme-section-title">Identity &amp; Ego</div>
+      <h2 class="theme-section-title">Identity &amp; Ego</h2>
       <p class="theme-section-desc">The shorthand is a brief description of who the entity and user are, for the smaller systems — not the full identity files (those are for the Ego model), just enough context for salience. Example: <em>"I am Apollo, an AI companion; my user is Sam, my partner."</em></p>
       <div class="llm-fields">
         <div class="llm-field">
@@ -12197,7 +12415,7 @@ export function renderFluxSettings(
     </section>
 
     <section class="theme-section">
-      <div class="theme-section-title">Presence &amp; cadence</div>
+      <h2 class="theme-section-title">Presence &amp; cadence</h2>
       <p class="theme-section-desc">How the continuous-presence driver and the ambient layers keep time. Values in milliseconds. The tick delay adapts between min and max with mood arousal and activity.</p>
       <div class="llm-fields">
         <div class="llm-field"><label for="flux-base-tick">Base tick (seconds)</label>${
@@ -12299,7 +12517,7 @@ export function renderFluxSettings(
     </section>
 
     <section class="theme-section">
-      <div class="theme-section-title">Emotional dynamics</div>
+      <h2 class="theme-section-title">Emotional dynamics</h2>
       <p class="theme-section-desc">How fast mood recovers from events and how readily the baseline shifts with experience — emotionally stable vs. reactive.</p>
       <div class="llm-fields">
         <div class="llm-field"><label for="flux-mood-decay">State decay rate (per sec)</label>${
@@ -12315,7 +12533,7 @@ export function renderFluxSettings(
     </section>
 
     <section class="theme-section">
-      <div class="theme-section-title">Wake &amp; promotion</div>
+      <h2 class="theme-section-title">Wake &amp; promotion</h2>
       <p class="theme-section-desc">The narrow waist deciding which observations survive into the Flux Space and which wake the Ego. Gates are 0–1.</p>
       <div class="llm-fields">
         <div class="llm-field"><label for="flux-th-salience">Salience gate</label>${
@@ -12394,11 +12612,11 @@ export function renderFluxSettings(
 
     </div>
 
-    <div id="flux-tab-hookups" style="display:none;">
+    <div id="flux-tab-hookups" role="tabpanel" aria-labelledby="flux-tab-btn-hookups" style="display:none;">
 
 
     <section class="theme-section">
-      <div class="theme-section-title">Mood Organ</div>
+      <h2 class="theme-section-title">Mood Organ</h2>
       <p class="theme-section-desc">The Mood Organ's text classifier. Two variants, same behavior — int8 is smaller and faster; fp32 is the exact original. Downloads once to this machine's model cache; without one, mood classification falls back to the hookup below, then the worker LLM.</p>
       <div class="llm-fields">
         <div class="llm-field">
@@ -12422,21 +12640,21 @@ export function renderFluxSettings(
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:0.5rem;">
         <button class="btn primary" onclick="moodModelSave()">Save choice</button>
         <button class="btn" onclick="moodModelDownload()">Download variant</button>
-        <span id="mood-model-status" class="settings-status"></span>
+        <span id="mood-model-status" class="settings-status" role="status" aria-live="polite"></span>
       </div>
     </section>
     <section class="theme-section">
-      <div class="theme-section-title">Model hookups</div>
+      <h2 class="theme-section-title">Model hookups</h2>
       <p class="theme-section-desc">Every Subconscious job that calls an LLM can carry its own model here — remote API or locally hosted, whatever speaks chat-completions. With no entries, ALL jobs run on the worker model of the connection profile selected under General (dreams ride the reverie hookup). Saving applies on the next Flux restart (saving does that automatically).</p>
       ${jobs.map((job) => renderFluxHookupCard(job, hookups[job])).join("")}
     </section>
 
     </div>
 
-    <div id="flux-tab-sensory" style="display:none;">
+    <div id="flux-tab-sensory" role="tabpanel" aria-labelledby="flux-tab-btn-sensory" style="display:none;">
 
     <section class="theme-section">
-      <div class="theme-section-title">Sensory Organs</div>
+      <h2 class="theme-section-title">Sensory Organs</h2>
       <p class="theme-section-desc">Each sense has a card — enable it, point it at its hardware and models. Shipped senses (motion-vision, system-state) and plugins from .psycheros/sensory-organs/ render identically; plugin cards appear after their first Flux start.</p>
       ${renderFluxSensoryCards(settings)}
     </section>
@@ -12449,7 +12667,7 @@ export function renderFluxSettings(
     </div>
 
     </div>
-    <div id="flux-settings-status" class="settings-status"></div>
+    <div id="flux-settings-status" class="settings-status" role="status" aria-live="polite"></div>
 
   </div>
 </div>`;

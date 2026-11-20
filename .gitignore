@@ -84,6 +84,10 @@ desktop.ini
 # ============================================
 .claude/
 .playwright-mcp/
+AGENTS.md
+.agents/
+.beads/
+.codex/
 TODO.md
 PLAN.md
 

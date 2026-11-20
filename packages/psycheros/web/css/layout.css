@@ -103,6 +103,17 @@ body.glass-enabled .header {
   border-radius: 3px;
 }
 
+button.state-seg {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+button.state-flux {
+  color: var(--c-accent);
+}
+
 .state-seg:hover {
   color: var(--c-accent);
 }
@@ -161,7 +172,17 @@ body.glass-enabled .header {
 }
 
 /* Held-skill viewer: tapping the skill chip shows the skill. */
+.skill-viewer:not([open]) {
+  display: none;
+}
+
 .skill-viewer {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: none;
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);

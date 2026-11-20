@@ -1666,13 +1666,13 @@ export class Server {
         </div>
       </div>
 
-      <div class="settings-tabs">
-        <button type="button" class="settings-tab active" data-tab="general" onclick="Psycheros.switchWorkspaceTab('general')">General</button>
-        <button type="button" class="settings-tab" data-tab="sessions" onclick="Psycheros.switchWorkspaceTab('sessions')">Sessions</button>
+      <div class="settings-tabs" role="tablist" aria-label="Workspace settings">
+        <button type="button" class="settings-tab active" id="workspace-tab-btn-general" role="tab" aria-selected="true" aria-controls="workspace-tab-general" tabindex="0" data-tab="general" onclick="Psycheros.switchWorkspaceTab('general')" onkeydown="settingsTablistKeydown(event)">General</button>
+        <button type="button" class="settings-tab" id="workspace-tab-btn-sessions" role="tab" aria-selected="false" aria-controls="workspace-tab-sessions" tabindex="-1" data-tab="sessions" onclick="Psycheros.switchWorkspaceTab('sessions')" onkeydown="settingsTablistKeydown(event)">Sessions</button>
       </div>
 
       <div class="settings-content" id="settings-content">
-      <div id="workspace-tab-general">
+      <div id="workspace-tab-general" role="tabpanel" aria-labelledby="workspace-tab-btn-general">
       <form id="workspace-settings-form">
         <div class="settings-field">
           <label for="contextBlock">Context block</label>
@@ -1840,7 +1840,7 @@ export class Server {
       </div>
       </div>
 
-      <div id="workspace-tab-sessions" style="display:none">
+      <div id="workspace-tab-sessions" role="tabpanel" aria-labelledby="workspace-tab-btn-sessions" style="display:none">
         <p class="settings-field-hint">
           <strong>Finished sessions are auto-deleted after the retention
           window (General tab) unless pinned.</strong> Pin a session to keep

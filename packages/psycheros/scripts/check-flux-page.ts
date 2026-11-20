@@ -20,6 +20,35 @@ const html = renderFluxSpacePage({
   userName: "the user",
 });
 
+let failed = false;
+
+// The e2e regression loads the rendered page from this fixture (the browser
+// image has node but no deno). Refresh it with `deno task check:flux-page
+// --write` whenever the page template changes.
+const fixtureUrl = new URL("../e2e/fixtures/flux-space.html", import.meta.url);
+if (Deno.args.includes("--write")) {
+  await Deno.writeTextFile(fixtureUrl, html);
+  console.log(`OK: wrote ${fixtureUrl.pathname}`);
+} else {
+  try {
+    const existing = await Deno.readTextFile(fixtureUrl);
+    if (existing !== html) {
+      console.error(
+        "FAIL: e2e/fixtures/flux-space.html is stale; run `deno task check:flux-page --write`",
+      );
+      failed = true;
+    } else {
+      console.log("OK: Flux Space fixture matches the rendered page");
+    }
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    console.error(
+      "FAIL: e2e/fixtures/flux-space.html is missing; run `deno task check:flux-page --write`",
+    );
+    failed = true;
+  }
+}
+
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((
   m,
 ) => m[1]);
@@ -28,7 +57,6 @@ if (scripts.length === 0) {
   Deno.exit(1);
 }
 
-let failed = false;
 for (let i = 0; i < scripts.length; i++) {
   const tmp = await Deno.makeTempFile({ suffix: ".js" });
   await Deno.writeTextFile(tmp, scripts[i]);

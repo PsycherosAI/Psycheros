@@ -250,7 +250,7 @@ export function pulseIndicatorSvg(): string {
  * This gets embedded into renderSettingsHub().
  */
 export function renderPulseHubCard(): string {
-  return `<a class="settings-hub-card"
+  return `<a href="/fragments/settings/pulse" class="settings-hub-card"
     hx-get="/fragments/settings/pulse"
     hx-target="#chat"
     hx-swap="innerHTML">
@@ -277,30 +277,37 @@ export function renderPulseSettings(
 ): string {
   return `<div class="settings-view">
   <div class="settings-header">
-    <a class="settings-back-btn" onclick="htmx.ajax('GET', '/fragments/settings', {target: '#chat', swap: 'innerHTML'})">
+    <a href="/fragments/settings" class="settings-back-btn" onclick="htmx.ajax('GET', '/fragments/settings', {target: '#chat', swap: 'innerHTML'})">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="15 18 9 12 15 6"/>
       </svg>
       <span>Settings</span>
     </a>
-    <div class="settings-tabs" style="padding: 0; border: none;">
-      <button class="settings-tab active" id="pulse-tab-prompts"
+    <div class="settings-tabs" role="tablist" aria-label="Pulse settings"
+      style="padding: 0; border: none;">
+      <button class="settings-tab active" id="pulse-tab-prompts" role="tab"
+        aria-selected="true" aria-controls="pulse-prompts" tabindex="0"
+        onkeydown="settingsTablistKeydown(event)"
         onclick="Psycheros.switchTab('pulse', 'prompts')">Prompts</button>
-      <button class="settings-tab" id="pulse-tab-log"
+      <button class="settings-tab" id="pulse-tab-log" role="tab"
+        aria-selected="false" aria-controls="pulse-log" tabindex="-1"
+        onkeydown="settingsTablistKeydown(event)"
         onclick="Psycheros.switchTab('pulse', 'log')">Execution Log</button>
     </div>
     <div class="settings-header-actions">
       <button class="btn btn--primary"
         hx-get="/fragments/settings/pulse/new"
         hx-target="#chat"
-        hx-swap="innerHTML">+ New Pulse</button>
+        hx-swap="innerHTML"><span><span aria-hidden="true">+</span> New Pulse</span></button>
     </div>
   </div>
   <div class="settings-content" id="settings-content">
-  <div id="pulse-prompts" class="tab-content">
+  <div id="pulse-prompts" class="tab-content" role="tabpanel"
+    aria-labelledby="pulse-tab-prompts">
     ${renderPulseList(pulses, getStats)}
   </div>
-  <div id="pulse-log" class="tab-content" style="display:none">
+  <div id="pulse-log" class="tab-content" role="tabpanel"
+    aria-labelledby="pulse-tab-log" style="display:none">
     <div id="pulse-log-content"
       hx-get="/fragments/settings/pulse/log"
       hx-trigger="load"></div>
@@ -418,7 +425,7 @@ export function renderPulseEditor(
 
   return `<div class="settings-view">
   <div class="settings-header">
-    <a class="settings-back-btn" onclick="htmx.ajax('GET', '/fragments/settings/pulse', {target: '#chat', swap: 'innerHTML'})">
+    <a href="/fragments/settings/pulse" class="settings-back-btn" onclick="htmx.ajax('GET', '/fragments/settings/pulse', {target: '#chat', swap: 'innerHTML'})">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="15 18 9 12 15 6"/>
       </svg>
@@ -740,9 +747,9 @@ export function renderPulseEditor(
     p.triggerType !== "webhook" ? "style='display:none'" : ""
   }>
         <div class="form-group">
-          <label>Webhook URL</label>
+          <label for="pulse-webhook-url">Webhook URL</label>
           <div class="input-with-copy">
-            <input type="text" readonly value="/api/webhook/pulse/${
+            <input type="text" id="pulse-webhook-url" readonly value="/api/webhook/pulse/${
     pulse?.id ?? "..."
   }" class="readonly-field">
             <button type="button" class="btn btn--sm" onclick="navigator.clipboard.writeText(this.previousElementSibling.value)">Copy</button>
@@ -751,9 +758,9 @@ export function renderPulseEditor(
     isEdit && p.webhookToken
       ? `
           <div class="form-group" style="margin-top: 0.5rem">
-            <label>Token</label>
+            <label for="pulse-webhook-token">Token</label>
             <div class="input-with-copy">
-              <input type="text" readonly value="${p.webhookToken}" class="readonly-field">
+              <input type="text" id="pulse-webhook-token" readonly value="${p.webhookToken}" class="readonly-field">
               <button type="button" class="btn btn--sm" onclick="navigator.clipboard.writeText(this.previousElementSibling.value)">Copy</button>
             </div>
             <small>Use as Bearer token: <code>Authorization: Bearer ${p.webhookToken}</code></small>
@@ -782,7 +789,7 @@ export function renderPulseEditor(
   }</button>
         <button type="button" class="btn" onclick="htmx.ajax('GET', '/fragments/settings/pulse', {target: '#chat', swap: 'innerHTML'})">Cancel</button>
       </div>
-      <div id="pulse-save-status" class="settings-status"></div>
+      <div id="pulse-save-status" class="settings-status" role="status" aria-live="polite"></div>
     </form>
   </div>
 </div>`;
