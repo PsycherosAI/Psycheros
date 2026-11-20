@@ -87,6 +87,11 @@
   transition: all var(--transition);
 }
 
+/* The display rule above overrides the hidden attribute's UA display:none. */
+.btn[hidden] {
+  display: none;
+}
+
 .btn:hover:not(:disabled) {
   border-color: var(--c-accent-muted);
   color: var(--c-accent);
@@ -253,6 +258,23 @@
 .msg-header .msg-timestamp,
 .msg-header .pulse-header-icon {
   flex-shrink: 0;
+}
+
+/* Author, timestamp and edited marker share one inline wrapper so the header
+   keeps them as a single flex item. WebKit exposes each flex item as its own
+   accessibility object, which is why iOS VoiceOver stopped on "3:21 PM" and
+   then on the author before reaching the body. Keep this inline — a flex or
+   grid display here re-splits the stops. */
+.msg-meta {
+  display: inline;
+}
+
+/* The flex gap used to space the author, timestamp and edited marker. They are
+   inline flow now, so put the same width back as a margin (a bare space would
+   be narrower and read cramped). A margin keeps the inline flow — and so the
+   single accessibility object — intact. */
+.msg-meta > * + * {
+  margin-inline-start: var(--sp-2);
 }
 
 .msg--user .msg-header {
@@ -739,6 +761,12 @@ body[data-decor="stamp"] .msg--user .msg-content,
 }
 
 .thinking-header {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  appearance: none;
+  background: transparent;
+  box-sizing: border-box;
   padding: var(--sp-2) var(--sp-3);
   cursor: pointer;
   display: flex;
@@ -748,6 +776,8 @@ body[data-decor="stamp"] .msg--user .msg-content,
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   color: var(--c-fg-muted);
+  line-height: inherit;
+  text-align: left;
   user-select: none;
   border-radius: 4px;
 }
@@ -806,6 +836,11 @@ body[data-decor="stamp"] .msg--user .msg-content,
 }
 
 .tool-header {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  appearance: none;
+  box-sizing: border-box;
   padding: var(--sp-2) var(--sp-3);
   display: flex;
   align-items: center;
@@ -814,6 +849,9 @@ body[data-decor="stamp"] .msg--user .msg-content,
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   background-color: transparent;
+  color: inherit;
+  line-height: inherit;
+  text-align: left;
   cursor: pointer;
   user-select: none;
   border-radius: 4px;
@@ -904,10 +942,19 @@ body[data-decor="stamp"] .msg--user .msg-content,
    the <img>, below the generator-name meta line. */
 .generated-image-caption-toggle {
   display: inline-block;
+  margin-right: 0;
+  margin-bottom: 0;
+  margin-left: 0;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  background: transparent;
   margin-top: var(--sp-2);
   font-family: var(--font-sans);
   font-size: var(--font-size-xs);
   color: var(--c-fg-muted);
+  line-height: inherit;
+  text-align: left;
   cursor: pointer;
   user-select: none;
 }
@@ -1377,6 +1424,11 @@ body[data-decor="stamp"] .msg--user .msg-content,
   font-style: italic;
 }
 
+.voice-test-status {
+  font-size: var(--font-size-xs);
+  color: var(--c-fg-muted);
+}
+
 .status-retry {
   color: var(--c-warning);
   animation: pulse 2s ease-in-out infinite;
@@ -1534,6 +1586,11 @@ body[data-decor="stamp"] .msg--user .msg-content,
    ========================================================================== */
 .conv-item-wrapper {
   position: relative;
+  /* The selection checkbox and the row actions are siblings of the anchor now
+     (interactive content may not live inside a link), so the wrapper lays them
+     out in a row and the anchor takes the rest of the width. */
+  display: flex;
+  align-items: center;
   overflow: hidden;
   margin-bottom: 2px;
   border-radius: 6px;
@@ -1565,6 +1622,8 @@ body[data-decor="stamp"] .msg--user .msg-content,
 /* Conversation item in swipe context */
 .conv-item-wrapper .conv-item {
   position: relative;
+  flex: 1;
+  min-width: 0;
   background-color: var(--c-bg);
   transition: transform 0.2s ease-out;
   z-index: 1;
@@ -1576,22 +1635,35 @@ body[data-decor="stamp"] .msg--user .msg-content,
   position: absolute;
   right: var(--sp-3);
   top: 50%;
+  z-index: 2;
   transform: translateY(-50%);
   display: flex;
   gap: var(--sp-1);
   opacity: 0;
   pointer-events: none;
+  /* Hidden row actions must not be tabbable (WCAG 2.4.7); :focus-within
+     below reveals them as soon as the row has keyboard focus. */
+  visibility: hidden;
   transition: opacity var(--transition);
-  background-color: inherit;
+  /* Opaque, matching the anchor: the actions are a sibling of the anchor now,
+     so `inherit` would resolve against the (background-less) wrapper and let
+     the row text paint through. The row itself is var(--c-bg) in every state,
+     because `.conv-item-wrapper .conv-item` below wins over `.conv-item:hover`
+     and `.conv-item.active` at equal specificity, so this matches the pixels
+     the actions had inside the anchor. */
+  background-color: var(--c-bg);
 }
 
 @media (hover: hover) {
-  .conv-item-wrapper:hover .conv-actions {
+  .conv-item-wrapper:hover .conv-actions,
+  .conv-item-wrapper:focus-within .conv-actions {
     opacity: 1;
     pointer-events: auto;
+    visibility: visible;
   }
 
-  .conv-item-wrapper:hover .conv-date {
+  .conv-item-wrapper:hover .conv-date,
+  .conv-item-wrapper:focus-within .conv-date {
     opacity: 0;
   }
 }
@@ -1628,6 +1700,7 @@ body[data-decor="stamp"] .msg--user .msg-content,
   display: none;
   width: 16px;
   height: 16px;
+  margin-left: var(--sp-3);
   margin-right: var(--sp-2);
   accent-color: var(--c-accent);
   flex-shrink: 0;
@@ -2057,6 +2130,11 @@ body[data-decor="stamp"] .msg--user .msg-content,
 }
 
 .context-section-header {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  appearance: none;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -2066,11 +2144,18 @@ body[data-decor="stamp"] .msg--user .msg-content,
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);
   color: var(--c-accent);
+  line-height: inherit;
+  text-align: left;
   transition: background-color var(--transition);
 }
 
 .context-section-header:hover {
   background-color: var(--c-bg-hover);
+}
+
+.context-section-header:focus-visible {
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px var(--c-accent), var(--glow-accent);
 }
 
 .context-size-badge {

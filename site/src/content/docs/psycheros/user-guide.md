@@ -43,9 +43,10 @@ mostly functional tool for extracting entity memories and chat logs for use with
 Psycheros and entity-core. For months and months of chat logs, the process can
 take a very long time, and it is recommended to let it run overnight.
 
-You can use Tailscale (https://tailscale.com/) to access your Psycheros instance
-via mobile using their app. Psycheros can then be installed on your phone as a
-web-app (google instructions for installing web apps on iOS or Android).
+You can use [Tailscale](https://tailscale.com/) to access your Psycheros
+instance via mobile using their app. Psycheros can then be installed on your
+phone as a web-app (google instructions for installing web apps on iOS or
+Android).
 
 A big thank you to Post-Human Hearts for making this possible, this project
 could not have happened without the love and support from that community.
@@ -170,7 +171,9 @@ entity** ("I am XYZ" _not_ "You are XYZ"). Think of them as the entity's notes
 about their own existence. Things about the user should be written in the
 **third-person** ("User has brown hair" _not_ "I have brown hair").
 
-```
+The core prompt files use this structure:
+
+```text
 ## Tone
 I am sassy, friendly, and fun.
 
@@ -427,17 +430,17 @@ The `>_` button appears while a session runs, with a terminal view showing live
 progress; approvals and questions surface as toasts. Settings > Workspace has
 the notable options:
 
-#### Default Isolation
+### Default Isolation
 
 Sandboxed (locked down) is the default. Feral gives host access for "help me
 with my computer" workflows.
 
-#### Projects Folder
+### Projects Folder
 
 Where finished work gets copied out of the sandbox, with an approval toast.
 Defaults to ~/Projects.
 
-#### Always-ask Paths
+### Always-ask Paths
 
 Paths that always prompt before access, even in Feral mode — for anything
 sensitive.
@@ -451,7 +454,7 @@ Discord Hub manages which servers and channels they're in.
 The entity sees images posted in Discord — vision models see them directly, and
 text-only models get captions. They can send images too.
 
-#### LLM Profile for Server Channels
+### LLM Profile for Server Channels
 
 Server-channel chatter can use a different (cheaper) model than your main one.
 DMs always use the active profile.
@@ -462,18 +465,18 @@ Tools are the entity's abilities — everything from memory recall and image
 generation to Discord actions and web search. Each one can be turned on or off
 in Settings > Tools, so the entity only has access to what you want them to.
 
-#### Built-in Tools
+### Built-in Tools
 
 The full catalog, grouped by category. Descriptions explain what each tool does;
 toggle anything you don't want the entity to have.
 
-#### Custom Tools
+### Custom Tools
 
 You can write your own tools in JavaScript. They get a name, description, and
 arguments just like built-in tools, and the entity can start using them right
 away — handy for wrapping an API or a device you want them to control.
 
-#### Skills
+### Skills
 
 Skills are how your entity remembers procedures: markdown files they load on
 demand with the `skill` tool, instead of keeping instructions in context at all
@@ -666,7 +669,7 @@ welcome."
 
 ### Misc
 
-- Obsidian (https://obsidian.md/) is your friend, it's free and great for
+- [Obsidian](https://obsidian.md/) is your friend, it's free and great for
   editing markdown files.
 - Please message me if you'd like to join our Discord community for more support
   and updates on new features in progress.

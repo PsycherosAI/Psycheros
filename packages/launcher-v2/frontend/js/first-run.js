@@ -60,12 +60,19 @@ function showError(target, message) {
   if (!target) return;
   target.textContent = String(message);
   target.classList.add("visible");
+  const announcer = document.getElementById("launcher-error-announcer");
+  if (announcer) {
+    announcer.textContent = "";
+    requestAnimationFrame(() => announcer.textContent = String(message));
+  }
 }
 
 function clearError(target) {
   if (!target) return;
   target.classList.remove("visible");
   target.textContent = "";
+  const announcer = document.getElementById("launcher-error-announcer");
+  if (announcer) announcer.textContent = "";
 }
 
 function appendTicker(line) {

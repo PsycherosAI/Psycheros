@@ -356,7 +356,8 @@
 }
 
 /* Discord settings page: input labels more prominent, hints stay small & muted */
-.discord-settings-page .llm-field label {
+.discord-settings-page .llm-field label,
+.discord-settings-page .llm-field .llm-field-heading {
   font-size: var(--font-size-sm);
   color: var(--c-fg);
   font-weight: var(--font-weight-medium);

@@ -90,6 +90,53 @@ function formatDate(isoDate) {
   }
 }
 
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+let overlayState = null;
+
+function focusableIn(root) {
+  return [...root.querySelectorAll(FOCUSABLE_SELECTOR)].filter((el) =>
+    el.getClientRects().length > 0
+  );
+}
+
+function handleOverlayKeydown(event) {
+  const overlay = event.currentTarget;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeOverlay();
+    return;
+  }
+  if (event.key !== "Tab") return;
+
+  const items = focusableIn(overlay);
+  if (items.length === 0) {
+    event.preventDefault();
+    return;
+  }
+  const first = items[0];
+  const last = items[items.length - 1];
+  const active = document.activeElement;
+  const inside = overlay.contains(active);
+
+  if (event.shiftKey) {
+    if (!inside || active === first) {
+      event.preventDefault();
+      last.focus();
+    }
+  } else if (!inside || active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 /**
  * Build the full-screen overlay. Mobile: full-screen takeover. Desktop
  * (≥768px): centered card. Inline onclick handlers live here (not in
@@ -101,11 +148,16 @@ function formatDate(isoDate) {
 function showOverlay(releases, opts = {}) {
   closeOverlay();
 
+  const active = document.activeElement;
+  const opener = active instanceof HTMLElement && active !== document.body
+    ? active
+    : null;
+
   const overlay = document.createElement("div");
   overlay.className = "whats-new-overlay";
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");
-  overlay.setAttribute("aria-label", "What's New");
+  overlay.setAttribute("aria-labelledby", "whats-new-title");
 
   const sheet = document.createElement("div");
   sheet.className = "whats-new-sheet";
@@ -116,6 +168,7 @@ function showOverlay(releases, opts = {}) {
   kicker.className = "whats-new-kicker";
   kicker.textContent = "Psycheros";
   const title = document.createElement("h2");
+  title.id = "whats-new-title";
   title.className = "whats-new-title";
   title.textContent = "What's New";
   head.appendChild(kicker);
@@ -181,12 +234,49 @@ function showOverlay(releases, opts = {}) {
     // the auto-show returns next load. Cheap safety against a stray tap.
     if (e.target === overlay) closeOverlay();
   });
+  overlay.addEventListener("keydown", handleOverlayKeydown);
   document.body.appendChild(overlay);
+
+  const inerted = [];
+  for (const child of [...document.body.children]) {
+    if (child === overlay || child.inert) continue;
+    inerted.push(child);
+    child.inert = true;
+  }
+  const bodyOverflow = document.body.style.overflow;
+  document.body.style.overflow = "hidden";
+  overlayState = { opener, inerted, bodyOverflow };
+
   continueBtn.focus();
 }
 
 function closeOverlay() {
-  document.querySelector(".whats-new-overlay")?.remove();
+  const overlay = document.querySelector(".whats-new-overlay");
+  const state = overlayState;
+  overlayState = null;
+  if (!overlay) {
+    if (state) {
+      for (const el of state.inerted) el.inert = false;
+      document.body.style.overflow = state.bodyOverflow;
+    }
+    return;
+  }
+
+  overlay.removeEventListener("keydown", handleOverlayKeydown);
+  overlay.remove();
+  for (const el of state?.inerted ?? []) el.inert = false;
+
+  if (state) {
+    document.body.style.overflow = state.bodyOverflow;
+    if (state.opener?.isConnected) {
+      state.opener.focus();
+      return;
+    }
+  }
+
+  const fallback = document.getElementById("main") ||
+    document.getElementById("message-input");
+  fallback?.focus();
 }
 
 /**
