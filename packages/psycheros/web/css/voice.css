@@ -19,6 +19,24 @@
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.voice-overlay:not([open]) {
+  display: none;
+}
+
+.voice-overlay::backdrop {
+  background: transparent;
 }
 
 /* Flux is alive behind the call: the overlay's EDGES breathe with the

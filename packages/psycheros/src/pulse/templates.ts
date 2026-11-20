@@ -293,7 +293,7 @@ export function renderPulseSettings(
       <button class="btn btn--primary"
         hx-get="/fragments/settings/pulse/new"
         hx-target="#chat"
-        hx-swap="innerHTML">+ New Pulse</button>
+        hx-swap="innerHTML"><span><span aria-hidden="true">+</span> New Pulse</span></button>
     </div>
   </div>
   <div class="settings-content" id="settings-content">
@@ -782,7 +782,7 @@ export function renderPulseEditor(
   }</button>
         <button type="button" class="btn" onclick="htmx.ajax('GET', '/fragments/settings/pulse', {target: '#chat', swap: 'innerHTML'})">Cancel</button>
       </div>
-      <div id="pulse-save-status" class="settings-status"></div>
+      <div id="pulse-save-status" class="settings-status" role="status" aria-live="polite"></div>
     </form>
   </div>
 </div>`;

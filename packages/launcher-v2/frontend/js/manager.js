@@ -165,12 +165,19 @@ function showError(message) {
   if (!els.error) return;
   els.error.textContent = String(message);
   els.error.classList.add("visible");
+  const announcer = document.getElementById("launcher-error-announcer");
+  if (announcer) {
+    announcer.textContent = "";
+    requestAnimationFrame(() => announcer.textContent = String(message));
+  }
 }
 
 function clearError() {
   if (!els.error) return;
   els.error.classList.remove("visible");
   els.error.textContent = "";
+  const announcer = document.getElementById("launcher-error-announcer");
+  if (announcer) announcer.textContent = "";
 }
 
 // --------------------------------------------------------------------------
